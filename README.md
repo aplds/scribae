@@ -17,7 +17,7 @@ A4), Word, Markdown.
 
 ## Essayer, sans rien installer
 
-<https://perchance.org/scribae>
+<https://aplds.github.io/scribae>
 
 L'application s'ouvre directement sur la démonstration. Aucune inscription : **onze comptes
 fictifs**, présentés par profil, s'ouvrent d'un clic — **sans mot de passe**.
