@@ -1,0 +1,1137 @@
+// ============================================================================
+// Modifier un acte publié.
+//
+// On n'édite plus un formulaire : on édite L'ACTE. Le document en vigueur est
+// ouvert dans un éditeur en place (« style traitement de texte ») ; le rédacteur
+// réécrit les articles, les abroge ou en insère. Chaque geste est relevé, et à
+// la confirmation DEUX actes sont produits :
+//   • l'acte modificatif, qui porte juridiquement la modification ;
+//   • la version consolidée de l'acte d'origine, qui trace ce qui a changé et
+//     deviendra la version en vigueur une fois la modification publiée.
+//
+// La suite du circuit est ensuite guidée : l'acte modificatif part en signature,
+// puis en publication ; la version consolidée est publiée sous le même
+// identifiant ELI que l'acte d'origine et le supplante, sans jamais le faire
+// disparaître : l'acte d'origine reste accessible dans l'historique des versions.
+// ============================================================================
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById } from "../state.js";
+import { h, clear, button, toast, modal, fitPaper } from "../dom.js";
+import { textField, selectField, emptyState, helpLink, confirmDialog } from "../components.js";
+import { openActe } from "./rediger.js";
+import { fullName } from "../../lib/users.js";
+import {
+  etapeActive, validationAJour, avancement, VALIDATION_STATUTS, ETAPE_STATUTS,
+} from "../../lib/validation.js";
+import {
+  formalites, statutExecution, dateExecutoire, dateLimiteRecours, ecartJours, aujourdhui,
+} from "../../lib/execution.js";
+import { revisionsDe, restaurerRevision } from "../../lib/revisions.js";
+import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
+import { ouvrirFormulaireFormalite } from "../execution-actions.js";
+import {
+  amendVocab, buildModificatif, buildConsolidated,
+  targetPhrase, defaultConsiderant, planSummary,
+} from "../../lib/amend.js";
+import { cleanDoc, planFromSession, revertArticleByEId, newInserted } from "../../lib/amend-edit.js";
+import { buildEditableDocument } from "./amend-editor.js";
+import { compile, nextNumero, interpolate } from "../../lib/compile.js";
+import { renderDocument, applyPaper } from "../../lib/render.js";
+import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
+import { parseDocumentFile } from "../../lib/akn.js";
+import { ecarts, locateAddr } from "../../lib/redaction.js";
+import { download, uid, pickFile, formatDate, todayIso, debounce } from "../../lib/util.js";
+
+const NATURES = {
+  original: { label: "Acte d'origine", color: "info" },
+  modificatif: { label: "Acte modificatif", color: "warning" },
+  consolide: { label: "Version consolidée", color: "success" },
+  importe: { label: "Acte importé", color: "info" },
+};
+export const natureOf = (a) => NATURES[a?.kind] || NATURES.original;
+
+// ------------------------------------------------------------ accès aux actes
+// Un acte rédigé à partir d'une trame se compile ; un acte importé, un acte
+// modificatif ou une version consolidée transportent leur document.
+export function docOfActe(a) {
+  if (!a) return null;
+  if (a.doc) return a.doc;
+  const trame = state.trames.find((t) => t.id === a.trameId);
+  if (!trame) return null;
+  const doc = compile(trame, a.values || {}, state.config, { overrides: a.overrides });
+  doc.kind = "original";
+  return doc;
+}
+
+// Écarts à la trame d'un acte : ce que le rédacteur a réécrit et que les
+// administrateurs doivent voir. Non bloquant.
+export function ecartsOfActe(a) {
+  if (!a) return { count: 0, list: [] };
+  if (Array.isArray(a.ecarts) && a.ecarts.length) return { count: a.ecarts.length, list: a.ecarts };
+  if (a.overrides && a.trameId) {
+    const trame = state.trames.find((t) => t.id === a.trameId);
+    if (trame) {
+      const list = ecarts(trame, a.overrides, state.config);
+      return { count: list.length, list };
+    }
+  }
+  return { count: 0, list: [] };
+}
+
+export function canModify(a) {
+  return !!docOfActe(a);
+}
+
+// ------------------------------------------------------------------ session
+// L'état d'édition vit dans `state.modifier` : il survit à un redessin de la
+// vue (un aller-retour dans le guide, par exemple) sans rien perdre.
+function startSession(a) {
+  const raw = docOfActe(a);
+  if (!raw) {
+    toast("Trame d'origine introuvable : cet acte est affichable mais pas modifiable.", "error");
+    return false;
+  }
+  // On travaille sur le texte EN VIGUEUR (une version consolidée est nettoyée de
+  // ses marques de modification : on réécrit le texte tel qu'il est aujourd'hui).
+  const doc = cleanDoc(raw);
+  const designation = doc.meta?.designation || amendVocab(state.config).designation;
+  state.modifier = {
+    base: {
+      acteId: a.id,
+      doc,
+      designation,
+      label: acteLabel(a, doc),
+      previousTrail: doc.trail || [],
+      warnings: doc.warnings || [],
+      numero: doc.meta?.numero || "",
+      dateSignature: doc.meta?.dateSignature || "",
+      eli: doc.meta?.eli || "",
+      kind: a.kind || "original",
+      statut: a.statut || "",
+      published: !!a.publication || a.statut === "publie",
+    },
+    edits: {},
+    removed: [],
+    inserted: [],
+    meta: defaultMeta(doc, designation),
+    // `showChanges` : le suivi des modifications de la version consolidée est
+    // une option d'affichage, décochée par défaut (voir `paintPreview`).
+    ui: { preview: "modificatif", showChanges: false },
+  };
+  return true;
+}
+
+export function modifierFromActe(a) {
+  if (!startSession(a)) return;
+  navigate("modifier/" + a.id);
+}
+
+export function acteLabel(a, doc) {
+  const d = doc || docOfActe(a);
+  const num = a?.numero || d?.meta?.numero || "";
+  const date = a?.dateSignature || d?.meta?.dateSignature || "";
+  return `${num ? "n° " + num : "(sans numéro)"}${date ? " du " + formatDate(date, "date-long") : ""}`;
+}
+
+function defaultMeta(doc, designation) {
+  const config = state.config;
+  const entityId = doc.meta?.entity?.id || config.entities?.[0]?.id || "";
+  const entity = (config.entities || []).find((e) => e.id === entityId) || config.entities?.[0];
+  const des = designation || amendVocab(config).designation;
+  return {
+    numero: entity ? nextNumero(config, entity) : "",
+    designation: des,
+    objet: `modification de ${targetPhrase(doc, des, config)}`,
+    dateSignature: todayIso(),
+    dateEffet: "",
+    entityId: entity?.id || "",
+    signataireId: doc.meta?.signataire?.id || "",
+    visas: [],
+    considerants: [defaultConsiderant(doc, des, config)],
+    addEntry: true,
+    addExecution: true,
+  };
+}
+
+// ------------------------------------------------------------------- entrée
+export function renderModifier(root, params) {
+  const id = params?.id;
+  if (id) {
+    const a = state.actes.find((x) => x.id === id);
+    if (!a) {
+      root.appendChild(emptyState("Acte introuvable dans le registre.", button("Voir le registre", { variant: "primary", onClick: () => navigate("actes") })));
+      return;
+    }
+    // Un acte non publiable (acte individuel) ne se modifie pas par voie
+    // d'acte modificatif : il n'y a pas de texte publié à consolider. On le
+    // corrige directement dans l'éditeur de rédaction.
+    if (!actePubliable(a)) {
+      root.appendChild(emptyState(
+        "Cet acte est un acte individuel : sa trame l'a déclaré non publiable. Il ne fait pas l'objet d'un acte modificatif — corrigez-le directement dans l'éditeur de rédaction.",
+        button("Corriger l'acte", { variant: "primary", icon: "note", onClick: () => openActe(a) })));
+      return;
+    }
+    if (!state.modifier || state.modifier.base?.acteId !== id) {
+      if (!startSession(a)) {
+        root.appendChild(emptyState("Cet acte ne peut pas être modifié (document d'origine absent).", button("Voir le registre", { variant: "primary", onClick: () => navigate("actes") })));
+        return;
+      }
+    }
+  }
+  if (!state.modifier) { renderChooser(root); return; }
+  renderWorkspace(root);
+}
+
+// Choix de l'acte à modifier
+function renderChooser(root) {
+  root.appendChild(h("div", { class: "page-head" },
+    h("div", { class: "page-head__text" },
+      h("h1", { class: "page-head__title", text: "Modifier un acte" }),
+      h("p", { class: "page-head__sub", text: "Choisissez l'acte à modifier, ou importez le fichier XML de l'acte publié. Vous l'éditerez directement dans le document ; la modification produit un acte modificatif et la version consolidée de l'acte d'origine." }),
+    ),
+    h("div", { class: "page-head__actions" }, helpLink("modifier", "Comment faire ?")),
+  ));
+
+  root.appendChild(h("div", { class: "fr-card" },
+    h("h2", { class: "fr-card__title", text: "Importer le fichier de l'acte publié" }),
+    h("p", { class: "fr-small fr-muted", text: "Fichier Akoma Ntoso (.akn.xml) exporté par l'application ou par un autre outil, ou document JSON exporté par l'application. L'acte importé est ajouté au registre, puis vous l'éditez comme n'importe quel autre acte." }),
+    h("div", { class: "fr-row" },
+      button("Choisir un fichier…", { variant: "primary", icon: "upload", onClick: importFile }),
+    ),
+  ));
+
+  const actes = [...state.actes].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const card = h("div", { class: "fr-card" }, h("h2", { class: "fr-card__title", text: "Actes du registre" }));
+  if (!actes.length) {
+    card.appendChild(h("p", { class: "fr-muted", text: "Aucun acte enregistré pour l'instant. Rédigez un acte, ou importez le fichier d'un acte publié." }));
+    card.appendChild(h("div", { class: "fr-row" },
+      button("Rédiger un acte", { variant: "secondary", onClick: () => navigate("rediger") }),
+    ));
+  } else {
+    const table = h("table", { class: "fr-table" },
+      h("thead", {}, h("tr", {},
+        h("th", { text: "Numéro" }), h("th", { text: "Objet" }), h("th", { text: "Nature" }),
+        h("th", { text: "Statut" }), h("th", {}))));
+    const tb = h("tbody");
+    for (const a of actes) {
+      const doc = docOfActe(a);
+      const n = natureOf(a);
+      tb.appendChild(h("tr", {},
+        h("td", { class: "fr-mono", text: a.numero || "—" }),
+        h("td", { text: a.objet || doc?.meta?.objet || "—" }),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
+        h("td", { class: "fr-small", text: statusText(a) }),
+        h("td", {}, h("div", { class: "fr-row" },
+          actePubliable(a)
+            ? button("Modifier", {
+              variant: "primary", size: "sm",
+              onClick: () => { if (startSession(a)) navigate("modifier/" + a.id); },
+            })
+            // Acte non publiable : pas d'acte modificatif, correction directe.
+            : button("Corriger", { variant: "primary", size: "sm", icon: "note", title: "Acte individuel non publiable : correction directe", onClick: () => openActe(a) }),
+          doc ? button("Ouvrir", { variant: "tertiary", size: "sm", onClick: () => navigate("acte/" + a.id) }) : null,
+        )),
+      ));
+    }
+    table.appendChild(tb);
+    card.appendChild(h("div", { class: "fr-table-wrap" }, table));
+  }
+  root.appendChild(card);
+
+  root.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h2", { class: "fr-card__title", text: "Ce que produit une modification" }),
+    h("p", { class: "fr-small", text: "1. L'acte modificatif : un acte à part entière, dont chaque article modifie un article de l'acte d'origine (remplacement, abrogation, insertion)." }),
+    h("p", { class: "fr-small", text: "2. La version consolidée : l'acte d'origine à jour. Elle est présentée dans sa rédaction en vigueur, chaque article modifié portant la mention de l'acte qui l'a modifié ; l'affichage du suivi des modifications (ajouts, suppressions et tableau récapitulatif) est une option, décochée par défaut." }),
+    h("p", { class: "fr-small fr-muted", text: "L'acte modificatif est ensuite signé puis publié ; à sa publication, la version consolidée est publiée sous le même identifiant ELI que l'acte d'origine et devient la version en vigueur. L'acte d'origine reste accessible dans l'historique." }),
+  ));
+}
+
+function statusText(a) {
+  const map = {
+    brouillon: "Brouillon", pret: "Prêt", en_signature: "En signature", signee: "Signé",
+    publie: "Publié", abroge: "Abrogé", en_attente: "En attente de publication",
+  };
+  const kind = a.kind === "consolide" ? "Version consolidée — " : "";
+  return kind + (map[a.statut] || a.statut || "Brouillon");
+}
+
+async function importFile() {
+  const f = await pickFile(".xml,.akn,.json,.txt");
+  if (!f) return;
+  let doc;
+  try { doc = parseDocumentFile(f.text, f.name); }
+  catch (e) { toast(e.message, "error"); return; }
+  const now = new Date().toISOString();
+  const acte = {
+    id: uid("acte"),
+    kind: "importe",
+    trameId: doc.meta?.trameId || "",
+    trameName: doc.meta?.trameName || "",
+    serviceId: doc.meta?.serviceId || "",
+    bureauId: doc.meta?.bureauId || "",
+    numero: doc.meta?.numero || "",
+    objet: doc.meta?.objet || "",
+    entityId: doc.meta?.entity?.id || "",
+    dateSignature: doc.meta?.dateSignature || "",
+    statut: doc.meta?.statut || "publie",
+    source: f.name,
+    createdAt: now, updatedAt: now,
+    values: null, doc, eli: doc.meta?.eli || "", issues: [],
+  };
+  state.actes.push(acte);
+  touch("actes", { rerender: false });
+  toast(`Acte importé : ${acte.numero || f.name}`, "success");
+  if (startSession(acte)) navigate("modifier/" + acte.id);
+}
+
+// ------------------------------------------------------------------ l'atelier
+function renderWorkspace(root) {
+  const config = state.config;
+  const mod = state.modifier;
+  const base = mod.base;
+
+  // ------------------------------------------------------------------ entête
+  root.appendChild(h("div", { class: "page-head" },
+    h("div", { class: "page-head__text" },
+      h("h1", { class: "page-head__title", text: "Modifier " + base.label }),
+      h("p", { class: "page-head__sub", text: `${natureOf({ kind: base.kind }).label} · ${base.doc.meta?.objet || ""}${base.published ? " · publié" : ""}` }),
+    ),
+    h("div", { class: "page-head__actions" },
+      helpLink("modifier", "Aide"),
+      button("Changer d'acte", { variant: "tertiary", icon: "doc", onClick: () => { state.modifier = null; redrawView(); } }),
+      button("Confirmer la modification", { variant: "primary", icon: "check", onClick: openMetaModal }),
+    ),
+  ));
+
+  if (base.warnings?.length) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "À vérifier sur l'acte repris" }),
+      ...base.warnings.map((wn) => h("p", { class: "fr-small", text: "• " + wn })),
+    ));
+  }
+
+  const grid = h("div", { class: "redaction-grid" });
+  root.appendChild(grid);
+
+  // ------------------------------------------------------- colonne document
+  const docCol = h("div", { class: "fr-stack mod-col--doc" });
+  const sideCol = h("div", { class: "fr-stack mod-col--side" });
+  grid.appendChild(docCol);
+  grid.appendChild(sideCol);
+
+  docCol.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("p", { class: "fr-small", style: { margin: 0 } },
+      h("strong", { text: "Écrivez directement dans l'acte. " }),
+      "Réécrivez un article comme dans un traitement de texte ; ",
+      h("span", { class: "amend-tool amend-tool--demo", text: "abroger" }),
+      " le retire, ",
+      h("span", { class: "amend-tool amend-tool--demo", text: "+ article après" }),
+      " en insère un. Les passages que vous modifiez sont surlignés en orange."),
+    h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" } },
+      "Le préambule (intitulé, visas, considérants) et le bloc de signature appartiennent à l'acte d'origine : ils ne sont pas modifiables ici."),
+  ));
+
+  const paperBox = h("div", { class: "paper-box" });
+  const paper = h("div", { class: "paper paper--edit" });
+  paper.style.fontFamily = config.brand.documentFont || "";
+  paperBox.appendChild(paper);
+  docCol.appendChild(paperBox);
+
+  const summaryBox = h("div", { class: "fr-card" });
+  const previewCard = h("div", { class: "fr-card" });
+  sideCol.appendChild(summaryBox);
+  sideCol.appendChild(previewCard);
+  sideCol.appendChild(trailCard());
+
+  // ------------------------------------------------------------- rendu
+  const paintSideSoon = debounce(() => paintSide(), 220);
+
+  mod.action = (name, payload = {}) => {
+    switch (name) {
+      case "edited":
+      case "refresh":
+        paintSideSoon();
+        break;
+      case "abrogate":
+        if (!mod.removed.includes(payload.key)) mod.removed.push(payload.key);
+        paintAll();
+        break;
+      case "restore":
+        mod.removed = mod.removed.filter((k) => k !== payload.key);
+        paintAll();
+        break;
+      case "insert": {
+        const anchor = payload.position === "end" ? "" : (payload.node?.eId || payload.node?.path || payload.node?.id || "");
+        mod.inserted.push(newInserted(anchor, payload.position || "after", { anchorLabel: payload.node?.numLabel || "" }));
+        paintAll();
+        break;
+      }
+      case "removeInserted":
+        mod.inserted = mod.inserted.filter((x) => x !== payload.ins);
+        paintAll();
+        break;
+      case "addPara":
+        payload.ins.blocks.push({ id: uid("it"), type: "para", text: "" });
+        paintAll();
+        break;
+      case "removePara":
+        payload.ins.blocks.splice(payload.index, 1);
+        paintAll();
+        break;
+      default:
+        paintAll();
+    }
+  };
+
+  function build() {
+    const plan = planFromSession(base.doc, mod, { designation: mod.meta.designation });
+    const changes = plan.filter((a) => a.action !== "keep");
+    const docs = changes.length
+      ? {
+        modificatif: buildModificatif(base.doc, plan, mod.meta, config),
+        consolide: buildConsolidated(base.doc, plan, mod.meta, config, { previousTrail: base.previousTrail, showChanges: mod.ui.showChanges }),
+      }
+      : { modificatif: null, consolide: null };
+    return { plan, changes, ...docs };
+  }
+
+  function paintDoc() {
+    clear(paper);
+    // La charte de l'acte donne ses marges à la feuille d'édition.
+    applyPaper(paper, base.doc, config);
+    paper.appendChild(buildEditableDocument(base.doc, config, mod));
+  }
+
+  function paintAll() {
+    paintDoc();
+    paintSide();
+    requestAnimationFrame(() => fitPaper(paperBox, paper));
+  }
+
+  function paintSide() {
+    const b = build();
+    mod.lastBuild = b;
+    paintSummary(b);
+    paintPreview(b);
+  }
+
+  // ------------------------------------------------------- récapitulatif
+  function paintSummary(b) {
+    clear(summaryBox);
+    summaryBox.appendChild(h("h2", { class: "fr-card__title", text: "Modifications relevées" }));
+    if (!b.changes.length) {
+      summaryBox.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucune modification pour l'instant. Réécrivez directement un article dans le document : tout ce qui change apparaîtra ici, sans rien perdre du reste." }));
+      return;
+    }
+    summaryBox.appendChild(h("p", { class: "fr-small fr-muted", text: `${b.changes.length} modification(s) relevée(s). Vérifiez la nouvelle rédaction — la version consolidée les intègre toutes.` }));
+    const list = h("ul", { class: "mod-changes" });
+    for (const a of b.plan) {
+      const row = planSummary([a], config)[0];
+      const fresh = a.action === "append" || a.action === "insert-after" || a.action === "insert-before";
+      list.appendChild(h("li", { class: "mod-change" },
+        h("div", { class: "mod-change__head" },
+          h("span", { class: "mod-change__article", text: fresh ? "Nouvel article" : (row.article || "—") }),
+          h("span", { class: "mod-change__action", text: row.actionLabel }),
+          button("Annuler", { variant: "tertiary", size: "sm", icon: "x", title: "Ne pas tenir compte de cette modification", onClick: () => revert(a) })),
+        row.detail ? h("p", { class: "mod-change__detail", text: row.detail }) : null,
+      ));
+    }
+    summaryBox.appendChild(list);
+  }
+
+  function revert(a) {
+    if (a.insId) {
+      mod.inserted = mod.inserted.filter((x) => x.id !== a.insId);
+    } else if (a.targetEId) {
+      revertArticleByEId(mod, mod.base.doc, a.targetEId);
+    }
+    paintAll();
+  }
+
+  // ---------------------------------------------------------- aperçus
+  function paintPreview(b) {
+    clear(previewCard);
+    const tab = mod.ui.preview || "modificatif";
+    previewCard.appendChild(h("div", { class: "fr-tabs" },
+      ...[["modificatif", "Acte modificatif"], ["consolide", "Version consolidée"]].map(([id, label]) => h("button", {
+        class: "fr-tab" + (tab === id ? " fr-tab--active" : ""),
+        text: label,
+        onClick: () => { mod.ui.preview = id; paintSide(); },
+      }))));
+
+    // La version consolidée peut être présentée avec ou sans le suivi des
+    // modifications. Sans lui, elle est le texte en vigueur, chaque article
+    // touché portant sous son intitulé la mention de l'acte modificatif.
+    const tracking = mod.ui.showChanges === true;
+    if (tab === "consolide") {
+      previewCard.appendChild(h("div", { class: "mod-preview__opt" },
+        checkbox("Afficher le suivi des modifications", tracking, (v) => { mod.ui.showChanges = v; paintSide(); }),
+        h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" },
+          text: tracking
+            ? "Ajouts et suppressions apparents, et tableau des modifications en fin de document."
+            : "Texte en vigueur seulement : chaque article modifié porte la mention « Modifié par … du … » sous son intitulé." })));
+    }
+
+    const doc = tab === "consolide" ? b.consolide : b.modificatif;
+    if (!doc) {
+      previewCard.appendChild(h("p", { class: "fr-small fr-muted", text: "L'aperçu du document apparaîtra dès la première modification." }));
+      return;
+    }
+    const box = h("div", { class: "paper-box mod-preview" });
+    const p = h("div", { class: "paper" });
+    p.style.fontFamily = config.brand.documentFont || "";
+    applyPaper(p, doc, config);
+    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && tracking }));
+    box.appendChild(p);
+    previewCard.appendChild(box);
+    previewCard.appendChild(h("div", { class: "fr-row", style: { marginTop: "8px" } },
+      button("Agrandir", { variant: "secondary", size: "sm", icon: "eye", onClick: () => previewModal(doc, tab) }),
+      button("Exporter…", { variant: "secondary", size: "sm", icon: "download", onClick: () => exportMenu(tab, b) }),
+      button("Imprimer / PDF", { variant: "secondary", size: "sm", onClick: () => printDocument(doc, config, null) }),
+      button("Word (.doc)", { variant: "secondary", size: "sm", onClick: () => download(fileName(doc, tab) + ".doc", exportWordDoc(doc, config, null), "application/msword") }),
+    ));
+    requestAnimationFrame(() => fitPaper(box, p));
+  }
+
+  // L'aperçu de la colonne est une vignette (l'A4 y tient réduit) : cette
+  // fenêtre affiche le document à sa taille réelle, dans une modale large.
+  function previewModal(doc, tab) {
+    const box = h("div", { class: "paper-box mod-preview mod-preview--full" });
+    const p = h("div", { class: "paper" });
+    p.style.fontFamily = config.brand.documentFont || "";
+    applyPaper(p, doc, config);
+    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && mod.ui.showChanges === true }));
+    box.appendChild(p);
+    modal({
+      title: tab === "consolide" ? "Version consolidée" : "Acte modificatif",
+      body: box,
+      wide: true,
+      actions: (close) => [
+        button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, config, null) }),
+        button("Fermer", { variant: "secondary", onClick: close }),
+      ],
+    });
+  }
+
+  // ------------------------------------------------------- suite du circuit
+  function trailCard() {
+    return h("div", { class: "fr-card fr-card--soft" },
+      h("h2", { class: "fr-card__title", text: "Le circuit après la modification" }),
+      h("p", { class: "fr-small", text: "1. Vous confirmez : l'acte modificatif et la version consolidée sont générés d'un seul geste." }),
+      h("p", { class: "fr-small", text: "2. L'acte modificatif est envoyé en signature électronique, puis publié au recueil." }),
+      h("p", { class: "fr-small", text: "3. À sa publication, la version consolidée est publiée sous le même identifiant ELI que l'acte d'origine : elle devient la version en vigueur et supplante l'acte d'origine." }),
+      h("p", { class: "fr-small fr-muted", text: "4. L'acte d'origine n'est jamais effacé : il reste consultable, avec ses versions consolidées successives, dans l'historique des versions publiées sous son ELI." }),
+    );
+  }
+
+  // ------------------------------------------------------------ export
+  function fileName(doc, tab) {
+    const num = (doc.meta?.numero || "acte").replace(/[^\w-]+/g, "_");
+    return num + (tab === "consolide" ? "_consolidee" : "_modificatif");
+  }
+
+  function exportMenu(tab, b) {
+    const doc = tab === "consolide" ? b.consolide : b.modificatif;
+    if (!doc) return;
+    const consolide = tab === "consolide";
+    const name = fileName(doc, tab);
+    const body = h("div", { class: "fr-stack" });
+    const row = (label, fn, mime) => button(label, { variant: "secondary", onClick: () => download(name + suffixOf(label), fn(), mime) });
+    const suffixOf = (label) => (label.includes("Ntoso") ? ".akn.xml" : label.includes("HTML") ? ".html" : label.includes("JSON-LD") ? ".jsonld" : label.includes("Markdown") ? ".md" : ".json");
+    body.appendChild(h("div", { class: "fr-row" },
+      row("Akoma Ntoso (.akn.xml)", () => exportAkn(doc, config), "application/xml"),
+      row("HTML complet", () => exportStandaloneHtml(doc, config), "text/html"),
+    ));
+    body.appendChild(h("div", { class: "fr-row" },
+      row("JSON-LD (ELI)", () => exportJsonLd(doc, config), "application/ld+json"),
+      row("Markdown", () => exportMarkdown(doc, config), "text/markdown"),
+      row("Document (JSON)", () => JSON.stringify({ kind: "document", doc }, null, 2), "application/json"),
+    ));
+    body.appendChild(h("div", { class: "fr-row" },
+      button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, config, null) }),
+      button("Word (.doc)", { variant: "secondary", onClick: () => download(name + ".doc", exportWordDoc(doc, config, null), "application/msword") }),
+    ));
+    body.appendChild(h("p", { class: "fr-small fr-muted", text: "Référence ELI : " + (doc.meta?.eli || "—") + (consolide ? " — même « work » que l'acte d'origine : la consolidation en est une nouvelle version." : "") }));
+    if (consolide) body.appendChild(h("p", { class: "fr-small fr-muted", text: doc.meta?.consolidated?.showChanges === true ? "Suivi des modifications affiché : ajouts et suppressions apparents, tableau en fin de document." : "Suivi des modifications masqué : texte en vigueur, mention sous chaque article modifié. Se règle depuis l'onglet « Version consolidée » de l'écran de modification." }));
+    modal({ title: consolide ? "Exporter la version consolidée" : "Exporter l'acte modificatif", body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });
+  }
+
+  // -------------------------------------------- confirmation & génération
+  function openMetaModal() {
+    const b = build();
+    if (!b.changes.length) {
+      toast("Aucune modification : réécrivez d'abord un article dans le document.", "warning");
+      return;
+    }
+    const body = h("div", { class: "fr-stack" });
+    body.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: `${b.changes.length} modification(s) seront apportées` }),
+      h("p", { class: "fr-small", text: "Un acte modificatif sera créé, et l'acte d'origine sera consolidé pour tenir compte de ces modifications. L'acte d'origine n'est pas retouché." })));
+
+    const meta = h("div", { class: "fr-stack" });
+    const numeroInput = h("input", { class: "fr-input", value: mod.meta.numero, on: { input: (e) => { mod.meta.numero = e.target.value; } } });
+    meta.appendChild(h("div", { class: "fr-field" },
+      h("label", { class: "fr-label" }, "Numéro de l'acte modificatif", h("span", { class: "fr-required", text: " *" })),
+      h("div", { class: "fr-row" }, h("div", { style: { flex: "1 1 auto" } }, numeroInput),
+        button("Réserver", { variant: "tertiary", size: "sm", icon: "check", title: "Prendre le prochain numéro de la séquence", onClick: () => {
+          const entity = config.entities.find((e) => e.id === mod.meta.entityId) || config.entities[0];
+          mod.meta.numero = nextNumero(config, entity);
+          config.numbering.seq += 1;
+          touch("config", { rerender: false });
+          numeroInput.value = mod.meta.numero;
+          toast("Numéro réservé : " + mod.meta.numero, "success");
+        } }))));
+
+    meta.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+      textField({ label: "Nature de l'acte", value: mod.meta.designation, help: "« Décision », « Arrêté »…", onChange: (v) => { mod.meta.designation = v; } }),
+      textField({ label: "Date de signature", type: "date", value: mod.meta.dateSignature, onChange: (v) => { mod.meta.dateSignature = v; } }),
+    ));
+    meta.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+      textField({ label: "Date d'effet", type: "date", value: mod.meta.dateEffet, help: "Laissez vide : « au lendemain de la publication ».", onChange: (v) => { mod.meta.dateEffet = v; } }),
+      selectField({
+        label: "Entité", value: mod.meta.entityId, placeholder: "— Entité —",
+        options: (config.entities || []).map((e) => ({ value: e.id, label: e.name + (e.code ? " (" + e.code + ")" : "") })),
+        onChange: (v) => { mod.meta.entityId = v; },
+      }),
+    ));
+    meta.appendChild(selectField({
+      label: "Signataire", value: mod.meta.signataireId, placeholder: "— Signataire —",
+      options: (config.people || []).map((pp) => ({ value: pp.id, label: [pp.civility, pp.firstName, pp.lastName].filter(Boolean).join(" ") })),
+      onChange: (v) => { mod.meta.signataireId = v; },
+    }));
+    meta.appendChild(textField({ label: "Objet", value: mod.meta.objet, rows: 2, onChange: (v) => { mod.meta.objet = v; } }));
+    meta.appendChild(textField({
+      label: "Considérants (un par ligne)", value: (mod.meta.considerants || []).join("\n"), rows: 3,
+      onChange: (v) => { mod.meta.considerants = v.split("\n").map((s) => s.trim()).filter(Boolean); },
+    }));
+    meta.appendChild(textField({
+      label: "Visas complémentaires (un par ligne)", value: (mod.meta.visas || []).join("\n"), rows: 2,
+      help: "Le visa de l'acte modifié est ajouté automatiquement.",
+      onChange: (v) => { mod.meta.visas = v.split("\n").map((s) => s.trim()).filter(Boolean); },
+    }));
+    meta.appendChild(h("div", { class: "fr-row" },
+      checkbox("Article d'entrée en vigueur", mod.meta.addEntry !== false, (v) => { mod.meta.addEntry = v; }),
+      checkbox("Article d'exécution", mod.meta.addExecution !== false, (v) => { mod.meta.addExecution = v; }),
+    ));
+    body.appendChild(meta);
+
+    modal({
+      title: "Confirmer la modification",
+      wide: true,
+      body,
+      actions: (close) => [
+        button("Annuler", { variant: "secondary", onClick: close }),
+        button("Générer les deux actes", { variant: "primary", icon: "check", onClick: () => { close(); generate(); } }),
+      ],
+    });
+  }
+
+  async function generate() {
+    const b = build();
+    if (!b.changes.length) { toast("Aucune modification saisie : rien à générer.", "warning"); return; }
+    if (!mod.meta.numero) { toast("Attribuez un numéro à l'acte modificatif.", "error"); return; }
+
+    const now = new Date().toISOString();
+    const baseId = base.acteId || null;
+    const baseActe = baseId ? state.actes.find((x) => x.id === baseId) : null;
+    const orgOf = { serviceId: baseActe?.serviceId || "", bureauId: baseActe?.bureauId || "" };
+    const authorOf = { createdBy: state.user?.id || "", createdByName: state.user ? fullName(state.user) : "" };
+
+    const modActe = {
+      id: uid("acte"), kind: "modificatif",
+      trameId: "", trameName: "Acte modificatif",
+      numero: mod.meta.numero, objet: mod.meta.objet,
+      entityId: mod.meta.entityId, dateSignature: mod.meta.dateSignature || "",
+      ...orgOf, ...authorOf,
+      statut: "pret", createdAt: now, updatedAt: now,
+      values: null, doc: b.modificatif, eli: b.modificatif.meta.eli, issues: [],
+      baseId, baseEli: base.doc.meta?.eli || "", baseNumero: base.doc.meta?.numero || "",
+      amendsId: baseId, amendsEli: base.doc.meta?.eli || "", amendsNumero: base.doc.meta?.numero || "",
+      amends: b.modificatif.amendments, source: "modification",
+    };
+    const consActe = {
+      id: uid("acte"), kind: "consolide",
+      trameId: "", trameName: "Version consolidée",
+      numero: base.doc.meta?.numero || "",
+      objet: base.doc.meta?.objet || mod.meta.objet,
+      entityId: base.doc.meta?.entity?.id || mod.meta.entityId,
+      dateSignature: base.doc.meta?.dateSignature || "",
+      ...orgOf, ...authorOf,
+      statut: "en_attente", createdAt: now, updatedAt: now,
+      values: null, doc: b.consolide, eli: b.consolide.meta.eli, issues: [],
+      baseId, baseEli: base.doc.meta?.eli || "", modificatifId: modActe.id, modificationIds: [modActe.id],
+      consolidatesId: baseId, consolidatesEli: base.doc.meta?.eli || "",
+      trail: b.consolide.trail, source: "consolidation", pendingConsolidation: true,
+    };
+    modActe.consolideId = consActe.id;
+    state.actes.push(modActe, consActe);
+    if (baseActe) {
+      baseActe.modificationIds = [...new Set([...(baseActe.modificationIds || []), modActe.id])];
+      baseActe.consolidationIds = [...new Set([...(baseActe.consolidationIds || []), consActe.id])];
+      baseActe.lastConsolideId = consActe.id;
+      baseActe.updatedAt = now;
+    }
+    touch("actes");
+    state.modifier = null;
+    toast("Acte modificatif et version consolidée enregistrés.", "success");
+    proposeNext(modActe, consActe, base);
+  }
+
+  function proposeNext(modActe, consActe, base0) {
+    modal({
+      title: "Deux actes ont été produits",
+      body: h("div", { class: "fr-stack" },
+        resultLine("Acte modificatif", modActe, "Il porte la modification : il part en signature, puis est publié."),
+        resultLine("Version consolidée", consActe, `Texte de l'acte n° ${base0.doc.meta?.numero || "—"} à jour. Elle devient la version en vigueur dès que l'acte modificatif est publié.`),
+        h("p", { class: "fr-small fr-muted", text: "L'acte d'origine n'est pas modifié : il reste consultable, et son historique de versions enregistre la consolidation." }),
+      ),
+      actions: (close) => [
+        button("Plus tard", { variant: "tertiary", onClick: close }),
+        button("Voir la version consolidée", { variant: "secondary", onClick: () => { close(); navigate("acte/" + consActe.id); } }),
+        button("Envoyer l'acte modificatif en signature", {
+          variant: "primary", icon: "lock",
+          onClick: () => { close(); state.signature = { tab: "circuit", acteId: modActe.id }; navigate("signature"); },
+        }),
+      ],
+    });
+  }
+
+  function resultLine(title, acte, note) {
+    return h("div", { class: "fr-card fr-card--soft" },
+      h("div", { class: "fr-row", style: { alignItems: "baseline" } },
+        h("strong", { text: title }),
+        h("span", { class: "fr-badge fr-badge--success", text: acte.numero || "" }),
+        h("span", { class: "fr-small fr-muted", text: acte.objet || "" })),
+      h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" }, text: note || "" }),
+    );
+  }
+
+  paintAll();
+}
+
+// ------------------------------------------------------------------ détails
+// Lecture seule d'un document d'acte (acte importé, modificatif, consolidée).
+export function renderActeDetail(root, params) {
+  const config = state.config;
+  const a = state.actes.find((x) => x.id === params.id);
+  if (!a) {
+    root.appendChild(emptyState("Acte introuvable.", button("Voir le registre", { variant: "primary", onClick: () => navigate("actes") })));
+    return;
+  }
+  const doc = docOfActe(a);
+  if (!doc) {
+    root.appendChild(emptyState("Le document de cet acte est indisponible (trame d'origine absente).", button("Voir le registre", { variant: "primary", onClick: () => navigate("actes") })));
+    return;
+  }
+  const n = natureOf(a);
+  root.appendChild(h("div", { class: "page-head" },
+    h("div", { class: "page-head__text" },
+      h("h1", { class: "page-head__title", text: `${doc.meta?.designation || "Acte"} n° ${a.numero || doc.meta?.numero || "—"}` }),
+      h("p", { class: "page-head__sub", text: [n.label, a.objet || doc.meta?.objet, doc.meta?.eli].filter(Boolean).join(" · ") }),
+    ),
+    h("div", { class: "page-head__actions" },
+      helpLink("modifier", "Aide"),
+      button("Registre", { variant: "secondary", icon: "list", onClick: () => navigate("actes") }),
+      can("actes.gerer") && canModify(a)
+        ? (actePubliable(a)
+          ? button("Modifier cet acte", { variant: "secondary", icon: "refresh", onClick: () => modifierFromActe(a) })
+          : button("Corriger cet acte", { variant: "secondary", icon: "note", title: "Acte individuel non publiable : correction directe, sans acte modificatif", onClick: () => openActe(a) }))
+        : null,
+      a.publication ? button("Version en ligne", { variant: "secondary", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(a.publication.cle)) }) : null,
+      button("Exporter…", { variant: "primary", icon: "download", onClick: () => exportDocMenu(doc, a) }),
+    ),
+  ));
+
+  const trace = [
+    a.createdByName ? `Rédigé par ${a.createdByName}` : "",
+    a.createdAt ? `le ${formatDate(String(a.createdAt).slice(0, 10))}` : "",
+    a.updatedAt && a.updatedAt !== a.createdAt ? `· dernière modification le ${formatDate(String(a.updatedAt).slice(0, 10))}` : "",
+  ].filter(Boolean).join(" ");
+  if (trace) root.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "-6px" }, text: trace }));
+
+  const history = historyCard(a, doc);
+  if (history) root.appendChild(history);
+
+  // Le parapheur : où en est l'acte dans son circuit de validation, et ce que
+  // le lecteur peut y faire. C'est la même mécanique que l'écran « Parapheur »,
+  // ramenée sur la fiche de l'acte concerné.
+  root.appendChild(parapheurCard(a));
+
+  // signature et publication
+  if (a.original || a.publication || a.statut === "signee" || a.statut === "publie" || a.statut === "en_signature" || a.statut === "en_attente") {
+    const p = a.publication || null;
+    root.appendChild(h("div", { class: "fr-card fr-card--soft" },
+      h("h2", { class: "fr-card__title", text: "Signature et publication" }),
+      a.original
+        ? h("p", { class: "fr-small" },
+          h("strong", { text: "Acte signé. " }),
+          `Signé le ${formatDate(String(a.original.signatures?.[0]?.signeLe || "").slice(0, 10))} par ${a.original.signatures?.[0]?.signataire?.nom || "—"} · empreinte SHA-256 ${String(a.original.document?.sha256 || "").slice(0, 24)}…`)
+        : h("p", { class: "fr-small", text: a.statut === "en_signature" ? "Circuit de signature ouvert, en attente de signature." : a.statut === "en_attente" ? "En attente : la version consolidée sera publiée en même temps que l'acte modificatif." : "Acte non signé." }),
+      p ? h("div", {},
+        h("p", { class: "fr-small" }, h("strong", { text: "Publié. " }), `ELI ${p.eliUri}`),
+        h("p", { class: "fr-small fr-muted", text: `Publié le ${formatDate(p.datePublication)} · entrée en vigueur le ${formatDate(p.dateOpposabilite)} · ${p.recueil || ""}` }),
+      ) : null,
+      !actePubliable(a) ? h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "8px" } },
+        h("p", { class: "fr-alert__title", text: "Acte non publiable" }),
+        h("p", { class: "fr-small", text: "Acte individuel : sa trame est déclarée non publiable. Signé et conservé au registre, il n'est pas déposé au recueil et ne reçoit pas d'identifiant ELI. Sa correction se fait directement, sans acte modificatif." })) : null,
+      h("div", { class: "fr-row" },
+        a.original ? button("Voir l'original signé", { variant: "secondary", size: "sm", icon: "lock", onClick: () => import("./signature.js").then((m) => m.voirOriginal(a)) }) : null,
+        p ? button("Consulter la version en ligne", { variant: "primary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(p.cle)) }) : null,
+        can("signature.gerer") && a.statut !== "publie" && a.kind !== "consolide"
+          ? button(
+            actePubliable(a) ? (a.original ? "Publication" : "Signer") : (a.original ? "Suivi du circuit" : "Signer"),
+            { variant: "tertiary", size: "sm", icon: "upload", onClick: () => { state.signature = { tab: actePubliable(a) && a.original ? "publication" : "circuit", acteId: a.id }; navigate("signature"); } })
+          : null,
+      ),
+    ));
+  }
+
+  // Le caractère exécutoire : un acte signé n'est pas encore opposable. Il le
+  // devient quand la dernière formalité requise est accomplie, et c'est de là
+  // que court le délai de recours.
+  root.appendChild(executionCard(a));
+
+  const ec = ecartsOfActe(a);
+  if (ec.count) {
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h2", { class: "fr-card__title", text: `Écarts à la trame (${ec.count})` }),
+      h("p", { class: "fr-small fr-muted", text: "Le rédacteur a adapté ces passages par rapport au modèle. L'acte reste valable : c'est un signalement, pas une erreur. Profitez-en pour faire évoluer la trame si l'adaptation est récurrente ou légitime." }),
+      ...ec.list.map((e) => {
+        const loc = locateAddr(doc, e.addr);
+        return h("div", { class: "rx-ecart" },
+          h("div", { class: "rx-ecart__head" }, h("span", { class: "rx-ecart__where", text: [loc.area, loc.label].filter(Boolean).join(" · ") })),
+          h("p", { class: "rx-ecart__line" },
+            h("span", { class: "rx-ecart__k", text: "trame" }),
+            h("span", { class: "rx-ecart__was", text: interpolate(e.original, doc.ctx || {}) || "—" })),
+          h("p", { class: "rx-ecart__line" },
+            h("span", { class: "rx-ecart__k", text: "acte" }),
+            h("span", { class: "rx-ecart__now", text: interpolate(e.current, doc.ctx || {}) || "(texte supprimé)" })));
+      }),
+    ));
+  }
+
+  // Version consolidée : le suivi des modifications est une option d'affichage
+  // (décochée par défaut). Le choix est enregistré sur le document : les
+  // exports, la signature et la version publiée le reprennent.
+  if (doc.kind === "consolide") {
+    doc.meta.consolidated = doc.meta.consolidated || {};
+    const suivi = doc.meta.consolidated.showChanges === true;
+    // Ce qui a été publié est figé : si la version en ligne a été déposée avec
+    // l'autre présentation, on le dit, plutôt que de laisser croire qu'elle suit.
+    const publieAvecSuivi = /class="doc-ins"|class="doc-trail"/.test(a.publication?.html || "");
+    root.appendChild(h("div", { class: "doc-optbar" },
+      checkbox("Afficher le suivi des modifications", suivi, (v) => {
+        doc.meta.consolidated.showChanges = v;
+        a.updatedAt = new Date().toISOString();
+        touch("actes");
+      }),
+      h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" },
+        text: suivi
+          ? "Ajouts et suppressions apparents, et tableau des modifications en fin de document."
+          : "Texte en vigueur, avec la mention de l'acte modificatif sous chaque article touché." }),
+      a.publication && publieAvecSuivi !== suivi
+        ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "La version en ligne déjà publiée garde la présentation retenue au moment de sa publication ; ce choix vaut pour l'affichage et les exports de la fiche." })
+        : null));
+  }
+
+  // L'historique des brouillons : les états successifs de l'acte avant sa
+  // signature, et le retour à l'un d'eux.
+  const rv = revisionsCard(a);
+  if (rv) root.appendChild(rv);
+
+  const box = h("div", { class: "paper-box" });
+  const paper = h("div", { class: "paper" });
+  paper.style.fontFamily = config.brand.documentFont || "";
+  applyPaper(paper, doc, config);
+  paper.appendChild(renderDocument(doc, config, {}));
+  box.appendChild(paper);
+  root.appendChild(box);
+  requestAnimationFrame(() => fitPaper(box, paper));
+}
+
+// ------------------------------------------------------------- parapheur
+// Où en est l'acte dans son circuit de validation. La carte dit trois choses :
+// le circuit applicable, la trace des étapes (qui a décidé quoi, quand, et
+// avec quelle observation), et ce que le lecteur peut faire maintenant — y
+// compris constater que la validation est devenue caduque parce que le texte a
+// été réécrit depuis.
+function parapheurCard(a) {
+  const circuit = circuitDe(a);
+  const v = a.validation;
+  const box = h("div", { class: "fr-card" });
+  const caduque = v ? !validationAJour(a) : false;
+  const etat = v ? (VALIDATION_STATUTS[v.statut] || {}) : {};
+
+  box.appendChild(h("div", { class: "fr-row" },
+    h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Parapheur" }),
+    v
+      ? h("span", { class: "fr-badge fr-badge--" + (caduque ? "warning" : (etat.color || "info")), text: caduque ? "validation caduque" : (etat.label || "") })
+      : h("span", { class: "fr-badge", text: "hors circuit" }),
+  ));
+
+  if (!v) {
+    box.appendChild(h("p", { class: "fr-small fr-muted", text: circuit
+      ? `Le circuit « ${circuit.label} » s'applique à cet acte : ${circuit.steps.length} étape(s). Il n'a pas encore été soumis.`
+      : "Aucun circuit du référentiel ne s'applique à cet acte : il part en signature sans validation préalable." }));
+    if (circuit && can("actes.rediger")) {
+      box.appendChild(h("div", { class: "fr-row" },
+        button("Soumettre au circuit", { variant: "primary", size: "sm", icon: "upload", onClick: () => soumettreCircuit(a, circuit) })));
+    }
+    return box;
+  }
+
+  const av = avancement(v);
+  box.appendChild(h("p", { class: "fr-small fr-muted", text: [
+    v.circuitLabel || "Circuit de validation",
+    `ouvert le ${formatDate(String(v.demarreLe || "").slice(0, 10))}`,
+    v.demarreParNom ? "par " + v.demarreParNom : "",
+    `${av.faites}/${av.total} étape(s)`,
+  ].filter(Boolean).join(" · ") }));
+
+  if (caduque) {
+    box.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { margin: "8px 0" } },
+      h("p", { class: "fr-alert__title", text: "Validation caduque" }),
+      h("p", { class: "fr-small", text: "Le texte de l'acte a été modifié après le passage au parapheur : ce qui a été validé n'est plus ce que porte l'acte. Le circuit doit être repris avant la signature." })));
+  }
+
+  box.appendChild(h("div", { class: "sig-steps" }, ...(v.steps || []).map((s, i) => etapeTraceEl(s, i, v))));
+
+  const mienne = etapeAParachever(a);
+  if (mienne && !caduque && can("actes.valider")) {
+    box.appendChild(carteDecision(a, mienne, { heading: "h3" }));
+  } else if (v.statut === "en_cours" && !caduque) {
+    const suivante = etapeActive(v);
+    box.appendChild(h("p", { class: "fr-small fr-muted", text: suivante
+      ? `L'étape ouverte est « ${suivante.label} » : elle n'est pas de votre ressort.`
+      : "Toutes les étapes sont franchies." }));
+  }
+
+  const reparables = ["valide", "refuse", "renvoye"].includes(v.statut) || caduque;
+  if (can("actes.valider") && circuit && reparables) {
+    box.appendChild(h("div", { class: "fr-row", style: { marginTop: "8px" } },
+      button("Reprendre le circuit", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }),
+      v.statut === "valide" && can("signature.gerer")
+        ? button("Aller à la signature", { variant: "primary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } })
+        : null,
+      (v.statut === "refuse" || v.statut === "renvoye") && can("actes.rediger")
+        ? button("Corriger l'acte", { variant: "primary", size: "sm", icon: "note", onClick: () => openActe(a) })
+        : null));
+  }
+  return box;
+}
+
+// Une étape du circuit, telle qu'elle a été franchie (ou non) : c'est la trace
+// des décisions, pas la file d'attente — d'où l'usage des mêmes classes que
+// l'écran du parapheur.
+function etapeTraceEl(s, i, v) {
+  const info = ETAPE_STATUTS[s.statut] || ETAPE_STATUTS.en_attente;
+  const ouverte = s.statut === "en_attente" && etapeActive(v)?.id === s.id;
+  return h("div", { class: "sig-step" + (s.statut === "valide" || s.statut === "passe" ? " is-done" : "") + (ouverte ? " is-open" : "") },
+    h("span", { class: "sig-step__dot", text: s.statut === "en_attente" ? String(i + 1) : (s.statut === "refuse" ? "✗" : s.statut === "renvoye" ? "↩" : "✓") }),
+    h("div", { class: "sig-step__body" },
+      h("p", { class: "sig-step__title" },
+        s.label,
+        h("span", { class: "fr-badge fr-badge--" + info.color, style: { marginLeft: "6px" }, text: info.label }),
+        s.kind === "avis" ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "avis" }) : null,
+        s.optional ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "facultative" }) : null,
+      ),
+      h("p", { class: "sig-step__line", text: s.at ? `${s.byName || "—"} · le ${formatDate(String(s.at).slice(0, 10))}` : (ouverte ? "Étape ouverte" : "En attente") }),
+      s.comment ? h("p", { class: "sig-step__line parapheur-comment", text: "« " + s.comment + " »" }) : null,
+    ),
+  );
+}
+
+// ------------------------------------------------- caractère exécutoire
+// Les formalités qui rendent l'acte opposable, et le délai de recours qui en
+// découle. La fiche dit l'essentiel et renvoie à l'échéancier pour agir — sauf
+// pour les formalités que l'on peut constater d'ici.
+function executionCard(a) {
+  const opts = { publiable: actePubliable(a), trame: trameById(a.trameId) };
+  const st = statutExecution(a, state.config, opts);
+  const exe = dateExecutoire(a, opts);
+  const limite = dateLimiteRecours(a, state.config, opts);
+  const jours = limite ? ecartJours(aujourdhui(), limite) : null;
+  const form = formalites(a, opts);
+  const box = h("div", { class: "fr-card" });
+
+  box.appendChild(h("div", { class: "fr-row" },
+    h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Caractère exécutoire" }),
+    h("span", { class: "fr-badge fr-badge--" + st.color, text: st.label }),
+  ));
+
+  box.appendChild(exe
+    ? h("p", { class: "fr-small" },
+      h("strong", { text: "Exécutoire le " + formatDate(exe) + ". " }),
+      limite ? `Délai de recours contentieux jusqu'au ${formatDate(limite)} (${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"}).` : "")
+    : h("p", { class: "fr-small fr-muted", text: st.code === "brouillon"
+      ? "L'acte n'est pas signé : le caractère exécutoire se constate après la signature."
+      : "L'acte n'est pas encore exécutoire : " + (st.manquantes || []).map((m) => m.court).join(" et ") + " manque(nt)." }));
+
+  box.appendChild(h("div", { class: "exec-formalites", style: { marginTop: "8px" } }, ...form.map((f) => h("div", { class: "exec-formalite" + (f.fait ? " is-done" : "") },
+    h("div", { class: "exec-formalite__head" },
+      h("strong", { text: f.label }),
+      h("span", { class: "fr-badge fr-badge--" + (f.fait ? "success" : f.requis ? "warning" : "info"), text: f.fait ? "Accomplie" : f.requis ? "À accomplir" : "Non requise" })),
+    h("p", { class: "fr-small" + (f.fait ? "" : " fr-muted"), text: f.fait
+      ? ["le " + formatDate(f.at), f.ref ? "réf. " + f.ref : "", f.parEli ? "constatée par la chaîne ELI" : "", f.byName ? "par " + f.byName : ""].filter(Boolean).join(" · ")
+      : (f.id === "signature" ? "L'acte n'est pas signé." : f.requis ? "Aucune constatation enregistrée." : "Formalité non requise : elle peut tout de même être constatée au dossier.") }),
+    f.id !== "signature" && !(f.id === "publication" && f.parEli) && (can("signature.gerer") || can("actes.gerer"))
+      ? h("div", { class: "fr-row" },
+        button(f.fait ? "Corriger" : "Enregistrer", {
+          variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
+          onClick: () => ouvrirFormulaireFormalite(a, f),
+        }))
+      : null,
+  ))));
+
+  box.appendChild(h("div", { class: "fr-row", style: { marginTop: "8px" } },
+    button("Ouvrir l'échéancier", { variant: "secondary", size: "sm", icon: "gear", onClick: () => { state.execution = { tab: "tous", acteId: a.id }; navigate("execution"); } })));
+  return box;
+}
+
+// -------------------------------------------------- historique des brouillons
+// Les états successifs de l'acte, conservés à chaque enregistrement. Revenir à
+// l'un d'eux n'efface rien : l'état courant est archivé au passage, et le
+// circuit de validation, s'il existait, devra être repris.
+function revisionsCard(a) {
+  const revs = revisionsDe(a);
+  if (!revs.length) return null;
+  const box = h("div", { class: "fr-card fr-card--soft" },
+    h("h2", { class: "fr-card__title", text: `Historique des brouillons (${revs.length})` }),
+    h("p", { class: "fr-small fr-muted", text: "Chaque enregistrement conserve l'état précédent. Revenir à une version archive d'abord l'état courant : rien ne se perd. Les vingt dernières versions sont conservées." }));
+
+  for (const r of revs) {
+    box.appendChild(h("div", { class: "sig-pub__line" },
+      h("div", {},
+        h("strong", { text: r.label + " — " + (r.numero || "sans n°") }),
+        h("p", { class: "fr-small fr-muted", text: [
+          r.at ? "le " + new Date(r.at).toLocaleString("fr-FR") : "",
+          r.byName ? "par " + r.byName : "",
+          r.objet || "",
+        ].filter(Boolean).join(" · ") })),
+      can("actes.rediger")
+        ? button("Restaurer cette version", {
+          variant: "tertiary", size: "sm", icon: "refresh",
+          onClick: async () => {
+            const ok = await confirmDialog("Restaurer cette version", "L'état actuel de l'acte sera archivé dans l'historique, puis remplacé par cette version. Si un circuit de validation est ouvert, il devra être repris.", { confirmLabel: "Restaurer" });
+            if (!ok) return;
+            const rev = restaurerRevision(a, r.id, { by: state.user?.id || "", byName: fullName(state.user) });
+            if (!rev) { toast("Cette version n'est plus disponible.", "warning"); return; }
+            await journaliser({
+              action: "acte.restauration", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
+              detail: `retour à la version « ${r.label} » du ${new Date(r.at).toLocaleString("fr-FR")}${a.validation ? " — le circuit de validation doit être repris" : ""}`,
+              to: [a.createdBy || "", "role:editeur"],
+            });
+            touch("actes", { rerender: false });
+            toast("Version restaurée", "success");
+            redrawView();
+          },
+        })
+        : null,
+    ));
+  }
+  return box;
+}
+
+// -------------------------------------------------- historique des versions
+// Chaîne des modifications subies par un acte : les actes modificatifs publiés
+// et leurs consolidations successives. C'est la mémoire de l'acte : chaque
+// modification y laisse une trace, et l'acte d'origine reste toujours lisible.
+function historyCard(a, doc) {
+  const base = (a.kind === "original" || a.kind === "importe" || !a.baseId)
+    ? a
+    : state.actes.find((x) => x.id === a.baseId) || null;
+  const liens = state.actes.filter((x) => x.baseId && base && x.baseId === base.id);
+  const mods = liens.filter((x) => x.kind === "modificatif");
+  const cons = liens.filter((x) => x.kind === "consolide");
+  const chain = [
+    a.amendsNumero || a.amendsEli ? ["Modifie", `${a.amendsNumero || ""} ${a.amendsEli ? "(" + a.amendsEli + ")" : ""}`] : null,
+    a.consolidatesEli ? ["Consolide", a.consolidatesEli] : null,
+    doc.trail?.length ? ["Modifications intégrées", doc.trail.map((t) => `${t.designation || "acte"} n°${t.numero} du ${formatDate(t.date)}`).join(" ; ")] : null,
+  ].filter(Boolean);
+
+  if (!chain.length && !liens.length) return null;
+
+  const card = h("div", { class: "fr-card" },
+    h("h2", { class: "fr-card__title", text: "Historique des modifications" }),
+  );
+
+  const enVigueur = cons.filter((x) => x.statut === "publie").sort((x, y) => String(y.updatedAt || "").localeCompare(String(x.updatedAt || "")))[0] || null;
+  if (enVigueur && enVigueur.id !== a.id) {
+    card.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "Cet acte a été supplanté par sa version consolidée" }),
+      h("p", { class: "fr-small", text: `La version consolidée du ${formatDate(enVigueur.datePublication || enVigueur.updatedAt?.slice(0, 10))} tient lieu de version en vigueur. L'acte d'origine reste consultable ci-dessous, dans sa rédaction signée.` }),
+      h("div", { class: "fr-row" },
+        button("Ouvrir la version en vigueur", { variant: "primary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + enVigueur.id) }),
+        enVigueur.publication ? button("Version en ligne", { variant: "secondary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(enVigueur.publication.cle)) }) : null)));
+  } else if (enVigueur && enVigueur.id === a.id) {
+    card.appendChild(h("p", { class: "fr-small", text: "Cette version consolidée est la version en vigueur de l'acte. L'acte d'origine et les consolidations antérieures restent consultables ci-dessous." }));
+  }
+
+  if (liens.length) {
+    const t = h("table", { class: "fr-table fr-table--small" },
+      h("thead", {}, h("tr", {},
+        h("th", { text: "Acte" }), h("th", { text: "Date" }), h("th", { text: "Nature" }),
+        h("th", { text: "Statut" }), h("th", { text: "Version publiée" }), h("th", {}))));
+    const tb = h("tbody");
+    const rows = [{ acte: base || a, label: "Texte d'origine", isBase: true }]
+      .concat(mods.map((m) => ({ acte: m, label: "Modification" })))
+      .concat(cons.map((c) => ({ acte: c, label: "Consolidation" })))
+      .sort((x, y) => String(x.acte.createdAt || "").localeCompare(String(y.acte.createdAt || "")));
+    for (const r of rows) {
+      const x = r.acte;
+      const nat = natureOf(x);
+      const pub = x.publication;
+      // Une consolidation est datée du jour de la consolidation : sa date de
+      // signature est celle de l'acte d'origine, qu'elle reprend.
+      const quand = x.kind === "consolide"
+        ? (x.datePublication || x.doc?.meta?.consolidated?.at?.slice(0, 10) || x.updatedAt?.slice(0, 10))
+        : (x.dateSignature || x.updatedAt?.slice(0, 10));
+      tb.appendChild(h("tr", { class: r.acte.id === a.id ? "mod-hist--current" : "" },
+        h("td", {},
+          h("strong", { text: x.numero || "—" }),
+          h("div", { class: "fr-small fr-muted", text: r.isBase ? r.label : (x.objet || "") })),
+        h("td", { class: "fr-small", text: formatDate(quand) }),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + nat.color, text: nat.label })),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + (x.statut === "publie" ? "success" : x.statut === "en_attente" ? "info" : "warning"), text: statusText(x) })),
+        h("td", { class: "fr-mono fr-small", text: pub?.eliUri || (x.kind === "consolide" ? "en attente" : "—") }),
+        h("td", {}, h("div", { class: "fr-row" },
+          x.id !== a.id ? button("Ouvrir", { variant: "tertiary", size: "sm", onClick: () => navigate("acte/" + x.id) }) : h("span", { class: "fr-badge fr-badge--success", text: "affiché" }),
+          pub ? button("En ligne", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(pub.cle)) }) : null)),
+      ));
+    }
+    t.appendChild(tb);
+    card.appendChild(h("div", { class: "fr-table-wrap" }, t));
+  } else if (chain.length) {
+    for (const [k, v] of chain) card.appendChild(h("p", { class: "fr-small" }, h("strong", { text: k + " : " }), v));
+  }
+
+  card.appendChild(h("p", { class: "fr-small fr-muted", text: "Chaque modification publiée laisse une trace : l'acte modificatif qui l'a portée, et la version consolidée correspondante. Rien n'est effacé — c'est l'historique des modifications dans le temps." }));
+  return card;
+}
+
+function exportDocMenu(doc, acte) {
+  const name = (acte.numero || "acte").replace(/[^\w-]+/g, "_");
+  const body = h("div", { class: "fr-stack" },
+    h("div", { class: "fr-row" },
+      button("Akoma Ntoso (.akn.xml)", { variant: "secondary", onClick: () => download(name + ".akn.xml", exportAkn(doc, state.config), "application/xml") }),
+      button("HTML complet", { variant: "secondary", onClick: () => download(name + ".html", exportStandaloneHtml(doc, state.config), "text/html") }),
+    ),
+    h("div", { class: "fr-row" },
+      button("JSON-LD (ELI)", { variant: "secondary", onClick: () => download(name + ".jsonld", exportJsonLd(doc, state.config), "application/ld+json") }),
+      button("Markdown", { variant: "secondary", onClick: () => download(name + ".md", exportMarkdown(doc, state.config), "text/markdown") }),
+      button("Document (JSON)", { variant: "secondary", onClick: () => download(name + ".document.json", JSON.stringify({ kind: "document", doc }, null, 2)) }),
+    ),
+    h("div", { class: "fr-row" },
+      button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, state.config, null) }),
+      button("Word (.doc)", { variant: "secondary", onClick: () => download(name + ".doc", exportWordDoc(doc, state.config, null), "application/msword") }),
+    ),
+    h("p", { class: "fr-small fr-muted", text: "Référence ELI : " + (doc.meta?.eli || "—") }),
+  );
+  modal({ title: "Exporter — " + (acte.numero || "acte"), body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });
+}
+
+// ------------------------------------------------------------------ outils
+function checkbox(label, checked, onChange) {
+  const c = h("input", { type: "checkbox", checked: !!checked });
+  c.addEventListener("change", () => onChange(c.checked));
+  return h("label", { class: "fr-check" }, c, label);
+}

@@ -1,0 +1,749 @@
+<!doctype html>
+<!--
+  Ces quatre lignes ne servent qu'à la version publiée en statique (GitHub
+  Pages) : elles donnent à la page un vrai document — mode « standards », jeu de
+  caractères, largeur d'écran pour les téléphones, titre d'onglet. Dans
+  l'environnement d'édition elles sont sans effet (le document existe déjà).
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scribae — trames, rédaction et publication des actes administratifs</title>
+<script>
+// Mode d'affichage : appliqué AVANT tout rendu, pour éviter l'éclair blanc du
+// chargement quand l'agent travaille en sombre. C'est la seule copie de la clé
+// de stockage de `src/lib/theme.js` (l'application reprend la main ensuite).
+try {
+  var pref = localStorage.getItem("scribae.theme") || "auto";
+  var dark = pref === "dark" || (pref === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.style.colorScheme = dark ? "dark" : "light";
+} catch (e) {}
+// La langue du document : les actes sont en français — c'est ce qui permet la
+// coupure des mots en fin de ligne (hyphens:auto) et une lecture correcte par
+// les synthèses vocales.
+if (!document.documentElement.lang) document.documentElement.lang = "fr";
+</script>
+<script type="text/x-server-plugin">
+// ============================================================================
+// Service de signature et de publication — API REST.
+//
+// Ce script est le code du SERVICE (il s'exécute côté serveur, de façon
+// autoritaire). Il est public : tout le monde peut le lire, donc il ne contient
+// aucun secret — seulement l'empreinte SHA-256 du jeton de démonstration.
+// (Cette empreinte et le jeton lui-même sont visibles côté client : c'est une
+// clé de démonstration, pas une clé de production.)
+//
+// Ressources exposées :
+//   /v1/actes                 dépôt des actes finalisés
+//   /v1/actes/{id}/signature  envoi en signature auprès d'un prestataire
+//   /v1/webhooks/signature    notification entrante du prestataire (retour signé)
+//   /v1/signatures/{id}       suivi du circuit de signature
+//   /v1/actes/{id}/publication  publication au recueil + attribution de l'ELI
+//   /v1/publications          registre public des publications
+//   /v1/eli/{...}             résolution d'un identifiant ELI
+//
+// Persistance : l'unique mémoire durable est `state` (Uint8Array), où l'on
+// range un document JSON en unités UTF-16 (voir loadDb/saveDb). Son en-tête
+// porte la version du format et la longueur du JSON sur 32 bits — une seule
+// unité UTF-16 ne suffisait pas au-delà de 65 535 caractères.
+// ============================================================================
+
+const SERVICE = "Service de signature et de publication";
+const SERVICE_VERSION = "1.0.0";
+// Version du format d'état. La 2 porte une longueur sur **32 bits** : la 1 la
+// rangeait dans une seule unité UTF-16, donc elle débordait silencieusement dès
+// que l'état JSON dépassait 65 535 caractères — saveDb écrivait une longueur
+// fausse, loadDb relisait un document tronqué et repartait de zéro. Un état à
+// l'ancien format est simplement recommencé (cas décrit par le commentaire de
+// `loadDb`).
+const STATE_VERSION = 2;
+const MAX_CHARS = 8000000;   // capacité maximale du document JSON stocké
+const MAX_DOC = 400000;      // taille maximale d'un document accepté par l'API
+const MAX_PUBLIES = 40;      // au-delà, la plus ancienne publication est retirée
+const MAX_SIGNATURES = 80;
+const MAX_ACTES = 80;
+const CLE_JETON = "a9a67cd97d873aafe3503d00e99db4c29cb7c92683dfc1c8aeb1578a9f1625ee"; // SHA-256 du jeton
+
+// ------------------------------------------------------------------- stockage
+// En-tête (unités UTF-16) : [0] version, [1] poids faible de la longueur,
+// [2] poids fort, [3] réservé. La suite est le JSON, `HEADER` unités plus loin.
+const U16_OFFSET = state.byteOffset + (state.byteOffset % 2);
+const U16 = new Uint16Array(state.buffer, U16_OFFSET, Math.floor((state.length - (U16_OFFSET - state.byteOffset)) / 2));
+const HEADER = 4;
+
+function dbVide() {
+  return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {} };
+}
+
+function loadDb() {
+  if (U16[0] !== STATE_VERSION) return dbVide();
+  const n = longueur();   // 32 bits, en unités UTF-16
+  if (!n || n > U16.length - HEADER) return dbVide();
+  let s = "";
+  const CH = 8192;
+  for (let i = 0; i < n; i += CH) {
+    const end = Math.min(n, i + CH);
+    s += String.fromCharCode.apply(null, U16.subarray(HEADER + i, HEADER + end));
+  }
+  try {
+    const db = JSON.parse(s);
+    db.actes = db.actes || {};
+    db.signatures = db.signatures || {};
+    db.publies = db.publies || {};
+    db.idem = db.idem || {};
+    db.collections = db.collections || {};
+    return db;
+  } catch (e) {
+    console.log("État illisible, réinitialisation :", String(e));
+    return dbVide();
+  }
+}
+
+// La longueur occupe deux unités : elle doit tenir sur 32 bits, pas 16.
+const longueur = () => U16[1] + U16[2] * 65536;
+function setLongueur(n) {
+  U16[1] = n % 65536;
+  U16[2] = (n - U16[1]) / 65536;
+}
+
+function saveDb(db) {
+  const s = JSON.stringify(db);
+  if (s.length > MAX_CHARS || s.length > U16.length - HEADER) {
+    console.log("État plein : écriture refusée (" + s.length + " unités)");
+    return false;
+  }
+  setLongueur(s.length);
+  for (let i = 0; i < s.length; i++) U16[HEADER + i] = s.charCodeAt(i);
+  U16[0] = STATE_VERSION;
+  return true;
+}
+
+const db = loadDb();
+
+function nextId(prefix, table) {
+  let n = (db.seq || 0) + 1;
+  let id;
+  do { id = prefix + "-" + String(n).padStart(4, "0"); n++; } while (table[id]);
+  db.seq = n;
+  return id;
+}
+
+// Éviction : on ne garde que les plus récentes (la plus ancienne sort d'abord).
+function evince(table, max, dateKey) {
+  const keys = Object.keys(table);
+  if (keys.length <= max) return;
+  keys.sort((a, b) => cmp(table[a][dateKey], table[b][dateKey]));
+  for (const k of keys.slice(0, keys.length - max)) delete table[k];
+}
+
+// Comparaison de chaînes. Le moteur du service n'expose pas `Intl`, et
+// `localeCompare` y lève donc une exception : l'utiliser faisait échouer toutes
+// les listes (actes, signatures, publications) dès qu'il y avait au moins deux
+// éléments à comparer — le comparateur n'étant appelé qu'à partir du deuxième.
+// Ces clés sont des dates ISO et des identifiants : l'ordre lexicographique y
+// est exactement l'ordre attendu.
+function cmp(a, b) {
+  const x = String(a == null ? "" : a), y = String(b == null ? "" : b);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+// ------------------------------------------------------------------ utilitaires
+function utf8Bytes(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c >= 0xd800 && c <= 0xdbff) {
+      const c2 = str.charCodeAt(i + 1);
+      if (c2 >= 0xdc00 && c2 <= 0xdfff) { i++; const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00); out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63)); }
+      else out.push(0xef, 0xbf, 0xbd);
+    } else if (c >= 0xdc00 && c <= 0xdfff) out.push(0xef, 0xbf, 0xbd);
+    else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+const K256 = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+
+// SHA-256 synchrone (le serveur n'a ni crypto ni TextEncoder).
+function sha256Hex(str) {
+  const bytes = utf8Bytes(str);
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  const hi = Math.floor(bitLen / 4294967296);
+  const lo = bitLen % 4294967296;
+  bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a,
+      h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  const w = new Array(64);
+  for (let i = 0; i < bytes.length; i += 64) {
+    for (let j = 0; j < 16; j++) w[j] = ((bytes[i + 4 * j] << 24) | (bytes[i + 4 * j + 1] << 16) | (bytes[i + 4 * j + 2] << 8) | bytes[i + 4 * j + 3]) | 0;
+    for (let j = 16; j < 64; j++) {
+      const x = w[j - 15], y = w[j - 2];
+      const s0 = rotr(x, 7) ^ rotr(x, 18) ^ (x >>> 3);
+      const s1 = rotr(y, 17) ^ rotr(y, 19) ^ (y >>> 10);
+      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let j = 0; j < 64; j++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K256[j] + w[j]) | 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
+  }
+  let out = "";
+  for (const v of [h0, h1, h2, h3, h4, h5, h6, h7]) out += (v >>> 0).toString(16).padStart(8, "0");
+  return out;
+}
+
+const nowIso = () => new Date().toISOString();
+const today = () => nowIso().slice(0, 10);
+
+function slug(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+
+// ------------------------------------------------------------------ réponses
+const ok = (status, body, headers) => ({ status, headers: headers || {}, body });
+const err = (status, message, extra, headers) => ({ status, headers: headers || {}, body: { erreur: message, ...(extra || {}) } });
+
+function authFail(headers) {
+  const raw = String((headers && (headers.authorization || headers.Authorization)) || "").trim();
+  const m = /^Bearer\s+(.+)$/.exec(raw);
+  if (!m) return err(401, "Jeton d'API absent. Ajoutez l'en-tête « Authorization: Bearer <jeton> ».", { code: "jeton_absent" });
+  if (sha256Hex(m[1]) !== CLE_JETON) return err(403, "Jeton d'API invalide.", { code: "jeton_invalide" });
+  return null;
+}
+
+const writes = new Map();
+function allowWrite(conn, limit = 90) {
+  const key = String((conn && conn.net && conn.net[3]) || (conn && conn.id) || "anon");
+  const t = Date.now();
+  let e = writes.get(key);
+  if (!e || t - e.t > 60000) { e = { t, n: 0 }; writes.set(key, e); }
+  e.n += 1;
+  return e.n <= limit;
+}
+
+// ---------------------------------------------------------------- projections
+// Les listes ne renvoient jamais les documents : seulement les métadonnées.
+function resumeActe(a) {
+  return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null };
+}
+function resumeSignature(s) {
+  return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
+}
+function resumePublication(p, latest) {
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, versions: p.versions || [] };
+}
+
+function clePublication(eliUri, dateExpr) {
+  return slug(eliUri.replace(/^eli:\/fr\//, "")) + "@" + (dateExpr || today());
+}
+
+function versionsOf(eliUri) {
+  const all = Object.keys(db.publies).map((k) => db.publies[k]).filter((p) => p.eliUri === eliUri);
+  all.sort((a, b) => cmp(a.dateDocument, b.dateDocument) || cmp(a.publieeLe, b.publieeLe));
+  return all;
+}
+function latestOf(eliUri) {
+  const v = versionsOf(eliUri);
+  return v.length ? v[v.length - 1] : null;
+}
+
+// ------------------------------------------------------------------ OpenAPI
+function openapi() {
+  const paths = {
+    "/v1/health": { get: { operationId: "sante", summary: "État du service", description: "Vérifie que le service répond et donne le nombre d'objets conservés.", tags: ["Service"], responses: { 200: { description: "Service disponible" } } } },
+    "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
+    "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "users", "meta", "journal", "presence"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
+    "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: "Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé.", security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, ord: { type: "integer" }, rev: { type: "integer", nullable: true }, payload: {} } } }, deletes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, rev: { type: "integer", nullable: true } } } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données par un administrateur)." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
+    "/v1/actes": {
+      get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
+      post: {
+        operationId: "deposerActe", summary: "Déposer un acte finalisé", tags: ["Actes"],
+        description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable` (true par défaut) indique si l'acte pourra être publié au recueil : mis à false pour un acte individuel (acte issu d'une trame déclarée non publiable), il rend la publication impossible même après signature.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt (statut, libellé du circuit, empreinte du texte validé, sort de chaque étape). Un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409).", properties: { statut: { type: "string" }, circuitLabel: { type: "string" }, empreinte: { type: "string" }, closLe: { type: "string" }, etapes: { type: "array", items: { type: "string" } } } } } } } } },
+        responses: { 201: { description: "Acte déposé" }, 200: { description: "Acte déjà déposé (idempotent)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Document trop volumineux" } },
+      },
+    },
+    "/v1/actes/{id}": { get: { operationId: "lireActe", summary: "Lire un acte déposé", tags: ["Actes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "L'acte et ses métadonnées" }, 404: { description: "Acte inconnu" } } } },
+    "/v1/actes/{id}/document": { get: { operationId: "lireDocumentActe", summary: "Télécharger le document Akoma Ntoso", tags: ["Actes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Document au format application/akn+xml" }, 404: { description: "Acte inconnu" } } } },
+    "/v1/actes/{id}/signature": {
+      post: {
+        operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
+        description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" } } } } } },
+        responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé, ou circuit de validation non achevé (code `validation_incomplete`)" }, 401: { description: "Jeton absent" } },
+      },
+    },
+    "/v1/webhooks/signature": {
+      post: {
+        operationId: "notifierSignature", summary: "Notification du prestataire (retour de l'acte signé)", tags: ["Signature"],
+        description: "Appelée par le prestataire lorsque la signature est apposée. Le service recalcule l'empreinte SHA-256 du document signé et la compare à celle de l'acte déposé : une différence est refusée (409), la signature n'est jamais acceptée sur un document qui n'est pas celui qui a été déposé.",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["signatureId", "documentSigne"], properties: { signatureId: { type: "string" }, statut: { type: "string", enum: ["signee", "refusee"] }, documentSigne: { type: "object", description: "L'original signé (document + signatures + horodatage)" } } } } } },
+        responses: { 200: { description: "Notification acceptée" }, 404: { description: "Circuit inconnu" }, 409: { description: "Empreinte du document signé différente de celle déposée" } },
+      },
+    },
+    "/v1/signatures": { get: { operationId: "listerSignatures", summary: "Lister les circuits de signature", tags: ["Signature"], responses: { 200: { description: "Circuits ouverts" } } } },
+    "/v1/signatures/{id}": { get: { operationId: "suivreSignature", summary: "Suivre un circuit de signature", tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Statut du circuit (en_attente, signee, refusee, rejetee)" }, 404: { description: "Circuit inconnu" } } } },
+    "/v1/signatures/{id}/document-signe": { get: { operationId: "lireDocumentSigne", summary: "Récupérer l'acte signé", tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "L'original signé" }, 404: { description: "Acte signé non disponible" } } } },
+    "/v1/actes/{id}/publication": {
+      post: {
+        operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
+        description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, original: { type: "object", description: "L'original signé" } } } } } },
+        responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, ou acte déclaré non publiable" }, 422: { description: "Version en ligne manquante" } },
+      },
+    },
+    "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
+    "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
+    "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
+  };
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: SERVICE,
+      version: SERVICE_VERSION,
+      description: "API de dépôt, de signature électronique et de publication des actes administratifs. Les lectures sont publiques ; les écritures exigent un jeton d'API (Authorization: Bearer).",
+    },
+    servers: [{ url: "https://api.valmont-sur-loire.fr", description: "Production" }, { url: "https://api.recette.valmont-sur-loire.fr", description: "Recette" }],
+    security: [],
+    paths,
+    components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } } },
+  };
+}
+
+// -------------------------------------------------------------------- routage
+function lireActe(id) { return db.actes[id] || null; }
+function lireSignature(id) { return db.signatures[id] || null; }
+function lirePublication(cle) { return db.publies[cle] || null; }
+
+function hSante() {
+  return ok(200, {
+    statut: "ok", service: SERVICE, version: SERVICE_VERSION, maintenant: nowIso(),
+    objets: { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publications: Object.keys(db.publies).length },
+  });
+}
+
+// Réduction de l'état du parapheur à des champs sûrs et bornés : le service
+// n'a pas à conserver le détail des décisions, seulement de quoi vérifier que
+// l'acte qui lui est présenté est bien un acte approuvé (statut, empreinte du
+// texte validé, et le sort de chaque étape).
+function normaliserValidation(v) {
+  if (!v || typeof v !== "object") return null;
+  const etapes = Array.isArray(v.etapes) ? v.etapes.slice(0, 20).map((s) => String(s || "").slice(0, 24)) : [];
+  return {
+    statut: String(v.statut || "").slice(0, 24),
+    circuitLabel: String(v.circuitLabel || "").slice(0, 160),
+    empreinte: String(v.empreinte || "").slice(0, 128),
+    closLe: String(v.closLe || "").slice(0, 40),
+    etapes,
+  };
+}
+
+function hDeposerActe(ctx) {
+  const b = ctx.body || {};
+  if (!b.akn || typeof b.akn !== "string") return err(400, "Le corps de la requête doit contenir le document `akn`.", { code: "document_absent" });
+  if (b.akn.length > MAX_DOC) return err(413, `Document trop volumineux (${b.akn.length} caractères, maximum ${MAX_DOC}).`, { code: "document_trop_volumineux" });
+  const sha = sha256Hex(b.akn);
+  // Idempotence « en vol » : redéposer un document déjà reçu et encore en
+  // circuit renvoie le même acte. Un acte déjà signé ou publié n'est jamais
+  // renvoyé : un nouveau circuit s'ouvre sur un nouveau dépôt.
+  for (const id in db.actes) {
+    const a = db.actes[id];
+    if (a.sha256 === sha && (a.statut === "depose" || a.statut === "en_signature")) {
+      return ok(200, { id, href: "/v1/actes/" + id, sha256: sha, deposeLe: a.deposeLe, idempotent: true }, { location: "/v1/actes/" + id });
+    }
+  }
+  const id = nextId("ACT", db.actes);
+  const acte = {
+    id, akn: b.akn, sha256: sha,
+    numero: b.numero || "", objet: b.objet || "", nature: b.nature || "Acte",
+    entityId: b.entityId || "", entityName: b.entityName || "",
+    dateSignature: b.dateSignature || "", trameId: b.trameId || "", ecarts: b.ecarts || 0,
+    // Le service ne connaît pas les trames : le client lui dit si l'acte est
+    // publiable (faux pour les actes individuels). Un acte déclaré non publiable
+    // ne pourra jamais être publié, même signé (voir hPublier).
+    publishable: b.publishable !== false,
+    // État du parapheur au moment du dépôt, réduit à des champs sûrs : le
+    // service n'exécute pas le circuit de validation, il en conserve la trace
+    // pour refuser d'ouvrir une signature sur un acte non approuvé.
+    validation: normaliserValidation(b.validation),
+    statut: "depose", deposeLe: nowIso(),
+  };
+  db.actes[id] = acte;
+  evince(db.actes, MAX_ACTES, "deposeLe");
+  if (!saveDb(db)) { delete db.actes[id]; return err(507, "Le service n'a plus de place disponible."); }
+  return ok(201, { id, href: "/v1/actes/" + id, sha256: sha, statut: acte.statut, deposeLe: acte.deposeLe }, { location: "/v1/actes/" + id });
+}
+
+function hEnvoyerEnSignature(ctx) {
+  const acte = lireActe(ctx.params.id);
+  if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  if (acte.statut === "signee" || acte.statut === "publie") return err(409, "Cet acte est déjà signé (" + acte.statut + ").", { code: "deja_signe" });
+  // Porte du parapheur : le service refuse d'ouvrir un circuit sur un acte dont
+  // la validation n'est pas achevée. L'acte signé est ainsi nécessairement
+  // l'acte qui a été approuvé (même règle que la porte du client).
+  if (acte.validation && acte.validation.statut !== "valide") {
+    return err(409, "Le circuit de validation de cet acte n'est pas achevé : la signature ne peut pas être ouverte.", { code: "validation_incomplete", validation: acte.validation });
+  }
+  const b = ctx.body || {};
+  const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
+  const id = nextId("SIG", db.signatures);
+  const sig = {
+    id, acteId: acte.id, numero: acte.numero, acteSha256: acte.sha256,
+    statut: "en_attente", signataires, niveau: b.niveau || "avancee",
+    urlNotification: b.urlNotification || "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
+    prestataire: "esup-signature", creeLe: nowIso(), documentSigne: null,
+  };
+  db.signatures[id] = sig;
+  acte.statut = "en_signature";
+  acte.signatureId = id;
+  evince(db.signatures, MAX_SIGNATURES, "creeLe");
+  if (!saveDb(db)) { delete db.signatures[id]; acte.statut = "depose"; return err(507, "Le service n'a plus de place disponible."); }
+  const base = "https://signature.valmont-sur-loire.fr/api/v1";
+  return ok(202, {
+    signatureId: id,
+    statut: "en_attente",
+    acteId: acte.id,
+    empreinte: acte.sha256,
+    signataires,
+    lienSignature: base + "/signature/" + id,
+    relevé_apres_secondes: 20,
+    prestataire: {
+      id: "esup-signature", nom: "ESUP-Signature (simulation)", baseUrl: base, niveau: sig.niveau,
+      document: "/documents", signataires: "/documents/{id}/signataires", demarrer: "/documents/{id}/demarrer", statut: "/documents/{id}",
+    },
+    notifications: { url: sig.urlNotification, evenement: "signature.terminee" },
+  }, { location: "/v1/signatures/" + id });
+}
+
+function hWebhookSignature(ctx) {
+  const b = ctx.body || {};
+  const sig = lireSignature(b.signatureId);
+  if (!sig) return err(404, "Circuit de signature inconnu : " + (b.signatureId || "(absent)"));
+  if (b.statut === "refusee") { sig.statut = "refusee"; sig.motif = b.motif || "Signature refusée par le signataire"; saveDb(db); return ok(200, { recu: true, signatureId: sig.id, statut: sig.statut }); }
+  const pack = b.documentSigne;
+  if (!pack || !pack.document || typeof pack.document.akn !== "string") return err(400, "Notification invalide : `documentSigne.document.akn` est attendu.", { code: "document_absent" });
+  const acte = lireActe(sig.acteId);
+  if (!acte) return err(404, "Acte d'origine introuvable pour ce circuit.");
+  // Contrôle d'intégrité fait par le service lui-même : le document signé doit
+  // être exactement le document déposé.
+  const sha = sha256Hex(pack.document.akn);
+  if (sha !== acte.sha256) {
+    sig.statut = "rejetee";
+    sig.motif = "Empreinte du document signé différente de celle du document déposé";
+    saveDb(db);
+    return err(409, "Signature refusée : le document signé ne correspond pas au document déposé.", {
+      code: "empreinte_divergente",
+      empreinte_deposee: acte.sha256,
+      empreinte_signee: sha,
+    });
+  }
+  sig.statut = "signee";
+  sig.documentSigne = pack;
+  sig.signeLe = (pack.signatures && pack.signatures[0] && pack.signatures[0].signeLe) || nowIso();
+  acte.statut = "signee";
+  acte.signeLe = sig.signeLe;
+  if (!saveDb(db)) return err(507, "Le service n'a plus de place disponible.");
+  return ok(200, { recu: true, signatureId: sig.id, acteId: acte.id, statut: "signee", signeLe: sig.signeLe, empreinte: sha });
+}
+
+function hPublier(ctx) {
+  const acte = lireActe(ctx.params.id);
+  if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  if (acte.statut !== "signee" && acte.statut !== "publie") {
+    return err(409, "Un acte ne peut être publié qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
+  }
+  // Acte individuel : la trame dont il est issu est déclarée non publiable au
+  // dépôt. Le service le refuse même signé (revalorisation d'un traitement,
+  // sanction, etc.) : ces actes sont conservés, pas publiés au recueil.
+  if (acte.publishable === false) {
+    return err(409, "Cet acte est déclaré non publiable : un acte individuel n'est pas publié au recueil des actes administratifs.", { code: "acte_non_publiable", statut: acte.statut, trameId: acte.trameId || null });
+  }
+  const b = ctx.body || {};
+  if (!b.html || !b.akn) return err(422, "La version en ligne (`html`) et le document Akoma Ntoso (`akn`) sont requis pour publier.", { code: "version_en_ligne_absente" });
+  if (!b.original) return err(422, "L'original signé (`original`) est requis : c'est lui qui est conservé et opposable.", { code: "original_absent" });
+  const idem = ctx.headers["idempotency-key"] || ctx.headers["Idempotency-Key"];
+  if (idem && db.idem[idem]) {
+    const p = lirePublication(db.idem[idem]);
+    if (p) return ok(200, { ...resumePublication(p, latestOf(p.eliUri) === p), idempotent: true });
+  }
+  const eliUri = b.eliUri || "";
+  if (!eliUri) return err(422, "L'identifiant ELI (`eliUri`) est requis.", { code: "eli_absent" });
+  const datePublication = b.datePublication || today();
+  const dateDocument = b.dateDocument || acte.dateSignature || "";
+  if (dateDocument && datePublication < dateDocument) {
+    return err(422, "La date de publication ne peut pas précéder la date de signature de l'acte.", { code: "date_publication_anterieure", dateDocument, datePublication });
+  }
+  const dateExpr = b.dateExpression || dateDocument || datePublication;
+  const cle = clePublication(eliUri, dateExpr + "-" + (b.kind || "originale"));
+  if (db.publies[cle]) return ok(200, { ...resumePublication(db.publies[cle], true), idempotent: true });
+
+  const rec = {
+    cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
+    numero: b.numero || acte.numero, nature: b.nature || acte.nature, objet: b.objet || acte.objet,
+    entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
+    dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
+    opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
+    kind: b.kind || "originale", brandName: b.brandName || "",
+    sha256: sha256Hex(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "" },
+    original: {
+      format: (b.original && b.original.format) || "application/vnd.actes.original-signe+json",
+      sha256: (b.original && b.original.document && b.original.document.sha256) || "",
+      pageHtml: (b.original && b.original.pageHtml) || "",
+      signatures: (b.original && b.original.signatures) || [],
+      horodatage: (b.original && b.original.horodatage) || null,
+      signaturesUrl: "/v1/eli/" + slug(eliUri.replace(/^eli:\/fr\//, "")) + "/original",
+    },
+    signature: {
+      prestataire: (b.original && b.original.prestataire) || null,
+      niveau: b.niveau || "avancee",
+      signataires: ((b.original && b.original.signatures) || []).map((s) => ({ nom: s.signataire && s.signataire.nom, fonction: s.signataire && s.signataire.fonction })),
+      signeLe: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].signeLe) || "",
+      algorithme: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].algorithme) || "",
+    },
+    ecarts: acte.ecarts || 0,
+    signataireActe: b.auteur || "",
+    publieeLe: nowIso(), misAJourLe: nowIso(),
+  };
+  db.publies[cle] = rec;
+  if (idem) db.idem[idem] = cle;
+  acte.statut = "publie";
+  acte.publication = cle;
+  evince(db.publies, MAX_PUBLIES, "publieeLe");
+  if (!saveDb(db)) { delete db.publies[cle]; return err(507, "Le service n'a plus de place disponible."); }
+  const versions = versionsOf(eliUri).map((p) => resumePublication(p, false));
+  return ok(201, {
+    cle, eli: eliUri, eliUri, url: rec.url,
+    numero: rec.numero, nature: rec.nature, objet: rec.objet,
+    dateDocument, datePublication, dateOpposabilite: rec.dateOpposabilite,
+    opposabilite: rec.opposabiliteRule,
+    recueil: rec.recueil,
+    versions,
+    ressource: "/v1/publications/" + encodeURIComponent(cle),
+    original: { format: rec.original.format, sha256: rec.original.sha256, signatures: rec.signature.signataires.length, href: rec.original.signaturesUrl },
+    formats: ["text/html", "application/akn+xml", "application/ld+json", rec.original.format],
+  }, { location: "/v1/publications/" + encodeURIComponent(cle) });
+}
+
+function hResoudreEli(ctx) {
+  const eliUri = eliKey(ctx.params);
+  const versions = versionsOf(eliUri);
+  if (!versions.length) return err(404, "Aucune publication ne porte l'identifiant " + eliUri + ".", { code: "eli_inconnu" });
+  const enVigueur = versions[versions.length - 1];
+  return ok(200, {
+    eli: eliUri, eliUri, enVigueur: resumePublication(enVigueur, true),
+    versions: versions.map((p, i) => resumePublication(p, i === versions.length - 1)),
+    texte: { html: enVigueur.formats.html, akn: enVigueur.formats.akn, jsonld: enVigueur.formats.jsonld },
+    original: enVigueur.original,
+    ressource: "/v1/publications/" + encodeURIComponent(enVigueur.cle),
+  }, { "content-location": "/v1/publications/" + encodeURIComponent(enVigueur.cle) });
+}
+
+// ------------------------------------------------------------------ base de données
+// Collections du référentiel partagé (référentiel, trames, actes, comptes,
+// métadonnées, journal d'audit, présence des postes). Le service de démonstration les conserve dans son état durable
+// (partagé entre les postes quand la page est servie par la plateforme ; propre
+// au navigateur dans l'édition statique — voir src/pages/host.js) : c'est
+// l'implémentation « sans rien installer » du contrat de persistance. Un serveur
+// externe MySQL / MariaDB expose exactement le même contrat — voir
+// src/server/mysql/.
+//
+// La synchronisation est faite **enregistrement par enregistrement** : chaque
+// écriture porte la révision que le client connaissait ; si le serveur en a une
+// autre, il refuse et renvoie sa version (conflit), que le client affiche au
+// lieu de l'écraser silencieusement.
+const DBC = { config: 1, trames: 1, actes: 1, users: 1, meta: 1, journal: 1, presence: 1 };
+const MAX_SYNC_RECORDS = 4000;
+
+function collection(name) {
+  db.collections = db.collections || {};
+  let c = db.collections[name];
+  if (!c) c = db.collections[name] = { rev: 0, records: {} };
+  if (!c.records) c.records = {};
+  return c;
+}
+
+function resumeCollection(c) {
+  return Object.keys(c.records).map((id) => ({ id, rev: c.records[id].rev || 0, ord: c.records[id].ord || 0, payload: c.records[id].payload }));
+}
+
+function hDbHealth() {
+  const collections = {};
+  for (const name of Object.keys(DBC)) {
+    const c = (db.collections && db.collections[name]) || { rev: 0, records: {} };
+    collections[name] = { records: Object.keys(c.records || {}).length, revision: c.rev || 0 };
+  }
+  return ok(200, {
+    statut: "ok",
+    service: "Base de données du référentiel partagé",
+    version: SERVICE_VERSION,
+    driver: "démonstration (état durable)",
+    partagee: true,
+    message: "Service de démonstration : son état durable tient lieu de base de données partagée.",
+    collections,
+  });
+}
+
+function hDbCollection(name) {
+  if (!DBC[name]) return err(404, "Collection inconnue : " + name, { code: "collection_inconnue" });
+  const c = collection(name);
+  return ok(200, { collection: name, revision: c.rev || 0, records: resumeCollection(c) });
+}
+
+function hDbSync(name, b) {
+  if (!DBC[name]) return err(404, "Collection inconnue : " + name, { code: "collection_inconnue" });
+  const upserts = Array.isArray(b.upserts) ? b.upserts : [];
+  const deletes = Array.isArray(b.deletes) ? b.deletes : [];
+  if (upserts.length + deletes.length > MAX_SYNC_RECORDS) {
+    return err(413, "Trop d'enregistrements dans une même synchronisation (maximum " + MAX_SYNC_RECORDS + ").", { code: "trop_d_enregistrements" });
+  }
+  const c = collection(name);
+  const avant = { records: { ...c.records }, rev: c.rev || 0 };
+  const applied = [];
+  const conflicts = [];
+
+  for (const u of upserts) {
+    if (!u || u.id === undefined || u.id === null) continue;
+    const id = String(u.id);
+    const cur = c.records[id];
+    if (!b.force) {
+      if (cur && (cur.rev || 0) !== (u.rev || 0)) { conflicts.push({ id, rev: cur.rev || 0, ord: cur.ord || 0, payload: cur.payload }); continue; }
+      if (!cur && u.rev) { conflicts.push({ id, deleted: true, rev: 0 }); continue; }
+    }
+    c.rev = (c.rev || 0) + 1;
+    c.records[id] = { rev: c.rev, ord: Number(u.ord) || 0, payload: u.payload === undefined ? null : u.payload, at: nowIso() };
+    applied.push({ id, rev: c.rev });
+  }
+
+  for (const d of deletes) {
+    if (!d || d.id === undefined || d.id === null) continue;
+    const id = String(d.id);
+    const cur = c.records[id];
+    if (!cur) continue;
+    if (!b.force && (cur.rev || 0) !== (d.rev || 0)) { conflicts.push({ id, rev: cur.rev || 0, ord: cur.ord || 0, payload: cur.payload }); continue; }
+    delete c.records[id];
+    c.rev = (c.rev || 0) + 1;
+    applied.push({ id, rev: 0, deleted: true });
+  }
+
+  if (!saveDb(db)) {
+    c.records = avant.records;
+    c.rev = avant.rev;
+    return err(507, "Le service n'a plus de place disponible.");
+  }
+  return ok(200, { collection: name, revision: c.rev || 0, applied, conflicts });
+}
+
+// --------------------------------------------------------------- table routière
+const ROUTES = [
+  { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
+  { m: "GET", p: /^\/v1\/db\/health$/, f: hDbHealth },
+  { m: "GET", p: /^\/v1\/db\/collections\/([a-z]+)$/, f: (ctx) => hDbCollection(ctx.params.id) },
+  { m: "POST", p: /^\/v1\/db\/collections\/([a-z]+)\/sync$/, auth: "jeton", ecrit: true, f: (ctx) => hDbSync(ctx.params.id, ctx.body || {}) },
+  { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
+  { m: "GET", p: /^\/v1\/actes$/, auth: "public", f: () => ok(200, { actes: Object.keys(db.actes).map((k) => resumeActe(db.actes[k])).sort((a, b) => cmp(b.deposeLe, a.deposeLe)) }) },
+  { m: "POST", p: /^\/v1\/actes$/, auth: "jeton", ecrit: true, f: hDeposerActe },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, auth: "jeton", ecrit: true, f: hEnvoyerEnSignature },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "jeton", ecrit: true, f: hPublier },
+  { m: "GET", p: /^\/v1\/signatures$/, f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => cmp(b.creeLe, a.creeLe)) }) },
+  { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: s.documentSigne }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
+  { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
+  { m: "POST", p: /^\/v1\/webhooks\/signature$/, auth: "public", ecrit: true, f: hWebhookSignature },
+  { m: "GET", p: /^\/v1\/publications$/, f: () => {
+      const all = Object.keys(db.publies).map((k) => db.publies[k]);
+      const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
+      return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => cmp(b.publieeLe, a.publieeLe)) });
+    } },
+  { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
+      const cle = decodeURIComponent(ctx.params.cle);
+      const p = lirePublication(cle);
+      if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+      const versions = versionsOf(p.eliUri).map((x) => resumePublication(x, latestOf(x.eliUri) === x));
+      return ok(200, { ...p, latest: latestOf(p.eliUri) === p, versions });
+    } },
+  { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/original$/, f: (ctx) => {
+      const eliUri = eliKey(ctx.params);
+      const p = latestOf(eliUri);
+      return p ? ok(200, { eli: eliUri, cle: p.cle, original: p.original, signature: p.signature }) : err(404, "ELI inconnu : " + eliUri);
+    } },
+  { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/, f: hResoudreEli },
+];
+
+const eliKey = (p) => "eli:/fr/" + [p.code, p.annee, p.numero, p.entite].filter(Boolean).join("/");
+
+function route(req, conn) {
+  const method = String(req.method || "GET").toUpperCase();
+  const path = String(req.path || "/");
+  const q = path.indexOf("?");
+  const clean = q >= 0 ? path.slice(0, q) : path;
+  const headers = req.headers || {};
+
+  let cheminTrouve = false;
+  for (const r of ROUTES) {
+    const m = r.p.exec(clean);
+    if (!m) continue;
+    cheminTrouve = true;
+    if (r.m !== method) continue;
+    if (r.auth === "jeton") {
+      const bad = authFail(headers);
+      if (bad) return bad;
+    }
+    if (r.ecrit && !allowWrite(conn)) {
+      return err(429, "Trop de requêtes d'écriture : ralentissez (limite : 90 par minute).", { code: "trop_de_requetes" }, { "retry-after": "60" });
+    }
+    const params = { 0: m[0] };
+    if (m[1] !== undefined) { params.id = m[1]; params.cle = m[1]; }
+    if (m[2] !== undefined) { params.code = m[1]; params.annee = m[2]; params.numero = m[3]; params.entite = m[4]; }
+    return r.f({ params, body: req.body, headers, conn, path: clean });
+  }
+  return cheminTrouve
+    ? err(405, "Méthode " + method + " non autorisée sur " + clean, { code: "methode_non_autorisee" })
+    : err(404, "Ressource inconnue : " + clean, { code: "ressource_inconnue" });
+}
+
+self.rpc = {
+  api(infos, data) {
+    const conn = (infos && infos.conn) || null;
+    let req;
+    try { req = JSON.parse(data); }
+    catch (e) { return JSON.stringify({ status: 400, headers: {}, body: { erreur: "Requête illisible (JSON attendu)." } }); }
+    let res;
+    try { res = route(req, conn); }
+    catch (e) {
+      console.log("Erreur interne :", String(e && e.stack || e));
+      res = { status: 500, headers: {}, body: { erreur: "Erreur interne du service." } };
+    }
+    return JSON.stringify({
+      status: res.status,
+      headers: { "content-type": "application/json; charset=utf-8", "x-service": SERVICE, ...(res.headers || {}) },
+      body: res.body,
+    });
+  },
+  ping() { return "pong"; },
+};
+</script>
+<link rel="icon" href='data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%20color%3D%22%23000091%22%3E%3Cdefs%3E%3Cmask%20id%3D%22sp-favicon%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23000%22%2F%3E%3Cpath%20d%3D%22M12%202H37L57%2022V53A9%209%200%200%201%2048%2062H12A9%209%200%200%201%203%2053V11A9%209%200%200%201%2012%202Z%22%20fill%3D%22%23fff%22%2F%3E%3Cpath%20d%3D%22M20%2047%2033%2021%2046%2047%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%229.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fmask%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22currentColor%22%20mask%3D%22url(%23sp-favicon)%22%2F%3E%3C%2Fsvg%3E'>
+<link rel="stylesheet" href="src/css/app.css">
+<div id="app"></div>
+<!-- Édition statique (GitHub Pages) : fournit les deux services d'exécution
+     quand la page n'est pas servie par l'environnement d'édition. Sans effet
+     ailleurs (voir src/pages/host.js). -->
+<script src="src/pages/host.js"></script>
+<script type="module" src="src/ui/app.js"></script>

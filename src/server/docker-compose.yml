@@ -1,0 +1,90 @@
+# ============================================================================
+# Scribae — déploiement auto-hébergé (Docker Compose).
+#
+#   db    MariaDB : le référentiel, les trames, les actes, les comptes, l'état
+#         de signature et de publication. Données dans le volume « donnees ».
+#   api   le service de la collectivité (Node) : API /v1/… — données et actes.
+#   web   nginx : sert l'application et fait proxy vers api sur /v1/.
+#
+# Toutes les valeurs viennent du fichier .env (voir env.example) : rien de
+# secret n'est écrit ici. Démarrage :
+#
+#   cp .env.example .env      # puis renseignez les mots de passe et les jetons
+#   docker compose up -d --build
+#   docker compose logs -f api
+#
+# L'application répond ensuite sur http://<l'hôte>:${HTTP_PORT:-8080}.
+# ============================================================================
+
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?renseignez DB_ROOT_PASSWORD dans .env}
+      MARIADB_DATABASE: ${DB_NAME:-scriba}
+      MARIADB_USER: ${DB_USER:-scriba}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?renseignez DB_PASSWORD dans .env}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - donnees:/var/lib/mysql
+      # Créé les tables au premier démarrage (base vide). Passer par api --migrate
+      # pour appliquer le schéma à une base déjà en service.
+      - ./mysql/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interne]
+
+  api:
+    build: ./mysql
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-scriba}
+      DB_PASSWORD: ${DB_PASSWORD:?renseignez DB_PASSWORD dans .env}
+      DB_NAME: ${DB_NAME:-scriba}
+      DB_POOL: ${DB_POOL:-8}
+      # « libellé:empreinte_sha256 » — la liste des jetons acceptés en écriture.
+      API_TOKENS: ${API_TOKENS:?générez au moins un jeton (voir .env.example)}
+      # L'application est servie par la même origine : « * » suffit dans ce cas.
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      MAX_BODY: ${MAX_BODY:-8388608}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [interne]
+
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    environment:
+      # Adresse de l'API telle que la voit le navigateur. Vide = même origine.
+      API_BASE: ${API_BASE:-}
+      # Jeton d'écriture remis à l'application (lecture des données publiques
+      # comprise sans lui). Il doit correspondre à une empreinte de API_TOKENS.
+      API_TOKEN: ${API_TOKEN:?renseignez API_TOKEN dans .env}
+    volumes:
+      - ./web:/srv/templates:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/entrypoint.sh:/docker-entrypoint.d/40-scriba-web.sh:ro
+      - webroot:/srv/www
+      # Le code de l'application : le dossier qui contient « src/ » et index.html.
+      - ${APP_DIR:-../../}:/srv/app:ro
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on: [api]
+    networks: [interne]
+
+volumes:
+  donnees:
+  webroot:
+
+networks:
+  interne:
+    driver: bridge

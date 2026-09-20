@@ -1,0 +1,33 @@
+// ============================================================================
+// Scribae — trames, rédaction et publication des actes administratifs.
+//
+// FLUX DE TRAVAIL (consigne permanente, détaillée dans src/README.md,
+// section « Flux de travail : Perchance ↔ GitHub ») :
+//   • le développement se fait ICI, sur Perchance : main.pjs + index.html + src/ ;
+//   • les versions finalisées sont déposées sur GitHub, qui est la référence
+//     publiée ;
+//   • quand l'utilisateur fournit un lien GitHub : COMPARER avant de coder, en
+//     lisant APP_VERSION (src/lib/version.js) et la première entrée datée de
+//     src/CHANGELOG.md ; si GitHub est plus récent, reporter D'ABORD GitHub dans
+//     Perchance, à l'identique, et vérifier que l'application tourne ;
+//   • toute version figée : incrémenter APP_VERSION et ajouter son entrée datée
+//     dans src/CHANGELOG.md (lisible dans l'application : Documentation
+//     technique › Journal des versions).
+// ============================================================================
+
+$meta
+  title = Scribae — trames, rédaction et publication des actes administratifs
+  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. Démonstrateur configuré pour une collectivité fictive (mairie de Valmont-sur-Loire).
+  image = https://user.uploads.dev/file/39e80c075f4725348ce5c5d6df3e4dfb.png
+  tags = actes administratifs, akoma ntoso, legalxml, trames, eli, open data, guide
+
+// Persistance : le stockage du navigateur (IndexedDB) sert de pilote « local »
+// — c'est le mode de démonstration. L'application peut aussi être branchée sur
+// une base partagée (service de démonstration, ou serveur MySQL/MariaDB) :
+// voir src/lib/db/ et src/server/mysql/.
+kv = {import:kv-plugin}
+
+// Service de signature et de publication (API REST) — voir index.html pour le
+// code du service lui-même. Sans lui, l'écran « Signature & publication » et la
+// consultation des publications restent inaccessibles.
+createServerSocket = {import:server-plugin}

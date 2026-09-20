@@ -1,0 +1,7 @@
+// Produit au démarrage du conteneur (voir web/entrypoint.sh) à partir des
+// variables d'environnement API_BASE et API_TOKEN. Ce fichier n'est jamais
+// versionné : le jeton ne doit pas entrer dans le dépôt.
+window.__SCRIBA_CONFIG__ = {
+  apiBase: "${API_BASE}",
+  apiToken: "${API_TOKEN}",
+};

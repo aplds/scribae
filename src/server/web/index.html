@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scribae — trames, rédaction et publication des actes administratifs</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/src/css/app.css">
+<!--
+  Coquille de l'édition auto-hébergée.
+
+  Dans l'édition en ligne, c'est l'index.html d'origine qui tient ce rôle :
+  l'environnement fournit `root.kv` (stockage) et `root.createServerSocket` (API du
+  service), puis charge `src/ui/app.js`. Ici, hors de cet environnement, ces deux services sont fournis par
+  le déploiement : `config.js` (jeton et adresse de l'API, produits à partir des
+  variables d'environnement du conteneur) puis `host.js` (stockage du navigateur et
+  transport HTTP). Le corps du document tient en trois lignes — tout le reste est
+  construit par l'application.
+-->
+<script src="/config.js"></script>
+<script src="/host.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/src/ui/app.js"></script>
+</body>
+</html>

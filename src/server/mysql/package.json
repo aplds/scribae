@@ -1,0 +1,17 @@
+{
+  "name": "scribae-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Service de la collectivité (données + signature/publication) de Scribae — éditeur de trames et d'actes administratifs",
+  "main": "server.mjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.mjs",
+    "migrate": "node server.mjs --migrate",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.3"
+  }
+}
