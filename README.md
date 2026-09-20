@@ -177,5 +177,4 @@ version par version, est dans **`src/CHANGELOG.md`** et se lit aussi dans l'appl
 
 ## Licence
 
-Aucune licence n'est accordée par défaut : tous droits réservés au propriétaire du dépôt. Ajouter
-un fichier `LICENSE` pour en choisir une.
+GNU General Public License v3.0
