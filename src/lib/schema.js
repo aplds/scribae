@@ -1,5 +1,7 @@
 import { uid } from "./util.js";
 import { emptyAuth } from "./auth.js";
+import { EXTERNE_DEFAUT } from "./numbering.js";
+import { ABROGATION_DEFAUT } from "./abrogations.js";
 
 export const NODE_TYPES = [
   { id: "title", label: "Intitulé", hint: "Titre de l'acte", akn: "heading", single: true, icon: "t" },
@@ -27,6 +29,7 @@ export const FIELD_TYPES = [
   { id: "boolean", label: "Oui / Non" },
   { id: "number", label: "Nombre" },
   { id: "money", label: "Montant" },
+  { id: "signataire", label: "Signataire (par fonction)" },
   { id: "person", label: "Personne (référentiel)" },
   { id: "entity", label: "Entité (référentiel)" },
   { id: "ref", label: "Référence juridique (référentiel)" },
@@ -96,6 +99,11 @@ export function newField(patch = {}) {
     options: [],
     refKind: "",
     format: "",
+    // Fonction attendue d'un champ « signataire » : la clé d'une fonction du
+    // référentiel (rôle ou délégation — voir src/lib/fonctions.js). Vide, celui
+    // qui rédige l'acte choisit lui-même la fonction. Ignorée par les autres
+    // types de champ.
+    qualite: "",
     appliesWhen: "",
     ...patch,
   };
@@ -233,7 +241,13 @@ export const emptyConfig = () => ({
       mentionAbrogate: "Abrogé par {designationThe} n°{numero} du {date}",
       mentionInsert: "Ajouté par {designationThe} n°{numero} du {date}",
       mentionThen: ", puis ",
+      renumberNotice: "Les articles ont été renumérotés : la numérotation du dispositif est continue.",
+      abrogationNotice: "L'acte est abrogé dans son ensemble : ses articles ne sont plus en vigueur.",
     },
+    // Tournures de l'abrogation PRÉVUE par un acte (clause de fin de dispositif).
+    // Jetons : {target} {targetCap} {abroge} {article} {articleLabel} {self}
+    // {selfDe} {designation} {designationLower} {designationThe}.
+    abrogation: { ...ABROGATION_DEFAUT },
   },
   numbering: {
     pattern: "{year}-{seq}-{entityCode}",
@@ -242,6 +256,10 @@ export const emptyConfig = () => ({
     year: new Date().getFullYear(),
     eliPattern: "{baseUri}/eli/{actTypeId}/{year}/{seq}/{entityCode}",
     eliEntity: true,
+    // Source du numéro : la séquence ci-dessus, ou un service externe (Grist,
+    // tableur en ligne…). Voir src/lib/numbering.js.
+    source: "interne",
+    externe: { ...EXTERNE_DEFAUT },
   },
   entities: [],
   services: [],
@@ -262,10 +280,42 @@ export const emptyConfig = () => ({
     publicationJours: 10,
     notificationJours: 8,
   },
+  // Publication au recueil : les réglages qui valent pour toutes les
+  // publications (titre du recueil, règle d'entrée en vigueur), et
+  // l'automatisme — `auto`, allumé par défaut, publie l'acte dès le retour
+  // signé. Voir src/lib/eli.js (publicationSettings) et Administration › Publication.
+  publication: {
+    recueil: "Recueil des actes administratifs",
+    auto: true,
+    opposabilite: { mode: "lendemain", jours: 1 },
+  },
   // Mode d'authentification : comptes de l'application (démonstration) ou
   // annuaire de la collectivité (OIDC). Brancher l'annuaire désactive
   // automatiquement les comptes de démonstration. Voir src/lib/auth.js.
   auth: emptyAuth(),
+  // Fonctions expérimentales : livrées, mais éteintes par défaut, et activées
+  // depuis Administration › Expérimentale.
+  //   • `parapheur` fait passer les actes par un circuit de validation de
+  //     l'établissement avant la signature (voir src/lib/validation.js) :
+  //     beaucoup de collectivités ont déjà leur propre circuit, en amont de
+  //     « Envoyer en signature » — d'où le défaut éteint.
+  //   • `controleLegalite` transmet l'acte signé au représentant de l'État par
+  //     une API d'envoi, entre le retour signé et la publication : l'accusé de
+  //     réception du contrôle de légalité est déposé sur le document, puis
+  //     l'acte est publié (voir src/lib/legalite.js). Éteint par défaut — la
+  //     télétransmission suppose une convention et des identifiants auprès de
+  //     la préfecture ; l'administration de la formalité reste possible à la
+  //     main depuis l'échéancier.
+  experimental: { parapheur: false, controleLegalite: false },
+  // Assistants — deux aides en langage naturel, livrées avec l'application :
+  //   • « Plume », dans l'atelier, qui explique le MODE D'EMPLOI de l'outil —
+  //     et ne reçoit jamais le contenu d'un acte (voir src/lib/assistant.js) ;
+  //   • « Publia », sur le recueil public, qui répond sur les actes PUBLIÉS.
+  // Ne sont rangés ici que les ÉCARTS aux réglages livrés : un bloc vide veut
+  // dire « tout par défaut ». Chacun s'allume ou s'éteint, et le moteur de
+  // langage est interchangeable — celui de Perchance, ou celui de la
+  // collectivité (adresse d'API, clé, modèle).
+  assistant: { atelier: {}, public: {} },
   // Feuilles de style (charte graphique des décisions). La feuille générale est
   // marquée `general: true` ; les autres sont des sous-feuilles rattachées à des
   // entités et/ou des familles. Voir src/lib/styles.js — et, pour le modèle

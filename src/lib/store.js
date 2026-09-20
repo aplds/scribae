@@ -13,7 +13,8 @@
 import { seedConfig, seedTrames } from "./seed.js";
 import { emptyConfig } from "./schema.js";
 import { seedActes } from "./demo-actes.js";
-import { seedUsers, isDemoUsers, syncDemoAccounts } from "./users.js";
+import { seedUsers, isDemoUsers, isDemoUser, hasRole, rolesOf, setRoles, syncDemoAccounts, DEMO_USER_IDS } from "./users.js";
+import { ROLE_SIGNATAIRE, situationDeSignature } from "./signataires.js";
 import { emptyAuth } from "./auth.js";
 import * as db from "./db/index.js";
 
@@ -35,7 +36,57 @@ import * as db from "./db/index.js";
 // en place (validations données, formalités constatées, actes mis à la
 // corbeille) ont laissé des traces dans les données locales — on régénère pour
 // que chacun parte d'un état neuf et cohérent.
-export const SEED_VERSION = 25;
+// La version 26 ajoute l'accord des qualités en genre (les rôles portent leurs
+// deux formes) et l'arbre des délégations de signature ; la 27, la trame
+// « permis de construire » rattachée à l'urbanisme ; la 28, le compte du chef du
+// bureau Urbanisme et l'acte signé au bout d'une chaîne à trois étages
+// (maire → adjoint → chef de bureau) ; la 29, une AUTORITÉ AUTONOME — l'office
+// public de l'habitat, son président de conseil d'administration et son
+// directeur général, chaîne indépendante de celle de la commune — et la
+// délégation donnée par le maire dans le nom du CCAS qu'il préside ; la 30, le
+// rattachement de chaque délégation à son organisation, la lecture de la chaîne
+// à la DATE de l'acte et la délégation du maire au nom du CCAS.
+//
+// La 31 ne change qu'un mécanisme : un changement de version remet désormais
+// aussi le RÉFÉRENTIEL de démonstration à niveau (voir plus bas, dans
+// `bootstrap`), et non les seules trames et actes.
+//
+// La 32 donne à chaque transmission de démonstration son CERTIFICAT DE
+// TRANSMISSION (l'accusé de réception de l'API du contrôle de légalité), pour
+// que l'étape soit visible sur les actes déjà au registre (voir
+// src/lib/legalite.js).
+//
+// La 33 ajoute les DÉCISIONS fondant la signature : renseignées sur les
+// personnes (le pouvoir de l'autorité) et, sur chaque délégation, en deux
+// volets — la nomination puis la délégation, chacune prise d'une publication
+// du recueil ou d'un lien externe. Elles se visent automatiquement sur les
+// actes, avec leur lien, étage par étage de la chaîne (voir
+// src/lib/delegations.js). Le jeu de démonstration porte la délibération du
+// conseil municipal pour le maire et les arrêtés de délégation, et ses trames
+// visent désormais la chaîne au lieu de la citer à la main.
+//
+// La 34 ajoute le RECOURS introduit contre un acte (sa date d'introduction, sa
+// nature, son auteur) et les pièces qui s'y rattachent — l'état des formalités
+// et l'attestation de non-recours (voir src/lib/execution.js et
+// src/lib/execution-documents.js). Le jeu de démonstration reçoit un permis de
+// construire contesté devant le tribunal administratif, pour que l'état
+// « recours introduit » soit visible dès l'ouverture.
+//
+// La 35 ajoute la RÉVISION des actes (le contrôle entre la décision d'envoyer
+// et l'envoi effectif — voir src/lib/revision.js) et, avec elle, le CUMUL DES
+// RÔLES : un éditeur peut être réviseur. Le référentiel de démonstration reçoit
+// le service des affaires générales comme réviseur pour tous les services, les
+// comptes de démonstration leurs qualités de réviseur, et les actes de
+// démonstration leur dossier de révision (un acte en attente, un acte révisé
+// après correction, un acte rejeté et revenu en brouillon).
+//
+// La 36 ne choisit plus le signataire par son NOM mais par sa FONCTION : on
+// désigne la qualité qui donne compétence pour signer l'acte, puis, parmi les
+// personnes qui la tiennent, celle qui signe (voir src/lib/fonctions.js et
+// src/ui/signer-picker.js). Le champ « signataire » des trames devient de type
+// `signataire` ; les trames existantes sont converties (voir
+// `migrateSignatureFields`).
+export const SEED_VERSION = 36;
 
 // Migration du vocabulaire de modification. Les gabarits par défaut d'origine
 // accordaient mal le nom de l'acte (« la présente arrêté », « confiée à le
@@ -89,6 +140,24 @@ function migrateDemoNonPublishable(config) {
   return changed;
 }
 
+// Présentation des familles — les THÈMES du recueil public (« Urbanisme et
+// voirie : autorisations d'urbanisme, accès, voirie… »). Introduite avec
+// l'accueil du recueil. Purement additive et prudente : on ne remplit que les
+// familles CONNUES dont le libellé n'a pas été changé — une famille renommée par
+// l'administration, ou créée à la main, reste sans présentation jusqu'à ce qu'on
+// lui en écrive une (Administration › Familles).
+function migrateFamilyDescriptions(config) {
+  if (!config || !Array.isArray(config.families)) return false;
+  const connues = seedConfig().families;
+  let changed = false;
+  for (const f of config.families) {
+    if (f.description !== undefined) continue;
+    const seed = connues.find((x) => x.id === f.id);
+    if (seed && seed.label === f.label) { f.description = seed.description; changed = true; }
+  }
+  return changed;
+}
+
 // Feuilles de style de la démonstration (la charte graphique des décisions).
 // Purement additif : un référentiel de démonstration qui n'en a pas encore les
 // reçoit ; un référentiel réel — ou vidé volontairement — n'est pas touché et
@@ -137,6 +206,44 @@ function migrateCircuits(config) {
   return changed;
 }
 
+// Fonctions expérimentales : réglage introduit après coup. Toutes sont éteintes
+// par défaut — c'est le cas du parapheur (circuit de validation avant signature),
+// que beaucoup de collectivités remplacent par leur propre circuit interne.
+// Idempotent : on ne pose que les clés ABSENTES.
+function migrateExperiments(config) {
+  if (!config) return false;
+  const defaults = emptyConfig().experimental;
+  if (!config.experimental || typeof config.experimental !== "object") {
+    config.experimental = { ...defaults };
+    return true;
+  }
+  let changed = false;
+  for (const [k, v] of Object.entries(defaults)) {
+    if (config.experimental[k] === undefined) { config.experimental[k] = v; changed = true; }
+  }
+  return changed;
+}
+
+// Assistants : réglage introduit après coup. Un référentiel antérieur n'a pas
+// ce bloc — on pose deux blocs VIDES, c'est-à-dire « tout par défaut » : les
+// deux assistants s'allument (leurs réglages livrés), sans qu'aucun écran ne
+// change pour autant. Purement additif, et idempotent.
+function migrateAssistants(config) {
+  if (!config) return false;
+  if (!config.assistant || typeof config.assistant !== "object") {
+    config.assistant = { atelier: {}, public: {} };
+    return true;
+  }
+  let changed = false;
+  for (const qui of ["atelier", "public"]) {
+    if (!config.assistant[qui] || typeof config.assistant[qui] !== "object") {
+      config.assistant[qui] = {};
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function migrateDemoStyleOptions(config) {
   if (!config || config.brand?.demo === false) return false;
   if (!Array.isArray(config.styles)) return false;
@@ -146,6 +253,99 @@ function migrateDemoStyleOptions(config) {
     if (!opts) continue;
     for (const [k, v] of Object.entries(opts)) {
       if (s[k] === undefined) { s[k] = v; changed = true; }
+    }
+  }
+  return changed;
+}
+
+// Révision des actes : la QUALITÉ DE RÉVISEUR portée par un SERVICE (Administration ›
+// Services). Introduite avec le rôle « Réviseur » : dans la démonstration, c'est
+// le service des affaires générales qui contrôle les actes des autres services.
+// Purement additif, et réservé à un référentiel de démonstration : un service qui
+// n'a AUCUN réglage de révision reçoit celui de la démonstration ; s'il en a un —
+// même éteint par l'administrateur — il n'est pas touché.
+function migrateDemoServiceRevision(config) {
+  if (!config || config.brand?.demo === false) return false;
+  const fresh = seedConfig();
+  let changed = false;
+  for (const s of config.services || []) {
+    if (s.reviseur) continue;
+    const f = (fresh.services || []).find((x) => x.id === s.id);
+    if (f?.reviseur) { s.reviseur = { ...f.reviseur, bureaux: [...(f.reviseur.bureaux || [])] }; changed = true; }
+  }
+  return changed;
+}
+
+// Révision des actes : réglage introduit avec le CUMUL DES RÔLES. Les comptes de
+// démonstration reçoivent la qualité de réviseur (et sa compétence). Purement
+// additif, et réservé au jeu de démonstration : un compte réel ne se voit jamais
+// attribuer un rôle par une mise à niveau — c'est à l'administrateur de le faire.
+function migrateDemoRevision(users) {
+  const list = Array.isArray(users) ? users : [];
+  if (!isDemoUsers(list)) return { users: list, changed: false };
+  let changed = false;
+  const out = list.map((u) => {
+    if (!isDemoUser(u)) return u;
+    if (u.id === "u-roussel" && !hasRole(u, "reviseur")) {
+      changed = true;
+      const v = { ...u };
+      setRoles(v, [...rolesOf(u), "reviseur"]);
+      return v;
+    }
+    if (u.id === "u-daval") {
+      const v = { ...u };
+      let touche = false;
+      if (!hasRole(u, "reviseur")) { setRoles(v, [...rolesOf(u), "reviseur"]); touche = true; }
+      if (!v.revision) {
+        v.revision = { services: [], trameIds: [], familyIds: ["fam-marches", "fam-associations"], actTypes: [], entityIds: [] };
+        touche = true;
+      }
+      if (touche) changed = true;
+      return touche ? v : u;
+    }
+    return u;
+  });
+  return { users: changed ? out : list, changed };
+}
+
+// La QUALITÉ DE SIGNATAIRE. Elle découle d'une désignation : celui qui figure
+// dans une chaîne de signature — comme autorité qui délègue, ou comme
+// délégataire qui signera — signe, et porte donc la qualité. Le référentiel de
+// démonstration portant déjà ses chaînes, ses comptes en reçoivent la qualité,
+// comme si l'administrateur venait de les désigner (voir
+// src/lib/signataires.js, `assurerRoleSignataire`). Purement additif, et
+// réservé au jeu de démonstration : un compte réel ne se voit jamais attribuer
+// un rôle par une mise à niveau.
+function migrateDemoSignataires(config, users) {
+  const list = Array.isArray(users) ? users : [];
+  if (!isDemoUsers(list)) return { users: list, changed: false };
+  let changed = false;
+  const out = list.map((u) => {
+    if (!isDemoUser(u)) return u;
+    if (!u.personId || u.active === false) return u;
+    if (hasRole(u, ROLE_SIGNATAIRE)) return u;
+    const sit = situationDeSignature(config, u.personId);
+    if (!sit.recues.length && !sit.donnees.length) return u;
+    changed = true;
+    const v = { ...u };
+    setRoles(v, [...rolesOf(u), ROLE_SIGNATAIRE]);
+    return v;
+  });
+  return { users: changed ? out : list, changed };
+}
+
+// Le signataire se choisit par la FONCTION, non par le nom. Les trames
+// antérieures portent un champ « signataire » de type `person` (la liste des
+// personnes du référentiel) : on le bascule sur le type `signataire`, qui ouvre
+// la fonction puis les personnes qui la tiennent. Purement mécanique, et
+// strictement limité au champ qui porte cette identité — le champ reste
+// `values.signataire`, l'identifiant d'une personne : rien d'autre ne bouge.
+function migrateSignatureFields(trames) {
+  if (!Array.isArray(trames)) return false;
+  let changed = false;
+  for (const t of trames) {
+    for (const f of t?.fields || []) {
+      if (f.id === "signataire" && f.type === "person") { f.type = "signataire"; changed = true; }
     }
   }
   return changed;
@@ -187,16 +387,24 @@ export async function bootstrap() {
     // jeu de démonstration obsolète et aucune donnée utilisateur : on remet à niveau
     trames = seedTrames();
     await saveTrames(trames);
-    // le référentiel de démonstration (reconnaissable à son absence de « nameWithArt »)
-    // est remis à niveau lui aussi tant qu'aucun acte réel n'existe
-    if (!(config.entities || []).some((e) => e.nameWithArt)) {
-      const keep = { brand: config.brand, vocab: config.vocab, numbering: config.numbering };
+    // Le référentiel de démonstration est remis à niveau lui aussi : c'est déjà
+    // acquis que le registre ne contient que des actes de démonstration, et l'on
+    // vérifie que la marque est bien celle de la démonstration (`brand.demo`) —
+    // un référentiel réel, ou repris à la main, n'est jamais touché. Seuls
+    // l'identité, le vocabulaire et la numérotation de l'utilisateur survivent.
+    if (config.brand?.demo !== false) {
+      const keep = { brand: config.brand, vocab: config.vocab, numbering: config.numbering, experimental: config.experimental, assistant: config.assistant };
       const fresh = seedConfig();
-      config = { ...fresh, brand: { ...fresh.brand, ...keep.brand }, vocab: { ...fresh.vocab, ...keep.vocab }, numbering: { ...fresh.numbering, ...keep.numbering } };
+      config = { ...fresh, brand: { ...fresh.brand, ...keep.brand }, vocab: { ...fresh.vocab, ...keep.vocab }, numbering: { ...fresh.numbering, ...keep.numbering }, experimental: { ...fresh.experimental, ...(keep.experimental || {}) }, assistant: { atelier: { ...(keep.assistant?.atelier || {}) }, public: { ...(keep.assistant?.public || {}) } } };
       await saveConfig(config);
     }
   }
   if (!actes) { actes = []; await saveActes(actes); }
+
+  // Le choix du signataire par la fonction : conversion des trames antérieures
+  // (champ « signataire » de type `person` → type `signataire`). Indépendante du
+  // jeu de démonstration — une trame réelle en bénéficie aussi.
+  if (migrateSignatureFields(trames)) await saveTrames(trames);
 
   // Les référentiels de démonstration datant d'avant l'introduction des éléments
   // dont la GÉNÉRATION des actes dépend (services et bureaux, mentions des actes
@@ -225,11 +433,16 @@ export async function bootstrap() {
     await saveTrames(trames);
     configTouched = true;
   }
+  // Délégations de signature : réglage introduit après coup. Un référentiel
+  // antérieur n'en a pas — on pose une liste vide, que l'on remplit depuis
+  // l'écran Délégations. Idempotent.
+  if (!Array.isArray(config.delegations)) { config.delegations = []; configTouched = true; }
   // Vocabulaire de modification (accord en genre / contraction), mentions des
   // actes individuels, feuilles de style : `|` (et non `||`) pour toutes les
   // tenter — chacune est idempotente.
   const migrated = migrateAmendmentVocab(config) | migrateDemoNonPublishable(config) | migrateDemoStyles(config)
-    | migrateDemoStyleOptions(config) | migrateCircuits(config);
+    | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
+    | migrateDemoServiceRevision(config) | migrateFamilyDescriptions(config) | migrateAssistants(config);
   if (migrated || configTouched) await saveConfig(config);
 
   // Actes de démonstration : posés (ou remis à niveau) à la version de jeu
@@ -258,7 +471,11 @@ export async function bootstrap() {
 
   if (!users || !Array.isArray(users) || !users.length) { users = seedUsers(config); await saveUsers(users); }  // Comptes de démonstration créés avant les services : on leur redonne le
   // rattachement de démonstration (services et bureaux).
-  else if (isDemoUsers(users) && users.every((u) => u.memberships === undefined) && (config.services || []).length) {
+  else if (isDemoUsers(users) && (config.services || []).length
+    && (users.every((u) => u.memberships === undefined) || DEMO_USER_IDS.some((id) => !users.some((u) => u.id === id)))) {
+    // Soit les comptes datent d'avant les services (pas de rattachement), soit le
+    // jeu de démonstration s'est enrichi d'un compte depuis (ex. le chef du
+    // bureau Urbanisme, ajouté avec les délégations).
     users = seedUsers(config);
     await saveUsers(users);
   }
@@ -266,8 +483,16 @@ export async function bootstrap() {
   // réactivés lorsqu'on revient aux comptes de l'application). Le calcul ne
   // dépend que du mode d'authentification : il est donc idempotent, et il
   // s'applique à chaque démarrage, y compris après un import de données.
+  // Avant cela, la qualité de réviseur est posée sur les comptes de
+  // démonstration (voir `migrateDemoRevision`).
+  const rev = migrateDemoRevision(users);
+  if (rev.changed) { users = rev.users; await saveUsers(users); }
   const sync = syncDemoAccounts(config, users);
   if (sync.changed) { users = sync.users; await saveUsers(users); }
+  // Après la synchronisation des comptes : un compte rendu actif par elle doit
+  // pouvoir recevoir la qualité dans le même démarrage.
+  const sig = migrateDemoSignataires(config, users);
+  if (sig.changed) { users = sig.users; await saveUsers(users); }
   if (meta.seedVersion !== SEED_VERSION) await db.write("meta", { ...meta, seedVersion: SEED_VERSION });
   return { config, trames, actes, users, session, firstRun };
 }

@@ -23,7 +23,7 @@
 //     restreint à certains bureaux, la cible doit viser un bureau autorisé (une
 //     cible qui vaut pour tout le service reste visible).
 // ============================================================================
-import { ROLES } from "./users.js";
+import { ROLES, hasRole, primaryRoleId } from "./users.js";
 
 export const servicesOf = (config) => config?.services || [];
 export const serviceById = (config, id) => servicesOf(config).find((s) => s.id === id) || null;
@@ -56,7 +56,7 @@ export const restrictedBureaux = (user, serviceId) => {
 // Le périmètre couvre-t-il tous les services, sans restriction de bureau ?
 export function coversAllServices(config, user) {
   if (!user || user.active === false) return false;
-  if (user.role === "administrateur") return true;
+  if (hasRole(user, "administrateur")) return true;
   const all = servicesOf(config);
   if (!all.length) return false;
   return all.every((s) => {
@@ -100,7 +100,7 @@ export function bureauxInScope(config, user, serviceId) {
 // Bureaux autorisés dans un service (null = tous).
 export function coveredBureaux(config, user, serviceId) {
   if (!user) return [];
-  if (coversAllServices(config, user) || user.role === "administrateur") return null;
+  if (coversAllServices(config, user) || hasRole(user, "administrateur")) return null;
   const m = membershipFor(user, serviceId);
   if (!m) return [];
   return Array.isArray(m.bureaux) ? m.bureaux : null;
@@ -109,7 +109,7 @@ export function coveredBureaux(config, user, serviceId) {
 // ---------------------------------------------------------------- libellés
 export function scopeLabel(config, user) {
   if (!user) return "—";
-  if (user.role === "administrateur") return "Tous les services (administrateur)";
+  if (hasRole(user, "administrateur")) return "Tous les services (administrateur)";
   const ms = membershipsOf(user);
   if (!ms.length) return "Aucun service";
   if (coversAllServices(config, user)) return "Tous les services";
@@ -134,7 +134,7 @@ export const primaryServiceName = (config, user) => {
 // « qui a écrit quoi » sans nommer d'agent derrière chaque phrase.
 export const authorLabel = (config, user) => {
   if (!user) return "";
-  return primaryServiceName(config, user) || user.login || roleLabelOf(user.role) || "";
+  return primaryServiceName(config, user) || user.login || roleLabelOf(primaryRoleId(user)) || "";
 };
 
 export function newService(over = {}) {

@@ -38,6 +38,7 @@ if (!document.documentElement.lang) document.documentElement.lang = "fr";
 //   /v1/actes/{id}/signature  envoi en signature auprès d'un prestataire
 //   /v1/webhooks/signature    notification entrante du prestataire (retour signé)
 //   /v1/signatures/{id}       suivi du circuit de signature
+//   /v1/actes/{id}/transmission  télétransmission au contrôle de légalité
 //   /v1/actes/{id}/publication  publication au recueil + attribution de l'ELI
 //   /v1/publications          registre public des publications
 //   /v1/eli/{...}             résolution d'un identifiant ELI
@@ -208,6 +209,47 @@ function sha256Hex(str) {
 const nowIso = () => new Date().toISOString();
 const today = () => nowIso().slice(0, 10);
 
+// ------------------------------------------------------- contrôle de légalité
+// La télétransmission au contrôle de légalité : l'acte signé part vers l'API
+// d'envoi de la préfecture, qui en accuse réception. L'accusé de réception vaut
+// certificat informatique de transmission, et c'est lui que le client dépose
+// sur le document avant de publier l'acte. Le service ne transmet que si le
+// client le lui a demandé au dépôt (`controleLegalite`), et refuse de publier
+// un acte dont la transmission manque.
+const CONTROLE_LEGALITE = {
+  destinataire: "Préfecture — contrôle de légalité",
+  mode: "ctes",
+  apiUrl: "https://api.ctes.valmont-sur-loire.fr/v1/transmissions",
+  delai: 900,   // millisecondes de latence simulée de l'API d'envoi
+};
+const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+
+// « 22 janvier 2026 à 09 h 14 » — sans Intl (le moteur du service ne l'expose
+// pas), et identique à la mention produite côté client (src/lib/legalite.js).
+function dateHeureFr(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return d.getDate() + " " + MOIS_FR[d.getMonth()] + " " + d.getFullYear() + " à " + h + " h " + mi;
+}
+
+function certificatTransmission({ reference, recuLe, destinataire, empreinte }) {
+  const d = destinataire || CONTROLE_LEGALITE.destinataire;
+  const r = recuLe || nowIso();
+  return {
+    nature: "Accusé de réception de télétransmission",
+    emisPar: "Contrôle de légalité — télétransmission @ctes",
+    emisLe: r,
+    destinataire: d,
+    reference: String(reference || ""),
+    empreinte: String(empreinte || ""),
+    algorithme: "SHA-256",
+    sceau: sha256Hex([reference, r, d, empreinte].join("|")),
+    mention: "Transmis au contrôle de légalité le " + dateHeureFr(r),
+  };
+}
+
 function slug(s) {
   return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
 }
@@ -237,13 +279,13 @@ function allowWrite(conn, limit = 90) {
 // ---------------------------------------------------------------- projections
 // Les listes ne renvoient jamais les documents : seulement les métadonnées.
 function resumeActe(a) {
-  return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null };
+  return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null, revision: a.revision || null };
 }
 function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, versions: p.versions || [] };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, transmission: p.transmission || null, versions: p.versions || [] };
 }
 
 function clePublication(eliUri, dateExpr) {
@@ -271,9 +313,9 @@ function openapi() {
       get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
       post: {
         operationId: "deposerActe", summary: "Déposer un acte finalisé", tags: ["Actes"],
-        description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable` (true par défaut) indique si l'acte pourra être publié au recueil : mis à false pour un acte individuel (acte issu d'une trame déclarée non publiable), il rend la publication impossible même après signature.",
+        description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable` (true par défaut) indique si l'acte pourra être publié au recueil : mis à false pour un acte individuel (acte issu d'une trame déclarée non publiable), il rend la publication impossible même après signature. Le champ `controleLegalite` (false par défaut) déclare que l'acte doit être transmis au contrôle de légalité avant sa publication : le service refusera alors de le publier tant que la transmission n'a pas été enregistrée (409, code `transmission_absente`).",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt (statut, libellé du circuit, empreinte du texte validé, sort de chaque étape). Un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409).", properties: { statut: { type: "string" }, circuitLabel: { type: "string" }, empreinte: { type: "string" }, closLe: { type: "string" }, etapes: { type: "array", items: { type: "string" } } } } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, themeId: { type: "string", description: "Famille de la trame dont l'acte est issu : le THÈME sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème au moment du dépôt (le recueil public l'affiche tel quel)." }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, controleLegalite: { type: "boolean", default: false, description: "true si l'acte doit être transmis au contrôle de légalité avant publication" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt (statut, libellé du circuit, empreinte du texte validé, sort de chaque étape). Un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409).", properties: { statut: { type: "string" }, circuitLabel: { type: "string" }, empreinte: { type: "string" }, closLe: { type: "string" }, etapes: { type: "array", items: { type: "string" } } } }, revision: { type: "object", nullable: true, description: "État de la révision au dépôt (statut, empreinte du texte révisé, date, corrections). Un acte dont la révision n'est pas au statut « valide » ne pourra pas être envoyé en signature (409, code `revision_incomplete`).", properties: { statut: { type: "string" }, empreinte: { type: "string" }, valideLe: { type: "string" }, corrige: { type: "boolean" }, par: { type: "string" } } } } } } } },
         responses: { 201: { description: "Acte déposé" }, 200: { description: "Acte déjà déposé (idempotent)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Document trop volumineux" } },
       },
     },
@@ -285,7 +327,7 @@ function openapi() {
         description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état.",
         security: [{ bearerAuth: [] }],
         requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" } } } } } },
-        responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé, ou circuit de validation non achevé (code `validation_incomplete`)" }, 401: { description: "Jeton absent" } },
+        responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé, ou circuit de validation non achevé (code `validation_incomplete`), ou révision non achevée (code `revision_incomplete`)" }, 401: { description: "Jeton absent" } },
       },
     },
     "/v1/webhooks/signature": {
@@ -299,17 +341,28 @@ function openapi() {
     "/v1/signatures": { get: { operationId: "listerSignatures", summary: "Lister les circuits de signature", tags: ["Signature"], responses: { 200: { description: "Circuits ouverts" } } } },
     "/v1/signatures/{id}": { get: { operationId: "suivreSignature", summary: "Suivre un circuit de signature", tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Statut du circuit (en_attente, signee, refusee, rejetee)" }, 404: { description: "Circuit inconnu" } } } },
     "/v1/signatures/{id}/document-signe": { get: { operationId: "lireDocumentSigne", summary: "Récupérer l'acte signé", tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "L'original signé" }, 404: { description: "Acte signé non disponible" } } } },
+    "/v1/actes/{id}/transmission": {
+      post: {
+        operationId: "transmettreControleLegalite", summary: "Transmettre l'acte signé au contrôle de légalité", tags: ["Contrôle de légalité"],
+        description: "Adresse l'acte signé à l'API d'envoi du contrôle de légalité (télétransmission @ctes). L'accusé de réception délivré vaut certificat informatique de transmission : « Transmis au contrôle de légalité le … à … ». Le service refuse (409) de transmettre un acte qui n'est pas signé ; un acte déjà transmis renvoie son certificat tel quel (idempotent). C'est cette étape, et non la publication, qui fait courir le délai de deux mois du représentant de l'État.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { at: { type: "string", description: "Horodatage de la remise (ISO 8601) ; à défaut, l'heure du service" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, destinataire: { type: "string" }, auteur: { type: "string" }, entite: { type: "string" } } } } } },
+        responses: { 201: { description: "Transmis : certificat de transmission délivré" }, 200: { description: "Acte déjà transmis (idempotent)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé (code `acte_non_signe`)" }, 401: { description: "Jeton absent" } },
+      },
+      get: { operationId: "lireTransmission", summary: "Lire le certificat de transmission d'un acte", tags: ["Contrôle de légalité"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La transmission et son certificat" }, 404: { description: "Acte inconnu, ou acte non transmis (code `transmission_absente`)" } } },
+    },
     "/v1/actes/{id}/publication": {
       post: {
         operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
-        description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
+        description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, original: { type: "object", description: "L'original signé" } } } } } },
-        responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, ou acte déclaré non publiable" }, 422: { description: "Version en ligne manquante" } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé" } } } } } },
+        responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, acte déclaré non publiable, ou acte non transmis au contrôle de légalité" }, 422: { description: "Version en ligne manquante" } },
       },
     },
     "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
     "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
+    "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
     "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
   };
   return {
@@ -354,6 +407,21 @@ function normaliserValidation(v) {
   };
 }
 
+// Réduction de l'état de la révision à des champs sûrs et bornés : c'est la
+// trace, côté service, du contrôle effectué avant l'envoi. Le service ne
+// connaît ni les réviseurs ni les compétences : le client lui dit l'état, et le
+// service s'en sert pour refuser une signature non révisée.
+function normaliserRevision(v) {
+  if (!v || typeof v !== "object") return null;
+  return {
+    statut: String(v.statut || "").slice(0, 24),
+    empreinte: String(v.empreinte || "").slice(0, 128),
+    valideLe: String(v.valideLe || "").slice(0, 40),
+    corrige: v.corrige === true,
+    par: String(v.par || "").slice(0, 80),
+  };
+}
+
 function hDeposerActe(ctx) {
   const b = ctx.body || {};
   if (!b.akn || typeof b.akn !== "string") return err(400, "Le corps de la requête doit contenir le document `akn`.", { code: "document_absent" });
@@ -373,15 +441,28 @@ function hDeposerActe(ctx) {
     id, akn: b.akn, sha256: sha,
     numero: b.numero || "", objet: b.objet || "", nature: b.nature || "Acte",
     entityId: b.entityId || "", entityName: b.entityName || "",
+    // Le THÈME de l'acte — la famille de sa trame (« urbanisme », « police »…) :
+    // c'est par lui que le recueil public classe les actes publiés. Le service ne
+    // connaît pas les trames ; le client le lui dit, et la publication le reprend.
+    themeId: b.themeId || "", themeLabel: b.themeLabel || "",
     dateSignature: b.dateSignature || "", trameId: b.trameId || "", ecarts: b.ecarts || 0,
     // Le service ne connaît pas les trames : le client lui dit si l'acte est
     // publiable (faux pour les actes individuels). Un acte déclaré non publiable
     // ne pourra jamais être publié, même signé (voir hPublier).
     publishable: b.publishable !== false,
+    // De même, le client dit si l'acte doit être transmis au contrôle de
+    // légalité avant sa publication (fonction expérimentale, éteinte par
+    // défaut — voir src/lib/legalite.js). Un acte ainsi déclaré ne peut pas
+    // être publié sans que sa transmission ait été enregistrée (voir hPublier).
+    controleLegalite: b.controleLegalite === true,
     // État du parapheur au moment du dépôt, réduit à des champs sûrs : le
     // service n'exécute pas le circuit de validation, il en conserve la trace
     // pour refuser d'ouvrir une signature sur un acte non approuvé.
     validation: normaliserValidation(b.validation),
+    // État de la RÉVISION au moment du dépôt : le service n'exécute pas la
+    // révision, il refuse seulement d'ouvrir une signature sur un acte que le
+    // réviseur n'a pas validé (voir hEnvoyerEnSignature).
+    revision: normaliserRevision(b.revision),
     statut: "depose", deposeLe: nowIso(),
   };
   db.actes[id] = acte;
@@ -399,6 +480,13 @@ function hEnvoyerEnSignature(ctx) {
   // l'acte qui a été approuvé (même règle que la porte du client).
   if (acte.validation && acte.validation.statut !== "valide") {
     return err(409, "Le circuit de validation de cet acte n'est pas achevé : la signature ne peut pas être ouverte.", { code: "validation_incomplete", validation: acte.validation });
+  }
+  // Porte de la RÉVISION, après celle du parapheur : un acte soumis à un
+  // réviseur — le client le déclare au dépôt en joignant l'état de la révision —
+  // ne s'ouvre qu'une fois la révision VALIDE. C'est ce qui garantit que l'acte
+  // signé est bien celui qui a été contrôlé.
+  if (acte.revision && acte.revision.statut !== "valide") {
+    return err(409, "La révision de cet acte n'est pas achevée : la signature ne peut pas être ouverte.", { code: "revision_incomplete", revision: acte.revision });
   }
   const b = ctx.body || {};
   const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
@@ -462,6 +550,41 @@ function hWebhookSignature(ctx) {
   return ok(200, { recu: true, signatureId: sig.id, acteId: acte.id, statut: "signee", signeLe: sig.signeLe, empreinte: sha });
 }
 
+// Télétransmission au contrôle de légalité : l'acte signé part vers l'API
+// d'envoi, qui accuse réception. L'accusé de réception vaut certificat de
+// transmission ; il est conservé sur l'acte, et c'est lui que le client dépose
+// sur le document. Le service refuse de transmettre un acte qui n'est pas
+// signé — la transmission est l'étape qui suit la signature, jamais l'inverse.
+function hTransmettre(ctx) {
+  const acte = lireActe(ctx.params.id);
+  if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  if (acte.statut !== "signee" && acte.statut !== "publie") {
+    return err(409, "Un acte ne peut être transmis au contrôle de légalité qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
+  }
+  // Idempotence : un acte déjà transmis renvoie son certificat tel quel.
+  if (acte.transmission) return ok(200, { ...acte.transmission, idempotent: true });
+  const b = ctx.body || {};
+  const recuLe = b.at || nowIso();
+  const reference = b.reference || ("AR-" + recuLe.slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
+  const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
+  const empreinte = acte.sha256;
+  const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte });
+  acte.transmission = {
+    reference, recuLe, destinataire, mode: b.mode || CONTROLE_LEGALITE.mode,
+    empreinte, auteur: String(b.auteur || "").slice(0, 120), entite: String(b.entite || "").slice(0, 160),
+    api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202 },
+    certificat, transmisLe: nowIso(),
+  };
+  if (!saveDb(db)) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
+  return ok(201, {
+    acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire,
+    mode: acte.transmission.mode, empreinte, certificat,
+    document: "/v1/actes/" + acte.id + "/document",
+    certificatUrl: "/v1/actes/" + acte.id + "/transmission",
+    ressource: "/v1/actes/" + acte.id + "/transmission",
+  }, { location: "/v1/actes/" + acte.id + "/transmission" });
+}
+
 function hPublier(ctx) {
   const acte = lireActe(ctx.params.id);
   if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
@@ -473,6 +596,13 @@ function hPublier(ctx) {
   // sanction, etc.) : ces actes sont conservés, pas publiés au recueil.
   if (acte.publishable === false) {
     return err(409, "Cet acte est déclaré non publiable : un acte individuel n'est pas publié au recueil des actes administratifs.", { code: "acte_non_publiable", statut: acte.statut, trameId: acte.trameId || null });
+  }
+  // Étape de transmission au contrôle de légalité : lorsque le client l'a
+  // demandée au dépôt, l'acte ne peut pas être publié avant d'avoir été
+  // transmis. C'est le service qui tient l'ordre « signé → transmis → publié »,
+  // et non le client.
+  if (acte.controleLegalite === true && !acte.transmission) {
+    return err(409, "Cet acte doit être transmis au contrôle de légalité avant sa publication.", { code: "transmission_absente", statut: acte.statut, controleLegalite: true });
   }
   const b = ctx.body || {};
   if (!b.html || !b.akn) return err(422, "La version en ligne (`html`) et le document Akoma Ntoso (`akn`) sont requis pour publier.", { code: "version_en_ligne_absente" });
@@ -495,12 +625,16 @@ function hPublier(ctx) {
 
   const rec = {
     cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
+    // L'acte déposé dont cette publication est la version en ligne : c'est lui
+    // qu'un retrait doit rendre de nouveau publiable (voir hRetirerPublication).
+    acteId: acte.id,
     numero: b.numero || acte.numero, nature: b.nature || acte.nature, objet: b.objet || acte.objet,
+    themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
     entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
     dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
     opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
     kind: b.kind || "originale", brandName: b.brandName || "",
-    sha256: sha256Hex(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "" },
+    sha256: sha256Hex(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
     original: {
       format: (b.original && b.original.format) || "application/vnd.actes.original-signe+json",
       sha256: (b.original && b.original.document && b.original.document.sha256) || "",
@@ -518,6 +652,10 @@ function hPublier(ctx) {
     },
     ecarts: acte.ecarts || 0,
     signataireActe: b.auteur || "",
+    // Le certificat de transmission au contrôle de légalité accompagne la
+    // publication : la version publiée porte la mention « Transmis au contrôle
+    // de légalité le … », et le registre garde l'accusé de réception.
+    transmission: b.transmission || acte.transmission || null,
     publieeLe: nowIso(), misAJourLe: nowIso(),
   };
   db.publies[cle] = rec;
@@ -530,6 +668,7 @@ function hPublier(ctx) {
   return ok(201, {
     cle, eli: eliUri, eliUri, url: rec.url,
     numero: rec.numero, nature: rec.nature, objet: rec.objet,
+    themeId: rec.themeId, themeLabel: rec.themeLabel,
     dateDocument, datePublication, dateOpposabilite: rec.dateOpposabilite,
     opposabilite: rec.opposabiliteRule,
     recueil: rec.recueil,
@@ -538,6 +677,51 @@ function hPublier(ctx) {
     original: { format: rec.original.format, sha256: rec.original.sha256, signatures: rec.signature.signataires.length, href: rec.original.signaturesUrl },
     formats: ["text/html", "application/akn+xml", "application/ld+json", rec.original.format],
   }, { location: "/v1/publications/" + encodeURIComponent(cle) });
+}
+
+// Le RETRAIT d'une publication. Geste EXCEPTIONNEL : un acte administratif
+// publié ne se retire pas. Seul un motif technique le justifie — dépôt en
+// double, erreur de dépôt, acte publié avant d'être signé, identifiant attribué
+// à tort. Un acte dont le retrait se justifierait autrement (illégalité,
+// annulation) se modifie ou s'abroge : il reste au recueil, avec son
+// historique. Le service exige donc un motif écrit et le conserve sur l'acte :
+// le retrait laisse une trace, même une fois la publication ôtée.
+//
+// L'acte redevient « signé » (donc publiable de nouveau), et la publication
+// disparaît du registre et du recueil. Les versions antérieures éventuelles
+// d'un même ELI, elles, ne sont pas touchées : on ne retire que la version
+// désignée.
+function hRetirerPublication(ctx) {
+  const cle = decodeURIComponent(ctx.params.cle);
+  const p = lirePublication(cle);
+  if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+  const motif = String((ctx.body && ctx.body.motif) || "").trim();
+  if (motif.length < 8) {
+    return err(422, "Un retrait de publication exige un motif technique explicite.", { code: "motif_absent" });
+  }
+  const auteur = String((ctx.body && ctx.body.auteur) || "").slice(0, 120);
+  const acte = Object.keys(db.actes).map((k) => db.actes[k])
+    .find((a) => a.publication === cle || (p.acteId && a.id === p.acteId)) || null;
+  const avant = acte ? { statut: acte.statut, publication: acte.publication, retraits: acte.retraits } : null;
+  delete db.publies[cle];
+  if (acte) {
+    acte.retraits = (acte.retraits || []).concat([{ cle, motif: motif.slice(0, 400), auteur, le: nowIso() }]);
+    acte.publication = null;
+    if (acte.statut === "publie") acte.statut = "signee";
+  }
+  if (!saveDb(db)) {
+    // Rien n'a été écrit : on remet la mémoire dans l'état d'avant.
+    db.publies[cle] = p;
+    if (acte && avant) { acte.statut = avant.statut; acte.publication = avant.publication; acte.retraits = avant.retraits; }
+    return err(507, "Le service n'a plus de place disponible.");
+  }
+  return ok(200, {
+    cle, numero: p.numero, eliUri: p.eliUri, motif,
+    acteId: acte ? acte.id : null, statut: acte ? acte.statut : null,
+    retraits: acte ? acte.retraits.length : 0,
+    ressource: "/v1/actes/" + (acte ? acte.id : ""),
+    journal: "Retrait de la publication du recueil — motif technique : " + motif.slice(0, 200),
+  });
 }
 
 function hResoudreEli(ctx) {
@@ -661,6 +845,8 @@ const ROUTES = [
   { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
   { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
   { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, auth: "jeton", ecrit: true, f: hEnvoyerEnSignature },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "jeton", ecrit: true, f: hTransmettre },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
   { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "jeton", ecrit: true, f: hPublier },
   { m: "GET", p: /^\/v1\/signatures$/, f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => cmp(b.creeLe, a.creeLe)) }) },
   { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: s.documentSigne }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
@@ -671,6 +857,7 @@ const ROUTES = [
       const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
       return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => cmp(b.publieeLe, a.publieeLe)) });
     } },
+  { m: "POST", p: /^\/v1\/publications\/([^/]+)\/retrait$/, auth: "jeton", ecrit: true, f: hRetirerPublication },
   { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
       const cle = decodeURIComponent(ctx.params.cle);
       const p = lirePublication(cle);

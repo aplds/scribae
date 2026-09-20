@@ -22,11 +22,18 @@
 //      `validation` dans le dépôt, index.html).
 //
 // Ce module est pur : il ne connaît ni le DOM ni l'état de l'application.
+//
+// Le parapheur n'est qu'UNE des portes avant la signature : la RÉVISION
+// (src/lib/revision.js) en est une autre, indépendante — un acte peut être
+// révisé sans passer par un circuit, et un circuit peut être achevé sans qu'un
+// réviseur soit compétent. Les deux portes sont vérifiées au même endroit, au
+// moment de l'envoi en signature (voir src/ui/views/signature.js).
 // ============================================================================
 
 import { uid } from "./util.js";
 import { stableStringify } from "./db/contract.js";
 import { inScope } from "./scope.js";
+import { hasRole } from "./users.js";
 
 // Rôles pouvant porter une étape. Les intitulés viennent de src/lib/users.js
 // (le rôle est celui du COMPTE, pas celui des personnes du référentiel).
@@ -42,6 +49,13 @@ export const STEP_KINDS = [
 
 // Sentinelle : une trame peut refuser explicitement tout circuit.
 export const AUCUN_CIRCUIT = "aucun";
+
+// Le parapheur est une fonction EXPÉRIMENTALE (Administration › Expérimentale) :
+// éteint par défaut, car beaucoup de collectivités ont déjà leur propre circuit
+// de validation interne, en amont de l'envoi en signature. Tant qu'il est
+// éteint, aucun circuit du référentiel ne s'applique, les actes partent
+// directement en signature, et l'écran du parapheur n'est pas proposé.
+export const parapheurActif = (config) => !!config?.experimental?.parapheur;
 
 export const VALIDATION_STATUTS = {
   en_cours: { label: "En cours de validation", color: "info" },
@@ -97,6 +111,7 @@ export function newCircuit(patch = {}) {
 // trame, à sa famille et à l'entité signataire. Un circuit général (sans
 // filtre) ne l'emporte jamais sur un circuit ciblé.
 export function circuitFor(config, { trame, acte } = {}) {
+  if (!parapheurActif(config)) return null;
   const list = (config?.circuits || []).filter((c) => c && c.active !== false && (c.steps || []).length);
   if (!list.length) return null;
   if (trame) {
@@ -210,7 +225,7 @@ export function etapeActive(v) {
 
 // Un compte peut-il agir sur l'étape ouverte ?
 export function peutValider(user) {
-  return !!user && user.active !== false && (user.role === "administrateur" || user.role === "editeur");
+  return !!user && user.active !== false && (hasRole(user, "administrateur") || hasRole(user, "editeur"));
 }
 
 export function etapePour(acte, user, config) {
@@ -221,7 +236,7 @@ export function etapePour(acte, user, config) {
   if (!step) return null;
   // Un administrateur peut tenir n'importe quelle étape (il est le recours
   // quand le titulaire est absent) ; les autres doivent porter le rôle demandé.
-  if (user.role !== "administrateur" && step.role !== user.role) return null;
+  if (!hasRole(user, "administrateur") && !hasRole(user, step.role)) return null;
   if (step.serviceScoped && acte.serviceId && !inScope(config, user, acte)) return null;
   return step;
 }

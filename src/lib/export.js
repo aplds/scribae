@@ -1,6 +1,6 @@
 import { esc, slug } from "./util.js";
 import { parseExpr } from "./expr.js";
-import { renderDocument, personName, personRole, documentToHtml } from "./render.js";
+import { renderDocument, personSignatureName, personRoleLines, documentToHtml } from "./render.js";
 import { amendmentMentions, amendmentMention } from "./amend.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
 import { styleForDoc, styleCss, paperMargins } from "./styles.js";
@@ -14,6 +14,11 @@ const wordMargin = (style) => {
 };
 
 const AKN_NS = "http://docs.oasis-open.org/legaldocml/ns/akn/3.0";
+
+// Échappement d'une valeur d'attribut (le contenu HTML a `esc` ; une adresse
+// posée dans `href` doit aussi voir ses guillemets et ses esperluettes échappés).
+const escAttr = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // ==========================================================================
 // Akoma Ntoso 3.0
@@ -185,7 +190,13 @@ export function exportAkn(doc, config, trame) {
   if (visaNode?.items?.length) {
     p('      <formula name="visas" eId="frm_visas">');
     for (const it of visaNode.items) {
-      p(`        <p>${esc([config.vocab.visasLabel || "Vu", it.text].join(" "))}</p>`);
+      // Une décision fondant la signature porte son LIEN : l'Akoma Ntoso le
+      // reçoit par un `ref` (c'est l'élément prévu pour cela), ce qui le fait
+      // survivre à l'archivage et à l'échange. Voir src/lib/delegations.js.
+      const etiquette = esc(config.vocab.visasLabel || "Vu");
+      p(it.lien
+        ? `        <p>${etiquette} <ref href="${escAttr(it.lien)}">${esc(it.text)}</ref></p>`
+        : `        <p>${esc([config.vocab.visasLabel || "Vu", it.text].join(" "))}</p>`);
     }
     p("      </formula>");
   }
@@ -246,8 +257,10 @@ export function exportAkn(doc, config, trame) {
     p(`      <p>Fait à ${esc(sig.place)}, le ${esc(sig.date)}</p>`);
     p('      <block name="signature" eId="sig_1">');
     if (sig.signataire) {
-      p(`        <p>${esc(personRole(sig.signataire, config))}</p>`);
-      p(`        <p>${esc(personName(sig.signataire))}</p>`);
+      for (const ligne of personRoleLines(sig.signataire, config)) {
+        p(`        <p>${esc(ligne)}</p>`);
+      }
+      p(`        <p>${esc(personSignatureName(sig.signataire))}</p>`);
     }
     p("      </block>");
   }
@@ -455,9 +468,12 @@ export function exportJsonLd(doc, config) {
 // ==========================================================================
 // Markdown (relecture, diffusion interne)
 // ==========================================================================
-export function exportMarkdown(doc, config) {
+export function exportMarkdown(doc, config, opts = {}) {
   // Même option que le rendu du document : sans le suivi des modifications, le
   // Markdown ne montre que le texte en vigueur, avec la mention sous l'intitulé.
+  // Les notes de préparation, elles, ne sortent que si l'appelant les demande
+  // (`notes: true`) : elles ne font pas partie de l'acte, et le Markdown sert
+  // aussi de représentation PUBLIÉE (voir `src/ui/views/signature.js`).
   const tracking = doc.meta?.consolidated?.showChanges === true;
   const mentions = tracking ? null : amendmentMentions(doc, config);
   const lines = [];
@@ -466,7 +482,7 @@ export function exportMarkdown(doc, config) {
     switch (n.type) {
       case "title": lines.push("# " + n.text, ""); break;
       case "authority": lines.push("*" + n.text + "*", ""); break;
-      case "visas": lines.push(...n.items.map((i) => "- " + [config.vocab.visasLabel, i.text].join(" ")), ""); break;
+      case "visas": lines.push(...n.items.map((i) => "- " + [config.vocab.visasLabel, i.lien ? "[" + i.text + "](" + i.lien + ")" : i.text].join(" ")), ""); break;
       case "considerants": lines.push(...n.items.map((i) => "> " + i.text), ""); break;
       case "enact": lines.push("**" + n.text + "**", ""); break;
       case "article": {
@@ -491,12 +507,16 @@ export function exportMarkdown(doc, config) {
         }
         break;
       }
-      case "signature": lines.push(`Fait à ${n.place}, le ${n.date}`, "", personName(n.signataire), ""); break;
+      case "signature": lines.push(`Fait à ${n.place}, le ${n.date}`, "", ...personRoleLines(n.signataire, config), personSignatureName(n.signataire), ""); break;
       case "mention": lines.push("> " + n.text, ""); break;
       default: break;
     }
   }
-  if (doc.notes?.length) {
+  // Les notes de préparation accompagnent les exports internes (c'est le
+  // savoir-faire de l'atelier) ; l'appelant les écarte (`notes: false`) quand le
+  // Markdown sert de représentation PUBLIÉE — elles ne font pas partie de
+  // l'acte. Voir `src/ui/views/signature.js`.
+  if (opts.notes !== false && doc.notes?.length) {
     lines.push("---", "", "## Notes de préparation", "");
     for (const n of doc.notes) lines.push(`- **[${n.kind}]** ${n.text}${n.author ? " — " + n.author : ""}`);
   }
@@ -551,6 +571,11 @@ export function documentCss(config, style) {
 .doc-authority{margin:0 0 .8em}
 .doc-visas{margin:0 0 .9em;padding-left:0;list-style:none}
 .doc-visas li{text-align:justify;margin-bottom:.25em}
+/* Une décision fondant la signature est un LIEN (recueil en ligne ou adresse
+   externe) : il se signale par un soulignement discret, sans crier plus fort
+   que le texte de l'acte. Le PDF imprimé depuis le navigateur garde le lien. */
+.doc-visas-link{color:inherit;text-decoration:underline;text-decoration-color:#9aa0b4;text-underline-offset:2px}
+.doc-visas-link:hover{text-decoration-color:currentColor}
 .doc-recitals{margin:0 0 .9em}.doc-recitals p{text-align:justify;margin:0 0 .4em}
 .doc-enact{text-align:center;font-weight:700;margin:1em 0}
 .doc-article{margin-bottom:1em}

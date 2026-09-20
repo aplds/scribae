@@ -14,9 +14,9 @@
 // identifiant ELI que l'acte d'origine et le supplante, sans jamais le faire
 // disparaître : l'acte d'origine reste accessible dans l'historique des versions.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById } from "../state.js";
-import { h, clear, button, toast, modal, fitPaper } from "../dom.js";
-import { textField, selectField, emptyState, helpLink, confirmDialog } from "../components.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher } from "../state.js";
+import { h, clear, button, toast, modal, fitPaper, icon } from "../dom.js";
+import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase } from "../components.js";
 import { openActe } from "./rediger.js";
 import { fullName } from "../../lib/users.js";
 import {
@@ -24,21 +24,31 @@ import {
 } from "../../lib/validation.js";
 import {
   formalites, statutExecution, dateExecutoire, dateLimiteRecours, ecartJours, aujourdhui,
+  recoursDe, recoursTypeLabel,
 } from "../../lib/execution.js";
 import { revisionsDe, restaurerRevision } from "../../lib/revisions.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
+import { etatRevision } from "../../lib/revision.js";
+import { rapportConformite } from "../../lib/conformite.js";
+import { carteDossierRevision, carteRapport, carteDecision as carteDecisionRevision } from "../revision-cartes.js";
 import { ouvrirFormulaireFormalite } from "../execution-actions.js";
 import {
   amendVocab, buildModificatif, buildConsolidated,
-  targetPhrase, defaultConsiderant, planSummary,
+  targetPhrase, defaultConsiderant, planSummary, numericToken,
 } from "../../lib/amend.js";
-import { cleanDoc, planFromSession, revertArticleByEId, newInserted } from "../../lib/amend-edit.js";
+import {
+  cleanDoc, planFromSession, revertArticleByEId, newInserted,
+  addSlot, dropSlot,
+} from "../../lib/amend-edit.js";
 import { buildEditableDocument } from "./amend-editor.js";
+import { signerPicker } from "../signer-picker.js";
 import { compile, nextNumero, interpolate } from "../../lib/compile.js";
+import { reserverNumero } from "../../lib/numbering.js";
 import { renderDocument, applyPaper } from "../../lib/render.js";
 import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
 import { parseDocumentFile } from "../../lib/akn.js";
 import { ecarts, locateAddr } from "../../lib/redaction.js";
+import { estAbroge } from "../../lib/abrogations.js";
 import { download, uid, pickFile, formatDate, todayIso, debounce } from "../../lib/util.js";
 
 const NATURES = {
@@ -112,6 +122,15 @@ function startSession(a) {
     edits: {},
     removed: [],
     inserted: [],
+    // Structure du texte : les ajouts et retraits de paragraphes, de lignes de
+    // liste et de lignes de tableau (voir lib/amend-edit.js).
+    layout: {},
+    ajouts: {},
+    // Renumérotation : un numéro réattribué par article, ou la renumérotation
+    // continue de tout le dispositif (« utile pour un acte avec beaucoup de
+    // trous » — les articles abrogés dont le numéro est repris disparaissent).
+    renumerote: {},
+    renumeroteTout: false,
     meta: defaultMeta(doc, designation),
     // `showChanges` : le suivi des modifications de la version consolidée est
     // une option d'affichage, décochée par défaut (voir `paintPreview`).
@@ -145,6 +164,7 @@ function defaultMeta(doc, designation) {
     dateEffet: "",
     entityId: entity?.id || "",
     signataireId: doc.meta?.signataire?.id || "",
+    signataireFonction: "",
     visas: [],
     considerants: [defaultConsiderant(doc, des, config)],
     addEntry: true,
@@ -219,7 +239,7 @@ function renderChooser(root) {
         h("td", { class: "fr-mono", text: a.numero || "—" }),
         h("td", { text: a.objet || doc?.meta?.objet || "—" }),
         h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
-        h("td", { class: "fr-small", text: statusText(a) }),
+        h("td", { class: "fr-small", text: statusText(a) }, abrogationBadge(a)),
         h("td", {}, h("div", { class: "fr-row" },
           actePubliable(a)
             ? button("Modifier", {
@@ -327,6 +347,8 @@ function renderWorkspace(root) {
       h("span", { class: "amend-tool amend-tool--demo", text: "+ article après" }),
       " en insère un. Les passages que vous modifiez sont surlignés en orange."),
     h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" } },
+      "La structure du texte se travaille aussi : les outils d'un paragraphe ou d'une ligne (", h("span", { class: "amend-tool amend-tool--demo", text: "+ §" }), ", ", h("span", { class: "amend-tool amend-tool--demo", text: "✕" }), ", ", h("span", { class: "amend-tool amend-tool--demo", text: "+ ligne" }), ") ajoutent ou retirent un paragraphe, une ligne de liste, une ligne de tableau. Le bouton « n° » d'un article lui réattribue un numéro."),
+    h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" } },
       "Le préambule (intitulé, visas, considérants) et le bloc de signature appartiennent à l'acte d'origine : ils ne sont pas modifiables ici."),
   ));
 
@@ -337,7 +359,9 @@ function renderWorkspace(root) {
   docCol.appendChild(paperBox);
 
   const summaryBox = h("div", { class: "fr-card" });
+  const actionsBox = h("div", { class: "fr-card fr-card--soft" });
   const previewCard = h("div", { class: "fr-card" });
+  sideCol.appendChild(actionsBox);
   sideCol.appendChild(summaryBox);
   sideCol.appendChild(previewCard);
   sideCol.appendChild(trailCard());
@@ -357,6 +381,39 @@ function renderWorkspace(root) {
         break;
       case "restore":
         mod.removed = mod.removed.filter((k) => k !== payload.key);
+        paintAll();
+        break;
+      case "abrogateAll":
+        mod.removed = (base.doc.nodes || []).filter((n) => n.type === "article").map((n) => n.eId || n.path || n.id);
+        paintAll();
+        break;
+      case "restoreAll":
+        mod.removed = [];
+        paintAll();
+        break;
+      // --- structure : ajouter / retirer un paragraphe, une ligne
+      case "addBlock":
+        addSlot(mod, payload.container, payload.count, payload.after || null, { type: payload.type || "para" });
+        paintAll();
+        break;
+      case "dropBlock":
+        dropSlot(mod, payload.container, payload.count, payload.slot, payload.addr);
+        paintAll();
+        break;
+      case "addLine":
+        addSlot(mod, payload.container, payload.count, payload.after || null, { type: payload.kind || "item" });
+        paintAll();
+        break;
+      case "dropLine":
+        dropSlot(mod, payload.container, payload.count, payload.slot, payload.addr);
+        paintAll();
+        break;
+      // --- numérotation
+      case "renumber":
+        renumber(payload);
+        break;
+      case "renumberAll":
+        mod.renumeroteTout = payload.on === true;
         paintAll();
         break;
       case "insert": {
@@ -382,13 +439,58 @@ function renderWorkspace(root) {
     }
   };
 
+  // Les numéros déjà pris dans le texte en vigueur (renumérotations comprises) et
+  // par les articles insérés : c'est ce qui permet de refuser un numéro occupé.
+  function numbersUsed(exceptKey) {
+    const label = config?.vocab?.articleLabel || "Article";
+    const used = new Map();
+    for (const n of base.doc.nodes || []) {
+      if (n.type !== "article") continue;
+      const key = n.eId || n.path || n.id;
+      if (key === exceptKey) continue;
+      const renum = mod.renumerote?.[key];
+      const num = renum || numericToken(n.numLabel);
+      if (num) used.set(String(num), renum ? `${label} ${renum} (après renumérotation)` : (n.numLabel || ""));
+    }
+    for (const a of planFromSession(base.doc, mod, { designation: mod.meta.designation })) {
+      if (a.newNum) used.set(String(a.newNum), "un article inséré");
+    }
+    return used;
+  }
+
+  // Réattribuer un numéro à un article : le numéro doit être LIBRE. Un champ
+  // vide remet le numéro d'origine.
+  async function renumber({ key, node }) {
+    const current = mod.renumerote?.[key] || numericToken(node?.numLabel) || "";
+    const v = await promptDialog(
+      "Réattribuer un numéro",
+      `Numéro de « ${node?.numLabel || "cet article"} » — le numéro doit être libre. Laissez vide pour revenir au numéro d'origine.`,
+      current,
+    );
+    if (v === null) return;
+    const num = String(v).trim();
+    if (!num) {
+      delete mod.renumerote[key];
+      paintAll();
+      return;
+    }
+    const pris = numbersUsed(key);
+    if (pris.has(num)) {
+      toast(`Le numéro « ${num} » est déjà porté par ${pris.get(num)} : un numéro doit être libre.`, "error");
+      return;
+    }
+    mod.renumerote[key] = num;
+    paintAll();
+  }
+
   function build() {
     const plan = planFromSession(base.doc, mod, { designation: mod.meta.designation });
     const changes = plan.filter((a) => a.action !== "keep");
+    const renum = { map: mod.renumerote || {}, all: mod.renumeroteTout === true };
     const docs = changes.length
       ? {
         modificatif: buildModificatif(base.doc, plan, mod.meta, config),
-        consolide: buildConsolidated(base.doc, plan, mod.meta, config, { previousTrail: base.previousTrail, showChanges: mod.ui.showChanges }),
+        consolide: buildConsolidated(base.doc, plan, mod.meta, config, { previousTrail: base.previousTrail, showChanges: mod.ui.showChanges, renum }),
       }
       : { modificatif: null, consolide: null };
     return { plan, changes, ...docs };
@@ -410,8 +512,59 @@ function renderWorkspace(root) {
   function paintSide() {
     const b = build();
     mod.lastBuild = b;
+    paintActions();
     paintSummary(b);
     paintPreview(b);
+  }
+
+  // ------------------------------------------------------------------- gestes
+  // Ce qui porte sur l'acte ENTIER : l'abroger d'un coup (l'acte modificatif
+  // abrogera alors tous ses articles), et la numérotation du dispositif.
+  function paintActions() {
+    clear(actionsBox);
+    const arts = (base.doc.nodes || []).filter((n) => n.type === "article");
+    const tous = arts.length > 0 && arts.every((n) => mod.removed.includes(n.eId || n.path || n.id));
+    actionsBox.appendChild(h("h2", { class: "fr-card__title", text: "L'acte entier" }));
+    actionsBox.appendChild(tous
+      ? h("p", { class: "fr-small", style: { margin: "0 0 8px" }, text: "Tous les articles sont abrogés : la version consolidée ne portera plus aucune disposition en vigueur." })
+      : h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" }, text: "Abroger l'acte d'un seul geste retire tous ses articles ; chacun reste rétablissable dans le document." }));
+    actionsBox.appendChild(h("div", { class: "fr-row" },
+      tous
+        ? button("Rétablir tous les articles", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => mod.action("restoreAll") })
+        : button("Abroger tout l'acte", {
+          variant: "tertiary", size: "sm", icon: "trash",
+          onClick: async () => {
+            const ok = await confirmDialog(
+              "Abroger tout l'acte",
+              `L'acte modificatif abrogera les ${arts.length} article(s) de ${base.label} : la version consolidée ne portera plus aucune disposition en vigueur. L'acte d'origine reste au recueil.`,
+              { confirmLabel: "Abroger tout l'acte", danger: true },
+            );
+            if (ok) mod.action("abrogateAll");
+          },
+        })));
+
+    actionsBox.appendChild(h("hr", { class: "fr-sep" }));
+    actionsBox.appendChild(h("h3", { style: { margin: "0 0 6px", fontSize: ".95rem" }, text: "Numérotation du dispositif" }));
+    actionsBox.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" },
+      text: "Le bouton « n° » d'un article lui réattribue un numéro (il doit être libre). « Tout renuméroter » rend la numérotation continue — utile pour un acte troué par les abrogations." }));
+    actionsBox.appendChild(checkbox("Tout renuméroter", mod.renumeroteTout === true, (v) => mod.action("renumberAll", { on: v })));
+    const renum = Object.entries(mod.renumerote || {});
+    if (renum.length) {
+      const ul = h("ul", { class: "mod-changes" });
+      for (const [key, num] of renum) {
+        const node = (base.doc.nodes || []).find((n) => n.type === "article" && (n.eId || n.path || n.id) === key);
+        ul.appendChild(h("li", { class: "mod-change" },
+          h("div", { class: "mod-change__head" },
+            h("span", { class: "mod-change__article", text: node?.numLabel || "" }),
+            h("span", { class: "mod-change__action", text: "portera le n° " + num }),
+            button("Annuler", { variant: "tertiary", size: "sm", icon: "x", onClick: () => { delete mod.renumerote[key]; paintAll(); } }))));
+      }
+      actionsBox.appendChild(ul);
+    }
+    if (mod.renumeroteTout) {
+      actionsBox.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
+        text: "La renumérotation continue s'applique à tout le dispositif et l'emporte sur les numéros réattribués un par un." }));
+    }
   }
 
   // ------------------------------------------------------- récapitulatif
@@ -559,7 +712,7 @@ function renderWorkspace(root) {
   function openMetaModal() {
     const b = build();
     if (!b.changes.length) {
-      toast("Aucune modification : réécrivez d'abord un article dans le document.", "warning");
+      toast("Aucune modification : réécrivez d'abord un article dans le document (réattribuer un numéro, à lui seul, ne produit pas d'acte modificatif).", "warning");
       return;
     }
     const body = h("div", { class: "fr-stack" });
@@ -572,13 +725,29 @@ function renderWorkspace(root) {
     meta.appendChild(h("div", { class: "fr-field" },
       h("label", { class: "fr-label" }, "Numéro de l'acte modificatif", h("span", { class: "fr-required", text: " *" })),
       h("div", { class: "fr-row" }, h("div", { style: { flex: "1 1 auto" } }, numeroInput),
-        button("Réserver", { variant: "tertiary", size: "sm", icon: "check", title: "Prendre le prochain numéro de la séquence", onClick: () => {
+        button("Réserver", { variant: "tertiary", size: "sm", icon: "check", title: "Prendre le prochain numéro de la séquence", onClick: async (ev) => {
           const entity = config.entities.find((e) => e.id === mod.meta.entityId) || config.entities[0];
-          mod.meta.numero = nextNumero(config, entity);
-          config.numbering.seq += 1;
-          touch("config", { rerender: false });
-          numeroInput.value = mod.meta.numero;
-          toast("Numéro réservé : " + mod.meta.numero, "success");
+          const b = ev.currentTarget;
+          b.disabled = true;
+          b.appendChild(h("span", { class: "spinner", "aria-hidden": "true" }));
+          try {
+            const res = await reserverNumero(config, entity, {
+              entityId: mod.meta.entityId,
+              objet: mod.meta.objet || "",
+              date: mod.meta.dateSignature || todayIso(),
+            });
+            mod.meta.numero = res.numero;
+            mod.meta.numeroSource = res.source === "externe"
+              ? { source: "externe", ref: res.ref || "", valeur: res.valeur || "", at: new Date().toISOString() }
+              : null;
+            if (res.source === "interne") { config.numbering.seq += 1; touch("config", { rerender: false }); }
+            numeroInput.value = mod.meta.numero;
+            toast("Numéro réservé : " + mod.meta.numero, "success");
+          } catch (e) {
+            toast(String((e && e.message) || e), "error");
+          }
+          b.disabled = false;
+          b.querySelector(".spinner")?.remove();
         } }))));
 
     meta.appendChild(h("div", { class: "fr-grid fr-grid--2" },
@@ -593,11 +762,23 @@ function renderWorkspace(root) {
         onChange: (v) => { mod.meta.entityId = v; },
       }),
     ));
-    meta.appendChild(selectField({
-      label: "Signataire", value: mod.meta.signataireId, placeholder: "— Signataire —",
-      options: (config.people || []).map((pp) => ({ value: pp.id, label: [pp.civility, pp.firstName, pp.lastName].filter(Boolean).join(" ") })),
-      onChange: (v) => { mod.meta.signataireId = v; },
-    }));
+    // Le signataire de l'acte modificatif se choisit comme partout : par sa
+    // FONCTION d'abord (voir src/ui/signer-picker.js), jamais dans un annuaire
+    // de noms.
+    const trameBase = state.trames.find((t) => t.id === mod.base?.trameId) || null;
+    meta.appendChild(h("div", { class: "fr-field" },
+      h("label", { class: "fr-label", text: "Signataire" }),
+      signerPicker({
+        config, showQualite: true,
+        scope: {
+          entityId: mod.meta.entityId || "", familyId: trameBase?.familyId || "",
+          actTypeId: trameBase?.actTypeId || "", date: mod.meta.dateSignature || "",
+        },
+        personId: mod.meta.signataireId || "",
+        fonctionKey: mod.meta.signataireFonction || "",
+        onPerson: (v) => { mod.meta.signataireId = v; },
+        onFonction: (cle) => { mod.meta.signataireFonction = cle; },
+      })));
     meta.appendChild(textField({ label: "Objet", value: mod.meta.objet, rows: 2, onChange: (v) => { mod.meta.objet = v; } }));
     meta.appendChild(textField({
       label: "Considérants (un par ligne)", value: (mod.meta.considerants || []).join("\n"), rows: 3,
@@ -644,6 +825,7 @@ function renderWorkspace(root) {
       ...orgOf, ...authorOf,
       statut: "pret", createdAt: now, updatedAt: now,
       values: null, doc: b.modificatif, eli: b.modificatif.meta.eli, issues: [],
+      numeroSource: mod.meta.numeroSource || null,
       baseId, baseEli: base.doc.meta?.eli || "", baseNumero: base.doc.meta?.numero || "",
       amendsId: baseId, amendsEli: base.doc.meta?.eli || "", amendsNumero: base.doc.meta?.numero || "",
       amends: b.modificatif.amendments, source: "modification",
@@ -668,6 +850,19 @@ function renderWorkspace(root) {
       baseActe.modificationIds = [...new Set([...(baseActe.modificationIds || []), modActe.id])];
       baseActe.consolidationIds = [...new Set([...(baseActe.consolidationIds || []), consActe.id])];
       baseActe.lastConsolideId = consActe.id;
+      // L'acte abrogé DANS SON ENSEMBLE : la mention est portée dès maintenant,
+      // en attente — c'est la publication de la version consolidée qui la rend
+      // effective (voir `publierConsolide`, views/signature.js).
+      if (b.consolide?.meta?.consolidated?.abrogation) {
+        baseActe.abrogePar = {
+          acteId: modActe.id,
+          numero: modActe.numero,
+          designation: modActe.doc?.meta?.designation || "",
+          date: modActe.dateSignature || "",
+          eli: modActe.eli || "",
+          enAttente: true,
+        };
+      }
       baseActe.updatedAt = now;
     }
     touch("actes");
@@ -748,13 +943,38 @@ export function renderActeDetail(root, params) {
   ].filter(Boolean).join(" ");
   if (trace) root.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "-6px" }, text: trace }));
 
+  // L'abrogation subie : c'est un fait du dossier, et il change la lecture de
+  // tout ce qui suit — l'acte n'est plus en vigueur. On le dit en tête de fiche.
+  if (abrogationPhrase(a)) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--" + (estAbroge(a) ? "warning" : "info"), style: { marginBottom: "12px" } },
+      h("p", { class: "fr-alert__title", text: estAbroge(a) ? "Acte abrogé" : "Abrogation prévue" }),
+      h("p", { class: "fr-small", text: abrogationPhrase(a) }),
+    ));
+  }
+
+  // D'où vient le numéro : un numéro attribué par un service externe est
+  // rattaché à la ligne créée chez ce service (voir src/lib/numbering.js).
+  if (a.numeroSource) {
+    root.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "-6px" },
+      text: `Numéro attribué par le service de numérotation${a.numeroSource.ref ? ` — référence ${a.numeroSource.ref}` : ""}${a.numeroSource.at ? `, le ${formatDate(String(a.numeroSource.at).slice(0, 10))}` : ""}.` }));
+  }
+
   const history = historyCard(a, doc);
   if (history) root.appendChild(history);
 
   // Le parapheur : où en est l'acte dans son circuit de validation, et ce que
   // le lecteur peut y faire. C'est la même mécanique que l'écran « Parapheur »,
-  // ramenée sur la fiche de l'acte concerné.
-  root.appendChild(parapheurCard(a));
+  // ramenée sur la fiche de l'acte concerné. Fonction expérimentale : la carte
+  // n'apparaît que si elle est activée (Administration › Expérimentale).
+  if (parapheurActif()) root.appendChild(parapheurCard(a));
+
+  // La révision : le contrôle avant la signature (voir src/lib/revision.js).
+  // Elle est INDÉPENDANTE du parapheur : un acte peut être révisé sans circuit,
+  // et un circuit peut être achevé sans réviseur compétent. La carte apparaît
+  // dès qu'un réviseur est compétent pour l'acte, ou que l'acte porte déjà son
+  // dossier de révision.
+  const revue = revisionCard(a);
+  if (revue) root.appendChild(revue);
 
   // signature et publication
   if (a.original || a.publication || a.statut === "signee" || a.statut === "publie" || a.statut === "en_signature" || a.statut === "en_attente") {
@@ -770,13 +990,19 @@ export function renderActeDetail(root, params) {
         h("p", { class: "fr-small" }, h("strong", { text: "Publié. " }), `ELI ${p.eliUri}`),
         h("p", { class: "fr-small fr-muted", text: `Publié le ${formatDate(p.datePublication)} · entrée en vigueur le ${formatDate(p.dateOpposabilite)} · ${p.recueil || ""}` }),
       ) : null,
+      // Un acte retiré du recueil garde la trace du retrait et de son motif :
+      // c'est un geste exceptionnel, il ne doit pas s'oublier.
+      a.retraits?.length ? h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "8px" } },
+        h("p", { class: "fr-alert__title", text: "Retiré du recueil" }),
+        ...a.retraits.slice(-3).map((r) => h("p", { class: "fr-small", text: `Le ${formatDate(String(r.le || "").slice(0, 10))}${r.auteur ? " par " + r.auteur : ""} — motif technique : ${r.motif}` })),
+        h("p", { class: "fr-small fr-muted", text: "Un acte publié ne se retire pas : le retrait est exceptionnel et ne se justifie que par un motif technique. Il est conservé ici et au journal d'audit." })) : null,
       !actePubliable(a) ? h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "8px" } },
         h("p", { class: "fr-alert__title", text: "Acte non publiable" }),
         h("p", { class: "fr-small", text: "Acte individuel : sa trame est déclarée non publiable. Signé et conservé au registre, il n'est pas déposé au recueil et ne reçoit pas d'identifiant ELI. Sa correction se fait directement, sans acte modificatif." })) : null,
       h("div", { class: "fr-row" },
         a.original ? button("Voir l'original signé", { variant: "secondary", size: "sm", icon: "lock", onClick: () => import("./signature.js").then((m) => m.voirOriginal(a)) }) : null,
         p ? button("Consulter la version en ligne", { variant: "primary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(p.cle)) }) : null,
-        can("signature.gerer") && a.statut !== "publie" && a.kind !== "consolide"
+        (a.original ? (actePubliable(a) ? can("signature.gerer") : can("actes.signer")) : can("actes.signer")) && a.statut !== "publie" && a.kind !== "consolide"
           ? button(
             actePubliable(a) ? (a.original ? "Publication" : "Signer") : (a.original ? "Suivi du circuit" : "Signer"),
             { variant: "tertiary", size: "sm", icon: "upload", onClick: () => { state.signature = { tab: actePubliable(a) && a.original ? "publication" : "circuit", acteId: a.id }; navigate("signature"); } })
@@ -909,13 +1135,49 @@ function parapheurCard(a) {
   if (can("actes.valider") && circuit && reparables) {
     box.appendChild(h("div", { class: "fr-row", style: { marginTop: "8px" } },
       button("Reprendre le circuit", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }),
-      v.statut === "valide" && can("signature.gerer")
+      v.statut === "valide" && can("actes.signer")
         ? button("Aller à la signature", { variant: "primary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } })
         : null,
       (v.statut === "refuse" || v.statut === "renvoye") && can("actes.rediger")
         ? button("Corriger l'acte", { variant: "primary", size: "sm", icon: "note", onClick: () => openActe(a) })
         : null));
   }
+  return box;
+}
+
+// ------------------------------------------------------------- révision
+// Le contrôle avant signature. La carte dit trois choses : où en est l'acte
+// devant le réviseur, ce que le rapport de conformité relève, et ce que le
+// lecteur peut faire — y compris lire le motif d'un rejet. Les briques
+// d'affichage sont partagées avec l'écran « Révision »
+// (src/ui/revision-cartes.js) : c'est le même dossier, lu par les mêmes gens.
+function revisionCard(a) {
+  const rev = revisionPour(a);
+  const r = a.revision;
+  if (!rev.requise && !r) return null;
+  const etat = etatRevision(a) || {};
+  const doc = docOfActe(a);
+  const rapport = doc ? rapportConformite(doc, { config: state.config, trame: trameById(a.trameId), acte: a, publiable: actePubliable(a) }) : null;
+  const box = h("div", { class: "fr-stack" });
+
+  box.appendChild(h("div", { class: "fr-card" },
+    h("div", { class: "fr-row" },
+      h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Révision" }),
+      h("span", { class: "fr-badge fr-badge--" + (etat.caduque ? "warning" : etat.color || "info"), text: etat.caduque ? "révision caduque" : etat.label || "hors révision" }),
+      h("div", { class: "fr-spacer" }),
+      can("actes.reviser")
+        ? button("Ouvrir la révision", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => { state.revision = { tab: r?.statut === "en_attente" ? "aReviser" : "rejets", acteId: a.id }; navigate("revision"); } })
+        : null,
+    ),
+    h("p", { class: "fr-small fr-muted", text: rev.requise
+      ? "Un réviseur est compétent pour cet acte : il le contrôle avant sa signature — le texte révisé est celui qui part en signature."
+      : "Aucun réviseur n'est compétent pour cet acte : il part en signature sans contrôle préalable." }),
+    !r && rev.requise ? h("p", { class: "fr-small", text: "Soumettez-le à la révision depuis « Signature & publication » : l'envoi en signature le transmet d'abord au réviseur." }) : null,
+  ));
+
+  if (r) box.appendChild(carteDossierRevision(a, etat));
+  if (r?.statut === "en_attente" && peutTrancher(a) && can("actes.reviser")) box.appendChild(carteDecisionRevision(a, rapport, { heading: "h3" }));
+  if (rapport) box.appendChild(carteRapport(rapport));
   return box;
 }
 
@@ -951,6 +1213,7 @@ function executionCard(a) {
   const limite = dateLimiteRecours(a, state.config, opts);
   const jours = limite ? ecartJours(aujourdhui(), limite) : null;
   const form = formalites(a, opts);
+  const rec = recoursDe(a);
   const box = h("div", { class: "fr-card" });
 
   box.appendChild(h("div", { class: "fr-row" },
@@ -961,10 +1224,25 @@ function executionCard(a) {
   box.appendChild(exe
     ? h("p", { class: "fr-small" },
       h("strong", { text: "Exécutoire le " + formatDate(exe) + ". " }),
-      limite ? `Délai de recours contentieux jusqu'au ${formatDate(limite)} (${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"}).` : "")
+      rec
+        ? `${recoursTypeLabel(rec.type) || "Recours"} introduit le ${formatDate(rec.introduitLe)} : le délai de recours est clos, l'acte est contesté.`
+        : limite ? `Délai de recours contentieux jusqu'au ${formatDate(limite)} (${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"}).` : "")
     : h("p", { class: "fr-small fr-muted", text: st.code === "brouillon"
       ? "L'acte n'est pas signé : le caractère exécutoire se constate après la signature."
       : "L'acte n'est pas encore exécutoire : " + (st.manquantes || []).map((m) => m.court).join(" et ") + " manque(nt)." }));
+
+  // Le recours du dossier : sa date d'introduction ferme le délai, et c'est elle
+  // qui interdit d'attester qu'il n'y a pas eu de recours. On le note depuis
+  // l'échéancier ; ici, la fiche le rappelle.
+  if (rec) {
+    const lignes = [
+      rec.demandeur ? "Auteur : " + rec.demandeur : "",
+      rec.ref ? "Réf. " + rec.ref : "",
+      rec.byName ? "noté par " + rec.byName : "",
+    ].filter(Boolean).join(" · ");
+    if (lignes) box.appendChild(h("p", { class: "fr-small fr-muted", text: lignes }));
+    if (rec.note) box.appendChild(h("p", { class: "fr-small", text: "« " + rec.note + " »" }));
+  }
 
   box.appendChild(h("div", { class: "exec-formalites", style: { marginTop: "8px" } }, ...form.map((f) => h("div", { class: "exec-formalite" + (f.fait ? " is-done" : "") },
     h("div", { class: "exec-formalite__head" },
@@ -973,6 +1251,15 @@ function executionCard(a) {
     h("p", { class: "fr-small" + (f.fait ? "" : " fr-muted"), text: f.fait
       ? ["le " + formatDate(f.at), f.ref ? "réf. " + f.ref : "", f.parEli ? "constatée par la chaîne ELI" : "", f.byName ? "par " + f.byName : ""].filter(Boolean).join(" · ")
       : (f.id === "signature" ? "L'acte n'est pas signé." : f.requis ? "Aucune constatation enregistrée." : "Formalité non requise : elle peut tout de même être constatée au dossier.") }),
+    // Certificat de transmission au contrôle de légalité, s'il y en a un : il a
+    // été déposé sur le document par l'API d'envoi (voir src/lib/legalite.js).
+    f.certificat ? h("p", { class: "fr-small exec-certificat" },
+      h("strong", { text: "Certificat de transmission" }),
+      h("span", { text: f.certificat.mention || "" }),
+      h("span", { class: "fr-muted", text: [
+        f.certificat.reference ? " · réf. " + f.certificat.reference : "",
+        f.certificat.sceau ? " · sceau " + String(f.certificat.sceau).slice(0, 16) + "…" : "",
+      ].filter(Boolean).join("") })) : null,
     f.id !== "signature" && !(f.id === "publication" && f.parEli) && (can("signature.gerer") || can("actes.gerer"))
       ? h("div", { class: "fr-row" },
         button(f.fait ? "Corriger" : "Enregistrer", {

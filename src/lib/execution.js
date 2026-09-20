@@ -144,6 +144,10 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
       ref: e.transmission?.ref || "",
       mode: e.transmission?.mode || "",
       byName: e.transmission?.byName || "",
+      // Certificat informatique de transmission (accusé de réception délivré
+      // par le contrôle de légalité) : présent lorsque la transmission a été
+      // faite par l'API d'envoi — voir src/lib/legalite.js.
+      certificat: e.transmission?.certificat || null,
     },
     {
       // La publication est normalement constatée par la chaîne ELI
@@ -192,10 +196,68 @@ export function dateLimiteRecours(acte, config, opts = {}) {
   return addMonths(d, delais(config).recoursMois);
 }
 
+// ------------------------------------------------------------------ entrée en vigueur
+// La date à laquelle un acte ENTRE EN VIGUEUR : la date d'effet qu'il déclare,
+// et à défaut son opposabilité — le lendemain de la publication, ou après le
+// nombre de jours réglé (Administration › Publication). C'est cette date-là,
+// et non celle de la publication, qui fait prendre effet les abrogations
+// prévues par l'acte (voir src/lib/abrogations.js et ui/abrogations-apply.js).
+export function entreeEnVigueur(acte, config) {
+  const effet = iso(acte?.values?.dateEffet || acte?.dateEffet || "");
+  if (effet) return effet;
+  const pub = iso(acte?.publication?.datePublication || acte?.datePublication || "");
+  if (!pub) return "";
+  const o = (config?.publication && config.publication.opposabilite) || {};
+  const jours = o.mode === "jours" ? Math.max(0, Number(o.jours) || 0) : 1;
+  return addDays(pub, jours);
+}
+
+// ------------------------------------------------------------------ recours
+// Le recours RÉELLEMENT introduit contre l'acte : un fait, et non une échéance.
+// L'administration le constate au vu de la pièce qu'elle a reçue — requête
+// enregistrée au greffe, lettre du requérant, déféré du préfet. La date
+// d'introduction est celle qui compte : c'est elle qui ferme le délai de
+// recours contentieux, et elle interdit désormais d'attester qu'il n'y a pas eu
+// de recours.
+export const RECOURS_TYPES = [
+  { id: "gracieux", label: "Recours gracieux" },
+  { id: "hierarchique", label: "Recours hiérarchique" },
+  { id: "contentieux", label: "Recours contentieux" },
+  { id: "refere_suspension", label: "Référé-suspension" },
+  { id: "refere_liberte", label: "Référé-liberté" },
+  { id: "defere_prefectoral", label: "Déféré du préfet" },
+  { id: "autre", label: "Autre" },
+];
+
+export const recoursTypeLabel = (id) => (RECOURS_TYPES.find((t) => t.id === id) || {}).label || "";
+
+export const recoursDe = (acte) => acte?.execution?.recours || null;
+
+export function enregistrerRecours(acte, { introduitLe, type, demandeur, ref, note, by, byName } = {}) {
+  if (!acte) return null;
+  acte.execution = acte.execution || {};
+  acte.execution.recours = {
+    introduitLe: iso(introduitLe) || aujourdhui(),
+    type: type || "",
+    demandeur: String(demandeur || "").trim(),
+    ref: String(ref || "").trim(),
+    note: String(note || "").trim(),
+    by: by || "",
+    byName: byName || "",
+    enregistreLe: new Date().toISOString(),
+  };
+  return acte.execution.recours;
+}
+
+export function effacerRecours(acte) {
+  if (acte?.execution) delete acte.execution.recours;
+}
+
 export const STATUTS_EXECUTION = {
   brouillon: { label: "En préparation", color: "warning" },
   en_attente: { label: "Formalités en cours", color: "info" },
   executoire: { label: "Exécutoire — recours ouvert", color: "success" },
+  recours: { label: "Recours introduit — contentieux en cours", color: "warning" },
   definitif: { label: "Définitif — délai de recours échu", color: "success" },
 };
 
@@ -207,6 +269,11 @@ export function statutExecution(acte, config, opts = {}) {
   const manquantes = requises.filter((x) => !x.fait);
   if (manquantes.length) return { ...STATUTS_EXECUTION.en_attente, code: "en_attente", manquantes, formalites: f };
   const limite = dateLimiteRecours(acte, config, opts);
+  const recours = recoursDe(acte);
+  // Un recours introduit ferme le délai : l'acte n'est plus « définitif par
+  // écoulement du délai », il est contesté — et le reste, fût le délai expiré,
+  // jusqu'à ce que le juge ait statué.
+  if (recours?.introduitLe) return { ...STATUTS_EXECUTION.recours, code: "recours", limite, recours, formalites: f };
   const jour = aujourdhui();
   if (limite && jour > limite) return { ...STATUTS_EXECUTION.definitif, code: "definitif", limite, formalites: f };
   return { ...STATUTS_EXECUTION.executoire, code: "executoire", limite, formalites: f };
@@ -266,9 +333,19 @@ export function alertes(acte, config, opts = {}) {
       out.push({
         niveau: reste <= 7 ? "warning" : "info",
         code: "recours",
-        message: `Délai de recours échu le ${formatDate(st.limite)} (${reste} jour(s)).`,
+        message: `Délai de recours contentieux : ${reste} jour(s) restant(s) (jusqu'au ${formatDate(st.limite)}).`,
       });
     }
+  }
+  // Un recours enregistré n'est pas un retard à rattraper, mais c'est un fait du
+  // dossier : un acte contesté ne se traite pas comme un acte dont le délai
+  // court encore. On le rappelle donc dans la liste des points à voir.
+  if (st.code === "recours" && st.recours) {
+    out.push({
+      niveau: "info",
+      code: "recours_introduit",
+      message: `${recoursTypeLabel(st.recours.type) || "Recours"} introduit le ${formatDate(st.recours.introduitLe)} : le délai de recours contentieux est clos.`,
+    });
   }
   return out;
 }
@@ -278,11 +355,23 @@ export function alertes(acte, config, opts = {}) {
 export function resumeExecution(acte, config, opts = {}) {
   const st = statutExecution(acte, config, opts);
   const exe = dateExecutoire(acte, opts);
+  if (st.code === "recours") {
+    const r = st.recours || {};
+    return {
+      code: st.code, label: st.label, color: st.color, exe, limite: st.limite, recours: r,
+      texte: `exécutoire le ${formatDate(exe)} · ${(recoursTypeLabel(r.type) || "recours").toLowerCase()} introduit le ${formatDate(r.introduitLe)}`,
+    };
+  }
   if (st.code === "executoire" || st.code === "definitif") {
+    const suite = st.limite
+      ? (st.code === "definitif"
+        ? ` · délai de recours échu le ${formatDate(st.limite)}`
+        : ` · recours jusqu'au ${formatDate(st.limite)}`)
+      : "";
     return {
       code: st.code, label: st.label, color: st.color,
       exe, limite: st.limite,
-      texte: `exécutoire le ${formatDate(exe)}` + (st.limite ? ` · recours jusqu'au ${formatDate(st.limite)}` : ""),
+      texte: `exécutoire le ${formatDate(exe)}${suite}`,
     };
   }
   if (st.code === "en_attente") {
@@ -296,8 +385,10 @@ export function resumeExecution(acte, config, opts = {}) {
 
 // Enregistre une formalité. L'appelant décide de la date et de la référence :
 // c'est une constatation, pas une déduction — l'application n'a aucun moyen de
-// savoir seule qu'un courrier est parti.
-export function enregistrerFormalite(acte, id, { at, ref, mode, destinataires, by, byName } = {}) {
+// savoir seule qu'un courrier est parti. Une formalité accomplie par une API
+// (transmission au contrôle de légalité) porte en plus son certificat et les
+// mentions de l'appel : la constatation est alors faite par le service.
+export function enregistrerFormalite(acte, id, { at, ref, mode, destinataires, certificat, api, by, byName } = {}) {
   if (!["transmission", "publication", "notification"].includes(id)) return null;
   acte.execution = acte.execution || {};
   acte.execution[id] = {
@@ -305,6 +396,8 @@ export function enregistrerFormalite(acte, id, { at, ref, mode, destinataires, b
     ref: String(ref || "").trim(),
     mode: mode || "",
     ...(destinataires !== undefined ? { destinataires: String(destinataires || "").trim() } : {}),
+    ...(certificat ? { certificat } : {}),
+    ...(api ? { api } : {}),
     by: by || "",
     byName: byName || "",
     enregistreLe: new Date().toISOString(),

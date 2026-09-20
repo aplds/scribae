@@ -26,6 +26,7 @@
 
 import * as db from "./db/index.js";
 import { hostKv } from "./hosts.js";
+import { rolesOf, primaryRoleId } from "./users.js";
 
 export const PRESENCE = "presence";
 export const JOURNAL = "journal";
@@ -93,7 +94,9 @@ export function notifiePour(entry, user) {
   if (!to.length) return false;
   if (to.includes("tous")) return true;
   if (to.includes(user.id)) return true;
-  if (user.role && to.includes("role:" + user.role)) return true;
+  // Les rôles CUMULÉS comptent tous : un éditeur-réviseur reçoit ce qui est
+  // adressé au rôle « reviseur » comme à celui d'« editeur ».
+  if (rolesOf(user).some((r) => to.includes("role:" + r))) return true;
   const services = (user.memberships || []).map((m) => m.serviceId).filter(Boolean);
   if (services.some((s) => to.includes("service:" + s))) return true;
   return false;
@@ -219,7 +222,9 @@ export function declarerUtilisateur(user) {
   moi = {
     id: user.id,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || user.login || "—",
-    role: user.role || "",
+    // La présence et le journal portent le rôle PRINCIPAL : c'est lui que lit
+    // l'en-tête (et les rôles cumulés sont visibles sur la fiche du compte).
+    role: primaryRoleId(user) || "",
     serviceId: (user.memberships || [])[0]?.serviceId || "",
   };
 }

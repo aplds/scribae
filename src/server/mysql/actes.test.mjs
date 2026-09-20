@@ -124,6 +124,45 @@ test("publication : ELI, registre, idempotence et date d'opposabilité", () => {
   assert.equal(call("GET", "/v1/actes").body.actes.length, 1);
 });
 
+test("contrôle de légalité : transmettre avant de publier, et le certificat est conservé", () => {
+  const { call } = banc();
+  const a = call("POST", "/v1/actes", { akn: AKN, numero: "2026-402", dateSignature: "2026-03-10", controleLegalite: true }, { authorization: JETON }).body;
+  assert.equal(a.controleLegalite, true, "le dépôt retient l'exigence de transmission");
+
+  // Avant la signature, il n'y a rien à transmettre.
+  const tropTot = call("POST", `/v1/actes/${a.id}/transmission`, {}, { authorization: JETON });
+  assert.equal(tropTot.status, 409);
+  assert.equal(tropTot.body.code, "acte_non_signe");
+
+  const s = call("POST", `/v1/actes/${a.id}/signature`, {}, { authorization: JETON }).body;
+  call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  });
+
+  // Signé mais non transmis : la publication est refusée par le service.
+  const corps = { html: "<html>x</html>", akn: AKN, eliUri: "eli:/fr/arr/2026/0402/iam", datePublication: "2026-03-11", original: { document: { sha256: sha256(AKN) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] } };
+  const sans = call("POST", `/v1/actes/${a.id}/publication`, corps, { authorization: JETON });
+  assert.equal(sans.status, 409);
+  assert.equal(sans.body.code, "transmission_absente");
+
+  // La transmission délivre le certificat, scellé sur l'empreinte du document.
+  const t = call("POST", `/v1/actes/${a.id}/transmission`, {}, { authorization: JETON });
+  assert.equal(t.status, 201);
+  assert.ok(t.body.certificat.mention.startsWith("Transmis au contrôle de légalité le "), t.body.certificat.mention);
+  assert.equal(t.body.certificat.empreinte, sha256(AKN));
+  assert.equal(call("POST", `/v1/actes/${a.id}/transmission`, {}, { authorization: JETON }).body.idempotent, true);
+  const lu = call("GET", `/v1/actes/${a.id}/transmission`);
+  assert.equal(lu.status, 200);
+  assert.equal(lu.body.reference, t.body.reference);
+
+  // Transmis : la publication passe, et le registre garde le certificat.
+  const publie = call("POST", `/v1/actes/${a.id}/publication`, { ...corps, transmission: t.body.certificat }, { authorization: JETON });
+  assert.equal(publie.status, 201);
+  const rec = call("GET", `/v1/publications/${encodeURIComponent(publie.body.cle)}`).body;
+  assert.equal(rec.transmission.mention, t.body.certificat.mention);
+});
+
 test("le routage : hors domaine, méthode et débit", () => {
   const { call, api } = banc();
   assert.equal(call("GET", "/v1/db/health"), null, "les routes de données ne relèvent pas de ce domaine");

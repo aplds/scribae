@@ -32,6 +32,11 @@ const ELI_CODES = {
 export const DEFAULT_PUBLICATION = {
   recueil: "Recueil des actes administratifs",
   opposabilite: { mode: "lendemain", jours: 1 },
+  // Publication AUTOMATIQUE au recueil : dès le retour de signature, un acte
+  // publiable est publié (et devient opposable). Éteinte, l'acte signé s'arrête
+  // au registre : c'est le réglage d'une administration qui publie dans son
+  // propre système, et n'attend pas de recueil de cette application.
+  auto: true,
   // Jeton d'API de démonstration. En exploitation, chaque application cliente
   // reçoit son propre jeton et seule son empreinte est conservée côté service.
   jetonDemonstration: "ak_demo_19de0ff93719f8484db433a0106aa022e034891defb1fd92",
@@ -110,6 +115,16 @@ function esc(s) {
 }
 const dlong = (x) => (x ? formatDate(x, "date-long") : "—");
 
+// Certificat de transmission au contrôle de légalité, DÉPOSÉ SUR LE DOCUMENT :
+// l'acte publié porte la mention délivrée par l'API d'envoi. C'est la marque de
+// l'étape qui s'est intercalée entre la signature et la publication.
+function transmissionBlock(r) {
+  const t = r.transmission;
+  if (!t || !t.mention) return "";
+  const ref = t.reference ? `<span class="ref">réf. ${esc(t.reference)}` + (t.sceau ? ` — sceau ${esc(String(t.sceau).slice(0, 24))}…` : "") + `</span>` : "";
+  return `<div class="transmis"><strong>Contrôle de légalité</strong>${esc(t.mention)}${ref ? "<br>" + ref : ""}</div>`;
+}
+
 // La page publiée : c'est le document déposé sur le service de publication.
 // Autonome (CSS inclus), elle reste lisible même sortie de l'application.
 export function buildWebVersion({ doc, config, record }) {
@@ -117,7 +132,7 @@ export function buildWebVersion({ doc, config, record }) {
   const brand = config.brand || {};
   const r = record || {};
   const style = styleForDoc(config, doc);
-  const body = doc ? renderDocument(doc, config, { style }).outerHTML : (r.bodyHtml || "");
+  const body = doc ? renderDocument(doc, config, { style, abrogations: true }).outerHTML : (r.bodyHtml || "");
   const formatLinks = [
     ["HTML", "text/html"],
     ["Akoma Ntoso", "application/akn+xml"],
@@ -165,7 +180,16 @@ ${documentCss(config, style)}
 /* Les marques de la version consolidée sont propres à la publication. */
 .doc ins{background:#e8f6ec;text-decoration:none;box-shadow:inset 0 0 0 1px #b8e0c4}
 .doc del{background:#fbeceb;box-shadow:inset 0 0 0 1px #f0c9c7;color:#7a7a7a}
+/* Articles abrogés : la version en ligne conserve leur ancienne rédaction (le
+   recueil la révèle sur demande, « Afficher les articles abrogés »), mais la
+   page publiée et son impression ne la montrent pas d'elles-mêmes. */
+.doc-article--abroge .doc-abroge-corps{display:none}
+@media print{.doc-article--abroge .doc-abroge-corps{display:none!important}}
 .foot{max-width:calc(${A4_WIDTH} + 354px);margin:0 auto;padding:14px 18px;color:#5a6472;font-size:.78rem}
+/* Certificat de transmission au contrôle de légalité, déposé sur le document. */
+.transmis{margin-top:1.6em;border-left:4px solid var(--brand);background:#f4f6fb;padding:10px 12px;border-radius:3px;font-size:.84rem}
+.transmis strong{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#3a3a3a}
+.transmis .ref{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;color:#5a6472}
 /* Impression de la version en ligne : seule la page de l'acte est imprimée,
    sur A4 — mêmes marges que le document d'origine, donc mêmes sauts de page. */
 ${A4_BREAK_CSS}
@@ -182,9 +206,9 @@ ${A4_BREAK_CSS}
   <span class="hdr__rep">${esc(r.recueil || settings.recueil)}</span>
   <span class="badge">${esc(r.nature || "Acte")} ${esc(r.numero || "")}</span>
 </div></div>
-<div class="crumb">Accueil &rsaquo; Actes administratifs &rsaquo; ${esc(r.nature || "")} &rsaquo; ${esc(r.numero || "")} <span class="eli">(${esc(r.eliUri || "")})</span></div>
+<div class="crumb">Accueil &rsaquo; Actes administratifs &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")} &rsaquo; ${esc(r.numero || "")} <span class="eli">(${esc(r.eliUri || "")})</span></div>
 <div class="main"><div class="grid">
-  <div class="paper"><div class="doc">${body}</div></div>
+  <div class="paper"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
   <div class="pub-aside">
     <div class="side">
       <h3>Publication</h3>
@@ -193,6 +217,7 @@ ${A4_BREAK_CSS}
         <dt>Publié le</dt><dd>${esc(dlong(r.datePublication))}</dd>
         <dt>${r.kind === "consolidee" ? "Texte consolidé au" : "Signé le"}</dt><dd>${esc(dlong(r.dateDocument))}</dd>
         <dt>Auteur</dt><dd>${esc(r.auteur || "")}</dd>
+        ${r.themeLabel ? `<dt>Thème</dt><dd>${esc(r.themeLabel)}</dd>` : ""}
         <dt>ELI</dt><dd class="eli">${esc(r.eliUri || "")}</dd>
       </dl>
       <div class="formats">${formatLinks.map(([l]) => `<span>${esc(l)}</span>`).join("")}</div>
@@ -243,6 +268,7 @@ export function publicationJsonLd(record) {
     ],
     "eli:related_to": (r.versions || []).map((v) => ({ "@id": v.eliUri || undefined, "eli:date_document": v.dateDocument, "dcterms:description": v.label })),
     "dcterms:description": r.objet || "",
+    "dcterms:subject": r.themeLabel ? { "dcterms:title": r.themeLabel } : undefined,
     "dcterms:creator": { "@type": "schema:Organization", "schema:name": r.brandName || "" },
     "schema:legislationIdentifier": r.numero || "",
     "eli:signature": r.signature ? {

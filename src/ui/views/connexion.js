@@ -17,7 +17,7 @@ import { h, icon } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
-import { ROLES, ROLE_ORDER, fullName, initialsOf, sortName } from "../../lib/users.js";
+import { ROLES, ROLE_ORDER, fullName, initialsOf, sortName, primaryRoleId, badgesOf } from "../../lib/users.js";
 import { primaryServiceName } from "../../lib/scope.js";
 import { isOidc } from "../../lib/auth.js";
 import { loginPanel } from "../oidc.js";
@@ -45,19 +45,22 @@ export function renderConnexion(root) {
           : "Choisissez un compte pour entrer. Les écrans, les actions et les trames accessibles dépendent du rôle et du périmètre (services et bureaux) du compte." }),
         oidc ? loginPanel() : groups(users, root),
         h("p", { class: "connexion__note", text: oidc
-          ? "Les comptes de démonstration sont désactivés tant que l'annuaire est branché : aucune session ne peut être ouverte sans passer par lui. C'est un réglage du référentiel (Référentiel › Annuaire)."
-          : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Référentiel › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),
+          ? "Les comptes de démonstration sont désactivés tant que l'annuaire est branché : aucune session ne peut être ouverte sans passer par lui. C'est un réglage du référentiel (Administration › Annuaire)."
+          : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Administration › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),
       ),
     ),
   );
   root.appendChild(box);
 }
 
+// Les comptes sont rangés par PROFIL PRINCIPAL. Un compte à rôles cumulés —
+// un éditeur chargé de la révision, par exemple — figure dans son profil
+// principal, et ses qualités cumulées s'affichent sur sa ligne.
 function groups(users, root) {
   const out = [];
   for (const roleId of ROLE_ORDER) {
     const role = ROLES[roleId];
-    const members = users.filter((u) => u.role === roleId).sort((a, b) => sortName(a).localeCompare(sortName(b)));
+    const members = users.filter((u) => primaryRoleId(u) === roleId).sort((a, b) => sortName(a).localeCompare(sortName(b)));
     if (!members.length) continue;
     out.push(h("div", { class: "connexion__group" },
       h("div", { class: "connexion__grouphead" },
@@ -73,6 +76,7 @@ function groups(users, root) {
 function accountRow(u, root) {
   const entity = (state.config.entities || []).find((e) => e.id === u.entityId);
   const entLogo = u.entityId === state.config.entities?.[0]?.id ? state.config.brand?.logoUrl : "";
+  const cumul = badgesOf(u).slice(1);
   return h("button", {
     class: "connexion__user", type: "button",
     title: "Se connecter en tant que " + fullName(u),
@@ -84,6 +88,7 @@ function accountRow(u, root) {
     h("span", { class: "connexion__who" },
       h("span", { class: "connexion__fullname", text: fullName(u) }),
       h("span", { class: "connexion__meta", text: [primaryServiceName(state.config, u), entity?.name].filter(Boolean).join(" · ") || u.email || "" }),
+      cumul.length ? h("span", { class: "connexion__qualites" }, ...cumul.map((r) => h("span", { class: "fr-badge fr-badge--" + r.badge, title: r.summary, text: r.label }))) : null,
     ),
     h("span", { class: "connexion__id fr-mono", text: u.login }),
     h("span", { class: "connexion__go", title: "Se connecter" }, icon("check", 16), h("span", { text: "Entrer" })),

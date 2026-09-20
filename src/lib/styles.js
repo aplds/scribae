@@ -41,6 +41,58 @@ import { uid } from "./util.js";
 // millimètres (l'unité est ajoutée en écrivant le CSS).
 // ============================================================================
 
+// --------------------------------------------------------------- polices
+// Les polices proposées aux feuilles de style : une **liste fermée** plutôt
+// qu'un champ libre, pour que l'écran dise ce qui est disponible et que les
+// chartes d'une collectivité se ressemblent. Ce sont des familles **répandues
+// sur les postes** — rien à télécharger, aucune dépendance réseau — et chaque
+// entrée porte sa pile CSS complète avec ses replis, car une même famille ne
+// s'appelle pas pareil d'un système à l'autre. Les documents exportés (Word,
+// HTML, PDF) nomment la même pile : la charte traverse donc les postes.
+//
+// Une police hors liste reste possible : la feuille conserve la pile saisie
+// (une police installée sur les postes, ou une pile CSS complète) et l'écran
+// la présente comme « Personnalisée ».
+export const FONT_CHOICES = [
+  {
+    group: "À empattements",
+    fonts: [
+      { value: "'Times New Roman', Times, Georgia, serif", label: "Times New Roman" },
+      { value: "Georgia, 'Times New Roman', serif", label: "Georgia" },
+      { value: "Cambria, Georgia, 'Times New Roman', serif", label: "Cambria" },
+      { value: "'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif", label: "Palatino" },
+      { value: "Garamond, 'EB Garamond', Georgia, serif", label: "Garamond" },
+      { value: "'Century Schoolbook', 'New Century Schoolbook', Georgia, serif", label: "Century Schoolbook" },
+    ],
+  },
+  {
+    group: "Sans empattement",
+    fonts: [
+      { value: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif", label: "Segoe UI" },
+      { value: "Arial, 'Helvetica Neue', Helvetica, sans-serif", label: "Arial" },
+      { value: "Calibri, 'Segoe UI', Arial, sans-serif", label: "Calibri" },
+      { value: "Verdana, Geneva, Tahoma, sans-serif", label: "Verdana" },
+      { value: "Tahoma, Verdana, sans-serif", label: "Tahoma" },
+      { value: "'Trebuchet MS', Tahoma, sans-serif", label: "Trebuchet MS" },
+      { value: "'Century Gothic', 'AppleGothic', sans-serif", label: "Century Gothic" },
+    ],
+  },
+  {
+    group: "Chasse fixe",
+    fonts: [
+      { value: "'Courier New', Courier, monospace", label: "Courier New" },
+      { value: "Consolas, 'Courier New', monospace", label: "Consolas" },
+    ],
+  },
+];
+
+export const FONT_DEFAULT = FONT_CHOICES[0].fonts[0].value;
+
+const FONT_FLAT = FONT_CHOICES.flatMap((g) => g.fonts);
+export const FONT_VALUES = FONT_FLAT.map((f) => f.value);
+export const isListedFont = (value) => FONT_VALUES.includes(value);
+export const fontLabel = (value) => (FONT_FLAT.find((f) => f.value === value) || {}).label || "";
+
 // --------------------------------------------------------------- modèle
 
 export function emptyStyle(patch = {}) {
@@ -67,7 +119,7 @@ export function emptyStyle(patch = {}) {
     frameSpace: "6", // mm entre le cadre et le texte
 
     // --- typographie
-    fontFamily: "'Times New Roman', Times, Georgia, serif",
+    fontFamily: FONT_DEFAULT,
     fontSize: "11",
     lineHeight: "1.5",
     justify: true,
@@ -118,16 +170,28 @@ export function emptyStyle(patch = {}) {
     recitalsItalic: false,
 
     // --- listes
-    listMarker: "disc", // disc | dash | decimal | none
+    // `listMarker` est la marque des listes à puces (`ul`) ; `listNumbering`,
+    // celle des listes numérotées (`ol`). Les deux se règlent séparément depuis
+    // que le rédacteur choisit, bloc par bloc, entre liste à puces et liste
+    // numérotée (voir l'éditeur de trame).
+    listMarker: "disc", // disc | circle | square | dash | decimal | none
+    listNumbering: "decimal", // decimal | degree | parenth | lalpha | ualpha | lroman | uroman | none
     listIndent: "22", // px
 
     // --- diviseurs et encadrés
     ruleStyle: "line", // line | double | dotted | none
     ruleWidth: "1",
     articleDivider: "none", // none | line | dotted | double
+    // Les encadrés : chaque présentation « Encadré » trace les côtés retenus —
+    // « tblr » (haut, droite, bas, gauche) par défaut. Voir `boxSides`.
+    titleBoxSides: "tblr",
+    headingBoxSides: "tblr",
     enactStyle: "plain", // plain | rule | band | box
+    enactBoxSides: "tblr",
     enactCase: false,
     mentionStyle: "plain", // plain | left | box | tinted
+    mentionBoxSides: "tblr",
+    signatureBoxSides: "tblr",
     mentionSize: "0.92", // em
     mentionItalic: false,
     tableStyle: "grid", // grid | rows | zebra
@@ -172,7 +236,7 @@ export function legacyStyleFromBrand(brand = {}) {
     id: "sty-general",
     label: "Feuille générale",
     general: true,
-    fontFamily: brand.documentFont || "'Times New Roman', Times, Georgia, serif",
+    fontFamily: brand.documentFont || FONT_DEFAULT,
     color: brand.color || "#000091",
   });
 }
@@ -239,11 +303,15 @@ export function styleTraits(style) {
   if (s.showHeader) t.push("en-tête");
   if (s.showFooter) t.push("pied de page");
   if (s.titleCase) t.push("intitulé en capitales");
+  if (s.titleRule === "box") t.push("intitulé encadré");
+  if (s.headingRule === "box") t.push("intitulés d'article encadrés");
   if (s.articleNumberLayout === "margin") t.push("numéros dans la marge");
   if (s.articleNumberLayout === "block") t.push("numéros au-dessus");
   if (s.articleDivider !== "none") t.push("filets entre articles");
   if (s.enactStyle !== "plain") t.push("formule DÉCIDE encadrée");
   if (s.mentionStyle !== "plain") t.push("mentions encadrées");
+  const numTrait = { degree: "listes en 1°", parenth: "listes en 1)", lalpha: "listes en a)", ualpha: "listes en A)", lroman: "listes en i.", uroman: "listes en I." }[s.listNumbering];
+  if (numTrait) t.push(numTrait);
   if (!s.justify) t.push("texte non justifié");
   return t;
 }
@@ -306,6 +374,7 @@ export function seedStyles() {
     emptyStyle({
       id: "sty-general",
       label: "Charte générale de la collectivité",
+      general: true,
       description: "La présentation par défaut de tous les actes : sobre, sur papier A4, sans en-tête ni pied de page.",
     }),
     emptyStyle({
@@ -471,6 +540,71 @@ export const STYLE_PRESETS = [
       frameStyle: "none", showHeader: false, showFooter: false,
     },
   },
+  // Les deux modèles « charte de l'État ». Le premier applique la charte de
+  // l'État à ses documents — la typographie Marianne et le bleu France —, mais
+  // elle est RÉSERVÉE à l'État et à ses opérateurs : le logiciel ne peut donc
+  // livrer ni la police Marianne ni le bloc-marque, qui restent à la charge de
+  // l'administration qui en a le droit. Le second en reprend la sobriété et les
+  // couleurs SANS ces éléments réservés (police Arial, identité de la
+  // collectivité) : c'est celui que prendront les collectivités. Voir la charte
+  // officielle : https://www.info.gouv.fr/marque-de-letat/charte-graphique-introduction
+  {
+    id: "etat",
+    label: "Charte graphique de l'État (réservé à l'État et à ses opérateurs)",
+    badge: "réservé",
+    badgeKind: "warning",
+    hint: "Bleu France (#000091) et typographie Marianne : la charte de l'État, son en-tête et son filet. Réservée à l'État et à ses opérateurs — la police Marianne et le bloc-marque ne sont pas livrés (installez la police, ajoutez votre bloc-marque au logo).",
+    values: {
+      // `Marianne` d'abord, avec des replis : la police officielle si le poste
+      // l'a, sinon une sans empattement sobre.
+      fontFamily: "Marianne, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      fontSize: "11", lineHeight: "1.5", justify: true, letterSpacing: "0",
+      color: "#000091", ink: "#1E1E1E", muted: "#666666", ruleColor: "#000091",
+      titleFont: "", titleSize: "1.1", titleWeight: "700", titleCase: false,
+      titleAlign: "center", titleRule: "line", titleColor: "#000091", titleMargin: "1",
+      authorityAlign: "left", authorityItalic: false,
+      headingFont: "", headingSize: "1", headingWeight: "700", headingColor: "#000091",
+      headingCase: false, headingRule: "none", articleNumberLayout: "inline",
+      visasLabelStyle: "plain", recitalsItalic: false,
+      ruleStyle: "line", articleDivider: "none",
+      enactStyle: "plain", enactCase: false,
+      mentionStyle: "plain", mentionSize: "0.9", mentionItalic: false,
+      tableStyle: "grid", signatureAlign: "right", signatureStyle: "line",
+      signatureSpace: "40", signatureWidth: "40", signatureNameWeight: "700",
+      frameStyle: "none",
+      showHeader: true, logoAlign: "left", logoHeight: "44",
+      headerText: "République française — {{entity.name}}", headerRule: true,
+      headerSize: "0.8", headerItalic: false, headerCase: false,
+      showFooter: false,
+    },
+  },
+  {
+    id: "marianne",
+    label: "Marianne-like (inspiré de la charte de l'État)",
+    badge: "libre",
+    hint: "Inspirée de la charte de l'État, sans ses éléments réservés : mêmes couleurs (bleu France #000091, noir) et même sobriété, mais en Arial et avec l'identité de votre collectivité. Utilisable par toute administration.",
+    values: {
+      fontFamily: "Arial, 'Helvetica Neue', Helvetica, sans-serif",
+      fontSize: "11", lineHeight: "1.5", justify: true, letterSpacing: "0",
+      color: "#000091", ink: "#1E1E1E", muted: "#666666", ruleColor: "#000091",
+      titleFont: "", titleSize: "1.08", titleWeight: "700", titleCase: false,
+      titleAlign: "left", titleRule: "line", titleColor: "#000091", titleMargin: "1",
+      authorityAlign: "left", authorityItalic: false,
+      headingFont: "", headingSize: "1", headingWeight: "700", headingColor: "#000091",
+      headingCase: false, headingRule: "none", articleNumberLayout: "inline",
+      visasLabelStyle: "plain", recitalsItalic: false,
+      ruleStyle: "line", articleDivider: "none",
+      enactStyle: "plain", enactCase: false,
+      mentionStyle: "left", mentionSize: "0.9", mentionItalic: false,
+      tableStyle: "rows", signatureAlign: "right", signatureStyle: "line",
+      signatureSpace: "40", signatureWidth: "40", signatureNameWeight: "700",
+      frameStyle: "none",
+      showHeader: true, logoAlign: "left", logoHeight: "44",
+      headerText: "{{entity.name}}", headerRule: true,
+      headerSize: "0.85", headerItalic: false, headerCase: false,
+      showFooter: false,
+    },
+  },
 ];
 
 // Applique un préréglage à une feuille : les valeurs du préréglage, le reste
@@ -495,7 +629,42 @@ function tint(hex, amount = 0.9) {
 }
 
 const RULE_BORDER = { line: "solid", double: "double", dotted: "dotted" };
-const LIST_MARKER = { disc: "disc", dash: "'– '", decimal: "decimal", none: "none" };
+// La marque des listes à puces (`ul`). `decimal` y subsiste pour les feuilles
+// enregistrées avant que la numérotation ait son propre réglage : leur valeur
+// reste rendue à l'identique.
+const LIST_MARKER = { disc: "disc", circle: "circle", square: "square", dash: "'– '", decimal: "decimal", none: "none" };
+// La numérotation des listes numérotées (`ol`), par leur nom de compteur CSS.
+const LIST_NUMBER = {
+  decimal: "decimal",
+  degree: "scribae-degree",
+  parenth: "scribae-parenth",
+  lalpha: "scribae-lalpha",
+  ualpha: "scribae-ualpha",
+  lroman: "scribae-lroman",
+  uroman: "scribae-uroman",
+  none: "none",
+};
+// Les compteurs sur mesure : `extends` reprend le compteur natif et n'en change
+// que le suffixe — « 1° », « 1) », « a) »… Rien à calculer, et la numérotation
+// reste continue d'une liste à l'autre comme celle du navigateur.
+const COUNTER_STYLES = {
+  "scribae-degree": 'system:extends decimal;suffix:"°"',
+  "scribae-parenth": 'system:extends decimal;suffix:")"',
+  "scribae-lalpha": 'system:extends lower-alpha;suffix:")"',
+  "scribae-ualpha": 'system:extends upper-alpha;suffix:")"',
+  "scribae-lroman": 'system:extends lower-roman;suffix:"."',
+  "scribae-uroman": 'system:extends upper-roman;suffix:"."',
+};
+// Les côtés d'un encadré : « tblr » = haut, droite, bas, gauche. On ne trace que
+// les côtés retenus, côté par côté, plutôt que par le raccourci `border` : c'est
+// ce qui permet un filet en haut seul, ou un encadré ouvert d'un côté.
+const BOX_SIDES = [["t", "top"], ["r", "right"], ["b", "bottom"], ["l", "left"]];
+const boxSides = (sides, decl) => {
+  // Une valeur absente vaut l'encadré complet ; une valeur vide (« aucun côté »)
+  // est une case comme une autre — on ne la remplace pas par le défaut.
+  const on = sides == null ? "tblr" : String(sides);
+  return BOX_SIDES.filter(([k]) => on.includes(k)).map(([, name]) => `border-${name}:${decl}`);
+};
 const AUTHORITY_ALIGN = { left: "left", center: "center", right: "right" };
 
 // Le CSS d'une feuille. `scope` permet de le confiner à un document précis
@@ -511,7 +680,7 @@ export function styleCss(style, config, { scope = "" } = {}) {
   const soft = tint(accent, 0.9);
   const neutral = tint(ink, 0.94);
   const gridLine = tint(ink, 0.72);
-  const font = s.fontFamily || "'Times New Roman', Times, Georgia, serif";
+  const font = s.fontFamily || FONT_DEFAULT;
   const titleFont = s.titleFont || font;
   const headingFont = s.headingFont || font;
   const headingColor = s.headingColor || ink;
@@ -524,6 +693,9 @@ export function styleCss(style, config, { scope = "" } = {}) {
 
   const w = [];
   const rule2 = (sel, decls) => w.push(`${sel}{${decls}}`);
+  // Un encadré : seuls les côtés retenus sont tracés (`boxSides`). Sans côté,
+  // rien n'est écrit — la casse d'un encadré est un réglage comme un autre.
+  const ruleBox = (sel, sides, decl) => { const d = boxSides(sides, decl); if (d.length) rule2(sel, d.join(";")); };
 
   // -- corps du document
   rule2(R(".doc"),
@@ -553,6 +725,7 @@ export function styleCss(style, config, { scope = "" } = {}) {
   if (s.titleRule === "line") rule2(A(".doc-title"), `border-bottom:${W} ${border} ${rule};padding-bottom:.35em`);
   if (s.titleRule === "double") rule2(A(".doc-title"), `border-bottom:3px double ${rule};padding-bottom:.35em`);
   if (s.titleRule === "underline") rule2(A(".doc-title"), "text-decoration:underline;text-underline-offset:4px");
+  if (s.titleRule === "box") { rule2(A(".doc-title"), "padding:.5em .8em"); ruleBox(A(".doc-title"), s.titleBoxSides, `${W} ${border} ${rule}`); }
 
   // -- formule d'autorité
   rule2(A(".doc-authority"),
@@ -574,6 +747,7 @@ export function styleCss(style, config, { scope = "" } = {}) {
   rule2(A(".doc-article-num"), `color:${headingColor}`);
   if (s.headingRule === "line") rule2(A(".doc-article-head"), `border-bottom:${W} solid ${rule};padding-bottom:.2em`);
   if (s.headingRule === "dotted") rule2(A(".doc-article-head"), `border-bottom:${W} dotted ${rule};padding-bottom:.2em`);
+  if (s.headingRule === "box") { rule2(A(".doc-article-head"), "padding:.35em .6em;margin-bottom:.55em"); ruleBox(A(".doc-article-head"), s.headingBoxSides, `${W} ${border} ${rule}`); }
   // Le numéro d'article au-dessus du titre, ou dans la marge de gauche.
   if (s.articleNumberLayout === "block") rule2(A(".doc-article-num"), "display:block;margin-bottom:.1em");
   if (s.articleNumberLayout === "margin") {
@@ -588,20 +762,25 @@ export function styleCss(style, config, { scope = "" } = {}) {
     rule2(A(".doc-article:first-of-type"), "border-top:none;padding-top:0");
   }
 
-  // -- listes
-  rule2(A(".doc-list"), `list-style:${LIST_MARKER[s.listMarker] || "disc"};padding-left:${pxv(s.listIndent, "22px")}`);
+  // -- listes : la puce des listes à puces, la numérotation des listes
+  //    numérotées. Le rédacteur choisit le genre, bloc par bloc.
+  const indent = pxv(s.listIndent, "22px");
+  rule2(A("ul.doc-list"), `list-style-type:${LIST_MARKER[s.listMarker] || "disc"};padding-left:${indent}`);
+  const numbering = LIST_NUMBER[s.listNumbering] || "decimal";
+  rule2(A("ol.doc-list"), `list-style-type:${numbering};padding-left:${indent}`);
+  if (COUNTER_STYLES[numbering]) w.push(`@counter-style ${numbering}{${COUNTER_STYLES[numbering]}}`);
 
   // -- formule d'édiction
   if (s.enactStyle === "rule") rule2(A(".doc-enact"), `border-top:${W} solid ${rule};border-bottom:${W} solid ${rule};padding:.35em 0`);
   if (s.enactStyle === "band") rule2(A(".doc-enact"), `background:${soft};border-top:1px solid ${rule};border-bottom:1px solid ${rule};padding:.5em;color:${headingColor}`);
-  if (s.enactStyle === "box") rule2(A(".doc-enact"), `border:1px solid ${rule};padding:.55em;background:#fff`);
+  if (s.enactStyle === "box") { rule2(A(".doc-enact"), "padding:.55em;background:#fff"); ruleBox(A(".doc-enact"), s.enactBoxSides, `1px solid ${rule}`); }
   if (s.enactCase) rule2(A(".doc-enact"), "text-transform:uppercase;letter-spacing:.04em");
 
   // -- mentions (recours, publication, notification)
   rule2(A(".doc-mention"), `font-size:${emv(s.mentionSize, "0.92em")}`);
   if (s.mentionItalic) rule2(A(".doc-mention"), "font-style:italic");
   if (s.mentionStyle === "left") rule2(A(".doc-mention"), `border-left:3px solid ${rule};padding-left:.7em`);
-  if (s.mentionStyle === "box") rule2(A(".doc-mention"), `border:1px solid ${rule};padding:.5em .7em`);
+  if (s.mentionStyle === "box") { rule2(A(".doc-mention"), "padding:.5em .7em"); ruleBox(A(".doc-mention"), s.mentionBoxSides, `1px solid ${rule}`); }
   if (s.mentionStyle === "tinted") rule2(A(".doc-mention"), `background:${neutral};border-left:3px solid ${rule};padding:.5em .7em`);
 
   // -- tableaux
@@ -635,7 +814,7 @@ export function styleCss(style, config, { scope = "" } = {}) {
   rule2(A(".doc-signature-name"), `font-weight:${s.signatureNameWeight || "400"}`);
   if (s.signatureFunctionItalic) rule2(A(".doc-signature-role"), "font-style:italic");
   if (s.signatureStyle === "line") rule2(A(".doc-signature-block"), `border-top:${W} solid ${ink};padding-top:${pxv(s.signatureSpace, "40px")}`);
-  if (s.signatureStyle === "box") rule2(A(".doc-signature-block"), `border:${W} dashed ${rule};padding:${pxv(s.signatureSpace, "40px")} 14px 10px`);
+  if (s.signatureStyle === "box") { rule2(A(".doc-signature-block"), `padding:${pxv(s.signatureSpace, "40px")} 14px 10px`); ruleBox(A(".doc-signature-block"), s.signatureBoxSides, `${W} dashed ${rule}`); }
 
   // -- en-tête (logo + texte) et pied de page
   const headerRule = s.headerRule && s.ruleStyle !== "none";
@@ -739,6 +918,14 @@ export function sampleDocument(config, style) {
             { id: "l1", text: "la production d'un compte rendu d'emploi des fonds dans les six mois suivant la clôture de l'exercice ;" },
             { id: "l2", text: "la mention du concours de la collectivité dans les supports de communication de l'association ;" },
             { id: "l3", text: "l'information immédiate de la collectivité en cas de changement de dirigeants." },
+          ] },
+          { type: "para", text: "Elle est en outre soumise aux obligations suivantes :" },
+          // Une liste NUMÉROTÉE, pour que l'écran des feuilles de style montre
+          // aussi la numérotation (1°, a), i… ) à côté de la puce.
+          { type: "list", ordered: true, items: [
+            { id: "n1", text: "justifier de la tenue d'une comptabilité séparée pour l'opération subventionnée ;" },
+            { id: "n2", text: "signaler sans délai toute modification statutaire ou changement de représentant légal ;" },
+            { id: "n3", text: "restituer les sommes non employées au terme de l'exercice." },
           ] },
         ],
       },

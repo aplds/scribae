@@ -9,7 +9,7 @@ Il expose **deux familles de ressources** :
 | Famille | Ressources | Persistance |
 |---|---|---|
 | **Données** | `GET /v1/db/health`, `GET /v1/db/collections/{collection}`, `POST /v1/db/collections/{collection}/sync` | `sb_record`, `sb_collection`, `sb_journal` |
-| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/publications…`, `/v1/eli/…`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
+| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/publications…`, `/v1/eli/…`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
 
 Le contrat de la famille « données » est **le même** que celui du service de
 démonstration : l'application ne voit aucune différence et
@@ -99,7 +99,7 @@ même autorisation d'écriture.
 
 ## 4. Brancher l'application
 
-Dans l'application : **Référentiel › Base de données** →
+Dans l'application : **Administration › Base de données** →
 
 - mode **Serveur externe — MySQL / MariaDB** ;
 - **Adresse** : `https://donnees.exemple.fr`, ou **vide** si l'application est servie par le

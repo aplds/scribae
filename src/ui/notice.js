@@ -3,7 +3,7 @@
 //
 // Il est affiché en tête de l'application tant que le référentiel ne dit pas le
 // contraire : `brand.demo !== false`. L'administrateur le coupe depuis
-// « Référentiel › Identité » au moment où l'installation est adaptée pour de
+// « Administration › Identité » au moment où l'installation est adaptée pour de
 // vrai. Le réglage vit donc dans le référentiel : il voyage avec lui quand on
 // exporte/importe les données, et une installation neuve repart avec le bandeau.
 //

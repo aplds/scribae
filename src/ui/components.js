@@ -1,6 +1,9 @@
 import { h, icon, button, modal, field as frField, textInput, select, toast, clear } from "./dom.js";
 import { state, navigate } from "./state.js";
 import { servicesInScope, bureauxInScope, coveredBureaux, serviceById, bureauxOf } from "../lib/scope.js";
+import { FONT_CHOICES, FONT_VALUES } from "../lib/styles.js";
+import { formatDate } from "../lib/util.js";
+import { estAbroge, abrogeParDe, avecArticle } from "../lib/abrogations.js";
 
 // Lien discret vers le chapitre du guide correspondant à l'écran courant.
 export function helpLink(chapterId, label = "Aide sur cette page") {
@@ -22,6 +25,45 @@ export function selectField({ label, value, options, onChange, help, required, p
   const opts = placeholder ? [{ value: "", label: placeholder }, ...options] : options;
   const s = select(opts, value, onChange);
   return frField(label, s, { help, required });
+}
+
+// Choix d'une police : la **liste** des polices proposées (rangées par
+// familles), plus une porte de sortie — « Autre (police personnalisée)… » —
+// pour une police installée sur les postes ou une pile CSS complète. La valeur
+// rangée dans la feuille reste la **pile CSS**, jamais un identifiant d'entrée :
+// une charte exportée puis importée ailleurs nomme donc exactement la même
+// police. `inherit` ajoute « Héritée », pour les polices qui se déduisent du
+// corps du texte (une liste fermée n'offrirait pas de valeur vide sans elle).
+export function fontField({ label, value, onChange, help, required, inherit = false }) {
+  const CUSTOM = "__custom__";
+  const current = value == null ? "" : String(value);
+  const custom = !!current && !FONT_VALUES.includes(current);
+
+  const list = [];
+  if (inherit) list.push({ value: "", label: "Héritée (police du corps)" });
+  for (const g of FONT_CHOICES) list.push({ label: g.group, options: g.fonts });
+  list.push({ value: CUSTOM, label: custom ? "Autre (police personnalisée) — en cours" : "Autre (police personnalisée)…" });
+
+  const input = h("input", {
+    class: "fr-input", value: current, spellcheck: "false",
+    placeholder: "'Nom de la police', Arial, sans-serif",
+    on: { input: (e) => onChange(e.target.value) },
+  });
+  const extra = h("div", { class: "styles-font__custom", hidden: !custom }, input);
+
+  const sel = select(list, custom ? CUSTOM : current, (v) => {
+    if (v === CUSTOM) {
+      extra.hidden = false;
+      if (!custom) input.value = current;
+      input.focus();
+      input.select();
+      return;
+    }
+    extra.hidden = true;
+    onChange(v);
+  });
+
+  return frField(label, h("div", { class: "styles-font" }, sel, extra), { help, required });
 }
 
 export function choiceField({ label, value, options, onChange, help, required, multi }) {
@@ -197,3 +239,29 @@ export const acteStatutBadge = (s) => h("span", { class: "fr-badge fr-badge--" +
 // Un acte encore modifiable dans l'éditeur de rédaction : un acte signé ou
 // publié ne se réécrit pas, il se modifie (acte modificatif + version consolidée).
 export const isDraftable = (s) => !["signee", "publie", "en_attente", "abroge"].includes(s || "brouillon");
+
+// ------------------------------------------------ abrogations subies
+// La marque d'une abrogation subie par un acte : « abrogé » dès qu'elle a pris
+// effet, « abrogation prévue » tant que l'acte qui la porte n'est pas entré en
+// vigueur (voir src/lib/abrogations.js). Elle s'accroche au badge de statut.
+export const abrogationBadge = (a) => {
+  const m = abrogeParDe(a);
+  if (!m) return null;
+  const par = [avecArticle(m.designation || "acte"), m.numero ? "n° " + m.numero : "", m.date ? "du " + formatDate(m.date, "date-long") : ""].filter(Boolean).join(" ");
+  const quand = m.dateEntreeEnVigueur ? `, à compter du ${formatDate(m.dateEntreeEnVigueur, "date-long")}` : "";
+  return estAbroge(a)
+    ? h("span", { class: "fr-badge fr-badge--error", style: { marginLeft: "5px" }, title: `Abrogé par ${par}${quand}.`, text: "abrogé" })
+    : h("span", { class: "fr-badge fr-badge--warning", style: { marginLeft: "5px" }, title: `L'abrogation prendra effet à l'entrée en vigueur de ${par}.`, text: "abrogation prévue" });
+};
+
+// La phrase complète, pour une fiche d'acte : ce que l'abrogation dit, et par
+// quoi l'acte a été abrogé.
+export const abrogationPhrase = (a) => {
+  const m = abrogeParDe(a);
+  if (!m) return "";
+  const par = [avecArticle(m.designation || "acte"), m.numero ? "n° " + m.numero : "", m.date ? "du " + formatDate(m.date, "date-long") : ""].filter(Boolean).join(" ");
+  if (estAbroge(a)) {
+    return `Cet acte a été abrogé par ${par}${m.article ? `, à l'exception de son article ${m.article}` : ""}${m.dateEntreeEnVigueur ? `, à compter du ${formatDate(m.dateEntreeEnVigueur, "date-long")}` : ""}.`;
+  }
+  return `Une abrogation de cet acte est prévue par ${par}. Elle prendra effet au jour de l'entrée en vigueur de cet acte.`;
+};

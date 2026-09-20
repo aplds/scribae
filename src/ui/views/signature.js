@@ -11,12 +11,12 @@
 // notification (webhook) revient au service, qui vérifie l'empreinte du
 // document avant d'accepter la signature.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe } from "../state.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, parapheurActif, controleLegaliteActif, revisionPour, revisionRequisePour, visibleActes } from "../state.js";
 import { h, clear, button, toast, modal, icon, badge } from "../dom.js";
 import { textField, selectField, emptyState, helpLink, confirmDialog } from "../components.js";
 import { docOfActe, natureOf } from "./modifier.js";
-import { exportAkn, printHtml, documentCss } from "../../lib/export.js";
-import { renderDocument, applyPaper } from "../../lib/render.js";
+import { exportAkn, printHtml, documentCss, exportMarkdown } from "../../lib/export.js";
+import { renderDocument, applyPaper, documentToText } from "../../lib/render.js";
 import { styleForDoc } from "../../lib/styles.js";
 import { formatDate, download, todayIso } from "../../lib/util.js";
 import {
@@ -25,8 +25,18 @@ import {
 } from "../../lib/eli.js";
 import { PRESTATAIRE, prestataire } from "../../lib/signature.js";
 import { validationPourSignature, avancement } from "../../lib/validation.js";
-import { get, post, connect, apiStatus, errorMessage, beginFlow, onStatus } from "../../lib/remote.js";
+import { enregistrerFormalite } from "../../lib/execution.js";
+import { CONTROLE_LEGALITE, verifierCertificatTransmission } from "../../lib/legalite.js";
+import { get, post, connect, apiStatus, errorMessage, beginFlow, onStatus, recordExternal } from "../../lib/remote.js";
 import { renderApiTab } from "./api-console.js";
+import { soumettreARevision } from "../revision-actions.js";
+import { appliquerAbrogations } from "../abrogations-apply.js";
+import { hasRole, fullName } from "../../lib/users.js";
+import {
+  ROLE_SIGNATAIRE, personneDeCompte, etatRapprochement, rapprocher,
+  placeDansChaine,
+} from "../../lib/signataires.js";
+import { fileSignature as fileSignatureDe } from "../state.js";
 
 const STATUTS = {
   brouillon: ["Brouillon", "warning"],
@@ -42,19 +52,38 @@ const STATUTS = {
 export const statutLabel = (s) => (STATUTS[s] || [, s || "Brouillon"])[0];
 export const statutColor = (s) => (STATUTS[s] || ["", "warning"])[1];
 
+// Les messages de la publication se taisent pendant l'amorçage du recueil de
+// démonstration (voir src/ui/demo-publications.js) : l'agent n'a pas à voir
+// passer les notifications d'un geste que personne n'a demandé.
+let silencieux = false;
+const dire = (message, kind) => { if (!silencieux) toast(message, kind); };
+
 const TABS = [
+  // « Ma signature » n'apparaît qu'au signataire : c'est SA file, et l'onglet
+  // par lequel il entre. Le circuit de signature, lui, montre tous les actes du
+  // périmètre — donc, pour un signataire, ceux de son champ de compétence.
+  { id: "ma-signature", label: "Ma signature", signataire: true },
   { id: "circuit", label: "Circuit de signature" },
-  { id: "publication", label: "Publication (ELI)" },
+  { id: "publication", label: "Publication (ELI)", perm: "signature.gerer" },
   { id: "api", label: "API & journal", perm: "api.gerer" },
 ];
 
 export function renderSignature(root, params) {
-  const ui = (state.signature = state.signature || { tab: "circuit", acteId: null });
+  const ui = (state.signature = state.signature || { tab: null, acteId: null });
+  const signataire = hasRole(state.user, ROLE_SIGNATAIRE);
+  // L'onglet d'entrée d'un signataire est sa file ; celui d'un autre compte,
+  // le circuit de signature (comportement historique).
+  if (!ui.tab) ui.tab = signataire ? "ma-signature" : "circuit";
+  if (ui.tab === "ma-signature" && !signataire) ui.tab = "circuit";
   if (ui.tab === "api" && !can("api.gerer")) ui.tab = "circuit";
+  if (ui.tab === "publication" && !can("signature.gerer")) ui.tab = "circuit";
   const config = state.config;
   const settings = publicationSettings(config);
+  // Les actes de CET écran sont ceux que le compte peut voir — un signataire
+  // n'y trouve donc que son champ de compétence (voir visibleActes).
+  const actes = visibleActes();
   const docs = new Map();
-  for (const a of state.actes) { try { docs.set(a.id, docOfActe(a)); } catch { docs.set(a.id, null); } }
+  for (const a of actes) { try { docs.set(a.id, docOfActe(a)); } catch { docs.set(a.id, null); } }
   const redraw = () => redrawView();
   const paint = () => { try { redraw(); } catch (e) { console.error(e); } };
   // Les actions de cet écran (envoyer en signature, publier) ne sont ouvertes que
@@ -65,33 +94,40 @@ export function renderSignature(root, params) {
   // désactivée jusqu'à ce qu'un appel soit déclenché ailleurs).
   try { connect(); } catch (e) { /* signalé par l'étiquette d'état */ }
 
-  if (!state.actes.length) {
+  if (!actes.length) {
     root.appendChild(h("div", { class: "page-head" },
       h("div", { class: "page-head__text" },
         h("h1", { class: "page-head__title", text: "Signature & publication" }),
-        h("p", { class: "page-head__sub", text: "Envoi des actes finalisés en signature, puis publication et attribution de l'identifiant ELI." }),
+        h("p", { class: "page-head__sub", text: signataire
+          ? "Les actes dont la signature relève de vous apparaissent ici, et nulle part ailleurs dans l'atelier."
+          : "Envoi des actes finalisés en signature, puis publication et attribution de l'identifiant ELI." }),
       ),
       h("div", { class: "page-head__actions" }, helpLink("signature", "Comment faire ?")),
     ));
-    root.appendChild(emptyState("Aucun acte à signer pour l'instant : rédigez d'abord un acte.",
-      button("Rédiger un acte", { variant: "primary", onClick: () => navigate("rediger") })));
+    root.appendChild(signataire
+      ? emptyState("Aucun acte n'attend votre signature pour l'instant.", null)
+      : emptyState("Aucun acte à signer pour l'instant : rédigez d'abord un acte.",
+        button("Rédiger un acte", { variant: "primary", onClick: () => navigate("rediger") })));
     return;
   }
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: "Signature & publication" }),
-      h("p", { class: "page-head__sub", text: "L'acte signé devient opposable à sa publication. Le service de publication attribue alors son identifiant ELI." }),
+      h("p", { class: "page-head__sub", text: signataire
+        ? "Vous signez avec votre compte, rapproché de votre compte sur l'outil de signature. L'acte signé devient opposable à sa publication."
+        : "L'acte signé devient opposable à sa publication. Le service de publication attribue alors son identifiant ELI." }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("signature", "Comment faire ?"),
       statusBadgeEl(),
-      button("Publications", { variant: "secondary", icon: "list", onClick: () => navigate("publications") }),
+      can("signature.gerer") ? button("Publications", { variant: "secondary", icon: "list", onClick: () => navigate("publications") }) : null,
     ),
   ));
 
   const tabs = h("div", { class: "fr-tabs" });
   for (const t of TABS) {
+    if (t.signataire && !signataire) continue;
     if (t.perm && !can(t.perm)) continue;
     tabs.appendChild(h("button", {
       class: "fr-tab" + (ui.tab === t.id ? " fr-tab--active" : ""),
@@ -101,7 +137,8 @@ export function renderSignature(root, params) {
   }
   root.appendChild(tabs);
 
-  if (ui.tab === "circuit") renderCircuit(root, { docs, ui, paint, config, settings });
+  if (ui.tab === "ma-signature") renderMaSignature(root, { docs, ui, paint, config, settings });
+  else if (ui.tab === "circuit") renderCircuit(root, { docs, ui, paint, config, settings });
   else if (ui.tab === "publication") renderPublication(root, { docs, ui, paint, config, settings });
   else renderApiTab(root, { ui, paint });
 }
@@ -133,11 +170,135 @@ function statusBadgeEl() {
   return h("span", { id: "api-status", class: "fr-badge fr-badge--" + color, title: s.detail || "", text: label });
 }
 
+// -------------------------------------------------------------- ma signature
+// La file du signataire. Deux temps, comme pour le parapheur et la révision :
+// ce qui attend SA signature, et ce qui est signé au titre de sa délégation.
+// L'écran dit aussi avec QUOI il signe : son compte de l'outil de signature,
+// et l'état du rapprochement.
+function renderMaSignature(root, ctx) {
+  const { docs, ui, paint, config, settings } = ctx;
+  const personne = personneDeCompte(config, state.user);
+  const etat = personne ? etatRapprochement(config, state.users, personne.id) : null;
+  const file = fileSignatureDe();
+  const nom = personne ? [personne.civility, personne.firstName, personne.lastName].filter(Boolean).join(" ") : fullName(state.user);
+
+  // ------------------------------------------------ l'identité et le compte
+  const rapproche = h("div", { class: "fr-card" },
+    h("h2", { class: "fr-card__title", text: "Avec quel compte vous signez" }),
+    h("div", { class: "sig-ident" },
+      h("div", { class: "fr-stack" },
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Signataire" }),
+        h("p", { style: { margin: 0 } }, h("strong", { text: nom || "—" })),
+        h("p", { class: "fr-small", style: { margin: 0 }, text: personne ? ((config.roles || []).find((r) => r.id === personne.roles?.[0])?.label || "qualité non renseignée") : "Aucune personne du référentiel n'est rattachée à ce compte." })),
+      h("div", { class: "fr-stack" },
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Compte de l'application" }),
+        h("p", { style: { margin: 0 } }, h("strong", { text: etat?.compte ? (fullName(etat.compte) + " · " + (etat.compte.login || "")) : "—" })),
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: etat?.courriel || "adresse inconnue" })),
+      h("div", { class: "fr-stack" },
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Compte sur l'outil de signature" }),
+        h("p", { style: { margin: 0 } }, h("strong", { text: etat?.compteOutil || "—" })),
+        etat?.ok
+          ? h("span", { class: "fr-badge fr-badge--success", text: "Rapproché" })
+          : h("span", { class: "fr-badge fr-badge--warning", text: "À rapprocher" }))),
+    !personne
+      ? h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+        h("p", { class: "fr-alert__title", text: "Aucune personne du référentiel" }),
+        h("p", { class: "fr-small", text: "Un signataire signe au nom d'une personne : rattachez ce compte à celle qu'il tient dans « Comptes et rôles » (« Personne du référentiel — qui signe »). C'est ce lien qui donne la qualité et ouvre le champ de compétence." }))
+      : null,
+    etat && !etat.ok
+      ? h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+        h("p", { class: "fr-alert__title", text: "Rapprochement nécessaire" }),
+        h("p", { class: "fr-small", text: etat.motif }),
+        personne
+          ? h("p", { class: "fr-small fr-muted", text: "L'annuaire de la collectivité (OIDC) délivre le compte de l'application et provisionne le même agent sur l'outil de signature : le rapprochement les relie." })
+          : null,
+        personne
+          ? button("Rapprocher avec l'outil de signature", {
+            variant: "primary", size: "sm", icon: "check",
+            onClick: async () => {
+              const r = rapprocher(config, state.users, personne.id, { par: fullName(state.user) || state.user?.login || "" });
+              if (!r.ok) { toast(r.motif, "warning"); return; }
+              touch("config");
+              await journaliser({
+                action: "signature.rapproche", cible: "personne", cibleLabel: nom,
+                detail: `compte rapproché de l'outil de signature (${r.etat.compteOutil})`, to: [],
+              });
+              toast("Compte rapproché de l'outil de signature.", "success");
+              paint();
+            },
+          })
+          : null)
+      : null,
+    etat?.ok
+      ? h("p", { class: "fr-small fr-muted", style: { marginTop: "8px" }, text: `Rapproché le ${formatDate(String(etat.declare?.rapprocheLe || "").slice(0, 10), "date-long")}${etat.declare?.par ? " par " + etat.declare.par : ""}.` })
+      : null);
+
+  root.appendChild(rapproche);
+
+  // ------------------------------------------------- ce qui attend ma signature
+  if (!file.aSigner.length) {
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h2", { class: "fr-card__title", text: "Actes qui attendent votre signature" }),
+      h("p", { class: "fr-small fr-muted", text: "Aucun acte n'attend votre signature." })));
+  } else {
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h2", { class: "fr-card__title", text: `Actes qui attendent votre signature (${file.aSigner.length})` }),
+      h("p", { class: "fr-small fr-muted", text: "Vérifiez le document, puis signez : l'empreinte du texte signé est conservée, et la publication suit la signature." }),
+      ...file.aSigner.map((a) => elementSignature(a, docs, paint, config))));
+  }
+
+  // ------------------------------------------- ce qui est signé sous ma délégation
+  if (file.engagee.length) {
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h2", { class: "fr-card__title", text: "Signés au titre de votre signature" }),
+      h("p", { class: "fr-small fr-muted", text: "Ces actes sont signés par vos délégataires : votre signature y est engagée par délégation ou subdélégation, vous les suivez sans les signer vous-même." }),
+      h("ul", { class: "sig-file" },
+        ...file.engagee.map((a) => h("li", { class: "sig-file__item" },
+          h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
+          h("span", { class: "sig-file__obj", text: a.objet || "—" }),
+          h("span", { class: "fr-small fr-muted", text: personne ? placeDansChaine(config, a, state.trames.find((t) => t.id === a.trameId), personne.id) : "" }),
+          button("Ouvrir", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }))))));
+  }
+}
+
+// Une ligne de la file : l'acte, son état, et le geste de signature. L'acte pas
+// encore déposé l'est au premier clic — c'est le même chemin que « Envoyer en
+// signature », avec l'outil ouvert dans la foulée.
+function elementSignature(a, docs, paint, config) {
+  const doc = docs.get(a.id) || null;
+  const blocking = (a.issues || doc?.issues || []).filter((i) => i.level === "blocking");
+  const dejaDepose = !!a.api?.docId;
+  const pret = pretPourSignatureAction(a);
+  const raison = blocking.length ? "L'acte comporte un contrôle bloquant." : (!pret.ok ? pret.raison : "");
+  return h("div", { class: "sig-file__item sig-file__item--action" },
+    h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
+    h("span", { class: "sig-file__obj", text: a.objet || doc?.meta?.objet || "—" }),
+    h("span", { class: "fr-small fr-muted", text: dejaDepose ? "circuit ouvert — " + (a.api?.statut || "") : "à déposer" }),
+    button(dejaDepose ? "Signer" : "Déposer et signer", {
+      variant: "primary", size: "sm", icon: "lock",
+      disabled: apiStatus().status !== "online" || !!raison,
+      title: raison || "Ouvrir l'outil de signature pour cet acte",
+      onClick: async () => {
+        const ctx = { docs, paint };
+        if (dejaDepose) await ouvrirOutil(a, doc, ctx, true);
+        else await envoyerEnSignature(a, ctx, { ouvrirOutil: true });
+      },
+    }));
+}
+
+// Les portes que l'acte doit avoir franchies avant la signature : parapheur
+// (fonction expérimentale) puis révision. On les interroge sans redessiner.
+function pretPourSignatureAction(a) {
+  const para = parapheurActif() ? validationPourSignature(a) : { ok: true, raison: "" };
+  if (!para.ok) return para;
+  return revisionPour(a);
+}
+
 // ------------------------------------------------------------------ le circuit
 
 function renderCircuit(root, ctx) {
   const { docs, ui, paint, config, settings } = ctx;
-  const acts = [...state.actes].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const acts = visibleActes().sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   if (!ui.acteId || !acts.some((a) => a.id === ui.acteId)) ui.acteId = defaultCircuitActe(acts, docs).id;
   const acte = acts.find((a) => a.id === ui.acteId);
   const doc = docs.get(acte.id);
@@ -177,29 +338,33 @@ function renderCircuit(root, ctx) {
   // Le passage au parapheur conditionne l'envoi en signature : le service
   // refuse d'ouvrir un circuit sur un acte dont le circuit de validation n'est
   // pas achevé (voir hEnvoyerEnSignature dans index.html).
-  const para = validationPourSignature(acte);
+  // Le parapheur est une fonction expérimentale : éteint, il ne conditionne
+  // rien et n'apparaît pas dans le circuit (Administration › Expérimentale).
+  const parapheur = parapheurActif();
+  const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
   const paraAvancement = avancement(acte.validation);
+  // Révision : le contrôle du réviseur, entre l'envoi décidé par le rédacteur et
+  // l'envoi effectif (voir src/lib/revision.js). Elle n'existe que s'il y a un
+  // réviseur compétent pour l'acte ; `rev.requise` dit si la marche existe.
+  const rev = revisionPour(acte);
+  const enRevision = acte.revision?.statut === "en_attente";
+  // Transmission au contrôle de légalité : fonction expérimentale, éteinte par
+  // défaut. Active, elle ajoute une marche ENTRE la signature et la
+  // publication, et l'acte signé y passe automatiquement (voir plus bas).
+  const controleLegalite = controleLegaliteActif();
 
   right.appendChild(h("div", { class: "fr-card" },
     h("h2", { class: "fr-card__title", text: `Circuit — ${acte.numero || "acte sans numéro"}` }),
     h("p", { class: "fr-small fr-muted", text: [acte.objet, doc?.meta?.entity?.name].filter(Boolean).join(" · ") }),
     h("div", { class: "sig-steps" },
-      stepEl(1, "Acte finalisé", !!acte.values || !!acte.doc, [
-        blocking.length ? `${blocking.length} contrôle(s) bloquant(s) : la signature est déconseillée` : "Aucun contrôle bloquant",
-        doc?.meta?.eli ? "ELI pressenti : " + normalizeUrl(doc.meta.eli) : "",
-      ].filter(Boolean)),
-      !acte.validation
-        ? stepEl(2, "Parapheur", true, [circuitDe(acte) ? "Aucun circuit ouvert : l'acte part en signature sans validation préalable." : "Aucun circuit ne s'applique à cet acte."])
-        : stepEl(2, "Parapheur — " + (acte.validation.circuitLabel || "circuit de validation"), para.ok, [
-          `${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`,
-          para.ok ? "" : para.raison,
-        ].filter(Boolean)),
-      stepEl(3, "Déposé au service", !!acte.api?.acteId, acte.api ? [`Identifiant ${acte.api.acteId}`, acte.api.sha256 ? "Empreinte SHA-256 " + acte.api.sha256.slice(0, 16) + "…" : ""].filter(Boolean) : ["En attente d'envoi"]),
-      stepEl(4, "Envoyé en signature", acte.api?.statut && acte.api.statut !== "depose", acte.api?.signataire ? [`Signataire : ${acte.api.signataire}`, `Prestataire : ${PRESTATAIRE.nom}`] : ["En attente"]),
-      stepEl(5, "Signé", !!(acte.original || acte.statut === "signee" || acte.statut === "publie"), acte.original ? [`Signé le ${formatDate(String(acte.original.signatures?.[0]?.signeLe || "").slice(0, 10))}`, (acte.original.signatures?.[0]?.certificat?.sujet || "")] : ["En attente de la signature"]),
-      publiable
-        ? stepEl(6, "Publié et opposable", acte.statut === "publie" && !!acte.publication, acte.publication ? [`ELI ${acte.publication.eliUri}`, `Opposable le ${formatDate(acte.publication.dateOpposabilite)}`] : ["En attente de publication"])
-        : stepEl(6, "Non publié (acte individuel)", signed, ["La trame a déclaré cet acte non publiable.", "L'acte signé est conservé au registre et notifié à l'intéressé."]),
+      // Les étapes sont numérotées par POSITION : la marche « Parapheur »
+      // disparaît quand la fonction expérimentale est éteinte, sans trou dans la
+      // numérotation.
+      ...etapesCircuit({
+        parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
+        blocking, doc, acte, signed, publiable, rev,
+        controleLegalite, transmission: acte.execution?.transmission || null,
+      }).map((e, i) => stepEl(i + 1, e.title, e.done, e.lines)),
     ),
   ));
 
@@ -220,16 +385,27 @@ function renderCircuit(root, ctx) {
       button("Voir le document", { variant: "tertiary", size: "sm", icon: "note", onClick: () => navigate("acte/" + acte.id) }),
     ));
   } else if (!signed) {
-    row.appendChild(button(acte.api?.acteId ? "Reprendre le circuit" : "Envoyer en signature", {
-      variant: "primary", icon: "upload",
-      disabled: apiStatus().status !== "online" || blocking.length > 0 || !para.ok,
-      title: blocking.length ? "L'acte comporte un contrôle bloquant" : !para.ok ? para.raison : "Déposer l'acte et ouvrir le circuit de signature",
+    const libelle = enRevision ? "Transmis au réviseur" : (rev.requise && !rev.ok ? "Soumettre au réviseur" : (acte.api?.acteId ? "Reprendre le circuit" : "Envoyer en signature"));
+    row.appendChild(button(libelle, {
+      variant: "primary", icon: enRevision ? "check" : "upload",
+      disabled: apiStatus().status !== "online" || blocking.length > 0 || !para.ok || enRevision,
+      title: blocking.length ? "L'acte comporte un contrôle bloquant"
+        : !para.ok ? para.raison
+          : enRevision ? "L'acte attend la décision du réviseur"
+            : rev.requise && !rev.ok ? "L'acte sera transmis au réviseur, qui le validera ou le rejettera"
+              : "Déposer l'acte et ouvrir le circuit de signature",
       onClick: () => envoyerEnSignature(acte, { docs, paint }),
     }));
-    if (!para.ok) {
+    if (parapheur && !para.ok) {
       row.appendChild(button("Ouvrir le parapheur", {
         variant: "secondary", icon: "check",
         onClick: () => { state.parapheur = { tab: "enCours", acteId: acte.id }; navigate("parapheur"); },
+      }));
+    }
+    if (rev.requise) {
+      row.appendChild(button("Ouvrir la révision", {
+        variant: "secondary", icon: "eye",
+        onClick: () => { state.revision = { tab: enRevision ? "aReviser" : "rejets", acteId: acte.id }; navigate("revision"); },
       }));
     }
     if (acte.api?.acteId) {
@@ -259,11 +435,23 @@ function renderCircuit(root, ctx) {
       ...blocking.map((b) => h("p", { class: "fr-small", text: "• " + b.message })),
     ));
   }
-  if (!signed && !para.ok) {
+  if (parapheur && !signed && !para.ok) {
     actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
       h("p", { class: "fr-alert__title", text: "Parapheur non achevé" }),
       h("p", { class: "fr-small", text: para.raison }),
       h("p", { class: "fr-small fr-muted", text: "Le service refuse d'ouvrir un circuit de signature sur un acte dont la validation n'est pas achevée : c'est ce qui garantit que l'acte signé est bien celui qui a été approuvé." }),
+    ));
+  }
+  // Révision : le contrôle du réviseur. Tant qu'elle n'est pas faite, l'acte ne
+  // part pas — et le service refuse lui aussi d'ouvrir le circuit.
+  if (rev.requise && !signed && !rev.ok) {
+    const rejete = acte.revision?.statut === "rejete";
+    actions.appendChild(h("div", { class: "fr-alert fr-alert--" + (rejete ? "error" : "warning"), style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: enRevision ? "En attente de révision" : rejete ? "Acte rejeté en révision" : "Révision requise avant la signature" }),
+      h("p", { class: "fr-small", text: rev.raison }),
+      h("p", { class: "fr-small fr-muted", text: rejete
+        ? "Corrigez l'acte, puis soumettez-le de nouveau au réviseur : c'est le nouvel envoi qui vaut demande de révision."
+        : "Un réviseur est compétent pour cet acte : « Envoyer en signature » le transmet d'abord au réviseur, qui le validera (l'acte part alors en signature) ou le rejettera (il revient en brouillon, avec le motif)." }),
     ));
   }
   right.appendChild(actions);
@@ -309,6 +497,95 @@ function stepEl(n, title, done, lines) {
   );
 }
 
+// Les marches du circuit de signature, dans l'ordre — SANS numérotation : le
+// numéro est la position dans cette liste. La marche « Parapheur » n'y figure
+// que si la fonction expérimentale est active, et la marche « Transmis au
+// contrôle de légalité » que si la sienne l'est : la liste, plutôt qu'une suite
+// d'appels numérotés à la main, évite un trou dans la numérotation.
+function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, signed, publiable, rev, controleLegalite, transmission }) {
+  const etapes = [{
+    title: "Acte finalisé",
+    done: !!(acte.values || acte.doc),
+    lines: [
+      blocking.length ? `${blocking.length} contrôle(s) bloquant(s) : la signature est déconseillée` : "Aucun contrôle bloquant",
+      doc?.meta?.eli ? "ELI pressenti : " + normalizeUrl(doc.meta.eli) : "",
+    ].filter(Boolean),
+  }];
+  if (parapheur) {
+    etapes.push(validation
+      ? {
+        title: "Parapheur — " + (validation.circuitLabel || "circuit de validation"),
+        done: para.ok,
+        lines: [`${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`, para.ok ? "" : para.raison].filter(Boolean),
+      }
+      : {
+        title: "Parapheur",
+        done: true,
+        lines: [circuit ? "Aucun circuit ouvert : l'acte part en signature sans validation préalable." : "Aucun circuit ne s'applique à cet acte."],
+      });
+  }
+  // La marche de la révision n'apparaît que si un réviseur est compétent pour
+  // l'acte : sans réviseur, il n'y a pas de contrôle à montrer.
+  if (rev?.requise) {
+    const r = acte.revision;
+    etapes.push({
+      title: "Révision — contrôle avant signature",
+      done: rev.ok,
+      lines: [
+        r ? (r.statut === "rejete" ? "Rejeté : " + (r.motif || "motif au dossier")
+          : r.statut === "en_attente" ? "En attente" + (r.demandeeParNom ? ` (soumis par ${r.demandeeParNom})` : "")
+            : `${r.valideParNom || "révisé"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}${r.corrige ? " · texte corrigé" : ""}`)
+          : "Pas encore soumis au réviseur",
+        rev.ok ? "" : rev.raison,
+      ].filter(Boolean),
+    });
+  }
+  etapes.push({
+    title: "Déposé au service",
+    done: !!acte.api?.acteId,
+    lines: acte.api
+      ? [`Identifiant ${acte.api.acteId}`, acte.api.sha256 ? "Empreinte SHA-256 " + acte.api.sha256.slice(0, 16) + "…" : ""].filter(Boolean)
+      : ["En attente d'envoi"],
+  });
+  etapes.push({
+    title: "Envoyé en signature",
+    done: !!(acte.api?.statut && acte.api.statut !== "depose"),
+    lines: acte.api?.signataire ? [`Signataire : ${acte.api.signataire}`, `Prestataire : ${PRESTATAIRE.nom}`] : ["En attente"],
+  });
+  etapes.push({
+    title: "Signé",
+    done: !!(acte.original || acte.statut === "signee" || acte.statut === "publie"),
+    lines: acte.original
+      ? [`Signé le ${formatDate(String(acte.original.signatures?.[0]?.signeLe || "").slice(0, 10))}`, (acte.original.signatures?.[0]?.certificat?.sujet || "")]
+      : ["En attente de la signature"],
+  });
+  // La transmission au contrôle de légalité s'intercale ICI : après le retour
+  // signé, avant la publication. Elle n'existe que si la fonction est active.
+  if (controleLegalite) {
+    etapes.push({
+      title: "Transmis au contrôle de légalité",
+      done: !!transmission,
+      lines: transmission
+        ? [transmission.certificat?.mention || `Transmis le ${formatDate(transmission.at)}`, transmission.ref ? `réf. ${transmission.ref}` : "", transmission.certificat?.sceau ? `sceau ${String(transmission.certificat.sceau).slice(0, 16)}…` : ""].filter(Boolean)
+        : ["En attente de la télétransmission (API @ctes)"],
+    });
+  }
+  etapes.push(publiable
+    ? {
+      title: "Publié et opposable",
+      done: acte.statut === "publie" && !!acte.publication,
+      lines: acte.publication
+        ? [`ELI ${acte.publication.eliUri}`, `Opposable le ${formatDate(acte.publication.dateOpposabilite)}`]
+        : ["En attente de publication"],
+    }
+    : {
+      title: "Non publié (acte individuel)",
+      done: signed,
+      lines: ["La trame a déclaré cet acte non publiable.", "L'acte signé est conservé au registre et notifié à l'intéressé."],
+    });
+  return etapes;
+}
+
 // --------------------------------------------------------- envoi et signature
 
 function aknOf(acte, doc) {
@@ -316,22 +593,47 @@ function aknOf(acte, doc) {
   return exportAkn(doc, state.config, trame);
 }
 
+// Le THÈME de l'acte — la famille de sa trame, celle qui classe l'acte dans le
+// recueil public (« Urbanisme et voirie », « Police administrative »…). Le
+// service ne connaît pas les trames : le thème lui est donc transmis au dépôt,
+// il le conserve sur l'acte, et la publication le reprend. C'est lui qui donne
+// au recueil sa page par thème — voir src/lib/recueil.js.
+function themeDe(acte, doc) {
+  const id = (state.trames.find((t) => t.id === acte?.trameId)?.familyId) || doc?.meta?.familyId || "";
+  if (!id) return { themeId: "", themeLabel: "" };
+  const f = (state.config?.families || []).find((x) => x.id === id);
+  return { themeId: id, themeLabel: (f && f.label) || "" };
+}
+
 // Libellé d'un acte dans le journal et les notifications : le numéro s'il
 // existe, sinon l'objet, sinon l'identifiant technique.
 const libelleActe = (acte) => acte.numero || acte.objet || acte.id;
 
+// Qui signe : la personne désignée par l'acte, son compte, et le compte que
+// l'outil de signature lui connaît. C'est cet ensemble que le prestataire
+// reçoit — un signataire sans compte rapproché signerait anonymement.
 function auteurDe(acte, doc) {
   const sig = doc?.meta?.signataire;
   const config = state.config;
+  const etat = sig?.id ? etatRapprochement(config, state.users, sig.id) : null;
   return {
     nom: sig ? [sig.civility, sig.firstName, sig.lastName].filter(Boolean).join(" ") : (doc?.meta?.entity?.authorityFormula || "Signataire"),
     fonction: sig ? ((config.roles || []).find((r) => r.id === sig.roles?.[0])?.label || "") : "",
-    courriel: sig?.courriel || "",
+    courriel: String(etat?.courriel || sig?.courriel || "").trim(),
     entite: doc?.meta?.entity?.name || "",
+    // Le rapprochement : la personne, son compte, et le compte de l'outil de
+    // signature (voir src/lib/signataires.js).
+    personId: sig?.id || "",
+    compteId: etat?.compte?.id || "",
+    compteOutil: etat?.compteOutil || "",
+    rapproche: !!etat?.ok,
   };
 }
 
-async function envoyerEnSignature(acte, ctx) {
+// Le geste d'envoi en signature est exporté : le bureau de la révision le
+// déclenche à la validation d'un acte révisé (« si l'acte est validé, il part en
+// signature »), par ce chemin-là et pas un autre.
+export async function envoyerEnSignature(acte, ctx, { ouvrirOutil: ouvrir = true } = {}) {
   const config = state.config;
   const doc = ctx.docs.get(acte.id) || docOfActe(acte);
   const settings = publicationSettings(config);
@@ -339,8 +641,20 @@ async function envoyerEnSignature(acte, ctx) {
   // Porte du parapheur : l'acte signé doit être l'acte approuvé. Le service
   // applique la même règle (409 « validation_incomplete »), mais on évite un
   // aller-retour voué à l'échec et on explique le motif à l'agent.
-  const para = validationPourSignature(acte);
+  // Parapheur éteint (fonction expérimentale) : aucune porte de ce côté, et
+  // l'état de validation n'est pas transmis au service.
+  const parapheur = parapheurActif();
+  const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
   if (!para.ok) { toast(para.raison, "warning"); return; }
+  // Porte de la RÉVISION : le geste du rédacteur ne fait pas partir l'acte en
+  // signature, il le SOUMET au réviseur (voir src/lib/revision.js). C'est le
+  // réviseur qui, en le validant, déclenche l'envoi — par ce même chemin.
+  const rev = revisionPour(acte);
+  if (rev.requise && !rev.ok) {
+    if (acte.revision?.statut === "en_attente") { toast("L'acte est déjà en attente de révision.", "info"); return; }
+    await soumettreARevision(acte, { paint: ctx.paint });
+    return;
+  }
   const flow = beginFlow(`Dépôt et envoi en signature — ${acte.numero || acte.id}`);
   const akn = aknOf(acte, doc);
   const auteur = auteurDe(acte, doc);
@@ -350,25 +664,43 @@ async function envoyerEnSignature(acte, ctx) {
       nature: doc.meta?.actTypeId || "Décision", entityId: doc.meta?.entity?.id || "", entityName: doc.meta?.entity?.name || "",
       dateSignature: acte.dateSignature || doc.meta?.dateSignature || "", trameId: acte.trameId || "",
       ecarts: (acte.ecarts || []).length,
+      // Le thème (la famille de la trame) part avec l'acte : c'est ce qui
+      // permettra au recueil public de classer l'acte, et à ses lecteurs de le
+      // retrouver par matière.
+      ...themeDe(acte, doc),
       // La publication est une propriété de la trame : le service ne connaît pas
       // les trames, donc on la lui transmet au dépôt, et il la fera respecter.
       publishable: actePubliable(acte),
+      // L'étape de transmission au contrôle de légalité est demandée au dépôt
+      // (fonction expérimentale) : le service refusera alors de publier l'acte
+      // tant que sa transmission n'aura pas été enregistrée.
+      controleLegalite: controleLegaliteActif(),
       // L'état du parapheur accompagne l'acte : le service peut ainsi refuser
       // d'ouvrir un circuit sur un acte non validé, et l'empreinte du texte
       // validé reste attachée à l'acte signé.
-      validation: acte.validation ? {
+      validation: parapheur && acte.validation ? {
         statut: acte.validation.statut,
         circuitLabel: acte.validation.circuitLabel || "",
         empreinte: acte.validation.empreinte || "",
         closLe: acte.validation.closLe || "",
         etapes: (acte.validation.steps || []).map((s) => s.statut),
       } : null,
+      // L'état de la RÉVISION accompagne l'acte de la même façon : le service
+      // refuse d'ouvrir un circuit sur un acte dont la révision n'est pas
+      // faite, et la trace de qui a révisé quoi reste attachée à l'acte signé.
+      revision: rev.requise && acte.revision ? {
+        statut: acte.revision.statut,
+        empreinte: acte.revision.empreinte || "",
+        valideLe: acte.revision.valideLe || "",
+        corrige: acte.revision.corrige === true,
+        par: acte.revision.valideParNom || "",
+      } : null,
     }, { token, flow, label: "Dépôt de l'acte finalisé" });
     if (!dep.ok) { toast(errorMessage(dep), "error"); return; }
     const apiActeId = dep.body.id;
 
     const sig = await post(`/v1/actes/${apiActeId}/signature`, {
-      signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1 }],
+      signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, compte: auteur.compteOutil || "" }],
       niveau: "avancee",
       urlNotification: "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
     }, { token, flow, label: "Envoi en signature (ouverture du circuit)" });
@@ -388,14 +720,17 @@ async function envoyerEnSignature(acte, ctx) {
     };
     acte.statut = "en_signature";
     touch("actes", { rerender: false });
-    toast("Acte déposé et circuit de signature ouvert.", "success");
+    toast(rev.requise
+      ? "Acte déposé et circuit de signature ouvert après révision."
+      : "Acte déposé et circuit de signature ouvert.", "success");
     await journaliser({
       action: "signature.depot", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
-      detail: `déposé au service (${apiActeId}), circuit ${signatureId} ouvert`,
+      detail: `déposé au service (${apiActeId}), circuit ${signatureId} ouvert`
+        + (rev.requise ? ` — révisé${acte.revision?.corrige ? " après correction" : ""}` : ""),
       to: [acte.createdBy, "role:editeur"],
     });
     ctx.paint();
-    await ouvrirOutil(acte, doc, ctx, true);
+    if (ouvrir) await ouvrirOutil(acte, doc, ctx, true);
   } catch (e) {
     toast(String((e && e.message) || e), "error");
   }
@@ -406,9 +741,12 @@ async function releverStatut(acte, ctx) {
   try {
     const res = await get(`/v1/signatures/${acte.api.signatureId}`, { flow, label: "Suivi du circuit de signature" });
     if (!res.ok) { toast(errorMessage(res), "error"); return; }
+    const dejaSigne = !!(acte.original || acte.statut === "signee" || acte.statut === "publie");
     acte.api.statut = res.body.statut;
     if (res.body.statut === "signee") { acte.statut = "signee"; acte.original = res.body.documentSigne || acte.original; }
     touch("actes", { rerender: false });
+    // Le retour signé vaut publication : c'est la relève qui l'a constaté.
+    if (res.body.statut === "signee" && !dejaSigne && acte.original) { await publierApresSignature(acte, ctx.paint); return; }
     toast("Statut du circuit : " + res.body.statut, "info");
     ctx.paint();
   } catch (e) { toast(String((e && e.message) || e), "error"); }
@@ -454,6 +792,9 @@ async function ouvrirOutil(acte, doc, ctx, autoOpen) {
         h("p", { class: "fr-small", text: acte.objet || "" }),
         h("p", { class: "fr-small fr-muted", text: "Signataire" }),
         h("p", { class: "fr-small", text: [auteur.nom, auteur.fonction].filter(Boolean).join(" — ") }),
+        h("p", { class: "fr-small fr-muted", text: "Compte de signature" }),
+        h("p", { class: "fr-small", text: auteur.compteOutil || "aucun compte rapproché" }),
+        auteur.rapproche ? null : h("p", { class: "fr-small sig-tool__warn", text: "Ce signataire n'a pas encore été rapproché de l'outil de signature : la signature serait anonyme. Le rapprochement se fait depuis « Ma signature », ou depuis sa fiche dans l'organigramme des délégations." }),
         h("p", { class: "fr-small fr-muted", text: "Niveau demandé" }),
         h("p", { class: "fr-small", text: "Signature avancée (certificat de démonstration)" }),
         h("p", { class: "fr-small fr-muted", text: "Empreinte du document" }),
@@ -526,13 +867,123 @@ async function signer(acte, doc, ctx) {
   acte.signeLe = pack.signatures[0].signeLe;
   acte.updatedAt = new Date().toISOString();
   touch("actes", { rerender: false });
-  toast("Acte signé. Il peut maintenant être publié.", "success");
   await journaliser({
     action: "signature.signe", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
     detail: `signé par ${auteur.nom} — empreinte ${String(pack.document?.sha256 || "").slice(0, 16)}…`,
     to: [acte.createdBy, "role:editeur"],
   });
-  ctx.paint();
+  // Le retour signé publie l'acte publiable : l'agent n'a pas d'autre geste à
+  // faire. Un acte individuel (trame non publiable) s'arrête à la signature.
+  await publierApresSignature(acte, ctx.paint);
+}
+
+// Suite automatique du retour signé. L'étape de transmission au contrôle de
+// légalité s'intercale d'abord (quand la fonction est active) : l'acte signé est
+// télétransmis, et son certificat est déposé sur le document. Vient ensuite la
+// publication : un acte publiable part au recueil ; un acte individuel — trame
+// déclarée non publiable — est conservé au registre et notifié à l'intéressé,
+// sans dépôt.
+//
+// Toute cette suite est éteinte par le réglage « publication automatique »
+// (Administration › Publication) : une administration qui publie dans son propre
+// système ne veut pas voir l'application déposer les actes à sa place.
+async function publierApresSignature(acte, paint) {
+  const doc = docOfActe(acte);
+  const publiable = actePubliable(acte);
+  if (publicationSettings(state.config).auto === false) {
+    toast("Acte signé. La publication automatique est désactivée : l'acte reste au registre, à publier le moment venu.", "success");
+    await journaliser({
+      action: "publication.automatique_eteinte", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
+      detail: "acte signé — publication automatique désactivée (Administration › Publication)",
+      to: [acte.createdBy],
+    });
+    paint();
+    return;
+  }
+  // 1. L'étape de transmission au contrôle de légalité. Tant qu'elle n'a pas
+  // abouti, l'acte n'est pas publié : c'est l'ordre « signé → transmis →
+  // publié », que le service applique lui aussi (409 transmission_absente).
+  if (controleLegaliteActif() && doc && acte.api?.acteId) {
+    toast("Acte signé — transmission au contrôle de légalité…", "info");
+    const transmis = await transmettreAuControleDeLegalite(acte, doc);
+    if (!transmis) { paint(); return; }
+  }
+  // 2. La publication.
+  if (!publiable) {
+    toast("Acte signé — acte individuel : conservé au registre, non publié au recueil.", "success");
+    paint();
+    return;
+  }
+  if (!doc || !acte.api?.acteId) {
+    toast("Acte signé. Il peut maintenant être publié.", "success");
+    paint();
+    return;
+  }
+  const settings = publicationSettings(state.config);
+  // La publication ne peut pas précéder la signature : si la date de l'acte est
+  // postérieure à aujourd'hui, c'est elle qui est retenue.
+  const dateSignature = acte.dateSignature || doc.meta?.dateSignature || "";
+  const datePublication = dateSignature && dateSignature > todayIso() ? dateSignature : todayIso();
+  toast("Acte signé — publication automatique au recueil…", "info");
+  await publier(acte, doc, {
+    datePublication, mode: settings.opposabilite.mode, jours: settings.opposabilite.jours,
+    recueil: settings.recueil, publishConsolide: true,
+  }, paint);
+}
+
+// ------------------------------------------------- transmission au contrôle de légalité
+// L'acte signé est adressé à l'API d'envoi du contrôle de légalité, qui en
+// accuse réception : cet accusé de réception vaut certificat de transmission
+// (« Transmis au contrôle de légalité le … à … »). Le certificat est déposé sur
+// le document — l'original signé et la version publiée — et la formalité est
+// constatée par le service, sans geste de l'agent. C'est alors seulement que
+// l'acte est publié (voir publierApresSignature).
+async function transmettreAuControleDeLegalite(acte, doc) {
+  const settings = publicationSettings(state.config);
+  const flow = beginFlow(`Transmission au contrôle de légalité — ${acte.numero || acte.id}`);
+  const auteur = auteurDe(acte, doc);
+  const at = new Date().toISOString();
+  const empreinte = acte.original?.document?.sha256 || acte.api?.sha256 || "";
+  const t0 = (globalThis.performance || Date).now();
+  try {
+    const res = await post(`/v1/actes/${acte.api.acteId}/transmission`, {
+      at, mode: CONTROLE_LEGALITE.mode, destinataire: CONTROLE_LEGALITE.destinataire,
+      auteur: auteur.nom, entite: auteur.entite,
+    }, { token: settings.jetonDemonstration, flow, label: "Télétransmission au contrôle de légalité (@ctes)" });
+    // L'appel sortant vers l'API d'envoi est tracé comme les autres : le journal
+    // de l'API montre ce qui est réellement parti, et vers quelle adresse.
+    recordExternal({
+      service: CONTROLE_LEGALITE.id, method: "POST", url: CONTROLE_LEGALITE.apiUrl,
+      request: { numero: acte.numero, objet: acte.objet, destinataire: CONTROLE_LEGALITE.destinataire, mode: CONTROLE_LEGALITE.mode, empreinte, auteur: auteur.nom },
+      response: res.ok ? { reference: res.body.reference, recuLe: res.body.recuLe, certificat: res.body.certificat?.mention } : (res.body || null),
+      status: res.status, ms: Math.round(((globalThis.performance || Date).now()) - t0), flow,
+      label: "Télétransmission à la préfecture",
+    });
+    if (!res.ok) { dire("Transmission au contrôle de légalité : " + errorMessage(res), "error"); return false; }
+    const certificat = res.body.certificat;
+    enregistrerFormalite(acte, "transmission", {
+      at: String(res.body.recuLe || at).slice(0, 10),
+      ref: res.body.reference, mode: res.body.mode || CONTROLE_LEGALITE.mode,
+      certificat,
+      api: { url: CONTROLE_LEGALITE.apiUrl, statut: res.status, recuLe: res.body.recuLe },
+      by: state.user?.id, byName: [state.user?.firstName, state.user?.lastName].filter(Boolean).join(" ") || auteur.nom,
+    });
+    // Le certificat est déposé SUR LE DOCUMENT : l'original signé le porte, et
+    // la version publiée le reprendra (voir src/lib/eli.js).
+    if (acte.original) acte.original.transmission = certificat;
+    acte.updatedAt = new Date().toISOString();
+    touch("actes", { rerender: false });
+    dire(certificat?.mention || "Acte transmis au contrôle de légalité.", "success");
+    await journaliser({
+      action: "formalite.transmission", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
+      detail: `télétransmis au contrôle de légalité (${res.body.reference || "sans référence"}) — ${certificat?.mention || ""}`,
+      to: [acte.createdBy, "role:editeur"],
+    });
+    return true;
+  } catch (e) {
+    dire("Transmission au contrôle de légalité : " + String((e && e.message) || e), "error");
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------- publication
@@ -540,7 +991,7 @@ async function signer(acte, doc, ctx) {
 function renderPublication(root, ctx) {
   const { docs, ui, paint, config, settings } = ctx;
   const form = (ui.pub = ui.pub || { datePublication: todayIso(), mode: settings.opposabilite.mode, jours: settings.opposabilite.jours, recueil: settings.recueil, publishConsolide: true });
-  const acts = [...state.actes].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const acts = visibleActes().sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   // Deux files distinctes : les actes publiables attendent leur dépôt au recueil,
   // les actes non publiables (actes individuels) s'arrêtent à la signature.
   const aSigner = acts.filter((a) => (a.statut === "signee" || (a.original && a.statut !== "publie")) && actePubliable(a));
@@ -681,7 +1132,14 @@ function dateIncoherente(acte, doc, form) {
 async function publier(acte, doc, form, paint) {
   // Garde-fou côté client : le service refuse lui aussi (409), mais on évite
   // d'envoyer une requête vouée à l'échec pour un acte individuel.
-  if (!actePubliable(acte)) { toast("Cet acte est déclaré non publiable par sa trame : il ne peut pas être déposé au recueil.", "error"); return; }
+  if (!actePubliable(acte)) { dire("Cet acte est déclaré non publiable par sa trame : il ne peut pas être déposé au recueil.", "error"); return; }
+  // L'étape de transmission au contrôle de légalité vaut aussi pour la
+  // publication MANUELLE : quand elle est active et qu'elle n'a pas encore eu
+  // lieu (transmission automatique en échec, acte signé avant l'activation), on
+  // transmet d'abord — le service refuserait de publier (409 transmission_absente).
+  if (controleLegaliteActif() && acte.api?.acteId && !acte.execution?.transmission) {
+    if (!(await transmettreAuControleDeLegalite(acte, doc))) return;
+  }
   const config = state.config;
   const settings = publicationSettings(config);
   const token = settings.jetonDemonstration;
@@ -692,23 +1150,36 @@ async function publier(acte, doc, form, paint) {
   const url = normalizeUrl(doc.meta?.eli);
   const dateOpposabilite = opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } });
   const rule = opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } });
+  const theme = themeDe(acte, doc);
   const record = {
     eliUri: eliU, url, numero: acte.numero || doc.meta?.numero || "", nature: doc.meta?.actTypeId || "Décision",
+    ...theme,
     title: (doc.nodes.find((n) => n.type === "title")?.text) || acte.objet || "",
     objet: acte.objet || doc.meta?.objet || "", entityName: doc.meta?.entity?.name || "",
     dateDocument: acte.dateSignature || doc.meta?.dateSignature || "", datePublication: form.datePublication,
     dateOpposabilite, opposabiliteRule: rule, recueil: form.recueil, kind: kindFor(acte),
     auteur: auteurDe(acte, doc).nom, originalSha256: acte.original?.document?.sha256 || "",
+    // Le certificat de transmission au contrôle de légalité, s'il y en a un :
+    // la version en ligne en porte la mention, et le registre des publications
+    // le conserve (voir src/lib/eli.js).
+    transmission: acte.execution?.transmission?.certificat || null,
   };
   const html = buildWebVersion({ doc, config, record });
   const jsonld = publicationJsonLd({ ...record, brandName: config.brand.name, signature: { signataires: [{ nom: record.auteur }], signeLe: acte.signeLe, algorithme: "ECDSA P-256 / SHA-256" } });
   const kind = kindFor(acte);
+  // Le texte de l'acte voyage avec sa publication, en Markdown et en texte brut :
+  // c'est ce que lisent les moteurs et les agents (voir le recueil ouvert,
+  // `src/server/mysql/actes.mjs`). Les notes de préparation en sont ÉCARTÉES :
+  // c'est l'acte qui est publié, pas les notes de l'atelier.
+  const md = exportMarkdown(doc, config, { notes: false });
+  const texte = documentToText(doc, config);
   const payload = {
     eliUri: eliU, url, work: url, numero: record.numero, nature: record.nature, objet: record.objet,
     entityCode: doc.meta?.entity?.code || "", brandName: config.brand.name,
     dateDocument: record.dateDocument, datePublication: form.datePublication, dateOpposabilite,
     opposabiliteRule: rule, recueil: form.recueil, auteur: record.auteur, kind,
-    html, akn, jsonld, original: acte.original,
+    html, akn, jsonld, md, texte, original: acte.original, transmission: record.transmission,
+    ...theme,
   };
   const opts = { token, flow, label: "Publication de l'acte signé", idempotencyKey: `${eliU}@${record.dateDocument}-${kind}` };
   try {
@@ -719,8 +1190,8 @@ async function publier(acte, doc, form, paint) {
       // approuvée, puis on republie.
       if (await retablirActe(acte, doc, { token, flow })) res = await post(`/v1/actes/${acte.api.acteId}/publication`, payload, opts);
     }
-    if (!res.ok) { toast(errorMessage(res), "error"); return; }
-    acte.publication = { ...res.body, html, akn, jsonld };
+    if (!res.ok) { dire(errorMessage(res), "error"); return; }
+    acte.publication = { ...res.body, html, akn, jsonld, md, texte };
     acte.statut = "publie";
     acte.eli = eliU;
     acte.datePublication = form.datePublication;
@@ -729,24 +1200,28 @@ async function publier(acte, doc, form, paint) {
     // Le registre public a changé : on invalide son cache pour qu'il se recharge.
     state.pubRegistre = { chargement: false };
     touch("actes", { rerender: false });
-    toast(`Acte publié — ELI ${eliU}`, "success");
+    dire(`Acte publié — ELI ${eliU}`, "success");
     await journaliser({
       action: "publication.publie", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
       detail: `publié sous l'ELI ${eliU}, opposable le ${dateOpposabilite}`,
       to: [acte.createdBy, "role:editeur"],
     });
+    // Un acte qui prévoyait des abrogations peut désormais les faire courir :
+    // elles prennent effet au jour de son ENTRÉE EN VIGUEUR (voir
+    // src/ui/abrogations-apply.js — idempotent).
+    appliquerAbrogations().catch((e) => console.warn("Abrogations :", e));
 
     // Une modification n'est complète que lorsque le texte consolidé est publié :
     // c'est lui qui devient la version en vigueur de l'acte d'origine.
     if (kind === "modificative" && form.publishConsolide !== false) {
       const cons = acte.consolideId ? state.actes.find((x) => x.id === acte.consolideId) : null;
       if (cons && cons.statut !== "publie") {
-        toast("Publication de la version consolidée…", "info");
+        dire("Publication de la version consolidée…", "info");
         await publierConsolide(cons, form, { token, flow });
       }
     }
     paint();
-  } catch (e) { toast(String((e && e.message) || e), "error"); }
+  } catch (e) { dire(String((e && e.message) || e), "error"); }
 }
 
 // Nature de la version déposée au recueil : elle découle de l'acte, elle ne se
@@ -789,6 +1264,7 @@ async function publierConsolide(cons, form, { token, flow }) {
       akn, numero: doc.meta?.numero || "", objet: cons.objet || doc.meta?.objet || "",
       nature: doc.meta?.actTypeId || "Décision", entityId: doc.meta?.entity?.id || "", entityName: doc.meta?.entity?.name || "",
       dateSignature: doc.meta?.dateSignature || "", trameId: "", ecarts: 0,
+      ...themeDe(cons, doc),
     }, { token, flow, label: "Dépôt de la version consolidée" });
     if (!dep.ok) { toast("Version consolidée — dépôt : " + errorMessage(dep), "error"); return; }
 
@@ -823,6 +1299,8 @@ async function publierConsolide(cons, form, { token, flow }) {
     };
     const html = buildWebVersion({ doc, config, record });
     const jsonld = publicationJsonLd({ ...record, brandName: config.brand.name, signature: { signataires: [{ nom: auteur.nom }], signeLe: pack.signatures[0].signeLe, algorithme: "ECDSA P-256 / SHA-256" } });
+    const md = exportMarkdown(doc, config, { notes: false });
+    const texte = documentToText(doc, config);
     // Chaque consolidation publiée sous le même ELI doit avoir sa propre clé : on
     // date l'expression du document du jour de la consolidation.
     const dateExpression = String(doc.meta?.consolidated?.at || new Date().toISOString()).replace(/[^\d]/g, "").slice(0, 14);
@@ -831,7 +1309,8 @@ async function publierConsolide(cons, form, { token, flow }) {
       entityCode: doc.meta?.entity?.code || "", brandName: config.brand.name,
       dateDocument: record.dateDocument, datePublication: form.datePublication, dateExpression,
       dateOpposabilite, opposabiliteRule: rule, recueil: form.recueil, auteur: record.auteur,
-      kind: "consolidee", html, akn, jsonld, original: pack,
+      kind: "consolidee", html, akn, jsonld, md, texte, original: pack,
+      ...themeDe(cons, doc),
     };
     const res = await post(`/v1/actes/${dep.body.id}/publication`, payload, {
       token, flow, label: "Publication de la version consolidée",
@@ -846,7 +1325,7 @@ async function publierConsolide(cons, form, { token, flow }) {
         signataire: auteur.nom, deposeLe: dep.body.deposeLe, akn,
       },
       original: pack, signeLe: pack.signatures[0].signeLe,
-      statut: "publie", publication: { ...res.body, html, akn, jsonld },
+      statut: "publie", publication: { ...res.body, html, akn, jsonld, md, texte },
       eli: eliU, datePublication: form.datePublication, dateOpposabilite,
       updatedAt: new Date().toISOString(), pendingConsolidation: false,
     });
@@ -858,6 +1337,23 @@ async function publierConsolide(cons, form, { token, flow }) {
       detail: `version consolidée publiée sous l'ELI ${eliU} : elle devient la version en vigueur`,
       to: [cons.createdBy, "role:editeur"],
     });
+    // Une consolidation qui retire TOUTES les dispositions de l'acte vaut
+    // abrogation de l'acte : elle devient opposable avec elle (voir
+    // `abrogePar`, et ui/abrogations-apply.js pour les abrogations prévues).
+    const socle = cons.consolidatesId ? state.actes.find((x) => x.id === cons.consolidatesId) : null;
+    if (socle && doc.meta?.consolidated?.abrogation) {
+      socle.abrogePar = {
+        acteId: cons.id, numero: cons.numero || "", designation: doc.meta?.designation || "",
+        date: doc.meta?.consolidated?.date || doc.meta?.dateSignature || "", eli: eliU,
+        dateEntreeEnVigueur: dateOpposabilite, enAttente: false,
+      };
+      socle.updatedAt = new Date().toISOString();
+      touch("actes", { rerender: false });
+      await journaliser({
+        action: "abrogation.appliquee", cible: "acte", cibleLabel: socle.numero || socle.id, acteId: socle.id,
+        detail: `acte abrogé par la version consolidée publiée sous l'ELI ${eliU}`, to: [],
+      });
+    }
   } catch (e) { toast("Version consolidée : " + String((e && e.message) || e), "error"); }
 }
 
@@ -873,19 +1369,34 @@ async function retablirActe(acte, doc, { token, flow }) {
     nature: doc?.meta?.actTypeId || "Décision", entityId: doc?.meta?.entity?.id || "", entityName: doc?.meta?.entity?.name || "",
     dateSignature: acte.dateSignature || doc?.meta?.dateSignature || "", trameId: acte.trameId || "",
     ecarts: (acte.ecarts || []).length, publishable: actePubliable(acte),
+    controleLegalite: controleLegaliteActif(),
+    ...themeDe(acte, doc),
   }, { token, flow, label: "Redépôt de l'acte signé" });
-  if (!dep.ok) { toast(errorMessage(dep), "error"); return false; }
+  if (!dep.ok) { dire(errorMessage(dep), "error"); return false; }
   const apiActeId = dep.body.id;
   const circ = await post(`/v1/actes/${apiActeId}/signature`, {
     signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1 }],
     niveau: "avancee",
   }, { token, flow, label: "Rétablissement du circuit de signature" });
-  if (!circ.ok) { toast(errorMessage(circ), "error"); return false; }
+  if (!circ.ok) { dire(errorMessage(circ), "error"); return false; }
   const signatureId = circ.body.signatureId;
   const notif = await post("/v1/webhooks/signature", {
     signatureId, statut: "signee", documentSigne: acte.original,
   }, { token, flow, label: "Notification de la signature déjà approuvée" });
-  if (!notif.ok) { toast(errorMessage(notif), "error"); return false; }
+  if (!notif.ok) { dire(errorMessage(notif), "error"); return false; }
+  // L'acte déclaré soumis au contrôle de légalité ne peut pas être publié par le
+  // service sans une transmission enregistrée — et un redépôt efface cet état.
+  // On le rétablit avec la référence et la date DÉJÀ constatées sur l'acte : la
+  // même transmission est rejouée, il ne s'en produit pas une seconde.
+  const transmission = acte.execution?.transmission;
+  if (controleLegaliteActif() && transmission) {
+    const tr = await post(`/v1/actes/${apiActeId}/transmission`, {
+      at: transmission.at, reference: transmission.ref, mode: transmission.mode,
+      destinataire: transmission.destinataire || transmission.certificat?.destinataire,
+      auteur: auteur.nom, entite: auteur.entite,
+    }, { token, flow, label: "Rétablissement de la transmission au contrôle de légalité" });
+    if (!tr.ok) { dire(errorMessage(tr), "error"); return false; }
+  }
   acte.api = {
     ...(acte.api || {}),
     acteId: apiActeId, signatureId, statut: "signee", sha256: dep.body.sha256,
@@ -894,6 +1405,29 @@ async function retablirActe(acte, doc, { token, flow }) {
   };
   touch("actes", { rerender: false });
   return true;
+}
+
+// Amorçage du recueil de démonstration : dépôt, signature déjà approuvée, puis
+// publication — le tout silencieusement (voir src/ui/demo-publications.js).
+// On repasse par un dépôt NEUF (plutôt que par l'identifiant d'API de la
+// fiction de démonstration) : un service déjà utilisé peut détenir un autre
+// acte sous ce même identifiant, et le nôtre doit être déposé pour ce qu'il est.
+export async function publierActeDuSeed(acte, doc, form) {
+  const avant = silencieux;
+  silencieux = true;
+  try {
+    const token = publicationSettings(state.config).jetonDemonstration;
+    const flow = beginFlow("Amorçage du recueil (démonstration)");
+    if (!(await retablirActe(acte, doc, { token, flow }))) return false;
+    // La publication locale est retirée le temps de l'appel : elle dit ainsi si
+    // le service a RÉELLEMENT publié (un acte déjà « publié » au registre ne doit
+    // pas faire passer un échec pour un succès).
+    const avantPublication = acte.publication || null;
+    acte.publication = null;
+    await publier(acte, doc, form, () => {});
+    if (!acte.publication) { acte.publication = avantPublication; return false; }
+    return true;
+  } finally { silencieux = avant; }
 }
 
 async function tenterPublicationNonSignee(autres, ctx) {
@@ -908,6 +1442,7 @@ async function tenterPublicationNonSignee(autres, ctx) {
       akn, numero: a.numero || doc?.meta?.numero || "", objet: a.objet || "", nature: doc?.meta?.actTypeId || "Décision",
       entityId: doc?.meta?.entity?.id || "", entityName: doc?.meta?.entity?.name || "",
       dateSignature: a.dateSignature || "", trameId: a.trameId || "", ecarts: 0,
+      ...themeDe(a, doc),
     }, { token: settings.jetonDemonstration, flow, label: "Dépôt (contre-épreuve)" });
     if (!dep.ok) { toast(errorMessage(dep), "error"); return; }
     const res = await post(`/v1/actes/${dep.body.id}/publication`, {
@@ -965,9 +1500,34 @@ export function voirOriginal(acte) {
       kv("Émis par", h0.emisPar), kv("Émis le", h0.emisLe ? new Date(h0.emisLe).toLocaleString("fr-FR") : ""),
       kv("Jeton", String(h0.valeur || "").slice(0, 64) + "…", true),
     ),
-    h("p", { class: "fr-small fr-muted", text: "La vérification de cette signature (empreinte, clé publique du certificat, horodatage) est faite à la consultation de la publication, dans « Publications »." }),
+    // Le certificat de transmission au contrôle de légalité : déposé sur le
+    // document après la signature, il atteste de la remise à la préfecture. Le
+    // sceau est vérifié à l'affichage, comme la signature l'est à la consultation
+    // d'une publication.
+    pack.transmission ? h("div", { class: "sig-cert" },
+      h("h3", { text: "Certificat de transmission" }),
+      h("p", { class: "fr-small", style: { margin: "0 0 8px" }, text: pack.transmission.mention || "" }),
+      kv("Référence", pack.transmission.reference),
+      kv("Destinataire", pack.transmission.destinataire),
+      kv("Délivré le", pack.transmission.emisLe ? new Date(pack.transmission.emisLe).toLocaleString("fr-FR") : ""),
+      kv("Délivré par", pack.transmission.emisPar),
+      kv("Empreinte du document", pack.transmission.empreinte, true),
+      kv("Sceau", pack.transmission.sceau, true),
+      h("p", { class: "fr-small" }, stateControle(pack.transmission, pack.document?.sha256)),
+    ) : null,
+    h("p", { class: "fr-small fr-muted", text: "La vérification de cette signature (empreinte, clé publique du certificat, horodatage) est faite à la consultation de la publication, dans « Publications ». Le sceau du certificat de transmission, lui, est vérifié ci-dessus." }),
   );
   modal({ title: "Original signé — " + (pack.reference || acte.numero || ""), wide: true, body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });
+}
+
+// L'état de la vérification du sceau du certificat de transmission, rempli dès
+// que le calcul asynchrone a répondu (le bloc est construit de façon synchrone).
+function stateControle(certificat, empreinte) {
+  const el = h("span", { class: "fr-muted", text: "vérification du sceau…" });
+  verifierCertificatTransmission(certificat, { empreinte })
+    .then((r) => { el.textContent = (r.ok ? "✓ " : "✗ ") + r.detail; el.className = r.ok ? "" : "fr-error-text"; })
+    .catch(() => { el.textContent = "vérification impossible"; });
+  return el;
 }
 
 export function ouvrirPage(html, title) {

@@ -152,6 +152,9 @@ const ACTIONS = {
   "parapheur.refus": "Acte refusé",
   "parapheur.renvoi": "Acte renvoyé",
   "parapheur.reprise": "Circuit repris",
+  "revision.depot": "Acte soumis à la révision",
+  "revision.validation": "Acte révisé",
+  "revision.rejet": "Acte rejeté en révision",
   "formalite.transmission": "Transmission enregistrée",
   "formalite.publication": "Publication enregistrée",
   "formalite.notification": "Notification enregistrée",
@@ -174,8 +177,8 @@ const libelleAction = (a) => ACTIONS[a] || a || "Modification";
 const ECRANS = {
   trames: "registre des trames", trame: "éditeur de trame", rediger: "rédaction",
   actes: "registre des actes", acte: "fiche d'un acte", modifier: "modification d'acte",
-  signature: "signature", publications: "publications", referentiel: "référentiel",
-  styles: "feuilles de style", comptes: "comptes", parapheur: "parapheur",
+  signature: "signature", publications: "publications", referentiel: "administration",
+  styles: "feuilles de style", comptes: "comptes", parapheur: "parapheur", revision: "révision",
   execution: "exécution & délais", corbeille: "corbeille", aide: "guide", docs: "documentation",
 };
 const libelleEcran = (e) => ECRANS[e] || e || "";

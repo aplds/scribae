@@ -19,6 +19,7 @@
 // de phrase viennent du référentiel (`vocab.amendment`), donc de l'utilisateur.
 // ============================================================================
 import { uid, clone, formatDate, esc } from "./util.js";
+import { enrichirSignataire } from "./delegations.js";
 import { numberedLabel, buildContext, interpolate } from "./compile.js";
 
 export const AMEND_ACTIONS = [
@@ -48,6 +49,8 @@ const DEFAULTS = {
   execution: "L'exécution de {designationThe} est confiée {authorityTo}.",
   considerant: "Considérant qu'il y a lieu de modifier {target} ;",
   consolidatedNotice: "Version consolidée à jour des modifications publiées. Ce document est diffusé à titre informatif : seuls les actes publiés au recueil des actes administratifs font foi.",
+  renumberNotice: "Les articles ont été renumérotés : la numérotation du dispositif est continue.",
+  abrogationNotice: "L'acte est abrogé dans son ensemble : ses articles ne sont plus en vigueur.",
   trailTitle: "Tableau des modifications",
   trailHead: ["Article", "Modification", "Rédaction"],
   // Mention portée sous l'intitulé d'un article quand le suivi des modifications
@@ -246,10 +249,12 @@ const firstText = (a) => {
 };
 
 // ------------------------------------------------- identité de l'acte produit
-function enrichPerson(config, id) {
+// Le signataire d'un acte modificatif est enrichi comme partout ailleurs :
+// qualité accordée en genre et chaîne de délégations comprises — la chaîne
+// relevant de l'organisation de l'acte (voir src/lib/delegations.js).
+function enrichPerson(config, id, entityId = "") {
   const p = (config.people || []).find((x) => x.id === id);
-  if (!p) return null;
-  return { ...p, fonction: (config.roles || []).find((r) => r.id === p.roles?.[0])?.label || "" };
+  return p ? enrichirSignataire(config, p, { entityId }) : null;
 }
 
 function entityOf(config, id, fallback) {
@@ -357,7 +362,7 @@ export function buildModificatif(base, plan, m, config) {
   nodes.push(id("signature", {
     place: entity.seatCity || base.meta?.entity?.seatCity || "",
     date: longDate(m.dateSignature),
-    signataire: enrichPerson(config, m.signataireId),
+    signataire: enrichPerson(config, m.signataireId, entity.id),
     showFunction: true,
   }));
   for (const mn of config.mentions || []) {
@@ -380,7 +385,7 @@ export function buildModificatif(base, plan, m, config) {
       trameName: "Modification d'acte",
       trameVersion: "",
       actTypeId: base.meta?.actTypeId || "acte",
-      entity, org: base.meta?.org || entity, signataire: enrichPerson(config, m.signataireId),
+      entity, org: base.meta?.org || entity, signataire: enrichPerson(config, m.signataireId, entity.id),
       generatedAt: new Date().toISOString(),
       amends: {
         numero: base.meta?.numero || "",
@@ -418,6 +423,47 @@ function insertedArticle(a, m, config, base) {
     when: "",
     notes: [],
   };
+}
+
+// ---------------------------------------------------------- renumérotation
+// Le numéro d'un article peut être RÉATTRIBUÉ lors d'une modification. Deux
+// gestes, deux portées :
+//   • un numéro donné à un article (`renum.map`, par identifiant d'article) —
+//     il doit être libre, ce que l'écran vérifie ;
+//   • « tout renuméroter » (`renum.all`) : la numérotation devient continue,
+//     ce qui est le remède à un acte troué par les abrogations. Les articles
+//     abrogés dont le numéro est repris par un article en vigueur ne sont
+//     alors même plus mentionnés — ils quittent le texte consolidé.
+// Un article abrogé n'occupe pas de rang, donc ne consomme pas de numéro.
+function abbreviated(node) {
+  return node?.type === "article" && node.change?.action === "abrogate";
+}
+
+export function applyRenumbering(nodes, renum, config) {
+  const ren = renum || {};
+  const map = ren.map || {};
+  const label = (num) => numberedLabel(config, num);
+  const list = nodes || [];
+  if (ren.all) {
+    let i = 0;
+    const pris = new Set();
+    for (const n of list) {
+      if (n.type !== "article" || abbreviated(n)) continue;
+      i += 1;
+      pris.add(String(i));
+      n.num = String(i);
+      n.numLabel = label(i);
+    }
+    return list.filter((n) => !(abbreviated(n) && pris.has(numericToken(n.numLabel))));
+  }
+  for (const n of list) {
+    if (n.type !== "article") continue;
+    const num = map[articleKey(n)];
+    if (!num) continue;
+    n.num = String(num);
+    n.numLabel = label(num);
+  }
+  return list;
 }
 
 export function buildConsolidated(base, plan, m, config, opts = {}) {
@@ -464,6 +510,17 @@ export function buildConsolidated(base, plan, m, config, opts = {}) {
     nodes.splice(insertAt, 0, ...appends.map((a) => insertedArticle(a, m, config, base)));
   }
 
+  // Renumérotation (réattribution d'un numéro, ou numérotation continue) : elle
+  // s'applique au texte consolidé, donc APRÈS les insertions.
+  const ordered = applyRenumbering(nodes, opts.renum, config);
+  const renumerote = !!(opts.renum && (opts.renum.all || Object.keys(opts.renum.map || {}).length));
+
+  // L'acte est-il abrogé DANS SON ENSEMBLE ? Toutes ses dispositions sont alors
+  // retirées : la version consolidée le dit, au lieu de laisser croire à une
+  // suite d'abrogations d'articles sans lien.
+  const arts = (base.nodes || []).filter((n) => n.type === "article");
+  const abroge = arts.length > 0 && arts.every((n) => changes.some((a) => a.action === "abrogate" && a.target && articleKey(a.target) === articleKey(n)));
+
   const entry = {
     numero: m.numero || "",
     designation: m.designation || V.designation,
@@ -484,6 +541,15 @@ export function buildConsolidated(base, plan, m, config, opts = {}) {
   };
   const trail = [...(opts.previousTrail || base.trail || []), entry];
 
+  // La notice de consolidation dit ce que le texte est : une mise à jour, un
+  // acte renuméroté, ou un acte abrogé tout entier.
+  const notice = [fill(V.consolidatedNotice, {
+    designationLower: lcFirst(m.designation || V.designation),
+    base: base.meta?.numero || "",
+  })];
+  if (abroge) notice.push(V.abrogationNotice);
+  else if (renumerote) notice.push(V.renumberNotice);
+
   return {
     kind: "consolide",
     meta: {
@@ -502,17 +568,18 @@ export function buildConsolidated(base, plan, m, config, opts = {}) {
         // défaut. Le choix est porté par le document : c'est lui qui décide de
         // la présentation de l'aperçu, des exports et de la version en ligne.
         showChanges: opts.showChanges === true,
+        // Ce que la consolidation a fait de particulier : l'acte est abrogé
+        // dans son ensemble, et/ou ses articles ont été renumérotés.
+        abrogation: abroge,
+        renumber: renumerote,
       },
     },
-    nodes,
+    nodes: ordered,
     notes: [],
     issues: [],
     missing: [],
     trail,
-    consolidationNotice: fill(V.consolidatedNotice, {
-      designationLower: lcFirst(m.designation || V.designation),
-      base: base.meta?.numero || "",
-    }),
+    consolidationNotice: notice.join(" "),
   };
 }
 

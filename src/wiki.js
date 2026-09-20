@@ -90,7 +90,7 @@ export const SHOTS = {
   },
   publication: {
     url: "https://user.uploads.dev/file/7499080dfe6b8b8e16f983f091e73ea6.png",
-    caption: "La version en ligne d'un acte publié, telle que le public la consulte.",
+    caption: "La consultation d'un acte publié dans l'application : son texte rendu dans la page, et ses métadonnées.",
     marks: [
       { n: 1, x: 84.5, y: 9.7, w: 14.2, h: 1.3, label: "L'identifiant ELI : la référence permanente de l'acte" },
       { n: 2, x: 86.8, y: 20.3, w: 23.6, h: 7.2, label: "Publié le… et l'entrée en vigueur : les deux dates de l'opposabilité" },
@@ -108,7 +108,7 @@ export const GUIDE = {
     { label: "Je débute", hint: "10 minutes, de zéro jusqu'à l'acte envoyé", chapters: ["demarrer", "ouvrir", "rediger", "messages", "export"] },
     { label: "Je m'en sers déjà", hint: "Les raccourcis utiles", chapters: ["rediger", "export", "retrouver", "corbeille", "modifier", "depannage"] },
     { label: "Je valide des actes", hint: "Le parapheur, et ce qui suit", chapters: ["parapheur", "signature", "execution", "mots"] },
-    { label: "Je publie un acte", hint: "Signature électronique, ELI, opposabilité, délais", chapters: ["parapheur", "signature", "publication", "execution", "modifier"] },
+    { label: "Je publie un acte", hint: "Signature électronique, ELI, opposabilité, délais", chapters: ["parapheur", "signature", "publication", "execution", "modifier", "abrogations"] },
     { label: "Je prépare les modèles", hint: "Pour les administrateurs", chapters: ["administrateurs", "chartes", "modifier", "mots", "depannage"] },
     { label: "Je gère les comptes", hint: "Qui peut faire quoi, et comment ouvrir un compte", chapters: ["comptes", "annuaire", "administrateurs", "depannage"] },
   ],
@@ -132,7 +132,7 @@ export const GUIDE = {
           { text: "L'application **écrit l'acte** au bon format, avec le bon numéro, puis on l'**exporte** pour le faire signer." },
         ] },
         { t: "note", kind: "ok", title: "En une phrase", text: "Un modèle, un document à compléter, un acte propre à envoyer. Rien de plus." },
-        { t: "note", kind: "warn", title: "Le bandeau « Démonstration » en haut de l'écran", text: "S'il est affiché, vous êtes dans l'**installation de démonstration** : les données sont fictives et la signature électronique est simulée. Le bandeau disparaît quand l'administrateur met l'application en service pour de vrai." },
+        { t: "note", kind: "warn", title: "Le bandeau « Démonstration » en haut de l'écran", text: "S'il est affiché, vous êtes dans l'**installation de démonstration** : les données sont fictives et la signature électronique est simulée. Il apparaît dans l'atelier, sur l'écran de connexion **et sur le recueil public**, pour que personne ne s'y trompe. Le bandeau disparaît quand l'administrateur met l'application en service pour de vrai." },
         { t: "p", text: "Deux choses que l'application **ne fait pas** : elle ne signe pas à votre place, et elle n'envoie pas les messages. L'impression, la signature et l'envoi restent votre travail." },
         { t: "p", text: "Et surtout : elle **n'oublie rien**. Chaque acte enregistré est numéroté et rangé dans un registre qu'on peut consulter des années plus tard." },
         { t: "next", chapter: "ouvrir", label: "Ouvrir l'application et s'y retrouver" },
@@ -146,10 +146,11 @@ export const GUIDE = {
       icon: "eye",
       minutes: 3,
       audience: "all",
-      keywords: "ouvrir adresse favori menu navigation écran trames sombre apparence thème clair",
+      keywords: "ouvrir adresse favori menu navigation écran trames sombre apparence thème clair délégation délégations organigramme signer signature subdélégation",
       blocks: [
         { t: "p", text: "Ouvrez votre navigateur (Chrome, Edge, Firefox ou Safari) et tapez l'adresse que l'administrateur vous a communiquée. Elle ressemble à `https://mon-organisme.github.io/scribae/`." },
         { t: "note", kind: "info", title: "À faire une fois pour toutes", text: "Pendant que la page est affichée, cliquez sur l'**étoile** à droite de la barre d'adresse (ou faites Ctrl+D). L'adresse est enregistrée dans vos favoris : vous n'aurez plus jamais à la retaper." },
+        { t: "note", kind: "info", title: "Deux portes à la même adresse", text: "La même adresse sert l'**espace public** — le recueil des actes publiés, que tout le monde consulte **sans compte** — et l'**atelier**. Depuis le recueil, le bouton **Se connecter** (dans son en-tête) ouvre la connexion : vos **comptes de l'application**, ou l'**annuaire** de la collectivité, selon le réglage. Une fois connecté, la même place propose **Retour à l'application**." },
         { t: "shot", shot: "trames" },
         { t: "p", text: "Le menu de gauche sert à tout. Selon votre profil, il contient les boutons suivants :" },
         { t: "terms", items: [
@@ -157,10 +158,13 @@ export const GUIDE = {
           { term: "Rédiger un acte", def: "Le document à compléter directement. C'est votre écran de travail." },
           { term: "Modifier un acte", def: "Pour corriger un acte déjà signé : on réécrit directement l'acte, et l'application produit un acte modificatif et la version consolidée." },
           { term: "Actes", def: "Le registre : tous les actes que vous avez enregistrés, avec leur numéro." },
-          { term: "Référentiel", def: "Les données de la collectivité (entités, personnes, textes de référence). Réservé aux administrateurs : vous n'avez rien à y modifier." },
+          { term: "Délégations", def: "L'**organigramme des délégations de signature** : qui peut signer à la place de qui, sous quelle qualité. Cliquez un acteur pour ouvrir sa fiche (pouvoir reçu, étendue, décision, dates, et la signature que cela produira). Visible par **tout le monde** ; seuls les administrateurs et les éditeurs peuvent le modifier." },
+          { term: "Signature & publication", def: "L'écran de la signature électronique et de la publication au recueil. Un **signataire** y arrive sur son propre onglet, **« Ma signature »**, d'où il signe les actes qui l'attendent ; les autres profils y suivent le **circuit** et la **publication (ELI)**." },
+          { term: "Administration", def: "Les données de la collectivité (entités, personnes, textes de référence). Réservé aux administrateurs : vous n'avez rien à y modifier." },
           { term: "Guide", def: "Ce document, avec une barre de recherche." },
         ] },
         { t: "note", kind: "info", title: "Travailler en clair ou en sombre", text: "Le bouton **lune / soleil** en haut à droite bascule l'application en **mode sombre** — plus confortable le soir ou sur un écran peu lumineux. Le menu de votre compte (à côté) propose aussi « **Automatique** » : l'application suit alors le réglage clair / sombre de votre système. C'est un réglage de **votre** poste de travail : il ne change rien pour vos collègues, et le document — le papier des actes — reste blanc, comme à l'impression." },
+        { t: "note", kind: "info", title: "Plume, le petit assistant", text: "En bas à droite, une **pastille** avec un personnage : c'est **Plume**, l'assistant de l'atelier. Cliquez-la et posez votre question en français — « comment j'exporte un acte ? », « que veut dire ce message ? ». Plume connaît le **mode d'emploi** de l'outil (ce guide), et **rien d'autre** : il ne voit ni vos actes, ni vos brouillons, ni vos collègues. Quand un chapitre répond à votre question, il vous en donne le **lien** : cliquez, vous y êtes. Il propose aussi une question de temps en temps dans une petite bulle. L'administrateur peut **l'éteindre** (il n'apparaît alors pas) ou lui donner un autre **nom et une autre icône** (Administration › Assistants) ; et vous, vous pouvez le **masquer pour votre seul compte** dans le menu de votre nom, sous « Assistants » — un confort de poste, comme le thème clair ou sombre." },
         { t: "note", kind: "warn", title: "La règle la plus importante", text: "Rien n'est enregistré avant que vous cliquiez sur **Enregistrer**. Si vous fermez l'onglet en pleine rédaction, tout ce qui n'était pas enregistré est perdu." },
         { t: "next", chapter: "rediger", label: "Écrire un acte, pas à pas" },
       ],
@@ -187,7 +191,7 @@ export const GUIDE = {
           { text: "Choisissez ce que vous rédigez.", detail: "Cliquez sur **Rédiger** sur la carte du modèle voulu. Si vous aviez déjà commencé un acte, il figure en haut : cliquez sur **Reprendre** (ou sur « Continuer » pour la rédaction en cours). Un champ de recherche filtre les modèles par nom." },
           { text: "En cours de rédaction, le bouton **Changer d'acte** (en haut) ramène à cet écran : rien n'est perdu, votre brouillon vous attend.", detail: "Les éditeurs et les administrateurs peuvent aussi lancer une rédaction depuis la liste des modèles (« Trames »), bouton « Rédiger » de la carte voulue." },
           { text: "Choisissez l'**Entité** concernée, en haut de la page.", detail: "C'est la structure au nom de laquelle l'acte est pris. Le nom de l'autorité qui signe en découle automatiquement." },
-          { text: "Renseignez le **numéro** : cliquez la pastille « Numéro de l'acte », ou utilisez le bouton **Réserver le prochain numéro** du panneau de droite.", detail: "Ne le tapez jamais à la main : c'est lui qui garantit qu'aucun acte ne portera deux fois le même numéro." },
+          { text: "Renseignez le **numéro** : cliquez la pastille « Numéro de l'acte », ou utilisez le bouton du panneau de droite.", detail: "Ne le tapez jamais à la main : c'est lui qui garantit qu'aucun acte ne portera deux fois le même numéro. Le bouton dit **« Réserver le prochain numéro »** quand l'application tient la séquence ; il dit **« Demander le numéro »** quand la collectivité numérote dans un autre logiciel (Administration › Numérotation) — l'application interroge alors ce service, et le numéro attribué s'inscrit tout seul. Dans ce second cas, ne redemandez pas un numéro sans raison : la ligne créée chez le service reste consommée, même si l'acte n'est pas enregistré." },
           { text: "Cliquez sur chaque **pastille** pour la renseigner, de haut en bas.", detail: "Les pastilles jaunes sont celles qui restent à compléter. Vous pouvez aussi passer par la liste « À compléter » du panneau de droite : les deux sont liés." },
           { text: "Écrivez dans le document tout ce qui doit être adapté.", detail: "Ajouter une phrase, préciser une condition, corriger une formule : c'est permis. Relisez comme vous reliriez une lettre avant de l'envoyer." },
           { text: "Ouvrez l'onglet **Contrôle & écarts** du panneau de droite.", detail: "Vert : tout est bon. Rouge : il manque quelque chose, le message dit quoi. Les passages que vous avez réécrits y sont aussi rappelés." },
@@ -276,6 +280,7 @@ export const GUIDE = {
       audience: "all",
       keywords: "parapheur validation valider circuit bon pour accord avis renvoyer refuser visa chef de service direction reprise",
       blocks: [
+        { t: "note", kind: "info", title: "Fonction expérimentale, désactivée par défaut", text: "Le parapheur est une **fonction expérimentale** : il n'est proposé que si l'administrateur l'active dans **Administration › Expérimentale**. Beaucoup de collectivités ont déjà leur propre circuit de validation, en amont de « Envoyer en signature » : dans ce cas, laissez-le désactivé — les actes partent directement en signature, et un acte signé publiable est publié au recueil automatiquement." },
         { t: "p", text: "Un acte ne part pas en signature dès qu'il est écrit. Selon l'acte, il doit d'abord recevoir le **bon pour accord** du chef de service, puis le **visa** de la direction — parfois un simple **avis**. C'est ce chemin qu'on appelle le **parapheur**." },
         { t: "p", text: "Tout se passe dans l'écran **Parapheur**, dans le menu de gauche. Le chemin à suivre dépend de l'acte : c'est le référentiel de la collectivité qui le définit, pas vous." },
         { t: "terms", items: [
@@ -293,6 +298,35 @@ export const GUIDE = {
         { t: "note", kind: "warn", title: "Si l'acte est modifié après validation", text: "Le parapheur garde le souvenir du **texte exact** qui a été approuvé. Si quelqu'un réécrit l'acte ensuite, la validation devient **caduque** : l'écran le signale et propose de **reprendre le circuit** depuis la première étape. C'est ce qui garantit qu'on ne signe jamais autre chose que ce qui a été approuvé." },
         { t: "note", kind: "info", title: "Où en est mon acte ?", text: "Pendant la rédaction, l'en-tête de l'écran indique l'état du circuit — et propose « **Soumettre au circuit** » quand l'acte vient d'être enregistré. La fiche de l'acte (depuis le registre) montre la même chose : le circuit, qui a décidé quoi, quand, et les observations." },
         { t: "note", kind: "info", title: "Un acte sans circuit", text: "Certains actes ne passent par aucun parapheur (aucun circuit ne s'applique, ou la trame demande explicitement « aucune validation »). Ils partent alors directement en signature — c'est normal." },
+        { t: "next", chapter: "revision", label: "Contrôler l'acte avant l'envoi (la révision)" },
+      ],
+    },
+    // -------------------------------- 5 bis : la révision (contrôle avant envoi)
+    {
+      id: "revision",
+      title: "Faire réviser un acte avant sa signature",
+      short: "Le contrôle qui s'intercale entre la décision d'envoyer et l'envoi effectif.",
+      icon: "eye",
+      minutes: 4,
+      audience: "all",
+      keywords: "révision réviseur relire contrôler conformité rapport corriger valider rejeter rejet motif brouillon compétence service",
+      blocks: [
+        { t: "p", text: "Certaines collectivités confient à un **réviseur** le soin de relire un acte **entre le moment où son rédacteur décide de l'envoyer en signature et le moment où il part réellement**. Le réviseur lit l'acte, en reçoit un **rapport de conformité**, le corrige s'il le faut, puis le **valide** — l'acte part alors en signature — ou le **rejette**, et l'acte revient en brouillon chez son rédacteur avec le motif du rejet." },
+        { t: "note", kind: "info", title: "La révision n'existe que si quelqu'un en est chargé", text: "S'il n'y a **aucun réviseur compétent** pour un acte, il n'y a pas de révision : l'acte part directement en signature. La qualité de réviseur se règle dans **Comptes et rôles** (le rôle « Réviseur », qui se cumule avec les autres), ou sur un **service entier** dans **Administration › Services** — c'est le cas d'un service des affaires juridiques qui contrôle les actes de tous les autres services." },
+        { t: "p", text: "Tout se passe dans l'écran **Révision**, dans le menu de gauche, quand votre compte en a la qualité." },
+        { t: "terms", items: [
+          { term: "Rapport de conformité", def: "Ce que les contrôles de l'application ont vérifié : champs obligatoires et règles de la trame, structure du document, visas et références, mentions obligatoires, publicité, écarts de rédaction. Il ne remplace pas votre lecture : l'opportunité et la légalité de fond restent à apprécier." },
+          { term: "Compétence", def: "Ce sur quoi un réviseur est compétent : certains services, certaines familles de trames, certains types d'actes, certaines entités. Ne rien restreindre vaut « tous les services, tous les actes »." },
+          { term: "Révision caduque", def: "Le texte de l'acte a été modifié depuis la révision : ce qui a été contrôlé n'est plus ce que porte l'acte. La révision doit être reprise." },
+        ] },
+        { t: "steps", items: [
+          { text: "Ouvrez **Révision**. L'onglet « À réviser par moi » montre les actes qui relèvent de votre compétence.", detail: "Les onglets « En attente », « Validées » et « Rejets » montrent la file : ce qui attend, ce qui a été validé, ce qui a été rejeté." },
+          { text: "Cliquez sur l'acte : lisez le **rapport de conformité**, groupe par groupe, et l'acte lui-même." },
+          { text: "Corrigez directement l'acte si nécessaire.", detail: "Les corrections passent par l'historique de travail de l'acte : elles sont conservées, et le dossier de révision indique qu'il y a eu correction." },
+          { text: "Écrivez votre **observation**, puis cliquez sur **Valider et envoyer en signature** — ou sur **Rejeter**.", detail: "Le motif de rejet est obligatoire : c'est lui qui dit au rédacteur ce qu'il doit corriger. Il lui est communiqué, et son acte revient en brouillon." },
+        ] },
+        { t: "note", kind: "warn", title: "Ce qui part en signature est ce qui a été révisé", text: "La révision porte sur le **texte exact** de l'acte. Si l'acte est réécrit après coup — par le rédacteur ou par le réviseur —, l'application le détecte : la révision devient **caduque**, et l'acte ne peut pas être envoyé sans une nouvelle révision. C'est ce qui garantit que l'acte signé est bien celui qui a été contrôlé." },
+        { t: "note", kind: "info", title: "Côté rédacteur", text: "Le rédacteur voit l'état de la révision dans l'en-tête de son acte. Quand un réviseur a corrigé le texte, il en est informé ; quand l'acte est rejeté, il lit le **motif** et peut reprendre son acte." },
         { t: "next", chapter: "signature", label: "Faire signer l'acte" },
       ],
     },
@@ -300,15 +334,16 @@ export const GUIDE = {
     {
       id: "signature",
       title: "Faire signer un acte",
-      short: "Envoyer l'acte au prestataire de signature et récupérer l'acte signé.",
+      short: "Envoyer l'acte au prestataire de signature et récupérer l'acte signé — ou, quand on est signataire, signer depuis l'onglet « Ma signature ».",
       icon: "lock",
       minutes: 4,
       audience: "all",
-      keywords: "signature signer prestataire certificat horodatage webhook circuit original signé",
+      keywords: "signature signer signataire ma signature onglet rapprochement compte outil de signature prestataire certificat horodatage webhook circuit original signé",
       blocks: [
         { t: "p", text: "Un acte n'existe vraiment qu'une fois **signé** par la personne qui a le pouvoir de le prendre. L'application envoie l'acte à un service de signature électronique et reçoit en retour l'acte signé." },
-        { t: "note", kind: "info", title: "Il faut d'abord l'accord du parapheur", text: "L'acte doit avoir franchi son **circuit de validation** (voir le chapitre « Faire valider un acte »). Sinon, le bouton « Envoyer en signature » reste inactif et l'écran explique pourquoi. Et si l'acte est réécrit après la validation, celle-ci devient caduque : le circuit doit être repris." },
+        { t: "note", kind: "info", title: "S'il y a un parapheur ou une révision", text: "Si l'administrateur a activé le **parapheur** (Administration › Expérimentale), l'acte doit d'abord franchir son **circuit de validation** (voir le chapitre « Faire valider un acte ») : sinon, le bouton « Envoyer en signature » reste inactif et l'écran explique pourquoi. Et si l'acte est réécrit après la validation, celle-ci devient caduque. De même, quand un **réviseur** est compétent pour l'acte, celui-ci doit être **révisé** avant l'envoi (voir le chapitre « Faire réviser un acte »). Ni parapheur ni révision : l'acte part directement en signature." },
         { t: "p", text: "Pour cela, ouvrez **Signature & publication** dans le menu de gauche, puis l'onglet « Circuit de signature »." },
+        { t: "note", kind: "info", title: "Si vous êtes vous-même signataire : l'onglet « Ma signature »", text: "Un compte qui porte la **qualité de Signataire** ouvre cet écran sur son propre onglet, **« Ma signature »**. Vous y voyez **qui vous êtes** pour l'application (la personne que vous tenez, votre qualité, votre compte, et l'état de son **rapprochement** avec l'outil de signature), puis deux listes : les **actes qui attendent votre signature** — avec, pour chacun, le bouton *Déposer et signer* ou *Signer* —, et les **actes signés au titre de votre signature**, c'est-à-dire ceux que vos délégataires ont signés sous votre pouvoir. Vous n'y voyez que les actes de votre **champ de compétence**. La qualité de Signataire **découle d'une désignation** : elle s'attribue d'elle-même dès que vous êtes désigné dans l'organigramme des **Délégations**, comme délégant ou comme délégataire. Si le bandeau annonce que votre compte **n'est pas encore rapproché** de l'outil de signature, un bouton suffit — en production, c'est l'annuaire de la collectivité qui a créé les deux comptes." },
         { t: "shot", shot: "signature" },
         { t: "terms", items: [
           { term: "Acte finalisé", def: "L'acte est complété et enregistré : plus aucun contrôle bloquant ne s'y oppose." },
@@ -322,8 +357,9 @@ export const GUIDE = {
           { text: "Cliquez sur **Envoyer en signature**.", detail: "L'acte part au service, qui calcule son **empreinte** (une sorte de code-barres du document) et ouvre un circuit de signature." },
           { text: "L'écran du prestataire s'ouvre : relisez l'acte, puis cliquez sur **Signer l'acte**.", detail: "C'est le geste de signature : le certificat signe l'empreinte du document, et la date est horodatée." },
           { text: "Le prestataire prévient l'application : l'acte revient signé.", detail: "Le service vérifie au passage que le document signé est bien exactement celui qui avait été déposé. Sinon, il refuse la signature." },
-          { text: "L'acte porte alors la mention **Signé** : vous pouvez le publier, ou télécharger l'original signé." },
+          { text: "Le retour signé **publie** l'acte : s'il est publiable, il est déposé au recueil et reçoit son identifiant ELI sans autre geste.", detail: "Un acte individuel (trame déclarée non publiable) s'arrête à la signature : il est conservé au registre et notifié à l'intéressé." },
         ] },
+        { t: "note", kind: "info", title: "Si la télétransmission est activée", text: "Quand l'administrateur a activé la **transmission au contrôle de légalité** (Administration › Expérimentale), une étape s'intercale **entre le retour signé et la publication** : l'acte signé part vers l'API d'envoi du contrôle de légalité, son **certificat de transmission** est déposé sur le document, puis l'acte est publié. La marche correspondante apparaît dans le circuit. Tant que la transmission n'a pas abouti, l'acte n'est pas publié." },
         { t: "note", kind: "info", title: "Si le signataire refuse", text: "Cliquez sur **Refuser** : l'acte revient en rédaction avec la mention « Prêt ». Rien n'est perdu, il suffit de le renvoyer après correction." },
         { t: "note", kind: "warn", title: "La signature de cette installation", text: "Le prestataire est ici une **simulation** : les échanges, la cryptographie et le retour de l'acte signé sont réels et vérifiables, mais le certificat est un certificat de démonstration — il n'a pas la valeur d'une signature qualifiée au sens du règlement eIDAS. En production, l'application est branchée sur le prestataire de la collectivité." },
         { t: "next", chapter: "publication", label: "Publier l'acte et le rendre opposable" },
@@ -337,7 +373,7 @@ export const GUIDE = {
       icon: "eye",
       minutes: 4,
       audience: "all",
-      keywords: "publication publier eli opposabilité opposable recueil version en ligne original signé acte individuel non publiable",
+      keywords: "publication publier eli opposabilité opposable recueil recueil public site sans compte theme thème matière famille carrousel derniers actes accueil version en ligne original signé acte individuel non publiable retrait retirer dépublier robot moteur de recherche llms.txt sitemap données ouvertes markdown json akoma ntoso adresse",
       blocks: [
         { t: "p", text: "Un acte signé n'est pas encore **opposable** : il ne peut être appliqué qu'à partir du moment où il a été publié. C'est la publication qui le rend obligatoire pour tout le monde." },
         { t: "p", text: "L'onglet « Publication (ELI) » fait ce travail : il dépose la **version en ligne** de l'acte au recueil, lui donne son **identifiant ELI** et fixe les dates." },
@@ -345,6 +381,8 @@ export const GUIDE = {
           { term: "Opposabilité", def: "Le moment à partir duquel l'acte peut être appliqué à tout le monde. Par défaut : le lendemain de la publication." },
           { term: "ELI (European Legislation Identifier)", def: "L'identifiant européen d'un texte : une référence courte et permanente, par exemple `eli:/fr/dec/2026/0402/iar`, qui ne change jamais, même si l'adresse du site change." },
           { term: "Recueil", def: "Le « journal officiel » de la collectivité : la collection dans laquelle les actes sont publiés." },
+          { term: "Recueil public", def: "Le site ouvert à tous où les actes publiés se consultent, **sans compte** : on y cherche un acte et l'on y lit son texte, comme sur Légifrance. C'est la vitrine de la collectivité ; l'application, elle, reste l'outil de travail." },
+          { term: "Recueil ouvert", def: "Ce que le recueil donne aux **moteurs de recherche** et aux **agents** (LLMs) : une adresse stable par acte, et le même acte dans des formats qu'ils savent lire — JSON, Markdown, texte brut, Akoma Ntoso." },
           { term: "Version en ligne", def: "La page web de l'acte publié, celle que chacun peut consulter." },
           { term: "Original signé", def: "Le document signé, conservé tel quel. C'est lui qui fait foi ; la version en ligne n'est qu'une lecture pratique." },
           { term: "Acte non publiable", def: "Acte individuel (revalorisation d'un traitement, sanction…) dont la trame est déclarée non publiable : signé et conservé au registre, il n'est pas déposé au recueil et ne reçoit pas d'identifiant ELI." },
@@ -359,7 +397,14 @@ export const GUIDE = {
         ] },
         { t: "note", kind: "warn", title: "On ne publie pas un acte non signé", text: "Le service refuse la publication tant que l'acte n'est pas signé (et si la date de publication précède la signature). Ce n'est pas une tracasserie : c'est ce qui garantit que l'acte publié est bien celui qui a été signé." },
         { t: "note", kind: "info", title: "Tous les actes ne se publient pas", text: "Les **actes individuels** (revalorisation d'un traitement, sanction disciplinaire…) relèvent de trames déclarées **non publiables**. Ils sont signés et conservés au registre, mais ne sont **jamais déposés au recueil** : ils n'apparaissent donc pas dans la file « à publier », mais dans la carte « Actes non publiables ». C'est leur **notification** à l'intéressé qui les rend applicables à son égard." },
-        { t: "p", text: "Pour relire une publication, ouvrez **Publications (ELI)** dans le menu : le registre public liste les actes publiés, et vous pouvez y coller un identifiant ELI pour retrouver directement un texte." },
+        { t: "p", text: "Le retour signé publie l'acte : dès que la signature revient, un acte publiable est **déposé au recueil automatiquement**, sans autre geste de votre part. Une administration qui publie déjà dans son propre système peut **éteindre cet automatisme** (Administration › Publication) : l'acte signé attend alors au registre, et se publie à la main le moment venu." },
+        { t: "note", kind: "info", title: "Le recueil public", text: "Les actes publiés se consultent par **tout le monde, sans compte**, dans le **recueil public** : un site qui ne montre que votre structure et ses actes. Sa **page d'accueil** se lit comme celle d'un vrai site : une entrée qui dit ce qu'on y trouve, la **recherche**, un **carrousel des derniers actes publiés** (chaque carte met en avant le **thème** de l'acte), puis les **thèmes** — les familles de trames — qui donnent accès aux actes par matière (urbanisme, police, finances…), et enfin la liste complète par année. Chaque acte s'y lit comme sur Légifrance — son titre, sa version, ses métadonnées (thème, identifiant ELI, dates d'opposabilité, recueil), puis son **texte présenté dans la page** (l'acte n'est pas enfermé dans une feuille à télécharger) —, avec ses pièces, sa signature vérifiable et ses versions. Le visiteur peut aussi ouvrir l'**original signé** — la pièce telle qu'elle a été signée — d'un bouton : elle s'affiche alors dans une fenêtre, où il peut l'imprimer ou l'enregistrer en PDF. C'est cette pièce qui fait foi. C'est l'adresse à communiquer ; l'écran « Publications (ELI) » donne un bouton **Ouvrir le recueil public** et permet d'en **copier le lien**." },
+        { t: "note", kind: "info", title: "Publia, l'assistant du recueil", text: "Le recueil public a, lui aussi, son assistant : **Publia** (une pastille en bas à droite). Le visiteur lui pose ses questions en français — « quels sont les derniers actes ? », « qu'est-ce que l'identifiant ELI ? » — et, dès qu'il a **un acte ouvert**, Publia le sait : elle répond d'abord sur **cet** acte (ce qu'il prévoit, sa portée, ses dates, ses modifications, ses versions) et donne le **lien** pour l'ouvrir. Elle ne connaît que les **actes publiés** : cette aide est publique, comme le recueil lui-même. Comme Plume, elle a un **nom** et une **icône** qui se règlent dans **Administration › Assistants**, et elle peut y être **éteinte** pour tout le monde." },
+        { t: "note", kind: "info", title: "Le recueil donne accès à l'application", text: "Pour qui n'a pas de compte, le recueil **est** l'entrée de l'application : son en-tête porte un bouton **Se connecter** (comptes de l'application ou annuaire, selon le référentiel). Une fois connecté, la même place propose **Retour à l'application** — et un agent authentifié à qui aucun rôle ne donne accès y trouve **Mon accès**, un écran qui le lui explique et le renvoie vers le recueil." },
+        { t: "note", kind: "info", title: "Les thèmes du recueil", text: "Le **thème** d'un acte est la **famille de sa trame** : c'est ce classement qui donne au recueil sa page d'accueil par matière. Le **libellé** et la **présentation** de chaque thème s'écrivent dans **Administration › Familles** — la présentation est la phrase affichée sous le nom du thème, sur le recueil public. Le thème est transmis au dépôt de l'acte, puis à sa publication : renommer une famille suffit à renommer le thème partout dans le recueil." },
+        { t: "p", text: "Pour relire une publication, ouvrez **Publications (ELI)** dans le menu : le registre liste les actes publiés, et vous pouvez y coller un identifiant ELI pour retrouver directement un texte. Le texte s'affiche **dans la page**, et un bouton mène à la page du recueil public du même acte." },
+        { t: "note", kind: "info", title: "Les moteurs de recherche et les agents lisent aussi le recueil", text: "Le recueil n'est pas lu que par des humains : les **moteurs de recherche** le parcourent pour référencer vos actes, et les **agents** (assistants, LLMs) le consultent pour répondre à des questions. Ces lecteurs-là n'exécutent pas l'application : il leur faut des **adresses** et des **formats**. Chaque acte publié a donc, à côté de sa page habituelle, une **adresse de référence** stable — la même tant que l'identifiant ELI ne change pas — et plusieurs **représentations** : **JSON** (les métadonnées, l'identifiant ELI et le texte), **Markdown** (le texte structuré, le plus lisible par un agent), **texte brut** et le document normé **Akoma Ntoso**. Vous les trouvez sous le texte de chaque acte, dans le bloc **« Recueil ouvert »** : chaque adresse se copie d'un bouton. Sur une installation hébergée sur votre propre serveur, ces adresses sont de vraies pages (`/recueil`, `/recueil/<clé>`, `/recueil/<clé>.json`…), et le recueil entier se donne aussi à lire aux robots : `/llms.txt` (sa présentation), `/recueil.json` (l'index), `/sitemap.xml` (le plan) et `/robots.txt` (ce qui peut être parcouru). Rien à régler : c'est la publication elle-même qui ouvre l'acte." },
+        { t: "note", kind: "warn", title: "Un acte publié ne se retire jamais", text: "Retirer un acte du recueil est un **dernier recours**, réservé à l'**administrateur**, et pour un **motif technique** seulement : dépôt en double, dépôt erroné, acte publié avant signature, identifiant attribué à tort. Ce n'est **pas** une façon de corriger un acte : un acte qu'on veut changer se **modifie** (acte modificatif), un acte qu'on veut annuler s'**abroge** — dans les deux cas il **reste au recueil**, car le public a pu le lire et s'y fier. Le geste s'ouvre depuis la consultation d'une publication, sous un **avertissement en grand**, et exige un **motif écrit**, conservé sur l'acte et au journal. L'acte redevient alors « signé », et peut être publié à nouveau." },
         { t: "shot", shot: "publication" },
         { t: "next", chapter: "execution", label: "Rendre l'acte exécutoire (formalités et délais)" },
       ],
@@ -368,20 +413,24 @@ export const GUIDE = {
     {
       id: "execution",
       title: "Rendre l'acte exécutoire (formalités et délais)",
-      short: "Transmettre, publier, notifier : ce qui fait qu'un acte s'applique vraiment — et jusqu'à quand il peut être contesté.",
+      short: "Transmettre, publier, notifier : ce qui fait qu'un acte s'applique vraiment — et qui peut le contester.",
       icon: "warn",
-      minutes: 5,
+      minutes: 7,
       audience: "all",
-      keywords: "exécutoire exécution formalité transmission contrôle de légalité préfecture publication notification délai recours contentieux échéancier constater",
+      keywords: "exécutoire exécution formalité transmission contrôle de légalité préfecture publication notification délai recours contentieux échéancier constater recours introduit requête greffe déféré attestation non-recours état des formalités pièce PDF",
       blocks: [
         { t: "p", text: "Un acte signé n'est pas encore **exécutoire** : il ne s'applique qu'une fois les formalités accomplies. Selon l'acte, il faut le **transmettre** au contrôle de légalité, le **publier** au recueil, ou **notifier** la personne concernée." },
-        { t: "p", text: "L'écran **Exécution & délais** montre, pour chaque acte signé, ce qui reste à faire et jusqu'à quand il peut être contesté." },
+        { t: "p", text: "L'écran **Exécution & délais** montre, pour chaque acte signé, ce qui reste à faire et jusqu'à quand il peut être contesté. C'est aussi là que l'on **note l'existence d'un recours** contre un acte, et que l'on **délivre les pièces** du dossier." },
         { t: "terms", items: [
           { term: "Transmission", def: "L'envoi au contrôle de légalité (préfecture, @ctes). C'est elle qui fait courir le délai de deux mois du représentant de l'État." },
+          { term: "Certificat de transmission", def: "L'accusé de réception du contrôle de légalité, qui porte la mention « Transmis au contrôle de légalité le … à … ». Il est déposé sur le document." },
           { term: "Publication", def: "Le dépôt au recueil, qui rend l'acte opposable à tout le monde. Quand l'acte est publié depuis « Signature & publication », cette formalité se constate d'elle-même." },
           { term: "Notification", def: "L'envoi à la personne concernée. Indispensable pour un acte individuel (revalorisation, sanction), qui ne se publie pas." },
           { term: "Exécutoire", def: "La date à laquelle la dernière formalité requise est accomplie. C'est de cette date que part le délai de recours." },
           { term: "Délai de recours", def: "Deux mois, en principe, pour contester l'acte devant le juge. Passé ce délai, l'acte est définitif." },
+          { term: "Recours introduit", def: "Un recours a réellement été déposé contre l'acte (requête au tribunal, recours gracieux, déféré du préfet). Sa **date d'introduction** ferme le délai : l'acte n'est plus « définitif », il est **contesté** jusqu'à la décision du juge." },
+          { term: "État des formalités", def: "La pièce qui relève, formalité par formalité, ce qui a été fait, **quand**, sous quelle **référence** et par qui. Elle s'exporte en PDF pour **tout acte signé**." },
+          { term: "Attestation de non-recours", def: "La pièce qui certifie qu'**aucun recours** n'a été porté à la connaissance de la collectivité contre un acte **définitif**. Elle se remet à un tiers qui en fait la demande." },
         ] },
         { t: "steps", items: [
           { text: "Ouvrez **Exécution & délais**, onglet **Formalités à accomplir**." },
@@ -389,8 +438,25 @@ export const GUIDE = {
           { text: "Cliquez sur **Enregistrer** au bas de la formalité, et renseignez la **date**, la **référence** (numéro d'accusé de réception, référence du recueil…) et, pour une notification, les **destinataires**." },
           { text: "Validez : l'acte devient **exécutoire** si c'était la dernière formalité requise, et l'écran indique la fin du délai de recours." },
         ] },
-        { t: "note", kind: "info", title: "Pourquoi c'est vous qui le déclarez", text: "L'application ne peut pas deviner qu'un courrier est parti. Chaque formalité est donc une **constatation** : vous attestez la date et la référence, l'application l'horodate, l'inscrit à votre nom et la garde au dossier." },
-        { t: "note", kind: "warn", title: "Retards et délais", text: "L'écran signale les transmissions et publications qui traînent, et les délais de recours qui se referment. Le registre des actes rappelle aussi combien d'actes attendent une formalité." },
+        { t: "stepscard", title: "Noter l'existence d'un recours", items: [
+          "Ouvrez l'onglet **Recours** et cliquez sur l'acte (il y figure soit parce que le délai court encore, soit parce qu'un recours y est déjà noté).",
+          "Cliquez sur **Enregistrer un recours** (ou **Un recours a été introduit**).",
+          "Renseignez la **date d'introduction** — celle de la requête, ou de sa réception pour un recours gracieux —, la **nature** du recours, son **auteur**, sa **référence** et, au besoin, une **observation**.",
+          "Validez : l'acte passe en **« Recours introduit »**, et ne pourra plus être attesté sans recours. La mention se **corrige** ou se **retire** par « Corriger la mention » (chaque geste est inscrit au journal).",
+        ] },
+        { t: "table", head: ["Pièce à délivrer", "Pour quel acte", "Ce qu'elle contient"], rows: [
+          ["**État des formalités**", "tout acte signé, quel que soit son état", "le tableau des formalités : requise ou non, **date**, référence, modalité, auteur — puis le certificat de transmission s'il existe, et la situation (exécutoire, délai, recours)"],
+          ["**Attestation de non-recours**", "un acte **définitif** que personne n'a contesté", "l'identité de l'acte, l'attestation qu'aucun recours n'a été porté à votre connaissance, les formalités qui l'ont rendu exécutoire, la date d'expiration du délai, et le bloc de signature de l'autorité"],
+        ] },
+        { t: "p", text: "Les deux pièces s'ouvrent dans un nouvel onglet : imprimez-les, ou enregistrez-les en PDF (**« Enregistrer au format PDF »** dans la fenêtre d'impression). Leur délivrance est inscrite au journal." },
+        { t: "note", kind: "info", title: "Pourquoi c'est vous qui le déclarez", text: "L'application ne peut pas deviner qu'un courrier est parti, ni qu'une requête a été déposée. Chaque formalité — comme chaque recours — est donc une **constatation** : vous attestez la date et la référence, l'application l'horodate, l'inscrit à votre nom et la garde au dossier." },
+        { t: "note", kind: "info", title: "Quand la transmission passe par l'API", text: "Si l'administrateur a activé la **télétransmission** (Administration › Expérimentale), la transmission ne se constate plus à la main : l'acte signé part vers l'**API d'envoi** du contrôle de légalité, qui accuse réception. Le **certificat de transmission** — « Transmis au contrôle de légalité le … à … », avec sa référence et son sceau — est alors déposé sur le document, et la formalité se constate d'elle-même. Si elle est activée, elle est **désactivée par défaut** et ne s'applique qu'aux actes signés après son activation.", },
+        { t: "note", kind: "warn", title: "Retards et délais", text: "L'écran signale les transmissions et publications qui traînent, et les délais de recours qui se referment. Un acte **contesté** y est signalé à part : il ne se traite pas comme un acte dont le délai court encore. Le registre des actes rappelle aussi combien d'actes attendent une formalité." },
+        { t: "faq", items: [
+          { q: "Le délai est expiré : puis-je délivrer une attestation de non-recours ?", a: "Oui, si **aucun recours** n'est enregistré contre l'acte : c'est le bouton **Attestation de non-recours (PDF)** de la carte « Recours ». Si un recours a été introduit — même gracieux —, l'attestation ne peut pas être délivrée : elle certifierait le faux. L'application le vérifie et refuse de la produire." },
+          { q: "Un recours a été classé ou retiré : que faire de la mention ?", a: "La mention reste au dossier : elle dit qu'un recours a existé, ce qui est un fait. Ouvrez **Corriger la mention** pour la compléter (l'issue du recours se note dans l'**observation**). Si la mention a été portée par erreur, **Retirez-la** : le geste est inscrit au journal." },
+          { q: "Pourquoi l'état des formalités n'a-t-il pas la charte de mon acte ?", a: "Parce que ce n'est pas l'acte : c'est un écrit administratif de la collectivité. L'état et l'attestation portent donc l'**en-tête de l'entité**, sur le même papier A4, et non la feuille de style de l'acte." },
+        ] },
         { t: "next", chapter: "retrouver", label: "Retrouver un acte déjà écrit" },
       ],
     },
@@ -420,7 +486,7 @@ export const GUIDE = {
           "**Voir** : affiche le document final en lecture seule.",
           "**Colonne « Trame »** : « conforme », ou « N écart(s) » si le texte a été réécrit par rapport au modèle.",
           "**↓ (exporter)** : refait un export sans rien modifier (par exemple pour renvoyer le PDF).",
-          "**🗑 (mettre à la corbeille)** : l'acte part à la **corbeille** (rien n'est perdu : on peut le restaurer, voir le chapitre suivant).",
+          "**🗑 (mettre à la corbeille)** : l'acte part à la **corbeille** (rien n'est perdu : on peut le restaurer, voir le chapitre suivant). Ce bouton n'existe que pour un **brouillon ou un acte prêt** : un acte signé ou publié ne s'efface pas, il s'**abroge** (voir le chapitre « Abroger un acte »).",
         ] },
         { t: "note", kind: "info", title: "Le registre de démonstration est déjà garni", text: "Pour la démonstration, le registre contient plusieurs actes : des actes **déjà rédigés et signés** (leur signature est vérifiable), deux actes **prêts à signer** et un **brouillon** à compléter. Vous pouvez les ouvrir, les reprendre, les modifier ou les publier — et tout se passe comme si vous les aviez écrits." },
         { t: "note", kind: "warn", title: "Où vivent vos actes", text: "En **mode local** (celui de la démonstration), ils sont enregistrés dans **ce navigateur**, sur **ce poste de travail** : ils ne sont donc pas sur un serveur commun. C'est pourquoi on exporte les actes importants — le fichier, lui, peut être copié, envoyé et archivé. Quand l'administrateur a branché l'application sur la **base partagée** de la collectivité, les actes sont au contraire rangés côté serveur et visibles depuis tous les postes." },
@@ -438,14 +504,51 @@ export const GUIDE = {
       keywords: "corbeille supprimer supprimé restaurer restauration définitive effacer récupérer",
       blocks: [
         { t: "p", text: "Quand vous supprimez un acte ou une trame, il ne disparaît pas : il part à la **corbeille**. Rien n'est effacé tant que vous ne le décidez pas explicitement." },
+        { t: "note", kind: "warn", title: "Seuls les brouillons vont à la corbeille", text: "Un acte **signé** ou **publié** n'a plus le bouton corbeille : c'est une pièce du dossier, et un acte administratif publié ne s'efface pas — il s'**abroge**, par un acte nouveau qui le vise (voir le chapitre « Abroger un acte »). Le seul retrait possible pour un acte publié est un **retrait technique du recueil** (dépôt en double, erreur de dépôt), réservé aux administrateurs et soumis à un motif écrit." },
         { t: "steps", items: [
           { text: "Ouvrez **Corbeille** dans le menu de gauche." },
           { text: "Les actes et les trames supprimés y sont listés, avec la date de suppression et le nom de la personne qui les y a mis." },
           { text: "Cliquez sur **Restaurer** pour les remettre à leur place, ou sur **Supprimer définitivement** pour les effacer pour de bon." },
         ] },
-        { t: "note", kind: "warn", title: "La suppression définitive est irréversible", text: "L'écran demande une confirmation, et l'effacement est inscrit au **journal** (Référentiel › Journal d'audit), avec son auteur et l'heure." },
+        { t: "note", kind: "warn", title: "La suppression définitive est irréversible", text: "L'écran demande une confirmation, et l'effacement est inscrit au **journal** (Administration › Journal d'audit), avec son auteur et l'heure." },
         { t: "note", kind: "info", title: "Ce que voit le registre", text: "Les actes à la corbeille n'apparaissent plus dans le registre des actes, ni dans le parapheur, ni dans l'échéancier. Le registre en signale simplement le nombre, avec un lien vers la corbeille." },
         { t: "next", chapter: "modifier", label: "Modifier un acte déjà publié" },
+      ],
+    },
+    // ------------------------------------ 6 quater : abroger un acte
+    {
+      id: "abrogations",
+      title: "Abroger un acte, ou l'un de ses articles",
+      short: "Faire cesser un acte de produire effet : la clause d'abrogation, son effet à l'entrée en vigueur, et ce que le recueil en montre.",
+      icon: "x",
+      minutes: 5,
+      audience: "all",
+      keywords: "abroger abrogation abrogé abrogée retirer retrait recueil article abrogé entrée en vigueur clause vieillissement remplacer caduc",
+      blocks: [
+        { t: "p", text: "Un acte peut cesser de produire effet sans être effacé : il est **abrogé**. L'abrogation se fait toujours par un **acte nouveau**, publié, qui **vise expressément** l'acte — ou l'article — qu'il abroge. C'est une règle de droit, et l'application la suit : rien ne disparaît, tout se lit." },
+        { t: "note", kind: "warn", title: "Un acte publié ne se supprime pas", text: "Vous ne trouverez pas de bouton « corbeille » sur un acte signé ou publié : personne ne doit pouvoir douter de ce qui a été publié, ni quand. Le bouton des actes signés et publiés s'appelle **« Retirer / abroger »** (icône ✕) et propose de **rédiger un acte d'abrogation**. Seul un **retrait technique du recueil** — dépôt en double, erreur de dépôt — reste possible, pour les administrateurs, avec un motif écrit." },
+        { t: "p", text: "**Deux chemins mènent à l'abrogation.**" },
+        { t: "terms", items: [
+          { term: "Depuis le registre", def: "Sur la ligne de l'acte, cliquez sur **✕ (Retirer / abroger)** : l'application vous dit ce que visera l'acte à rédiger, puis vous choisissez la **trame** qui le portera. La clause d'abrogation est alors prévue d'avance." },
+          { term: "Depuis la rédaction", def: "Quand vous rédigez un acte, l'onglet **« Abrogations »** du panneau de droite permet de prévoir, dans le texte même de l'acte, l'abrogation d'un autre acte du registre — ou d'un seul de ses articles." },
+        ] },
+        { t: "steps", items: [
+          { text: "Ouvrez l'onglet **« Abrogations »** du panneau de droite, pendant la rédaction, et cliquez sur **Prévoir une abrogation**." },
+          { text: "Choisissez l'objet : **un acte du registre**, **un article d'un acte du registre**, ou **un acte qui n'est pas dans l'application** (il se vise alors par son texte)." },
+          { text: "Désignez l'acte dans la liste — c'est sa **désignation exacte** (nature, numéro, date) que la clause reprendra. Le panneau montre en dessous la phrase qui figurera dans l'acte.", detail: "Un acte du registre se vise **expressément** : l'application sait de quoi il s'agit, et pourra appliquer l'abrogation le jour venu. Un acte qu'elle ne connaît pas ne peut être visé que par un texte libre — elle ne pourra pas le marquer abrogé." },
+          { text: "Au besoin, **réécrivez la clause** : le champ « Réécrire la clause » remplace la phrase type, et vous pouvez aussi corriger la clause directement dans le document.", detail: "Un article d'abrogation apparaît alors en fin de dispositif, juste avant le bloc de signature : « **L'arrêté n° … du … est abrogé à compter de l'entrée en vigueur du présent arrêté.** »" },
+        ] },
+        { t: "note", kind: "info", title: "L'effet court de l'ENTRÉE EN VIGUEUR, pas de la publication", text: "C'est ce que dit la clause, et c'est ce que fait l'application. L'entrée en vigueur d'un acte, c'est la **date d'effet** qu'il déclare ; à défaut, le lendemain de sa publication (ou le délai réglé dans Administration › Publication). Tant que ce jour n'est pas arrivé, l'abrogation est **annoncée** sans être opposable ; le jour venu, l'application l'applique : l'acte visé **dans son ensemble** reçoit sa marque d'abrogation au registre, un **article** visé donne lieu à une **version consolidée** de son acte — comme le ferait un acte modificatif — qui part à la publication." },
+        { t: "note", kind: "info", title: "Ce que le registre en dit", text: "Un acte abrogé porte, à côté de son statut, un badge **« abrogé »** (ou **« abrogation prévue »** tant que l'effet n'est pas acquis) ; sa fiche l'explique en tête, avec l'acte qui l'a abrogé, sa date, et la date d'effet. Survolez le badge pour lire la phrase entière." },
+        { t: "note", kind: "info", title: "Abroger un acte ENTIER depuis une modification", text: "Quand vous **modifiez** un acte (voir le chapitre précédent), le panneau de droite propose **« Abroger tout l'acte »** : l'acte modificatif abrogera alors tous les articles, et la version consolidée le dira (« L'acte est abrogé dans son ensemble »). C'est l'abrogation par voie de modification ; l'onglet « Abrogations » de la rédaction, lui, sert aux abrogations qu'un acte prévoit pour un **autre** acte." },
+        { t: "note", kind: "info", title: "Le recueil public et les articles abrogés", text: "Sur l'espace en ligne, un acte se lit toujours dans sa **version la plus récente**. Un article abrogé garde son intitulé — la numérotation continue d'en dépendre — et la mention de l'acte qui l'a abrogé, mais sa **rédaction** ne s'affiche pas : une case **« Afficher les articles abrogés »**, en tête de l'acte, la révèle (barrée, comme une pièce d'archive). Sur la page des actes publiés, la liste présente chaque acte **une seule fois**, dans sa rédaction en vigueur ; une case discrète, dans les filtres, fait réapparaître les **versions antérieures** lorsqu'il y en a." },
+        { t: "faq", items: [
+          { q: "J'ai abrogé un acte, mais il est encore dans le recueil public. Est-ce normal ?", a: "Oui. Un acte publié reste au recueil — c'est la trace de ce qui a été publié. Ce qui change, c'est son **état** : il est marqué abrogé, et l'acte qui l'abroge, lui aussi publié, porte la clause. Le retrait pur et simple du recueil n'est pas la voie de l'abrogation : il est réservé aux erreurs techniques de dépôt." },
+          { q: "Puis-je abroger un article dont je ne connais pas le numéro ?", a: "Ouvrez le panneau « Abrogations » et choisissez **« un article d'un acte du registre »** : l'application liste les articles de l'acte choisi, avec leur intitulé. Vous désignez l'article dans la liste — le numéro est repris pour vous." },
+          { q: "L'acte visé n'est pas dans l'application. Que faire ?", a: "Choisissez **« un acte qui n'est pas dans l'application »** et écrivez sa désignation (« l'arrêté préfectoral n° 12-345 du 3 mars 2019 »). La clause sera juste, mais l'application ne pourra pas marquer cet acte comme abrogé : elle ne le connaît pas." },
+          { q: "Un article abrogé peut-il reprendre du service ?", a: "Non : un article abrogé ne se rétablit pas. S'il faut de nouveau cette règle, elle revient par un **acte nouveau** — ou par une modification qui insère un article, éventuellement sous un autre numéro." },
+        ] },
+        { t: "next", chapter: "mots", label: "Glossaire : les mots employés ici" },
       ],
     },
     // ------------------------------------------------ 6 bis : modifier un acte
@@ -478,39 +581,47 @@ export const GUIDE = {
         { t: "note", kind: "info", title: "Ce qui ne se modifie pas ici", text: "Le préambule (intitulé, visas, considérants) et le bloc de signature appartiennent à l'acte d'origine : la modification porte sur les **articles**. C'est ce que décrit l'acte modificatif, article par article." },
         { t: "note", kind: "warn", title: "Si l'acte d'origine n'a pas été produit ici", text: "Importez son fichier : sans lui, l'application ne sait pas ce qu'elle modifie. Le fichier Akoma Ntoso (.akn.xml) est celui que l'application produit, et celui qu'un administrateur peut vous transmettre." },
         { t: "note", kind: "info", title: "Les écarts de rédaction", text: "Si un rédacteur a adapté le texte d'une trame, l'acte porte la mention **« hors trame »** : le détail de ce qu'il a réécrit reste visible dans le registre des actes et dans les fichiers exportés. C'est un signalement, jamais un blocage." },
-        { t: "next", chapter: "mots", label: "Glossaire : les mots employés ici" },
+        { t: "next", chapter: "abrogations", label: "Abroger un acte, ou l'un de ses articles" },
       ],
     },
     // ------------------------------------------------------------------ 7
     {
       id: "administrateurs",
       title: "Préparer et faire évoluer une trame",
-      short: "Pour les administrateurs et les éditeurs : l'éditeur de trame et les commentaires qui ne se perdent plus.",
+      short: "Pour les administrateurs et les éditeurs : l'éditeur de trame, les commentaires qui ne se perdent plus, et le choix du signataire par sa fonction.",
       icon: "gear",
-      minutes: 6,
+      minutes: 7,
       audience: "admin",
-      keywords: "administrateur éditeur trame éditeur de trame bloc champ règle commentaire service auteur version publier base de données mysql mariadb partagé multi-poste serveur persistance importer export exemple json modèle fichier format",
+      keywords: "administrateur éditeur trame éditeur de trame bloc champ règle commentaire service auteur version publier base de données mysql mariadb partagé multi-poste serveur persistance importer export exemple json modèle fichier format qualité signataire fonction rôle choisir signataire genre accord délégation subdélégation maire adjoint arbre décision pouvoir fondement visa liste puces numérotée numérotation énumération numérotation numéro séquence externe grist api clé jeton relais",
       blocks: [
         { t: "p", text: "Ce chapitre s'adresse aux collègues — administrateurs **et éditeurs** — qui écrivent et mettent à jour les modèles. Les autres peuvent passer au glossaire." },
         { t: "p", text: "Une trame se fabrique dans l'**éditeur de trame** : depuis la liste, cliquez sur « Ouvrir l'éditeur » sur la carte du modèle. L'écran est divisé en trois colonnes." },
         { t: "shot", shot: "editor" },
         { t: "terms", items: [
-          { term: "À gauche : le plan", def: "La liste des morceaux du document (intitulé, visas, articles, signature…). Cliquez un morceau pour le sélectionner et le régler à droite." },
-          { term: "Au centre : la page", def: "Le document tel qu'il sera imprimé. Cliquez directement dans le texte pour le corriger." },
-          { term: "À droite : l'inspecteur", def: "Les réglages du morceau sélectionné, plus les onglets « Champs » (les informations demandées au rédacteur), « Règles » et « Trame »." },
+          { term: "À gauche : le plan et la réserve", def: "Le plan : la liste des morceaux du document (intitulé, visas, articles, signature…). Cliquez-en un pour le régler à droite, ou attrapez-le pour le déplacer. **Dessous, la réserve** : tout ce qui peut être inséré — vos questions, les renseignements que l'application remplit seule, et les morceaux de document." },
+          { term: "Au centre : la page", def: "Le document tel qu'il sera imprimé. Cliquez directement dans le texte pour le corriger, et **glissez-y les éléments de la réserve** à l'endroit exact où ils doivent aller." },
+          { term: "À droite : l'inspecteur", def: "Les réglages de ce qui est sélectionné, en quatre onglets : « Ce bloc », « Questions » (ce qui sera demandé au rédacteur), « Contrôles » et « Trame »." },
         ] },
         { t: "steps", items: [
-          { text: "Pour **ajouter un morceau**, cliquez sur un petit **+** entre deux blocs et choisissez le type.", detail: "Le morceau s'insère exactement à cet endroit ; les flèches ↑ ↓ le déplacent, la corbeille le retire." },
-          { text: "Pour **corriger un texte**, cliquez dedans et écrivez.", detail: "Les pastilles bleues sont des **champs** : elles seront remplacées par ce que le rédacteur saisira. Utilisez « Insérer un champ » pour en ajouter un, et les filtres `|date-long`, `|money`… pour la mise en forme." },
-          { text: "Pour **expliquer une règle**, ouvrez l'onglet « Bloc » puis « Commentaires », et cliquez sur Ajouter.", detail: "Choisissez la nature : juridique, consigne, question ou veille. Le commentaire est **signé du service** de votre compte (le vôtre, pas votre nom), reste visible dans l'inspecteur, part dans les exports et ne disparaît plus comme un commentaire Word." },
-          { text: "Pour **empêcher un oubli**, ouvrez l'onglet « Champs » et cochez « obligatoire » sur la case concernée.", detail: "Le rédacteur est averti, et l'export est bloqué tant que la case est vide." },
+          { text: "Pour **ajouter un morceau**, prenez-le dans la réserve — groupe « Ajouter un bloc », à gauche — et **glissez-le dans la page**.", detail: "Un trait bleu montre où il se posera : au-dessus ou au-dessous du morceau survolé, selon l'endroit où vous lâchez. Vous pouvez aussi cliquer le petit **+** placé entre deux blocs : un menu s'ouvre et le morceau s'insère exactement là. Pour le ranger ensuite, attrapez la poignée ⠿ du morceau et faites-le glisser — ou servez-vous des flèches ↑ ↓." },
+          { text: "Pour **poser une question au rédacteur**, créez-la dans l'onglet « Questions », puis **glissez son nom dans le texte**.", detail: "Un champ est un trou dans la phrase : « Arrêté n° ⬤ du ⬤ portant ⬤ » — l'agent le remplira. Si le glisser vous paraît difficile, **cliquez** le nom du champ puis **cliquez dans le texte** : le résultat est identique. Une bande bleue « Cliquez dans le document à l'endroit où insérer… » vous rappelle où vous en êtes, et le bouton « Annuler » interrompt le geste." },
+          { text: "Pour **corriger un texte**, cliquez dedans et écrivez.", detail: "Les pastilles bleues sont des **champs** : elles seront remplacées par ce que le rédacteur saisira. Les filtres `|date-long`, `|money`… mettent la valeur en forme." },
+          { text: "Pour une **liste**, choisissez « À puces » ou « Numérotée » dans l'inspecteur.", detail: "Un bloc de liste s'insère et se remplit comme un paragraphe. Sélectionnez-le : l'inspecteur propose son **type**. Son **apparence** — la puce, ou la numérotation « 1° 2° 3° », « a) b) c) »… — se règle dans les **Feuilles de style**, rubrique « Listes » : elle vaut alors pour toutes les listes du même genre, dans tous les actes qui portent cette charte." },
+          { text: "Pour **expliquer une règle**, ouvrez l'onglet « Ce bloc » puis « Commentaires », et cliquez sur Ajouter.", detail: "Choisissez la nature : juridique, consigne, question ou veille. Le commentaire est **signé du service** de votre compte (le vôtre, pas votre nom), reste visible dans l'inspecteur, part dans les exports et ne disparaît plus comme un commentaire Word." },
+          { text: "Pour **empêcher un oubli**, ouvrez l'onglet « Questions », dépliez « Réglages avancés » sur la question concernée, et cochez « Réponse obligatoire ».", detail: "Le rédacteur est averti, et l'export est bloqué tant que la case est vide." },
           { text: "Pour rendre un paragraphe **facultatif**, remplissez « Condition d'affichage » dans l'inspecteur.", detail: "Le bloc n'apparaîtra que si la condition est vraie — par exemple seulement pour une régie de recettes." },
           { text: "Pour **préparer vos trames en amont** (éditeur de texte, script, hors ligne), cliquez sur « Fichier d'exemple » : le JSON téléchargé documente chaque clé et se réimporte tel quel, via « Importer une trame ».", detail: "Un fichier peut contenir une trame ({ \"trame\": {…} }), plusieurs trames ({ \"trames\": [ {…}, {…} ] }), ou directement une trame. Seuls « name » et « body » sont obligatoires ; les identifiants sont régénérés à l'import. Les erreurs de format sont listées avant tout import, et les points corrigés automatiquement (type inconnu, valeur par défaut) sont signalés." },
           { text: "Quand la trame est prête, **mettez à jour la version** et le statut, puis exportez-la en JSON pour la transmettre.", detail: "Tant qu'une trame reste sur votre poste, personne d'autre ne l'a. Une trame publiée sans version claire est une source de confusion." },
         ] },
         { t: "note", kind: "info", title: "Déclarer une trame non publiable", text: "Dans l'onglet « Trame », la case **« Publiable au recueil des actes administratifs »** est cochée par défaut. Décochez-la pour les trames qui produisent des **actes individuels** (revalorisation d'un traitement, sanction disciplinaire, décision nominative…). Les actes issus de ces trames sont alors rédigés, signés et conservés au registre, mais **jamais** déposés au recueil : le service refuse leur publication, même signés. Réservez cette déclaration aux actes que le droit ne soumet pas à publicité ; la déclaration vaut aussi pour les actes déjà rédigés à partir de la trame." },
-        { t: "note", kind: "info", title: "Rien de figé dans le code", text: "Entités, personnes, rôles, références, mentions, vocabulaire de rédaction, numérotation, **circuits de validation** (Référentiel › Circuits de validation) et **délais** (Référentiel › Exécution & délais) : tout se règle dans **Référentiel**. On y change une formule de recours, un type d'acte, ou l'ordre des visas à obtenir sans toucher à l'application." },
-        { t: "p", text: "**Où vivent les données.** Par défaut, tout est rangé dans votre navigateur : c'est le mode de démonstration, pratique mais **propre à ce poste**. Pour que plusieurs agents travaillent sur les mêmes trames et les mêmes actes, l'administrateur ouvre **Référentiel › Base de données** et branche l'application sur la base de la collectivité (MySQL / MariaDB) — ou, sans rien installer, sur le **service partagé** de la démonstration." },
+        { t: "note", kind: "info", title: "La qualité du signataire s'accorde en genre", text: "Au bas de l'acte, la qualité vient du **rôle** du signataire, accordée au genre de la personne : « Le maire » ou « **La maire** », « Le directeur général des services » ou « **La directrice générale des services** ». Chaque rôle porte donc ses deux formes (Administration › Rôles), et l'accord se règle **au cas par cas** sur la fiche de la personne (Administration › Personnes › Accord) : une femme maire peut tenir à être appelée « le maire ». Le document n'imprime que la qualité accordée et le **Prénom Nom** du signataire — la civilité n'y figure pas." },
+        { t: "note", kind: "info", title: "Le signataire se choisit par la FONCTION, jamais par son nom", text: "Au moment de désigner qui signera l'acte, l'application ne propose pas un annuaire de noms : elle demande d'abord la **fonction** — la qualité qui donne compétence pour signer — puis, **parmi les personnes qui la tiennent**, celle qui signe. Les fonctions proposées viennent du référentiel : les **rôles** (Administration › Rôles : « Maire », « Adjoint au maire », « Directeur général des services »…) et les **délégations de signature** (écran **Délégations** : « adjoint au maire en charge de l'urbanisme », « chef de bureau Urbanisme »…). Seules apparaissent les fonctions qui ont du sens **pour cet acte** : une délégation donnée dans le nom d'une autre organisation ne s'affiche jamais, et une délégation limitée à une famille ou à un type d'acte ne s'affiche que sur ces actes. Quand une fonction ne peut être tenue que par une personne — le cas d'une délégation —, celle-ci est retenue d'office ; quand plusieurs personnes la tiennent (deux adjoints, par exemple), c'est au rédacteur de désigner qui signe. Dans l'**éditeur de trame**, la question du signataire peut porter une **« Fonction attendue »** : le modèle fixe alors la qualité — « Maire » pour un arrêté portant délégation de signature, par exemple — et le rédacteur n'a plus qu'à désigner qui la tient. Rien n'est bloqué : le rédacteur peut toujours écarter cette fonction, et le signataire déjà retenu sur un acte reste proposé même s'il n'a pas la qualité attendue." },
+        { t: "note", kind: "info", title: "Délégations et subdélégations de signature", text: "Quand une autorité délègue sa signature — et que le délégataire sous-délègue à son tour, par dérogation — l'acte doit dire par quel chemin la compétence est venue. Réglez l'arbre dans l'écran **Délégations** : chaque délégation nomme un délégant, un délégataire, la qualité sous laquelle il signe, l'**organisation** dans le nom de laquelle elle est donnée, et facultativement la **famille** et le **type d'acte** visés. L'acte signé au bout de la chaîne porte alors toutes les qualités traversées : « Le Maire, / Par délégation, l'adjoint au maire en charge de l'urbanisme, / Par subdélégation, le chef de bureau Urbanisme, / Karim BENALI ». Seul le **nom du signataire** s'imprime : les qualités des étages intermédiaires sont écrites, jamais les noms de ceux qui les portent. Le rédacteur **voit la chaîne sous le champ « Signataire »** au moment de le choisir. **Désigner quelqu'un dans cet organigramme lui attribue la qualité de Signataire** (au délégant comme au délégataire), sans passer par « Comptes et rôles » : c'est cette qualité qui ouvre à l'intéressé l'onglet **« Ma signature »** et son **champ de compétence** — les actes dont sa signature relève. La désignation peut être faite par un **éditeur** comme par un administrateur." },
+        { t: "note", kind: "info", title: "Les décisions qui fondent la signature sont visées d'elles-mêmes", text: "Chaque étage d'une chaîne de délégations tient son pouvoir de **décisions** : l'autorité de tête, d'une seule — celle qui lui a donné son pouvoir, la délibération du conseil pour le maire par exemple ; un **délégataire**, de **deux** — la décision de **nomination** qui l'a nommé à sa fonction, et la décision de **délégation** qui lui a donné le droit de signer. La première se renseigne sur la **fiche de la personne** (Administration › Personnes, « Décision fondant son pouvoir de signer ») ; les deux autres, sur chaque **délégation** (écran **Délégations**, fiche du délégataire, « Les décisions fondant la signature »). Chacune se désigne d'un **acte publié au recueil** (le lien est celui du recueil en ligne), d'un **lien externe** (un texte qui vit ailleurs), ou d'une **référence du référentiel** qui porte son adresse. Un signataire ne se configure pas sans ses deux décisions : « Créer la délégation » les refuse tant qu'il en manque une. Lorsqu'une trame appelle, dans ses visas, « les décisions fondant la signature », l'acte les imprime **dans l'ordre — la nomination avant la délégation, à chaque étage** : un acte signé par subdélégation vise ainsi la délibération qui a donné son pouvoir au maire, puis, pour chaque étage, la nomination et la délégation. Chaque visa porte son **lien cliquable**, sur le web comme en PDF. Rien n'est visé pour un acteur dont une décision n'est pas renseignée ; on vérifie la série sous le champ « Signataire » et sous chaque délégation de l'arbre, sans rédiger d'acte pour voir." },
+        { t: "note", kind: "info", title: "Les établissements autonomes ont leur propre chaîne", text: "Toutes les chaînes ne descendent pas du maire. Un **établissement public** — un office, un centre de gestion, un syndicat — a sa propre autorité de tête, le **président de son conseil d'administration**, et sa propre chaîne de délégations, indépendante de celle de la commune : une délégation donnée dans le nom d'un établissement ne s'applique **qu'aux actes de cet établissement**. C'est le rattachement de chaque délégation à son **organisation** qui garantit cette indépendance, même quand une même personne tient des délégations des deux côtés. La formule d'autorité de l'entité (Administration › Entités) peut porter le jeton `{qualite}` : il est alors remplacé par la qualité de l'autorité de tête de l'établissement — « Le Président du conseil d'administration de l'office … »." },
+        { t: "note", kind: "info", title: "Le numéro peut venir d'un autre logiciel", text: "Par défaut, l'application tient la **séquence** des numéros : le rédacteur réserve le suivant. Une collectivité qui numérote déjà ailleurs — un document **Grist**, un tableur en ligne, un référentiel interne — peut faire **attribuer le numéro par ce service** : c'est le réglage « Attribution du numéro » de **Administration › Numérotation**. L'application demande alors le numéro au moment de rédiger (le bouton devient « Demander le numéro »), et **la ligne créée chez le service fait foi** : sa référence est conservée sur l'acte et au journal. Le réglage porte l'adresse de l'API, l'authentification, le corps de la requête et l'endroit où lire la réponse ; un bouton **« Tester l'appel »** permet de l'éprouver — attention, un essai crée réellement une ligne, donc consomme un numéro. Deux points à connaître : la **clé d'API est conservée dans le référentiel** (donc dans les sauvegardes : prenez une clé restreinte au strict nécessaire), et l'appel passe par le **relais** de l'hébergement, car un navigateur ne peut pas appeler Grist directement." },
+        { t: "note", kind: "info", title: "Rien de figé dans le code", text: "Entités, personnes, rôles, références, mentions, vocabulaire de rédaction, numérotation, **circuits de validation** (Administration › Circuits de validation), **délais** (Administration › Exécution & délais) et **recueil** (Administration › Publication : titre du recueil, publication automatique après signature, règle d'opposabilité) : tout se règle dans **Administration**. On y change une formule de recours, un type d'acte, ou l'ordre des visas à obtenir sans toucher à l'application." },
+        { t: "p", text: "**Où vivent les données.** Par défaut, tout est rangé dans votre navigateur : c'est le mode de démonstration, pratique mais **propre à ce poste**. Pour que plusieurs agents travaillent sur les mêmes trames et les mêmes actes, l'administrateur ouvre **Administration › Base de données** et branche l'application sur la base de la collectivité (MySQL / MariaDB) — ou, sans rien installer, sur le **service partagé** de la démonstration." },
         { t: "note", kind: "warn", title: "Changer de base ne déplace pas les documents", text: "Basculer d'un mode à l'autre ne mélange pas les données : ce qui est à l'écran y reste jusqu'à ce que vous cliquiez **Envoyer les données à la base** ou **Récupérer depuis la base**. En cas de doute, exportez d'abord (onglet « Données »), puis transférez." },
         { t: "note", kind: "info", title: "Deux postes, le même acte", text: "Quand la base est partagée, deux personnes peuvent modifier en même temps des éléments **différents** sans se gêner. Si elles touchent le **même** élément, la base refuse le second écrasement : la version enregistrée est reprise et un message le signale — plutôt que de perdre silencieusement le travail de l'autre. L'en-tête montre qui est **présent** (les pastilles) et si un collègue a le **même acte ouvert** ; la **cloche** signale ce qui vous attend — un acte à valider, une signature, une publication." },
         { t: "next", chapter: "mots", label: "Glossaire : les mots employés ici" },
@@ -524,7 +635,7 @@ export const GUIDE = {
       icon: "palette",
       minutes: 6,
       audience: "admin",
-      keywords: "feuille de style charte graphique police logo en-tête pied de page filet diviseur encadré couleur présentation pdf word aperçu entité famille sous-feuille marges cadre capitales éditeur direct wysiwyg sombre",
+      keywords: "feuille de style charte graphique police liste des polices logo en-tête pied de page filet diviseur encadré intitulé encadré bordures côtés couleur présentation liste à puces liste numérotée numérotation 1° énumération pdf word aperçu entité famille sous-feuille marges cadre capitales éditeur direct wysiwyg sombre",
       blocks: [
         { t: "p", text: "Un acte, c'est un texte — mais c'est aussi une **apparence** : un logo en tête, une police, des filets, une couleur, des marges. C'est ce que règle l'écran **Feuilles de style**, dans le menu « Configurer ». Rien n'y est codé : chaque collectivité, chaque entité, compose la sienne." },
         { t: "terms", items: [
@@ -532,22 +643,26 @@ export const GUIDE = {
           { term: "Sous-feuille", def: "Une charte particulière, rattachée facultativement à une **entité** et/ou à une **famille d'actes**. C'est ainsi que le CCAS peut avoir son en-tête sans changer celui de la mairie." },
           { term: "Réglages", def: "La vue exhaustive : tous les réglages, rangés par thème (papier, typographie, intitulé, visas, filets, articles, tableaux, signature, en-tête…)." },
           { term: "Édition directe", def: "L'autre façon de faire, la plus rapide : on **clique l'élément** dans l'aperçu (l'intitulé, un tableau, l'en-tête) et seuls ses réglages apparaissent. Le texte de l'acte n'est jamais modifié." },
-          { term: "Modèle de départ", def: "Une présentation complète appliquée d'un clic : « Classique préfectoral », « Moderne », « Solennel », « Sobre », « Recueil communal », « Acte individuel ». Tout reste modifiable ensuite." },
+          { term: "Modèle de départ", def: "Une présentation complète appliquée d'un clic : « Classique préfectoral », « Moderne », « Solennel », « Sobre », « Recueil communal », « Acte individuel », « Charte graphique de l'État » (réservé à l'État et à ses opérateurs) et « Marianne-like » (la même sobriété, sans les éléments réservés). Tout reste modifiable ensuite." },
+          { term: "Police", def: "Le corps du texte, l'intitulé et les intitulés d'article ont chacun la leur, choisie dans une **liste** rangée par familles (à empattements, sans empattement, à chasse fixe) : des polices présentes sur les postes, donc sans rien installer. « Autre (police personnalisée) » permet une police propre à la collectivité ou une pile CSS complète." },
+          { term: "Encadré", def: "Une marque de l'intitulé — comme le soulignement ou le filet. L'intitulé de l'acte et les intitulés d'article peuvent être **encadrés** d'un filet, qui prend le style et la couleur des filets de la charte. La formule d'édiction (« ARRÊTE »), les mentions et le bloc de signature connaissent le même encadré. Chaque encadré se règle **côté par côté** (« Bordures de l'encadré » : haut, droite, bas, gauche) : un seul filet se pose ainsi sous un intitulé, ou l'encadré s'ouvre d'un côté." },
+          { term: "Listes", def: "Un acte comporte souvent des listes : à puces pour une énumération libre, **numérotées** pour un « 1° 2° 3° » réglementaire. C'est la trame qui décide, bloc par bloc, du genre de chaque liste (dans l'inspecteur, « Type de liste ») ; la charte dit ensuite à quoi elles ressemblent — la puce d'un côté, la numérotation de l'autre (« 1. », « 1° », « 1) », « a) », « A) », « i. », « I. »)." },
           { term: "Aperçu", def: "À droite de l'écran, un acte type rendu par le **même code** que le PDF et l'export Word. Ce que vous voyez est ce qui sortira." },
         ] },
         { t: "steps", items: [
           { text: "Ouvrez **Feuilles de style** et choisissez une feuille dans la liste de gauche.", detail: "La démonstration en livre trois : la charte générale, celle du CCAS, celle des actes individuels. « Nouvelle sous-feuille » en crée une ; « Dupliquer » part d'une existante." },
           { text: "Cliquez **Édition directe**, en haut de l'écran.", detail: "Le bouton d'affichage passe de « Réglages » à « Édition directe ». Cliquez alors un élément dans l'aperçu — l'intitulé, un tableau, le bloc de signature — : l'encadré bleu montre ce qui est réglé, et seuls ses réglages apparaissent. La barre de pastilles (« Papier », « En-tête », « Signature »…) permet d'atteindre directement une partie du document." },
-          { text: "Pour partir d'une base, appliquez un **Modèle de départ**.", detail: "Dans la vue « Réglages » : « Solennel » pose un cadre double et des numéros d'article dans la marge, « Moderne » un bandeau et une police sans empattement, etc. Le nom, le rattachement et le logo de la feuille sont conservés." },
-          { text: "Réglez ensuite ce qui fait l'identité du document.", detail: "Marges de page, police et corps, couleurs, en-tête et pied de page, filets, encadrés, tableaux, bloc de signature, cadre de page. Chaque changement se répercute aussitôt dans l'aperçu. Les textes de l'en-tête et du pied acceptent des jetons : {{entity.name}}, {{brand.name}}, {{numero}}, {{objet}}, {{dateSignature}}…" },
+          { text: "Pour partir d'une base, appliquez un **Modèle de départ**.", detail: "Dans la vue « Réglages » : « Solennel » pose un cadre double et des numéros d'article dans la marge, « Moderne » un bandeau et une police sans empattement, etc. Deux modèles suivent la **charte graphique de l'État** (bleu France, typographie Marianne, en-tête et filet) : « Charte graphique de l'État » — **réservé à l'État et à ses opérateurs**, la police Marianne et le bloc-marque n'étant pas livrés — et « Marianne-like », la même sobriété sans les éléments réservés, avec vos couleurs et votre identité, utilisable par toute administration. Le nom, le rattachement et le logo de la feuille sont conservés." },
+          { text: "Réglez ensuite ce qui fait l'identité du document.", detail: "Marges de page, police et corps, couleurs, en-tête et pied de page, filets, encadrés, tableaux, bloc de signature, cadre de page. Les polices se choisissent dans une liste, rangée par familles — « Autre » pour une police propre à la collectivité ; l'intitulé de l'acte et les intitulés d'article peuvent être **encadrés**, et l'on choisit alors les **côtés** tracés ; les listes numérotées prennent ici leur numérotation (« 1° 2° 3° »…). Chaque changement se répercute aussitôt dans l'aperçu. Les textes de l'en-tête et du pied acceptent des jetons : {{entity.name}}, {{brand.name}}, {{numero}}, {{objet}}, {{dateSignature}}…" },
           { text: "Rattachez une sous-feuille à ses **entités** et à ses **familles** d'actes.", detail: "Dès qu'une entité ou une famille lui est associée, les actes concernés prennent cette charte — sans qu'on touche à leurs trames." },
           { text: "Pour un acte précis, désignez la feuille depuis l'onglet « Trame » de l'éditeur de trame.", detail: "Le champ « Feuille de style » de la trame l'emporte sur tout le reste. Laissez-le sur « Automatique » dans le cas général." },
-          { text: "Vérifiez le résultat sur un vrai acte : **Actes → l'acte → Imprimer / PDF** ou **HTML**.", detail: "L'aperçu, le PDF, l'export Word et la version publiée au recueil appliquent tous la même charte." },
+          { text: "Vérifiez le résultat sur un vrai acte : **Actes → l'acte → Imprimer / PDF** ou **HTML**.", detail: "L'aperçu, le PDF, l'export Word et la page HTML autonome appliquent tous la même charte. La **page du recueil public**, elle, ne l'applique pas (voir la note ci-dessous)." },
         ] },
+        { t: "note", kind: "info", title: "La charte habille le papier, pas le recueil", text: "La charte s'applique à l'**aperçu**, au **PDF**, au fichier **Word**, à la **page HTML autonome** et à l'**original signé** — le papier, en somme. La **page du recueil public**, celle que tout le monde consulte en ligne, ne l'applique **pas** : elle suit l'apparence du site, qui se personnalise à part. Un acte peut donc porter une charte très marquée sans que cela change le recueil en ligne." },
         { t: "note", kind: "info", title: "Qui l'emporte", text: "Ordre de priorité : la **trame** (si elle désigne une feuille), puis l'**entité** signataire, puis la **famille** de la trame, puis la **feuille générale**. Autrement dit, la règle la plus précise gagne." },
-        { t: "note", kind: "info", title: "Les marges de page", text: "Les marges font partie de la charte (en millimètres) : elles s'appliquent à l'aperçu, au PDF, au fichier Word et à la version publiée. Si vous imprimez directement l'aperçu de l'application (Ctrl+P), c'est la feuille **générale** qui donne ses marges à la page." },
+        { t: "note", kind: "info", title: "Les marges de page", text: "Les marges font partie de la charte (en millimètres) : elles s'appliquent à l'aperçu, au PDF, au fichier Word et à la page autonome — le papier. Si vous imprimez directement l'aperçu de l'application (Ctrl+P), c'est la feuille **générale** qui donne ses marges à la page." },
         { t: "note", kind: "info", title: "Ce qui n'est pas dans la charte", text: "La charte ne change **que la présentation**. Le texte, les visas, les articles, le numéro et les dates viennent de la trame et de la rédaction. Habiller un acte ne modifie jamais son contenu — c'est vrai aussi de l'édition directe, où l'on ne peut cliquer que des éléments d'apparence." },
-        { t: "note", kind: "warn", title: "Importer et exporter une charte", text: "Une charte s'exporte en JSON (« Exporter la charte ») et s'importe sur un autre poste ou dans une autre collectivité. Elle voyage aussi avec l'export complet du référentiel (Référentiel → Données)." },
+        { t: "note", kind: "warn", title: "Importer et exporter une charte", text: "Une charte s'exporte en JSON (« Exporter la charte ») et s'importe sur un autre poste ou dans une autre collectivité. Elle voyage aussi avec l'export complet du référentiel (Administration → Données)." },
         { t: "next", chapter: "mots", label: "Glossaire : les mots employés ici" },
       ],
     },
@@ -565,23 +680,32 @@ export const GUIDE = {
         { t: "terms", items: [
           { term: "Acte", def: "Le document officiel signé par l'autorité : une décision, une nomination, une délégation…" },
           { term: "Trame", def: "Le modèle d'acte préparé à l'avance par les administrateurs. On dit aussi « modèle »." },
-          { term: "Feuille de style", def: "La charte graphique d'un acte : police, logo, en-tête, filets, encadrés. Une feuille générale sert de défaut ; des sous-feuilles se rattachent à des entités ou à des familles d'actes. Elle ne change que la présentation, jamais le texte." },
+          { term: "Feuille de style", def: "La charte graphique d'un acte : police, logo, en-tête, filets, encadrés, numérotation des listes. Une feuille générale sert de défaut ; des sous-feuilles se rattachent à des entités ou à des familles d'actes. Elle ne change que la présentation, jamais le texte." },
           { term: "Rédacteur", def: "La personne qui remplit le formulaire. C'est vous." },
           { term: "Administrateur", def: "La ou les collègues qui écrivent les trames et tiennent le référentiel à jour." },
           { term: "Entité", def: "La commune, l'établissement public ou le service au nom duquel l'acte est pris." },
-          { term: "Signataire", def: "La personne qui appose sa signature sur l'acte." },
+          { term: "Signataire", def: "La personne qui appose sa signature sur l'acte. Elle se désigne **par sa fonction** — la qualité qui donne compétence pour signer — et non par son nom : on choisit d'abord la fonction, puis, parmi les personnes qui la tiennent, celle qui signe. Un compte qui porte la **qualité de Signataire** (cumulable, attribuée dès que la personne est désignée dans l'organigramme des délégations) ouvre l'onglet **« Ma signature »** : il y signe avec **son compte**, rapproché de celui de l'outil de signature, et ne voit dans l'atelier que les actes de son champ de compétence." },
+          { term: "Rapprochement", def: "Le lien entre les deux « moi » d'un signataire : sa **personne** au référentiel, son **compte** dans l'application, et le **compte que l'outil de signature** lui connaît. En production, l'annuaire de la collectivité crée les deux comptes ; les rapprocher (un bouton, depuis « Ma signature », la fiche du compte ou la fiche de l'acteur dans les Délégations) est ce qui permet à la signature d'être nominative plutôt qu'anonyme." },
+          { term: "Champ de compétence", def: "Ce sur quoi un signataire est compétent : les actes dont **sa signature** relève — ceux qu'il signe lui-même, et ceux que signent ses **délégataires** (sa signature y est engagée par délégation ou subdélégation). C'est la part du registre qu'il voit dans l'atelier." },
+          { term: "Qualité cumulable", def: "Un rôle qui ne remplace pas le profil du compte mais **s'ajoute** à lui : **Réviseur** (contrôler un acte avant sa signature) et **Signataire** (le signer). Un compte peut donc être, par exemple, éditeur **et** réviseur, ou rédacteur **et** signataire." },
           { term: "Visa", def: "Les textes et décisions rappelés avant de décider (« Vu le décret… »)." },
+          { term: "Décision fondant la signature", def: "L'acte par lequel un signataire tient son pouvoir de signer : la délibération qui donne délégation au maire, l'arrêté qui nomme un adjoint, celui qui le sous-délègue. Un délégataire en a **deux** — sa nomination et sa délégation. Renseignées sur la personne (le pouvoir de l'autorité de tête) ou sur la délégation, elles se visent d'elles-mêmes sur les actes signés, avec leur lien, dans l'ordre de la chaîne." },
           { term: "Considérant", def: "Les raisons de la décision (« Considérant que… »)." },
           { term: "Formule d'édiction", def: "Le mot qui annonce la décision : « DÉCIDE », « ARRÊTE »." },
           { term: "Article", def: "Une partie numérotée de la décision. Un acte doit en comporter au moins un." },
           { term: "Champ (ou jeton)", def: "Un emplacement du modèle rempli automatiquement avec ce que vous saisissez. Il s'affiche en pastille bleue dans l'éditeur." },
-          { term: "Numéro (chrono)", def: "Le numéro unique de l'acte, attribué par l'application. On le réserve, on ne le tape pas." },
+          { term: "Numéro (chrono)", def: "Le numéro unique de l'acte. Il est attribué par l'application, qui en tient la séquence ; on le **réserve**, on ne le tape pas. Dans une collectivité qui numérote dans un autre logiciel (un document **Grist**, par exemple), c'est ce logiciel qui l'attribue : on le **demande** alors depuis l'écran de rédaction." },
+          { term: "Service de numérotation", def: "Le logiciel extérieur qui attribue le numéro, quand la collectivité n'utilise pas la séquence de l'application : un document **Grist**, un tableur en ligne, un référentiel interne. On le règle dans **Administration › Numérotation** : l'application lui demande le numéro au moment de rédiger, et la **ligne créée** chez lui fait foi." },
           { term: "Registre", def: "La liste de tous les actes enregistrés : le menu « Actes »." },
-          { term: "Référentiel", def: "La liste des données réutilisables : entités, personnes, rôles, textes de référence, mentions, vocabulaire, numérotation." },
+          { term: "Administration", def: "La liste des données réutilisables : entités, personnes, rôles, textes de référence, mentions, vocabulaire, numérotation." },
           { term: "Conformité", def: "Le contrôle automatique passé avant l'export." },
           { term: "Écart (hors trame)", def: "Un passage du document qui a été réécrit par rapport au modèle. Le texte réécrit est conservé, mais l'acte le signale aux administrateurs. Ce n'est jamais bloquant." },
           { term: "Acte modificatif", def: "L'acte qui modifie un acte déjà signé : il dit, article par article, ce qui est remplacé, abrogé ou ajouté." },
           { term: "Version consolidée", def: "L'acte d'origine remis à jour de ses modifications. Elle se lit par défaut dans sa rédaction en vigueur, chaque article modifié portant la mention de l'acte qui l'a modifié ; le suivi des modifications (ajouts et suppressions apparents, tableau récapitulatif) est une option. Elle est diffusée à titre d'information : seuls les actes publiés font foi." },
+          { term: "Abrogation", def: "Le fait de faire cesser un acte — ou l'un de ses articles — de produire effet. Elle se fait par un **acte nouveau**, publié, qui **vise expressément** ce qu'il abroge ; elle prend effet au jour de l'**entrée en vigueur** de cet acte, et non à sa publication. Un acte publié ne s'efface pas : il reste au recueil, marqué comme abrogé." },
+          { term: "Entrée en vigueur", def: "Le jour où un acte commence à produire effet : la **date d'effet** qu'il déclare, et à défaut le lendemain de sa publication — ou le délai réglé dans Administration › Publication. C'est cette date qui fait courir les abrogations prévues par l'acte." },
+          { term: "Article abrogé", def: "Un article qui n'est plus en vigueur. Il garde son numéro — la numérotation ne se referme pas — et la mention de l'acte qui l'a abrogé ; sa rédaction n'est plus lue que sur demande (« Afficher les articles abrogés », dans le recueil public)." },
+          { term: "Retrait du recueil", def: "Un geste **technique** et exceptionnel : dépôt en double, erreur de dépôt. Il ne sert jamais à faire cesser un acte de produire effet — c'est l'abrogation qui le fait. Réservé aux administrateurs, et soumis à un motif écrit." },
           { term: "Prestataire de signature", def: "Le service extérieur qui recueille la signature électronique (ESUP-Signature ou équivalent). L'application lui envoie l'acte et reçoit l'acte signé en retour." },
           { term: "Empreinte", def: "Une suite de caractères calculée à partir du document (SHA-256). Si le document change d'un seul caractère, l'empreinte change : c'est ce qui prouve qu'un acte n'a pas été modifié." },
           { term: "Certificat", def: "Le « tampon » électronique du signataire, délivré par une autorité. Il permet de vérifier la signature, des années plus tard." },
@@ -589,8 +713,14 @@ export const GUIDE = {
           { term: "Circuit de signature", def: "Le parcours d'un acte envoyé en signature : déposé, envoyé, signé (ou refusé)." },
           { term: "Publication", def: "Le dépôt officiel de l'acte : c'est à partir de là qu'il s'impose à tout le monde." },
           { term: "Opposabilité", def: "Le moment à partir duquel l'acte peut être appliqué. Par défaut, le lendemain de sa publication." },
+          { term: "Exécutoire", def: "Un acte est **exécutoire** quand la dernière formalité requise est accomplie : il s'applique vraiment. C'est de cette date — et non de la signature — que court le délai de recours (écran « Exécution & délais »)." },
+          { term: "Délai de recours", def: "Le temps pendant lequel l'acte peut être contesté devant le juge : **deux mois** en principe, à compter de la date d'exécutoire. Passé ce délai sans recours, l'acte est **définitif**." },
+          { term: "Recours introduit", def: "Un recours a réellement été déposé contre un acte (requête au tribunal, recours gracieux, déféré du préfet). Sa **date d'introduction** ferme le délai : l'acte n'est plus « définitif », il est **contesté** jusqu'à la décision du juge. On le note depuis l'échéancier." },
+          { term: "Attestation de non-recours", def: "La pièce qui certifie qu'**aucun recours** n'a été porté à la connaissance de la collectivité contre un acte **définitif**. Elle se délivre en PDF depuis l'échéancier, pour un tiers qui en fait la demande. Un acte contesté ne peut pas en faire l'objet." },
+          { term: "État des formalités", def: "La pièce qui relève, pour un acte signé, chaque formalité d'exécution avec sa **date**, sa **référence**, sa modalité et son auteur — plus la situation (exécutoire, délai, recours). Elle s'exporte en PDF et se classe au dossier." },
           { term: "ELI", def: "European Legislation Identifier : l'identifiant permanent d'un texte, par exemple `eli:/fr/dec/2026/0402/iar`. C'est lui qu'on cite, plutôt que l'adresse du site." },
           { term: "Recueil", def: "Le « journal officiel » de la collectivité, dans lequel les actes sont publiés." },
+          { term: "Retrait du recueil", def: "L'effacement d'un acte du recueil, en **dernier recours** et sur **motif technique** (dépôt en double, dépôt erroné, acte publié avant signature, identifiant attribué à tort). Réservé à l'**administrateur**, il laisse une trace sur l'acte et au journal. Ce n'est **pas** une façon de corriger un acte : pour cela, on le **modifie** ou on l'**abroge**, et il reste au recueil." },
           { term: "Version en ligne", def: "La page web de l'acte publié, celle que tout le monde peut consulter." },
           { term: "Original signé", def: "Le document signé, conservé tel quel. C'est lui qui fait foi : la version en ligne n'est qu'une lecture commode." },
           { term: "Acte non publiable", def: "Un acte individuel (revalorisation d'un traitement, sanction, décision nominative…) dont la trame est déclarée **non publiable**. Il est rédigé, signé et conservé au registre, mais il n'est pas déposé au recueil et ne reçoit pas d'identifiant ELI : il est notifié à l'intéressé." },
@@ -626,8 +756,9 @@ export const GUIDE = {
           { q: "Rien ne s'ouvre quand je clique sur Imprimer / PDF", a: "Votre navigateur a peut-être bloqué la nouvelle fenêtre. Autorisez les fenêtres surgissantes (pop-up) pour ce site, puis réessayez. En dernier recours, utilisez « HTML complet » et imprimez depuis le navigateur." },
           { q: "Je me suis trompé dans un acte déjà enregistré", a: "Ouvrez-le depuis **Actes** → « Ouvrir », corrigez les cases, puis **Enregistrer** de nouveau. Si l'acte a déjà été signé ou publié, ne le modifiez pas : demandez à l'administrateur s'il faut un acte rectificatif." },
           { q: "Je ne trouve pas le modèle que je cherche", a: "Videz le champ de recherche et remettez les filtres sur « Toutes les familles » et « Tous les statuts ». Le modèle n'est peut-être pas encore publié : demandez-le à l'administrateur." },
-          { q: "Je veux travailler depuis un autre ordinateur", a: "Tout dépend du mode de rangement. En **mode partagé** (base de la collectivité), vos trames et vos actes sont visibles depuis n'importe quel poste, avec le même compte. En **mode local** (démonstration), les données ne sont enregistrées que dans le navigateur de votre poste : pour les transférer, exportez — le PDF voyage par courriel, et les administrateurs peuvent exporter/importer l'ensemble depuis **Référentiel → Données**." },
+          { q: "Je veux travailler depuis un autre ordinateur", a: "Tout dépend du mode de rangement. En **mode partagé** (base de la collectivité), vos trames et vos actes sont visibles depuis n'importe quel poste, avec le même compte. En **mode local** (démonstration), les données ne sont enregistrées que dans le navigateur de votre poste : pour les transférer, exportez — le PDF voyage par courriel, et les administrateurs peuvent exporter/importer l'ensemble depuis **Administration → Données**." },
           { q: "Le bandeau affiche « base hors ligne »", a: "L'application n'arrive pas à joindre la base partagée : elle continue de fonctionner avec les dernières données reçues sur ce poste. Vos modifications sont mises de côté et **renvoyées automatiquement** dès que la base répond de nouveau. Vérifiez votre connexion ; si cela dure, prévenez l'administrateur." },
+          { q: "Je me connecte et l'application me dit que je n'ai pas accès", a: "Votre identité a bien été reconnue, mais aucun rôle ne vous ouvre l'atelier (vous êtes **Visiteur**). L'écran affiche les groupes reçus de l'annuaire : s'il vous en manque un, c'est là qu'est la réponse. Adressez-vous au **service qui gère l'application** (ses coordonnées sont sur cet écran) pour obtenir le rôle qui correspond à votre travail. En attendant, le bouton « Consulter l'espace public » vous amène au recueil des actes publiés, ouvert à tous." },
           { q: "Un message d'erreur s'affiche en haut de l'écran", a: "Notez-le ou photographiez l'écran, puis prévenez l'administrateur. N'insistez pas : recharger et recommencer suffit le plus souvent." },
           { q: "Je ne comprends pas un mot", a: "Cherchez-le dans le **glossaire** (chapitre précédent), ou dans la barre de recherche de ce guide." },
         ] },
@@ -671,11 +802,11 @@ export const GUIDE = {
     {
       id: "comptes",
       title: "Qui peut faire quoi : les comptes et les rôles",
-      short: "Trois profils d'accès : administrateur, éditeur, rédacteur. Le vôtre détermine les écrans et les boutons.",
+      short: "Trois profils d'accès — administrateur, éditeur, rédacteur —, deux qualités qui se cumulent (réviseur, signataire), et le visiteur, qui n'a aucun accès. Le vôtre détermine les écrans et les boutons.",
       icon: "lock",
       minutes: 3,
       audience: "all",
-      keywords: "compte rôle profil connexion session administrateur éditeur rédacteur permission accès identifiant se connecter changer de compte service bureau périmètre transverse rattachement",
+      keywords: "compte rôle profil connexion session administrateur éditeur rédacteur réviseur signataire signature signer rapprochement outil de signature en son nom qualité cumul cumulable visiteur accès refusé permission accès identifiant se connecter changer de compte service bureau périmètre transverse rattachement",
       blocks: [
         { t: "p", text: "L'application demande d'abord **qui se connecte**. Ce n'est pas une formalité : c'est le compte choisi qui décide de ce que vous pouvez faire — **les écrans que vous voyez** et **les actes que vous pouvez toucher** — et qui signe (au nom de qui) les actes que vous rédigez." },
         { t: "p", text: "Trois profils existent, du plus large au plus étroit. Le profil dit **ce que l'on peut faire** ; le rattachement à un service dit **sur quoi** :" },
@@ -684,6 +815,9 @@ export const GUIDE = {
           ["**Éditeur**", "Créer, modifier et commenter les **trames** de son périmètre ; rédiger des actes ; voir et modifier les actes des agents de son périmètre ; envoyer en signature et publier. Il touchera aussi aux **feuilles de style** des actes (à venir).", "Gérer le référentiel, les comptes et les API. Il ne sort pas du périmètre de son service (sauf compte **transverse**)."],
           ["**Rédacteur**", "**Choisir une trame** de son périmètre dans l'écran « Rédiger un acte » et **rédiger l'acte** ; puis les actions qui vont avec : enregistrer, exporter, envoyer en signature, publier.", "Voir le registre des trames (« Trames »), créer, modifier ou dupliquer les trames, gérer le référentiel. Il ne voit **que ses propres actes**, dans son périmètre."],
         ] },
+        { t: "p", text: "**Le réviseur, un rôle qui se cumule.** Le rôle **Réviseur** ne s'ajoute pas à la liste des profils : il **se cumule** avec un autre profil. Un éditeur des affaires juridiques peut ainsi être *éditeur* **et** *réviseur* : il rédige comme un éditeur, et il contrôle en plus les actes avant leur signature (voir le chapitre « Faire réviser un acte »). Sa **compétence** — les services, familles, types d'actes et entités qu'il révise — se règle sur son compte ; quand la qualité appartient à un **service entier** (ou à certains de ses bureaux), elle se règle sur le service, dans **Administration › Services**." },
+        { t: "p", text: "**Le signataire, l'auteur de l'acte.** La qualité **Signataire** se cumule elle aussi : elle ne remplace aucun profil, elle ajoute le **pouvoir de signer**. Elle ne se coche pas dans une liste : elle **découle d'une désignation**. Dès qu'une personne est désignée dans l'organigramme des **Délégations** — comme l'autorité qui délègue, ou comme celui qui signera —, le compte rattaché à cette personne reçoit la qualité, même si la désignation est faite par un éditeur. Concrètement, un signataire **signe avec son compte** : en production, l'annuaire de la collectivité délivre le compte de l'application **et** provisionne le même agent sur l'**outil de signature**, et les deux doivent être **rapprochés** (un bouton, depuis « Ma signature », depuis la fiche du compte, ou depuis celle de l'acteur dans les Délégations). Enfin, un signataire ne voit dans l'atelier **que les actes relevant de son champ de compétence** : ceux qu'il signe lui-même, et ceux que signent ses **délégataires**." },
+        { t: "p", text: "**Le visiteur, un compte sans aucun accès.** Un agent peut s'authentifier sans qu'aucun rôle ne lui soit reconnu : c'est le cas, avec l'annuaire, quand aucun de ses groupes ne correspond à un rôle de l'application. Il devient **Visiteur** : sa session est bien ouverte, mais l'atelier ne lui est pas ouvert — il arrive sur un écran qui le lui explique, donne le contact du service qui gère l'application, et le renvoie vers **l'espace public** (le recueil, consultable sans compte). Le profil « Visiteur » s'attribue comme les autres dans **Comptes et rôles**." },
         { t: "p", text: "**Services et bureaux.** Une collectivité se range en **services** (Ressources humaines, État civil, Cabinet…), eux-mêmes subdivisés en **bureaux** (par exemple « Assemblées et actes » et « Courrier et accueil » au sein du Secrétariat général). Chaque agent est rattaché à **un ou plusieurs services**, et chaque **trame** comme chaque **acte** est affecté à un service — et, si besoin, à un bureau précis. Votre périmètre découle de ce rattachement : c'est lui qui décide des trames que l'on vous propose et des actes que vous voyez." },
         { t: "list", items: [
           "Une **trame générale** (sans service) reste visible de tous : ce sont les modèles communs à la collectivité.",
@@ -691,12 +825,12 @@ export const GUIDE = {
           "Par défaut, rattacher un agent à un service lui ouvre **tous les bureaux** de ce service. L'administrateur peut ensuite **restreindre** l'accès à certains bureaux seulement, si l'organisation le demande.",
         ] },
         { t: "note", kind: "info", title: "Aucune trame ne vous est proposée ?", text: "Une trame n'apparaît que si elle relève de votre périmètre, ou si elle est **générale** (sans service). Si l'écran **Trames** (réservé aux éditeurs et aux administrateurs) ou la liste des modèles de **Rédiger un acte** est vide, c'est qu'aucun modèle n'est rattaché à votre service : demandez à un administrateur d'en rattacher un, ou de le rendre général." },
-        { t: "note", kind: "info", title: "Où cela se règle", text: "Les **services et bureaux** se décrivent dans **Référentiel › Services**. Le **périmètre** de chaque agent (ses services, et éventuellement tel ou tel bureau) se coche dans **Comptes et rôles**, colonne « Périmètre », avec de grands boutons pour tout cocher ou tout retirer. Un compte marqué **« transverse »** couvre l'ensemble des services." },
+        { t: "note", kind: "info", title: "Où cela se règle", text: "Les **services et bureaux** se décrivent dans **Administration › Services**. Le **périmètre** de chaque agent (ses services, et éventuellement tel ou tel bureau) se coche dans **Comptes et rôles**, colonne « Périmètre », avec de grands boutons pour tout cocher ou tout retirer. Un compte marqué **« transverse »** couvre l'ensemble des services." },
         { t: "note", kind: "info", title: "Concrètement", text: "Le menu de gauche et les boutons s'adaptent : ce que votre profil n'autorise pas n'est pas affiché. Le registre, lui, ne liste **que ce qui est dans votre périmètre** ; si un collègue vous envoie un lien vers un écran ou un acte interdit, vous revenez simplement à votre écran de travail — rien ne se casse." },
         { t: "p", text: "**Changer de compte** : cliquez sur votre nom, en haut à droite, puis sur « Changer de compte ». Vous revenez à la liste des comptes." },
-        { t: "p", text: "**Gérer les comptes** (administrateur uniquement) : menu de votre nom → « Comptes et rôles ». Vous pouvez y créer un compte, changer son rôle, **régler son périmètre** (les services et, au besoin, les bureaux qu'il couvre), le désactiver ou le supprimer — et y lire la liste exacte des permissions de chaque profil. Deux garde-fous : on ne supprime pas son propre compte, et il doit toujours rester un administrateur actif." },
+        { t: "p", text: "**Gérer les comptes** (administrateur uniquement) : menu de votre nom → « Comptes et rôles ». Vous pouvez y créer un compte, changer son rôle, **régler son périmètre** (les services et, au besoin, les bureaux qu'il couvre), lui ajouter une **qualité de réviseur** et en régler la compétence, lui **rattacher la personne du référentiel** qu'il tient (c'est ce qui lui permet de signer en son nom) et **rapprocher son compte de l'outil de signature**, le désactiver ou le supprimer — et y lire la liste exacte des permissions de chaque profil. Deux garde-fous : on ne supprime pas son propre compte, et il doit toujours rester un administrateur actif." },
         { t: "note", kind: "warn", title: "Vos actes restent les vôtres", text: "Un acte garde le nom de l'agent qui l'a rédigé : c'est ce nom qui s'affiche dans le registre et sur la fiche de l'acte. Se connecter avec le compte d'un collègue pour rédiger à sa place est donc **à éviter** — l'acte porterait son nom." },
-        { t: "note", kind: "info", title: "Dans cette démonstration", text: "Les neuf comptes livrés sont **fictifs** et l'authentification est **simulée** : on choisit un compte, sans mot de passe. C'est le mode « comptes de l'application ». L'application sait aussi se **brancher sur l'annuaire de la collectivité** (annuaire d'entreprise, OpenID Connect) : le rôle vient alors des groupes de l'agent, et **les comptes de démonstration sont désactivés automatiquement** — voir le chapitre suivant pour les administrateurs." },
+        { t: "note", kind: "info", title: "Dans cette démonstration", text: "Les onze comptes livrés sont **fictifs** et l'authentification est **simulée** : on choisit un compte, sans mot de passe. C'est le mode « comptes de l'application ». L'application sait aussi se **brancher sur l'annuaire de la collectivité** (annuaire d'entreprise, OpenID Connect) : le rôle vient alors des groupes de l'agent, et **les comptes de démonstration sont désactivés automatiquement** — voir le chapitre suivant pour les administrateurs." },
         { t: "next", chapter: "demarrer", label: "Revenir au début du guide" },
       ],
     },
@@ -712,11 +846,11 @@ export const GUIDE = {
       blocks: [
         { t: "p", text: "Par défaut, l'application ouvre les sessions avec **ses propres comptes** : on choisit un compte dans la liste, sans mot de passe. C'est très pratique pour essayer, mais ce n'est pas de la sécurité — c'est un mode de démonstration." },
         { t: "p", text: "Pour de vrai, on **branche l'annuaire** : l'agent se connecte chez le fournisseur d'identité de la collectivité (OpenID Connect), et l'application ouvre la session avec le **rôle** et le **périmètre** que lui donnent ses groupes. Dès que l'annuaire est branché, **les comptes de démonstration sont désactivés automatiquement** : ils ne sont plus proposés, aucune session ne peut s'ouvrir sans passer par l'annuaire, et ils apparaissent « Désactivé (annuaire) » dans *Comptes et rôles*." },
-        { t: "note", kind: "warn", title: "C'est un réglage du référentiel", text: "Il est enregistré avec le reste du référentiel : il **suit l'export** des données, et se règle dans **Référentiel › Annuaire (OIDC)**. L'application ne détient aucun secret (elle se déclare en **client public**, avec PKCE) : c'est ce qui rend ce branchement possible sans intervention sur les serveurs." },
+        { t: "note", kind: "warn", title: "C'est un réglage du référentiel", text: "Il est enregistré avec le reste du référentiel : il **suit l'export** des données, et se règle dans **Administration › Annuaire (OIDC)**. L'application ne détient aucun secret (elle se déclare en **client public**, avec PKCE) : c'est ce qui rend ce branchement possible sans intervention sur les serveurs." },
         { t: "steps", items: [
-          { text: "Ouvrez **Référentiel › Annuaire (OIDC)**, encart « Mode de connexion », et choisissez **Annuaire de la collectivité (OIDC)**.", detail: "Un bandeau vous dit combien de comptes de démonstration viennent d'être désactivés. Si vous étiez connecté avec l'un d'eux, la session se ferme : c'est normal." },
+          { text: "Ouvrez **Administration › Annuaire (OIDC)**, encart « Mode de connexion », et choisissez **Annuaire de la collectivité (OIDC)**.", detail: "Un bandeau vous dit combien de comptes de démonstration viennent d'être désactivés. Si vous étiez connecté avec l'un d'eux, la session se ferme : c'est normal." },
           { text: "Renseignez le **fournisseur** : adresse de l'émetteur, identifiant du client, et l'**adresse de retour** que vous déclarez chez le fournisseur (bouton « Copier l'adresse à déclarer »).", detail: "Le bouton « Vérifier la découverte du fournisseur » lit la configuration publiée et affiche les points de terminaison trouvés. Si le fournisseur ne se laisse pas interroger depuis le navigateur, recopiez-les à la main dans la section repliable." },
-          { text: "Réglez la **correspondance des groupes** : quel groupe de l'annuaire donne quel rôle ici.", detail: "Par défaut : `scribae-administrateurs` → Administrateur, `scribae-editeurs` → Éditeur, `scribae-redacteurs` → Rédacteur. Un agent dont aucun groupe n'est reconnu est **refusé** (le réglage sûr) — vous pouvez préférer lui donner un rôle de repli." },
+          { text: "Réglez la **correspondance des groupes** : quel groupe de l'annuaire donne quel rôle ici.", detail: "Par défaut : `scribae-administrateurs` → Administrateur, `scribae-editeurs` → Éditeur, `scribae-redacteurs` → Rédacteur. Un agent dont aucun groupe n'est reconnu est accueilli comme **visiteur** (aucun accès) : il arrive sur un écran qui lui explique la situation et le renvoie vers l'espace public. Vous pouvez préférer lui donner un rôle de repli." },
           { text: "**Essayez d'abord sans fournisseur** : tant qu'aucune adresse d'émetteur n'est saisie, l'**annuaire d'essai** prend le relais.", detail: "Il propose des identités fictives avec leurs groupes : vous voyez immédiatement quel rôle chacune recevrait, sans aucun réglage réseau. C'est aussi lui qui vous évite de rester bloqué à l'écran de connexion." },
           { text: "Connectez-vous **pour de vrai**, une fois : l'application affiche ce qu'elle a **vérifié** (émetteur, audience, validité, nonce, signature) et quel rôle elle en a tiré.", detail: "Si un contrôle échoue, le message dit lequel : le plus souvent une horloge décalée, une adresse de retour différente, ou une signature non vérifiable parce que les clés du fournisseur ne sont pas joignables." },
           { text: "Quand tout est éprouvé, **retirez la porte de secours** (encart « Porte de secours »).", detail: "Elle permet sinon, depuis l'écran de connexion, de revenir aux comptes de l'application — utile pendant la mise en service, à retirer ensuite." },
@@ -733,20 +867,109 @@ export const GUIDE = {
 export const findChapter = (id) => GUIDE.chapters.find((c) => c.id === id) || null;
 export const chapterIndex = (id) => GUIDE.chapters.findIndex((c) => c.id === id);
 
-// Recherche très tolérante : on cherche les mots saisis (au moins 2 lettres)
-// dans le titre, les mots-clés et le texte de chaque chapitre.
-export function searchGuide(query) {
-  const q = String(query || "").trim().toLowerCase();
+// Recherche très tolérante : on cherche les mots saisis (au moins 3 lettres)
+// dans le titre, les mots-clés et le texte de chaque chapitre. La casse, les
+// accents et la ponctuation sont ignorés — « exporte », « exporter » et
+// « export » se retrouvent —, et les mots grammaticaux (le, de, que, comment…)
+// ne comptent pas : ce sont eux qui, sinon, feraient remonter tous les
+// chapitres à égalité. Si la recherche stricte ne rend rien, on réessaie sans
+// filtre, comme avant : mieux vaut un résultat approximatif que pas de résultat.
+const MOTS_GRAMMATICAUX = new Set([
+  "les", "des", "une", "que", "qui", "quoi", "dont", "pour", "avec", "dans", "sans", "sur", "sous",
+  "comment", "pourquoi", "quand", "est", "sont", "ete", "etre", "fait", "faire", "peut", "peuvent",
+  "plus", "pas", "non", "oui", "vous", "nous", "mon", "mes", "ton", "tes", "son", "ses", "cette",
+  "cet", "ces", "aux", "par", "quel", "quelle", "quels", "quelles", "tout", "tous", "toute", "toutes",
+  "donc", "alors", "aussi", "mais", "comme", "bien", "tres", "deja", "encore", "jamais", "toujours",
+  "avoir", "elle", "ils", "elles", "leur", "leurs", "meme", "quand", "apres", "avant", "entre",
+]);
+
+const sansAccents = (s) => String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+// Les mots d'une question, ramenés à leur forme comparable : sans casse, sans
+// accents, sans ponctuation, et sans les mots grammaticaux — ce sont eux qui,
+// sinon, feraient remonter tous les chapitres à égalité.
+function motsCles(query) {
+  const q = sansAccents(String(query || "").trim());
   if (q.length < 2) return [];
-  const words = q.split(/\s+/).filter((w) => w.length >= 2);
+  const strict = [...new Set(q.split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !MOTS_GRAMMATICAUX.has(w)))];
+  if (strict.length) return strict;
+  return [...new Set(q.split(/[^a-z0-9]+/).filter((w) => w.length >= 2))];
+}
+
+// « exporte » doit retrouver « exporter » : on accepte aussi le mot privé de sa
+// terminaison. Au-delà de sept lettres, un mot français garde son radical.
+function contientMot(hay, w) {
+  if (hay.includes(w)) return true;
+  const racine = w.length >= 7 ? w.slice(0, w.length - 2) : w;
+  return racine !== w && hay.includes(racine);
+}
+
+// Le texte comparable d'un chapitre — calculé une fois, puis gardé : le guide
+// est une constante, et la recherche le parcourt à chaque frappe.
+const teteNorm = new Map();
+const corpsNorm = new Map();
+function texteTete(chapter) {
+  let t = teteNorm.get(chapter.id);
+  if (t === undefined) {
+    t = sansAccents([chapter.title, chapter.short, chapter.keywords].filter(Boolean).join(" "));
+    teteNorm.set(chapter.id, t);
+  }
+  return t;
+}
+function texteCorps(chapter) {
+  let t = corpsNorm.get(chapter.id);
+  if (t === undefined) {
+    t = sansAccents([...plainText(chapter)].join(" "));
+    corpsNorm.set(chapter.id, t);
+  }
+  return t;
+}
+function texteNormalise(chapter) {
+  return texteTete(chapter) + " " + texteCorps(chapter);
+}
+
+export function searchGuide(query) {
+  const words = motsCles(query);
+  if (!words.length) return [];
   return GUIDE.chapters
-    .map((c) => {
-      const hay = [c.title, c.short, c.keywords, ...plainText(c)].join(" ").toLowerCase();
-      const score = words.reduce((n, w) => n + (hay.includes(w) ? 1 : 0), 0);
+    .map((c) => ({ chapter: c, score: words.reduce((n, w) => n + (contientMot(texteNormalise(c), w) ? 1 : 0), 0) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.chapter);
+}
+
+// Les chapitres qui RÉPONDENT le mieux à une question, pour l'assistant de
+// l'atelier. Deux idées, et elles suffisent :
+//   • le TITRE, le résumé et les mots-clés d'un chapitre pèsent bien plus que
+//     son corps de texte : ils sont écrits pour dire de quoi il parle ;
+//   • chaque mot est pondéré par sa rareté (un mot présent dans tous les
+//     chapitres — « acte » — ne désigne personne ; « exporte », « parapheur » ou
+//     « délégation », si).
+export function chapitresPertinents(query, max = 3) {
+  const words = motsCles(query);
+  if (!words.length) return [];
+  const chapitres = GUIDE.chapters;
+  const tetes = chapitres.map(texteTete);
+  const corps = chapitres.map(texteCorps);
+  const poids = (textes) => words.map((w) => {
+    const df = textes.reduce((n, t) => n + (contientMot(t, w) ? 1 : 0), 0);
+    return df ? 1 / df : 0;
+  });
+  const pt = poids(tetes);
+  const pc = poids(corps);
+  return chapitres
+    .map((c, i) => {
+      const score = words.reduce((n, w, j) => {
+        let s = n;
+        if (contientMot(tetes[i], w)) s += 6 * pt[j];
+        if (contientMot(corps[i], w)) s += pc[j];
+        return s;
+      }, 0);
       return { chapter: c, score };
     })
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
+    .slice(0, max)
     .map((x) => x.chapter);
 }
 
@@ -764,4 +987,63 @@ function plainText(chapter) {
   };
   walk(chapter.blocks);
   return out;
+}
+
+// ------------------------------------------------------------------ mise à plat
+// Le guide, mis à plat pour un moteur de langage : du texte suivi, sans la mise
+// en forme d'écran (un modèle lit du texte, pas des encadrés). C'est la matière
+// de l'assistant de l'atelier — la seule qu'il reçoive, avec la question posée
+// (voir src/lib/assistant.js).
+const aPlat = (s) => String(s == null ? "" : s).replace(/\*\*/g, "").replace(/`/g, "").replace(/\s+/g, " ").trim();
+
+function blocAPlat(b) {
+  switch (b.t) {
+    case "p": return aPlat(b.text);
+    case "note":
+      return "[" + (b.kind === "warn" ? "attention" : b.kind === "ok" ? "à retenir" : "info") + "] "
+        + [aPlat(b.title), aPlat(b.text)].filter(Boolean).join(" : ");
+    case "steps":
+    case "stepscard": {
+      const tete = b.title ? aPlat(b.title) + "\n" : "";
+      return tete + (b.items || []).map((it, i) => (i + 1) + ". " + aPlat(typeof it === "string" ? it : it.text)).join("\n");
+    }
+    case "terms": return (b.items || []).map((it) => "- " + aPlat(it.term) + " : " + aPlat(it.def)).join("\n");
+    case "list": return (b.items || []).map((it) => "- " + aPlat(typeof it === "string" ? it : it.text)).join("\n");
+    case "faq": return (b.items || []).map((it) => "Question : " + aPlat(it.q) + "\nRéponse : " + aPlat(it.a)).join("\n");
+    case "table": {
+      const lignes = [b.caption ? aPlat(b.caption) : "", (b.head || []).map(aPlat).join(" | "),
+        ...(b.rows || []).map((r) => r.map(aPlat).join(" | "))];
+      return lignes.filter(Boolean).join("\n");
+    }
+    case "shot": return "(illustration du guide : " + aPlat(b.shot) + ")";
+    case "contact": return "(Le guide affiche ici le contact du service, réglé dans Administration › Identité.)";
+    default: return b.text ? aPlat(b.text) : "";
+  }
+}
+
+// Un chapitre entier, en texte suivi.
+export function chapitreEnTexte(c) {
+  if (!c) return "";
+  const entete = "## " + aPlat(c.title) + (c.short ? " — " + aPlat(c.short) : "");
+  const corps = (c.blocks || []).map(blocAPlat).filter(Boolean).join("\n");
+  return entete + "\n" + corps;
+}
+
+// Le lien d'un chapitre, tel qu'il se clique DANS l'application : « #/aide/<id> ».
+// C'est cette forme — et elle seule — que l'assistant recopie dans ses réponses ;
+// le panneau de conversation l'intercepte et l'ouvre sans recharger la page.
+export const lienChapitre = (chapitre) => {
+  const id = typeof chapitre === "string" ? chapitre : chapitre && chapitre.id;
+  const c = typeof chapitre === "string" ? findChapter(chapitre) : chapitre;
+  if (!id || !c) return "";
+  return "[" + aPlat(c.title) + "](#/aide/" + id + ")";
+};
+
+// La table des matières, une ligne par chapitre : elle permet à l'assistant de
+// savoir ce qui existe — et de renvoyer au bon chapitre par son LIEN — même quand
+// le chapitre détaillé n'a pas été joint.
+export function guideSommaire() {
+  return GUIDE.chapters
+    .map((c) => "- " + aPlat(c.title) + (c.short ? " : " + aPlat(c.short) : "") + " — lien : " + lienChapitre(c))
+    .join("\n");
 }

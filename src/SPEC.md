@@ -45,7 +45,7 @@
 
 ## 2. Modèle de données
 
-### 2.1 Référentiel (`config`)
+### 2.1 Administration (`config`)
 
 ```js
 {
@@ -53,24 +53,100 @@
   vocab:      { enact:"DÉCIDE", articleLabel:"Article", recitalsLabel:"Considérant",
                 visasLabel:"Vu", recoursLabel, publicationLabel },
   numbering:  { pattern:"{year}-{seq}-{entityCode}", seq:400, pad:3, year:2026,
-                eliPattern:"{baseUri}/eli/{actType}/{year}/{seq}/{entityCode}" },
+                eliPattern:"{baseUri}/eli/{actType}/{year}/{seq}/{entityCode}",
+                source:"interne",        // "interne" | "externe" (voir § 2.1 bis)
+                externe:{ transport:"relais", url, method:"POST", headers, body,
+                          valeur:"records[0].id", reference, pattern:"", timeoutMs:15000 } },
   entities:   [ { id, code, name, legalName, seatCity, kind, orgRefs:[refId], tribunal } ],
   people:     [ { id, civility, firstName, lastName, entityId, roles:[roleId],
+                  accord:"",  // ""|"m"|"f" — force l'accord en genre de la qualité
+                  fondementRefId,  // refId de la décision fondant son pouvoir de signer (autorité de tête)
                   refs:[{ kind, label }] } ],
   services:   [ { id, code, name, entityId, bureaux:[ { id, name } ] } ],
-  roles:      [ { id, label } ],
+  roles:      [ { id, label, m, f } ],   // deux formes : « maire »/« maire », « directeur… »/« directrice… »
+  delegations:[ { id, fromId, toId, qualiteM, qualiteF, matieres, familyId, actTypeId,
+                  entityId, acteRefId, acte, du, au, active } ], // délégations de signature, chaînables (sous-délégation) ;
+                                                     // entityId = l'organisation dans le nom de laquelle elle est donnée
+                                                     // acteRefId = la décision qui l'a consentie (acte = intitulé libre à défaut)
   refs:       [ { id, kind, label, scope, active, source, date, abrogatedBy } ],
   mentions:   [ { id, kind:"recours"|"publication", label, text } ],
-  families:   [ { id, label } ],
+  families:   [ { id, label, description } ],  // famille de trames = « thème » du recueil : `description`
+                                               // est la phrase de présentation publique du thème (accueil du recueil)
   circuits:   [ { id, label, description, active, trameIds:[], familyIds:[], entityIds:[],
                   steps:[ { id, label, role:"editeur"|"administrateur",
                             kind:"accord"|"avis", serviceScoped, optional, help } ] } ],
+                                            // n'ont d'effet que si `experimental.parapheur` (ci-dessous)
   delais:     { recoursMois:2, transmissionJours:15, publicationJours:10, notificationJours:8 },
+  experimental:{ parapheur:false, controleLegalite:false },
+                                            // fonctions expérimentales (Administration › Expérimentale) :
+                                            // le parapheur est ÉTEINT par défaut — `circuitFor` ne
+                                            // résout alors aucun circuit (voir § 2.8.1) ; la
+                                            // transmission au contrôle de légalité est ÉTEINTE par
+                                            // défaut — l'étape ne s'intercale pas entre la signature
+                                            // et la publication (voir § 2.8.2 bis)
   styles:     [ { id, label, general, entityIds:[], familyIds:[], …présentation } ],
   actTypes:   [ { id, label, aknElement } ],
   colors:     [...]
 }
 ```
+
+### 2.1 bis Numérotation : séquence interne, ou service externe
+
+Le numéro d'un acte a **deux sources possibles**, réglées dans Administration › Numérotation :
+
+| Source | Ce qui se passe |
+|---|---|
+| `interne` (défaut) | le numéro est composé sur la **séquence du référentiel** (`numbering.seq`), incrémentée à chaque réservation depuis l'écran de rédaction |
+| `externe` | le numéro est **demandé à un service** au moment de rédiger ; c'est le service qui l'attribue |
+
+Le second cas est celui d'une collectivité qui **numérote ailleurs** : un document **Grist** (la
+création d'une ligne y attribue le numéro), un tableur en ligne, un référentiel interne.
+
+**Le numéro est composé de la même façon dans les deux cas** : `numbering.pattern` reçoit le
+jeton `{seq}`, qui vaut le rang local (source interne) ou **la valeur rendue par le service**
+(source externe). La valeur rendue est complétée par des zéros **si c'est un entier**
+(`{seq}` = `012` pour `12` avec `pad:3`) ; une valeur déjà mise en forme (« 2026/0412 ») est
+reprise telle quelle. `numbering.externe.pattern` permet de donner au numéro externe un motif
+propre ; le jeton `{valeur}` y porte la valeur brute du service.
+
+**L'appel.** `numbering.externe` décrit une requête HTTP :
+
+| Champ | Rôle |
+|---|---|
+| `transport` | `relais` (par le relais HTTP de l'hôte — contourne CORS) ou `direct` (appel du navigateur, l'API devant autoriser l'origine) |
+| `url`, `method` | l'adresse et la méthode. Grist : `POST /api/docs/{docId}/tables/{table}/records` |
+| `headers` | un « Nom: valeur » par ligne — c'est là que va l'authentification (`Authorization: Bearer …`) |
+| `body` | le corps JSON (POST/PUT/PATCH) — Grist attend `{"records":[{"fields":{…}}]}` |
+| `valeur`, `reference` | **où lire** dans la réponse JSON : le numéro, et la référence de la ligne créée |
+| `pattern`, `timeoutMs` | motif propre au numéro externe, et délai d'attente |
+
+Les **jetons** sont remplacés dans l'url, les en-têtes et le corps : `{valeur}` `{entityCode}`
+`{entity}` `{year}` `{seq}` `{objet}` `{date}` `{trameId}` `{actTypeId}`. Seuls les jetons
+connus sont remplacés : les accolades d'un corps JSON traversent la substitution intactes. Les
+chemins de lecture acceptent la notation de Grist (`records[0].id`).
+
+**Ce que l'application retient.** La **référence** de la ligne créée est conservée sur l'acte
+(`acte.numeroSource = { source:"externe", ref, valeur, at, par, parName }`), affichée sur la
+fiche de l'acte, et l'attribution entre au **journal d'audit**
+(`numero.attribution_externe`). L'échange lui-même est journalisé, requête et réponse, avec les
+appels au prestataire de signature et au contrôle de légalité (voir § 2.6) : il apparaît dans la
+console « API & journal » sous le service « Numérotation ».
+
+**Ce que l'application ne fait pas.** Elle ne rattrape pas un service injoignable : l'appel
+échoue, le numéro n'est pas attribué, l'acte reste sans numéro — le rédacteur voit le message
+d'erreur. Elle ne demande **jamais** un numéro en silence : le geste est celui du rédacteur
+(« Demander le numéro »), et un numéro déjà obtenu ne se redemande pas sans confirmation, car
+la ligne créée chez le service reste consommée même si l'acte n'est jamais enregistré. Le
+bouton **« Tester l'appel »** du référentiel prévient, pour la même raison, que l'essai crée
+une ligne.
+
+**Deux précautions à l'installation.** L'API de Grist **n'accepte pas** l'en-tête
+`Authorization` depuis un navigateur tiers : soit l'origine de l'application est déclarée
+**origine de confiance** chez Grist et l'on utilise `direct`, soit l'on passe par le `relais`
+(qui contourne CORS, mais voit la clé passer). Et la **clé d'API est conservée dans le
+référentiel** : elle part dans les sauvegardes JSON et, en base partagée, dans la base commune.
+Il faut donc une clé restreinte au strict nécessaire (création sur la seule table de
+numérotation).
 
 ### 2.2 Trame (`trame`)
 
@@ -138,7 +214,9 @@ FeuilleDeStyle = {
   color, ink, muted, ruleColor,
 
   // intitulé de l'acte
-  titleFont, titleSize, titleWeight, titleCase, titleAlign, titleRule,
+  titleFont, titleSize, titleWeight, titleCase, titleAlign,
+  titleRule,                                 // none | line | double | underline | box
+  titleBoxSides,                             // côtés de l'encadré : « tblr » (voir plus bas)
   titleColor, titleSpacing, titleMargin,
 
   // formule d'autorité
@@ -146,21 +224,23 @@ FeuilleDeStyle = {
 
   // intitulés d'article
   headingFont, headingSize, headingWeight, headingColor, headingCase,
-  headingRule, articleNumberLayout,          // inline | block | margin
+  headingRule,                               // none | line | dotted | box
+  headingBoxSides,                           // côtés de l'encadré : « tblr »
+  articleNumberLayout,                       // inline | block | margin
 
   // visas et considérants
   visasIndent, visasBullet, visasLabelStyle, recitalsIndent, recitalsItalic,
 
-  // listes
-  listMarker, listIndent,
+  // listes — la puce des listes à puces (ul), la numérotation des listes numérotées (ol)
+  listMarker, listNumbering, listIndent,
 
-  // filets, encadrés, tableaux
-  ruleStyle, ruleWidth, articleDivider, enactStyle, enactCase,
-  mentionStyle, mentionSize, mentionItalic,
+  // filets, encadrés, tableaux — chaque encadré trace les côtés choisis (`…BoxSides`)
+  ruleStyle, ruleWidth, articleDivider, enactStyle, enactCase, enactBoxSides,
+  mentionStyle, mentionSize, mentionItalic, mentionBoxSides,
   tableStyle, tableFontSize, tableCellPadding, tableCaptionAlign, tableCaptionCase,
 
   // signature
-  signatureAlign, signatureStyle, signatureSpace, signatureWidth,
+  signatureAlign, signatureStyle, signatureBoxSides, signatureSpace, signatureWidth,
   signatureFunctionItalic, signatureNameWeight,
 
   // en-tête et pied de page
@@ -188,8 +268,46 @@ réglages, par thème) et « **Édition directe** » — un éditeur **WYSIWYG s
 on clique l'élément dans l'aperçu (intitulé, tableau, en-tête…), et seuls ses réglages
 apparaissent. Le texte de l'acte n'y est jamais modifiable. Des **préréglages**
 (`STYLE_PRESETS` : classique préfectoral, moderne, solennel, sobre, recueil communal, acte
-individuel) donnent un point de départ complet, sans toucher au nom, au rattachement ni au logo
-de la feuille.
+individuel, charte graphique de l'État, Marianne-like) donnent un point de départ complet, sans
+toucher au nom, au rattachement ni au logo de la feuille. Les deux derniers reprennent la **charte
+graphique de l'État** (bleu France `#000091`, typographie Marianne, en-tête et filet) : le préréglage
+`etat` est **réservé à l'État et à ses opérateurs** — la police Marianne et le bloc-marque étant
+réservés, le logiciel ne les livre pas, l'administration les ajoute —, tandis que `marianne`
+reprend la même sobriété **sans les éléments réservés** (Arial, identité de la collectivité), pour
+toute administration. Chacun porte son étiquette dans la liste (« réservé », « libre »).
+
+**Les polices** (`fontFamily`, `titleFont`, `headingFont`) se choisissent dans une **liste
+fermée** — `FONT_CHOICES` dans `src/lib/styles.js`, rangée par familles (à empattements, sans
+empattement, à chasse fixe) : des polices **répandues sur les postes**, donc sans
+téléchargement ni dépendance réseau, chacune avec sa **pile CSS complète et ses replis** (une
+même famille ne s'appelle pas pareil d'un système à l'autre). Le champ
+(`fontField`, `src/ui/components.js`) garde une porte de sortie — « Autre (police
+personnalisée) » — pour une police propre à la collectivité ou une pile CSS complète : la
+feuille range **toujours la pile**, jamais un identifiant d'entrée, si bien qu'une charte
+exportée puis importée ailleurs nomme exactement la même police. `titleFont` et `headingFont`
+proposent en outre « Héritée » : l'intitulé reprend alors la police du corps.
+
+**L'intitulé de l'acte** (`titleRule`) comme les **intitulés d'article** (`headingRule`)
+acceptent l'option `box` : l'intitulé est alors **encadré** — filet du style et de la couleur
+des filets de la charte (`ruleStyle`, `ruleWidth`, `ruleColor`). C'est la même marque
+d'encadrement que la formule d'édiction (`enactStyle: box`), les mentions (`mentionStyle: box`)
+et le bloc de signature (`signatureStyle: box`).
+
+**Chaque encadré choisit ses côtés.** `titleBoxSides`, `headingBoxSides`, `enactBoxSides`,
+`mentionBoxSides`, `signatureBoxSides` portent une chaîne sur `tblr` — chaque lettre allume un
+côté (haut, droite, bas, gauche). La clé absente vaut l'encadré complet ; **vide**, l'encadré est
+ouvert de partout. `styleCss` n'écrit donc pas le raccourci `border` mais un `border-…` par côté
+retenu (`boxSides`), si bien qu'un filet se pose seul sous un intitulé, ou qu'un encadré s'ouvre
+du côté où le texte respire.
+
+**Les listes** se déclinent en deux familles, que la trame distingue **bloc par bloc**
+(`ordered` sur un nœud `list`, réglé dans l'inspecteur de l'éditeur de trame) et que la charte
+habille séparément : `listMarker` pour la puce des listes à puces (`ul`), `listNumbering` pour la
+numérotation des listes numérotées (`ol`) — `decimal` (« 1. »), `degree` (« 1° »), `parenth`
+(« 1) »), `lalpha` (« a) »), `ualpha` (« A) »), `lroman` (« i. »), `uroman` (« I. »), `none`. Les
+numérotations sur mesure sont des règles `@counter-style` qui **étendent** le compteur natif et
+n'en changent que le suffixe (`COUNTER_STYLES`) ; le navigateur, le PDF et le HTML autonome les
+honorent, Word — qui ignore ces règles — rend alors la numérotation par défaut.
 
 **Marges du papier** : elles font partie de la feuille (`pageMarginTop`… en millimètres). Dans
 les documents exportés, `styleCss` les écrit sur `.paper` (`padding`) **et** dans la règle
@@ -244,7 +362,12 @@ Acte = { id, trameId, numero, objet, entityId, serviceId, bureauId, dateSignatur
          values: { …, __entityId, __overrides: { [adresse]: "texte source" } },
          overrides: { [adresse]: "texte source" },   // recopie lisible de __overrides
          ecarts:    [ { addr, label, original, current } ],
-         issues: [], eli, createdAt, updatedAt }
+         issues: [], eli, createdAt, updatedAt,
+         numeroSource: { source:"externe", ref, valeur, at, par, parName } | null,  // § 2.1 bis : numéro attribué par un service
+         execution: {  …formalités constatées (voir § 2.8.2) :
+            transmission: { at, ref, mode, byName, api?, certificat? },  // certificat = accusé de réception
+            publication:  { at, ref, mode, byName },                    // constatée hors chaîne ELI
+            notification: { at, ref, mode, destinataires, byName } } }
 ```
 
 Une **adresse d'emplacement** désigne un texte précis de la trame :
@@ -291,6 +414,77 @@ celui-ci : l'originale reste accessible dans l'historique des modifications (fic
 l'acte, onglet « Versions » du registre public). Un acte importé (`.akn.xml` ou JSON) est
 relu par `src/lib/akn.js`.
 
+### 2.5 bis Abrogation d'un acte, ou d'un article
+
+Un acte publié ne se supprime pas : il **s'abroge**, par un acte nouveau qui le vise
+expressément. L'application distingue donc deux voies, et ne les confond jamais.
+
+**L'abrogation prévue par un acte.** Un acte peut, par lui-même, prévoir l'abrogation d'un
+AUTRE acte — ou de l'un de ses articles. Pendant la rédaction, l'onglet **« Abrogations »**
+(`src/ui/views/rediger.js`) tient la liste de ces cibles, rangées dans
+`values.__abrogations` :
+
+```
+{ id, kind: "acte" | "article" | "texte",
+  acteId, numero, designation, date, eli,   // photographie de l'acte visé
+  article, articleEId,                      // le cas échéant
+  texte,                                    // acte hors de l'application
+  clause,                                   // réécriture éventuelle de la clause
+  appliedAt, appliedOn }                    // posés le jour de l'application
+```
+
+Un acte **du registre** se désigne expressément (une liste, pas une saisie) : nature, numéro
+et date sont une **photographie** prise à ce moment-là, car la clause d'un acte signé ne se
+réécrit pas. Un acte que l'application ne connaît pas ne se vise que par un texte libre — elle
+ne pourra pas le marquer abrogé. `src/lib/abrogations.js` (module **pur**) compose la clause à
+partir du vocabulaire `config.vocab.abrogation` ; `compile.js` l'insère en **article de
+dispositif**, juste avant le bloc de signature, sous un numéro ordinaire.
+
+La clause dit que l'abrogation prend effet **à l'entrée en vigueur** de l'acte qui la porte, et
+non à sa publication : `entreeEnVigueur(acte, config)` (`src/lib/execution.js`) rend la date
+d'effet déclarée, et à défaut le lendemain de la publication (ou le délai réglé dans
+Administration › Publication). Arrivée à ce terme, `src/ui/abrogations-apply.js`
+(**idempotent**, marqueur `appliedAt`) applique l'abrogation :
+
+- acte visé **dans son ensemble** → `abrogePar` sur l'acte visé (`enAttente` tant que l'acte
+  abrogeant n'est pas publié, puis effectif) ;
+- **article** visé → une **version consolidée** de l'acte qui le porte est construite par les
+  mêmes mécanismes que l'acte modificatif (`planAmendments` + `buildConsolidated`, action
+  `abrogate`), marquée `pendingConsolidation` et `abrogationPar`, et part à la publication.
+
+L'application tourne au démarrage (`src/ui/app.js`) et après chaque publication
+(`src/ui/views/signature.js`) ; chaque application entre au journal
+(`abrogation.appliquee`).
+
+**Abroger l'acte entier depuis une modification.** L'écran de modification propose aussi
+**« Abroger tout l'acte »** (panneau « L'acte entier ») : l'acte modificatif abroge alors tous
+les articles, et la version consolidée porte l'avertissement `abrogationNotice`.
+
+**Renumérotation.** Les mêmes mécanismes servent à **réattribuer un numéro** à un article
+(refusé s'il est occupé : `numbersUsed`) et à **« tout renuméroter »** (`applyRenumbering`,
+option `renum` de `buildConsolidated`). Un article abrogé n'occupe pas de rang : quand la
+numérotation est rendue continue, les articles abrogés dont le numéro est repris par un article
+en vigueur quittent le texte consolidé.
+
+**Corbeille, retrait, abrogation.** Seuls les actes **non signés** (`isDraftable`) peuvent
+être mis à la corbeille. Pour un acte signé ou publié, le registre remplace le bouton corbeille
+par **« Retirer / abroger »** : il propose de rédiger un acte d'abrogation (l'intention voyage
+jusqu'à l'écran de rédaction par `state.redigerIntent`, et le rédacteur choisit la trame qui la
+portera), et — pour un administrateur — mène au **retrait technique du recueil**, mesure
+exceptionnelle réservée aux erreurs de dépôt (`POST /v1/publications/{cle}/retrait`).
+Le registre et la fiche de l'acte portent le badge **« abrogé »** ou **« abrogation prévue »**
+(`abrogationBadge`, `abrogationPhrase` dans `src/ui/components.js`).
+
+**Ce que le recueil public en montre.** Le recueil présente chaque acte **dans sa version la
+plus récente** : la liste, ses compteurs et les tuiles de thème partent des publications en
+vigueur (`publicationsEnVigueur`), et une case **« Afficher les versions antérieures »**
+(visible seulement s'il y en a) les rouvre. Sur la page d'un acte, l'**article abrogé** garde
+son intitulé et la mention de l'acte qui l'a abrogé ; sa **rédaction** est conservée dans la
+version en ligne (`renderDocument` avec `opts.abrogations` la range dans un bloc
+`.doc-abroge-corps`) mais masquée, et la case **« Afficher les articles abrogés »** la révèle.
+La page publiée, elle, et son impression, ne la montrent jamais (`buildWebVersion`,
+`CSS_DOCUMENT_WEB`).
+
 ### 2.6 Signature et publication (démonstration)
 
 Deux écrans, deux services distincts de l'éditeur :
@@ -303,17 +497,21 @@ elle-même. Le service expose :
 | `POST` | `/v1/actes` | déposer l'acte finalisé (Akoma Ntoso) ; idempotent tant que le circuit est ouvert |
 | `POST` | `/v1/actes/{id}/signature` | ouvrir un circuit auprès du prestataire → `202` + `signatureId` |
 | `POST` | `/v1/webhooks/signature` | notification entrante du prestataire : retour de l'acte signé |
-| `GET` | `/v1/signatures/{id}` | suivre le circuit (`en_attente`, `signee`, `refusee`, `rejetee`) |
-| `GET` | `/v1/signatures/{id}/document-signe` | récupérer l'original signé |
+| `GET` | `/v1/signatures/{id}`, `/v1/signatures/{id}/document-signe` | suivre le circuit, récupérer l'original signé |
+| `POST` | `/v1/actes/{id}/transmission` | télétransmettre l'acte signé au contrôle de légalité → `201` + certificat *(fonction expérimentale, § 2.8.2 bis)* |
+| `GET` | `/v1/actes/{id}/transmission` | relire le certificat de transmission |
 | `POST` | `/v1/actes/{id}/publication` | publier et attribuer l'ELI |
+| `POST` | `/v1/publications/{cle}/retrait` | retirer un acte du recueil (motif technique exigé, administrateur seul) |
 | `GET` | `/v1/publications`, `/v1/publications/{cle}`, `/v1/eli/{...}` | registre public et résolution ELI |
 
 Les lectures sont publiques ; les écritures exigent `Authorization: Bearer <jeton>`
 (`401` sans jeton, `403` si le jeton est invalide, `429` au-delà de 90 écritures par
 minute et par réseau, `409` pour un acte déjà signé **ou dont le circuit de validation
-n'est pas achevé** (`409 validation_incomplete` — voir § 2.8.1), `422` si la date de
-publication précède la signature). `POST /v1/actes/{id}/publication` accepte un en-tête
-`Idempotency-Key`.
+n'est pas achevé** (`409 validation_incomplete` — voir § 2.8.1) **ou dont la
+transmission au contrôle de légalité manque** (`409 transmission_absente` — voir
+§ 2.8.2 bis), `422` si la date de publication précède la signature, `422 motif_absent` si le
+motif d'un retrait du recueil manque).
+`POST /v1/actes/{id}/publication` accepte un en-tête `Idempotency-Key`.
 
 **Trames non publiables (actes individuels).** Une trame peut être déclarée
 `publishable: false` (onglet « Trame » de l'éditeur ; défaut `true`). Les actes qui en
@@ -345,37 +543,252 @@ publication** et la **date d'opposabilité** (le lendemain de la publication par
 ou après *n* jours — réglable), et conserve l'original signé. Les versions successives
 d'un même acte partagent le même ELI : c'est le même « work », seules les expressions
 datées diffèrent. La consultation publique est un client de `GET /v1/publications` :
-rien n'est lu dans les données locales.
+rien n'est lu dans les données locales. Le recueil public et la consultation d'une
+publication rendent le texte **dans la page** (§ 2.6 bis).
+
+**Le retour signé publie l'acte.** Le webhook accepté (§ ci-dessus) déclenche la
+**transmission au contrôle de légalité** si elle est active (§ 2.8.2 bis), puis la
+publication **automatique** de l'acte **publiable** : `publierApresSignature`
+(`src/ui/views/signature.js`) publie avec la date du jour — sauf si la date de signature
+est à venir, auquel cas c'est elle qui est retenue, la publication ne pouvant précéder la
+signature. Un acte **individuel** (`publishable: false`) s'arrête à la signature :
+conservé au registre, il est notifié à l'intéressé. La publication manuelle reste offerte
+depuis l'onglet « Publication (ELI) » (date, recueil, consolidation) et emprunte le même
+`publier()`.
+
+Cet automatisme se **règle** (Administration › Publication, `config.publication.auto`, vrai
+par défaut) : éteint, `publierApresSignature` s'arrête après la signature — ni publication,
+ni transmission —, et l'acte signé attend au registre (§ 2.6 bis).
 
 Si le service ne connaît pas l'acte au moment de publier (il a redémarré, ou l'acte a été
 signé sur un autre poste), le client le **redépose** avec sa signature déjà approuvée —
 le service revérifie l'empreinte — puis republie.
 
-**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **onze
-actes**, dont **sept rédigés et posés comme signés** (document compilé depuis sa trame,
+**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **quinze
+actes**, dont **dix rédigés et posés comme signés** (document compilé depuis sa trame,
 exporté en Akoma Ntoso, signé par `buildSignedPackage` — certificat, ECDSA P-256,
-horodatage, donc vérifiables), trois prêts à signer et un brouillon incomplet. Deux de
+horodatage, donc vérifiables), trois prêts à signer, un brouillon incomplet, un acte **en
+attente de révision** et un acte **rejeté** en révision, revenu en brouillon avec son motif.
+Un acte signé porte en outre la trace d'une **révision validée** (avec correction du réviseur).
+Deux de
 ces actes sont des **actes individuels non publiables** (trame `tpl-revalorisation`,
-`publishable: false`), l'un signé et l'autre prêt à signer. Ils ne sont posés que sur un
-registre de démonstration vide (`SEED_VERSION`, identifiants `acte-demo-*`) : jamais sur
-un registre réel.
+`publishable: false`), l'un signé et l'autre prêt à signer. Leurs **transmissions au
+contrôle de légalité** portent leur **certificat** (`certificatTransmission`, mêmes
+mentions et même sceau que le service). Ils ne sont posés que sur un registre de
+démonstration vide (`SEED_VERSION`, identifiants `acte-demo-*`) : jamais sur un registre
+réel.
+
+#### 2.6 bis Le recueil public des actes
+
+La publication produit deux choses distinctes : le **texte publié** (la version en ligne,
+conservée par le service, opposable) et sa **consultation publique** — le **recueil**. Les deux
+sont séparés parce qu'ils ne s'adressent pas au même lecteur : l'administration lit le
+**registre** (métadonnées, versions d'un même ELI, formats, original signé, vérification de
+signature), le public lit le **recueil**.
+
+**Le recueil** (`src/ui/views/recueil-public.js`) est un **site sans compte**, servi par la même
+page sous la route `#/recueil` (la liste) et `#/recueil/<clé>` (un acte). Il est rendu **avant la
+porte de connexion** (`app.js`, `EST_PUBLIQUE`) : ni écran de connexion, ni cloche, ni rien du
+logiciel — seulement la **structure** (son logo, son nom), le **titre du recueil**
+(`config.publication.recueil`) et les actes **réellement publiés**. Le **bandeau de
+démonstration** (« mention de démonstration », § 2.7 bis) s'y affiche aussi, comme dans l'atelier :
+un visiteur doit savoir quand l'installation qu'il consulte est une démonstration. Il ne lit
+aucune donnée locale : il **interroge le service** (`GET /v1/publications`), comme le ferait
+n'importe quel visiteur.
+
+**Le recueil est aussi la porte d'entrée de l'application.** Pour qui n'a pas de compte, c'est
+l'interface de l'installation (§ 2.7.3) : son en-tête porte donc **« Se connecter »** tant
+qu'aucune session n'est ouverte — la porte de l'atelier, vue de la rue —, **« Retour à
+l'application »** quand une session l'est, et **« Mon accès »** pour un visiteur authentifié sans
+rôle. La session ne change rien au recueil lui-même : un agent connecté y lit exactement ce que
+lit un passant.
+
+**La page d'accueil du recueil** — la « page d'accueil de l'interface publique » — n'est pas un
+registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
+
+1. **L'entrée** (`hero`) : le nom de la collectivité, le titre du recueil, une phrase qui dit ce
+   qu'on y trouve, la **recherche**, et une ligne de chiffres (actes publiés, thèmes, dernière
+   publication).
+2. **Les derniers actes administratifs publiés** : un **carrousel** (`carrousel`) des actes en
+   **vigueur** les plus récents. La piste défile au doigt, à la molette ou par deux **flèches**,
+   avec des **points** qui disent où l'on est ; le défilement est **natif** (`scroll-snap`), donc
+   il fonctionne même sans JavaScript — les flèches ne sont qu'un confort. Chaque **carte** met
+   en avant le **thème** de l'acte (voir plus bas), puis son objet, son numéro et sa date.
+3. **Parcourir par thème** (`themesZone`) : une **grille de tuiles**, une par thème présent dans
+   le recueil, avec sa **présentation** — le texte écrit dans Administration › Familles — et le
+   nombre d'actes. La tuile **filtre** la liste sur son thème (et se dé-filtre au second clic) ;
+   elle porte une **teinte** stable, déduite de l'identifiant de la famille, qui n'est qu'un
+   repère visuel.
+4. **Tous les actes publiés** : la **recherche** et les filtres fins (**thème**, nature, année,
+   organisation), puis la liste **groupée par année**.
+
+- **Recherche, thèmes et navigation** (`src/lib/recueil.js`) : un texte libre (numéro, objet,
+  nature, thème, entité, ELI), quatre filtres déduits des actes réellement présents (**thème**,
+  **nature**, **année**, **organisation**), et une liste **groupée par année** — le recueil se lit
+  comme un recueil, et non comme un journal de dépôts. Le filtre « thème » a sa sentinelle
+  (`SANS_THEME`) : « les actes sans thème » n'est pas la même chose que « tous les actes ».
+- **Le thème d'un acte** est la **famille de sa trame** (`config.families`) : c'est la matière
+  dont l'acte traite (« Urbanisme et voirie », « Police administrative », « Finances et budget »…).
+  C'est le classement que la page d'accueil met en avant. La publication porte `themeId` et
+  `themeLabel`, **transmis au dépôt** par le client (le service ne connaît pas les trames, comme
+  pour `publishable`) : `views/signature.js` les envoie au dépôt de l'acte puis à sa publication,
+  le service les conserve (`resumePublication`, `ficheActe`) et les rend dans le JSON, le JSON-LD
+  (`dcterms:subject`) et l'index du recueil (`indexRecueil.themes`). La **vue** résout le libellé
+  au référentiel (renommer une famille suit donc partout) et, pour les actes publiés **avant** que
+  le thème ne soit transmis, retrouve la famille par l'**acte local** (`themeDePublication`,
+  `views/acte-publie.js`) : ce repli ne vaut que sur un poste qui détient le registre. L'unicité du
+  thème dans un acte est celle de sa famille de trame : le choix du thème **se fait donc en
+  choisissant la famille de la trame** (Administration › Familles, et « Famille » dans la trame).
+- **La présentation d'un thème** (`config.families[].description`) s'édite dans Administration ›
+  Familles et s'affiche sous le nom du thème, sur le recueil public.
+- **L'acte est rendu dans la page**, jamais dans une fenêtre ni dans une feuille : la version en
+  ligne publiée est une page HTML autonome ; on en prélève le **document** (`extraireVersion`),
+  **pas sa feuille de style** — la **charte** d'un acte vaut pour le **papier** (PDF, Word, page
+  autonome), pas pour la version en ligne. `CSS_DOCUMENT_WEB` pose la présentation web à partir
+  des styles de lecture de l'application (`.doc*`, `src/css/app.css`) : la décision n'est donc
+  **pas enfermée dans une feuille**, elle fait partie de la page, dans l'apparence du recueil
+  (l'interface publique a sa propre personnalisation, indépendante des chartes d'actes). Le
+  **texte occupe toute la largeur disponible** et adopte la **police de l'interface**
+  (`--font-ui`), pour une lecture homogène avec le reste du site ; la **liste** des actes garde,
+  elle, une largeur de lecture. Les jetons de couleur sont ramenés aux valeurs **thémées** du site
+  (`--ink-public`, `--brand-public`, copies posées sur `:root` dans `src/css/app.css`) : le texte
+  reste lisible en mode sombre, sans redevenir une feuille blanche.
+- **La présentation est la même** dans le recueil public et dans la consultation de
+  l'administration : `views/acte-publie.js` réunit la **notice** (marques de version, titre, bloc
+  de métadonnées), le **texte**, puis les blocs **pièces**, **signature** et **versions**.
+- **L'original signé se consulte dans le recueil public, à la demande** : `blocOriginal`
+  (`views/acte-publie.js`) ne déploie pas le document d'office — il offre un bouton **« Voir
+  l'original signé »** qui l'ouvre dans une **fenêtre**, où on peut aussi l'**imprimer ou
+  l'enregistrer en PDF**. La pièce est le document **tel qu'il a été signé** — texte suivi du bloc
+  de signature (identité, certificat, empreinte, horodatage) ; le texte en ligne n'en est qu'une
+  lecture. L'administration ouvre le même document dans son onglet « Original signé ».
+- La consultation d'une publication depuis l'administration (`views/publications.js`) rend le
+  **même** corps, par le **même** `corpsDeLActe` ; l'écran « Publications (ELI) » renvoie au
+  recueil plutôt que d'ouvrir la page HTML autonome — qui reste pour l'impression, le PDF et le
+  téléchargement. Deux adresses à ne pas confondre : `hrefRecueil`/`hrefActe` (adresses **relatives**,
+  `?recueil=1` et `?acte=<clé>`) servent à **naviguer** dans la page, `adresseRecueil`/`adresseActe`
+  (adresses **absolues**, `perchance.org/<générateur>?acte=<clé>`) à **citer et partager** l'acte —
+  et, sur un déploiement serveur, `/recueil` et `/recueil/<clé>` (§ 2.6 ter).
+
+**Amorçage de la démonstration.** Un service neuf ne contient aucune publication, donc le recueil
+serait vide : `src/ui/demo-publications.js` (`amorcerRecueil`, appelé en fin d'amorçage par
+`app.js`) publie au premier démarrage les actes que la fiction déclare publiés — ceux qui portent
+une constatation de publication —, par le **même chemin** que l'écran de signature
+(`publierActeDuSeed`), de sorte que le registre local et le service racontent la même chose. Le
+geste vaut pour les actes **signés** comme pour les actes **déjà publiés au registre local** : un
+service remis à zéro (état perdu, installation neuve) doit retrouver son recueil, sans quoi le
+registre et le recueil se contrediraient. `publierActeDuSeed` ne se fie donc pas au statut local
+pour dire « c'est publié » : il retire la publication locale le temps de l'appel et la repose
+seulement si le service a **réellement** publié. Le **redépôt** rétablit aussi ce qu'un service
+neuf a perdu : la signature (`retablirActe`) et, quand l'acte est soumis au contrôle de légalité,
+sa **transmission** — sans quoi le service refuserait la publication (`transmission_absente`,
+§ 2.8.2 bis). Idempotent, silencieux, et réservé au jeu de démonstration intact (`acte-demo-*`,
+`tpl-*`).
+
+#### 2.6 ter Le recueil ouvert : les moteurs de recherche et les agents
+
+Un acte publié est une **donnée publique** : ce ne sont pas seulement des humains qui la
+consultent, ce sont aussi les **moteurs de recherche** et les **agents** (LLMs). Or ces lecteurs-là
+n'exécutent pas une application : il leur faut des **adresses stables** et des **représentations
+qu'ils savent lire**. C'est ce que le logiciel appelle le **recueil ouvert**, et c'est la raison
+d'être des routes décrites ici.
+
+- **Une adresse par acte, et elle ne change pas.** Sur un déploiement auto-hébergé
+  (`__SCRIBA_SELF_HOSTED__`), le service sert `/recueil` (la liste), `/recueil/<clé>` (un acte) et
+  `/recueil/<clé>.<ext>` (une représentation) : ce sont de **vraies pages HTML**, rendues côté
+  serveur, sans JavaScript (`src/server/mysql/actes.mjs`, `pageActe`/`pageRecueil`). Ailleurs —
+  démonstration statique, plateforme —, la page porte elle-même ces adresses en **paramètres de
+  requête** (`?acte=<clé>`, `&format=md`), lues par `parseRoute` avant toute autre route.
+- **Une représentation par usage** (`FORMATS_OUVERTS`, `src/lib/recueil.js`) : **JSON** (métadonnées,
+  ELI, texte), **Markdown** (la structure de l'acte — la plus lisible pour un agent), **texte brut**,
+  et **Akoma Ntoso** (le document normé). Le texte déposé à la publication voyage avec elle
+  (`formats.md`, `formats.texte`) : la représentation publiée dit la même chose que la version en
+  ligne, et **les notes de préparation en sont écartées** — c'est l'acte qui est publié, pas
+  l'atelier.
+- **Les fichiers du recueil** (`FICHIERS_OUVERTS`) : `/llms.txt` (le recueil présenté aux agents,
+  convention `llms.txt`), `/recueil.json` (l'index complet), `/sitemap.xml` (une adresse par acte),
+  `/robots.txt` (ce qui peut être parcouru). Servis par le service ; annoncés dans le pied du
+  recueil **uniquement** là où un serveur les sert.
+- **L'accueil du recueil ouvert** (`pageRecueil`, `src/server/mysql/actes.mjs`) suit l'accueil de
+  l'application : les derniers actes publiés défilent sur une ligne (`scroll-snap`, sans
+  JavaScript), les **thèmes** se présentent en grille — chaque tuile mène à sa section d'actes par
+  une ancre —, puis les actes sont rangés **par thème**. Aucune donnée supplémentaire n'est
+  nécessaire : `themeId`/`themeLabel` voyagent avec la publication. `indexRecueil` (donc
+  `/recueil.json`) publie la liste des thèmes (`id`, libellé, nombre), et `llmsTxt` donne le thème
+  de chaque acte.
+- **La page se décrit** : titre, description, `rel="canonical"`, un `rel="alternate"` par
+  représentation, et les **données structurées** JSON-LD de la publication, posés par
+  `publierMeta` (`views/recueil-public.js`) dans le `<head>`. Ces balises portent `data-recueil` :
+  `retirerMetaRecueil` les efface quand on quitte le recueil, pour rendre à l'atelier son propre
+  titre.
+- **Le recueil ouvert se donne à copier** : `blocDonneesPubliques` (`views/acte-publie.js`) replie,
+  sous le texte de l'acte, l'adresse de référence et les adresses de chaque format, chacune avec son
+  bouton « Copier ». Il est montré au public comme à l'administration.
+- **L'URL suit la page, jamais l'inverse** : `majUrlRecherche` (`src/ui/state.js`) tient l'adresse
+  de la page d'accord avec l'écran affiché, en ne touchant qu'aux clés du recueil (`acte`, `format`,
+  `recueil`) et en conservant les paramètres de la plateforme et le fragment de l'éditeur. La
+  navigation interne ne recharge pas la page : un clic intercepté (`views/recueil-public.js`) suit
+  l'adresse du recueil sans quitter l'application.
+
+ (`config.publication.auto`, Administration › Publication,
+**vrai par défaut**). Éteinte, `publierApresSignature` (`views/signature.js`) **s'arrête au retour
+signé** : ni publication, ni transmission au contrôle de légalité, l'acte signé attend au
+registre, et le fait est journalisé. C'est le réglage d'une administration qui publie dans **son
+propre système** et ne veut pas que l'application dépose les actes à sa place. Le réglage régit le
+geste *automatique*, pas la publication : un acte signé reste publiable à la main.
+
+**Le retrait du recueil est exceptionnel, et réservé à l'administrateur.** Un acte publié peut,
+en dernier recours, être retiré du recueil (`POST /v1/publications/{cle}/retrait`) — pour un
+**motif technique** seulement : dépôt en double, dépôt erroné, acte publié avant signature,
+identifiant attribué à tort. Le geste est précédé d'un **avertissement en grand** rappelant qu'un
+acte administratif publié **ne se retire jamais** : ni le retrait ni l'oubli ne sont un moyen de
+corriger un acte, qui doit être **modifié** ou **abrogé** et rester au recueil. Le **motif est
+obligatoire** (le service refuse un motif absent, `422 motif_absent`) et **conservé** sur l'acte
+(`acte.retraits`) comme au journal. Le retrait efface l'entrée du recueil, ramène l'acte à l'état
+**signé** (il redevient publiable) et laisse une trace sur sa fiche. La permission
+`publications.depublier` est accordée au seul rôle **administrateur**.
+
+**Amorçage de la démonstration.** Un service neuf ne contient aucune publication, donc le recueil
+serait vide : `src/ui/demo-publications.js` (`amorcerRecueil`, appelé en fin d'amorçage par
+`app.js`) publie au premier démarrage les actes que la fiction déclare publiés — ceux qui portent
+une constatation de publication —, par le **même chemin** que l'écran de signature
+(`publierActeDuSeed`), de sorte que le registre local et le service racontent la même chose.
+Idempotent, silencieux, et réservé au jeu de démonstration intact (`acte-demo-*`, `tpl-*`).
 
 ### 2.7 Comptes et rôles
 
 L'accès à l'application est **authentifié** : on ouvre une session sous un **compte**, et ce
-compte porte un **rôle**. Trois rôles, du plus large au plus restreint :
+compte porte un **rôle**. Six rôles — trois profils ordinaires, du plus large au plus
+restreint, **deux qualités cumulables** (Réviseur, Signataire), et le **Visiteur** :
 
 | Rôle | Vocabulaire | Ce que le rôle ouvre |
 |---|---|---|
 | **Administrateur** | « l'informaticien » | tout le back-office : référentiel, trames, comptes et rôles, connexion des API ; il **crée et supprime les comptes** et **voit tout, quel que soit le service** |
 | **Éditeur** | rédacteur en chef | rédiger les **trames** de son périmètre, les modifier, les commenter, et régler les **feuilles de style** des actes (charte graphique) ; rédiger et gérer les actes de son périmètre |
 | **Rédacteur** | agent | **rédiger un acte** à partir d'une trame de son périmètre et mener les actions associées (enregistrer, signer) — **uniquement ses propres actes** ; il choisit son modèle dans « Rédiger un acte » (le registre des trames, `trames.voir`, est réservé aux éditeurs et aux administrateurs) |
+| **Réviseur** | la plume qui relit | **cumulable**, il ne remplace pas un profil : il ajoute le **contrôle de l'acte avant sa signature** (§ 2.8.1 bis). Il reçoit un rapport de conformité, peut corriger l'acte, le valider — il part alors en signature — ou le rejeter, l'acte revenant en brouillon chez son rédacteur avec le motif |
+| **Signataire** | l'auteur de l'acte | **cumulable**, il ne remplace pas un profil : il ajoute la **qualité de signer** (§ 2.7.2 ter). Il ouvre l'onglet **« Ma signature »** de l'écran Signature & publication, y voit les actes qui attendent sa signature et ceux signés au titre de sa délégation, et ne voit, dans l'atelier, que les actes relevant de son **champ de compétence**. La qualité **découle d'une désignation** : elle est attribuée au compte de la personne dès que celle-ci est désignée dans l'organigramme des **Délégations** (§ 2.8.1) |
+| **Visiteur** | l'identité reconnue, sans accès | **aucune permission** : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public** (le recueil). C'est l'état d'un compte authentifié dont aucun rôle d'application n'est reconnu (§ 2.7.3) |
+
+**Les qualités « Réviseur » et « Signataire » se cumulent.** Un compte porte une **liste** de
+rôles (`user.roles`), dont le premier est le **rôle principal** — celui qui s'affiche, qui classe
+et qui est lu par ce qui ne connaît qu'un rôle (annuaire, présence, journal). `user.role` reste
+écrit en miroir du principal, et `rolesOf(user)` est la **seule** lecture des rôles : un compte
+enregistré avant le cumul (rôle unique) est lu sans migration. Une **qualité cumulable ne peut
+jamais devenir principale** (`primaryRoleId` écarte les rôles cumulables) : ajouter la qualité de
+réviseur, ou celle de signataire, à un rédacteur ne le transforme pas en « profil réviseur » ou
+« profil signataire ».
 
 Le contrôle d'accès repose sur des **permissions** nommées (`trames.voir`, `trames.gerer`,
-`trames.styles`, `actes.rediger`, `actes.gerer`, `actes.tous`, `signature.gerer`,
-`referentiel.gerer`, `comptes.gerer`, `api.gerer`), chacune accordée à un ensemble de rôles.
+`trames.styles`, `actes.rediger`, `actes.gerer`, `actes.tous`, `actes.valider`, `actes.reviser`,
+`actes.signer`, `signature.gerer`, `delegations.gerer`, `publications.depublier`,
+`referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`), chacune
+accordée à un ensemble de rôles. **Signer** (`actes.signer`) et **publier** (`signature.gerer`)
+sont deux permissions distinctes : la première ouvre l'écran de signature et les gestes qui
+engagent la signature — un signataire peut donc signer sans pouvoir conduire la publication.
 Une seule table dans `src/lib/users.js` (`PERMS`) sert à la fois de **source d'autorité** pour
-`can(user, perm)` et de contenu à la **matrice des droits** affichée dans l'écran « Comptes et
+`can(user, perm)` — qui interroge **tous** les rôles du compte — et de contenu à la **matrice des
+droits** affichée dans l'écran « Comptes et
 rôles ». Les vues n'ont pas de logique de rôle en dur : elles interrogent `can()`.
 
 **Le rôle et le périmètre sont deux axes distincts.** Le rôle dit ce qu'un compte peut *faire*
@@ -387,10 +800,21 @@ ci-dessous.
 Le modèle d'un compte :
 
 ```js
-{ id, firstName, lastName, login, role, entityId, email,
+{ id, firstName, lastName, login, role, roles, entityId, email,
+  personId,                                  // la personne du référentiel que le compte tient
   memberships: [ { serviceId, bureaux } ],   // bureaux: null = tous ceux du service
+  revision: { services, trameIds, familyIds, actTypes, entityIds },  // compétence de réviseur
   active, createdAt, lastLoginAt, note }
 ```
+
+`roles` est la **liste** des rôles (le premier est le principal, miroir de `role`) ;
+`revision` est la **compétence de réviseur** du compte — une compétence **vide** vaut « tous les
+services, tous les actes » (§ 2.8.1 bis). `personId` rattache le compte à la **personne du
+référentiel** qu'il tient : c'est ce lien qui fait qu'un compte **signe** — au nom de cette
+personne — et qu'il ne voit, dans l'atelier, que les actes de son **champ de compétence**
+(§ 2.7.2 ter). Le rapprochement de ce compte avec celui de l'**outil de signature** se range, lui,
+sur la **personne** (`personne.signature = { compteId, courriel, compteOutil, rapprocheLe, par }`) :
+la qualité de signataire est une donnée du référentiel, elle suit l'export.
 
 ### 2.7.1 Organisation : services, bureaux, périmètre
 
@@ -414,7 +838,7 @@ bureau), `serviceById`, `bureauxOf`, `servicesInScope`, `bureauxInScope`, `cover
 `servicesOf`, `scopeLabel`, `primaryServiceName`, `targetLabel`, `newService`, `newBureau`.
 `state.js` s'en sert dans `visibleTrames()` et `visibleActes()`.
 
-Les services/bureaux se décrivent dans **Référentiel › Services** ; le périmètre se règle dans
+Les services/bureaux se décrivent dans **Administration › Services** ; le périmètre se règle dans
 **Comptes et rôles** (colonne « Périmètre », éditeur à cases, boutons « tous les services » /
 « retirer tous les accès »). Supprimer un service retire les rattachements correspondants.
 
@@ -430,11 +854,279 @@ limite à ses actes, et le registre de tout compte se limite à son périmètre.
 
 > **Démonstrateur.** L'authentification est **simulée** par défaut : l'écran de connexion liste
 > les comptes et un clic ouvre la session, sans mot de passe. Le jeu de démonstration
-> (`seedUsers`) crée **neuf comptes fictifs** rattachés aux services de Valmont-sur-Loire (dont
+> (`seedUsers`) crée **onze comptes fictifs** rattachés aux services de Valmont-sur-Loire (dont
 > un compte transverse).
 >
 > Le référentiel peut **brancher l'annuaire de la collectivité** (OpenID Connect) : voir
 > § 2.7 bis. Le brancher **désactive automatiquement les comptes de démonstration**.
+
+### 2.7.2 Qualités, accord en genre et délégations de signature
+
+**La qualité du signataire s'accorde en genre.** Chaque **rôle** (`config.roles`) porte ses deux
+formes — `m` et `f` : « maire »/« maire », « directeur général des services »/« directrice
+générale des services », « chef de bureau »/« cheffe de bureau ». Le `label` n'est qu'un repère
+de liste : il ne s'imprime jamais. Le **genre** d'une personne se déduit de sa **civilité**, et se
+force au besoin par `accord: "m"|"f"` sur sa fiche (Administration › Personnes) — le cas par cas
+d'une femme maire qui tient à « le maire ». La qualité se compose avec son article (`avecArticle`) :
+« le »/« la », ou « l' » devant une voyelle (même forme dans les deux genres). Le bloc de
+signature imprime les qualités puis le **Prénom Nom** du signataire — sans civilité, que la
+qualité rend superflue.
+
+**Le signataire se choisit par la FONCTION, non par son nom.** `src/lib/fonctions.js` construit,
+pour un acte, le **catalogue des fonctions** qui peuvent le signer : les **rôles** (toutes les
+personnes qui portent le rôle ont la fonction) et les **délégations** en vigueur dont le périmètre
+convient à l'acte (voir `scoreDelegation` : organisation, famille, type — une délégation d'une
+autre organisation, ou visant une autre famille ou un autre type d'acte, est écartée). Chaque
+fonction porte ses **personnes** : une clé stable — `role:<id>` ou `del:<id>` — `personnesAyantQualite`
+rendant, pour un rôle, ses titulaires, et pour une délégation, les délégataires de **même qualité
+dans la même organisation** (plusieurs personnes peuvent tenir une qualité, chacune par sa propre
+délégation). Une fonction que personne ne tient est écartée du catalogue.
+
+Le champ de trame correspondant est de **type `signataire`** (les trames antérieures, de type
+`person`, sont converties au démarrage par `migrateSignatureFields`). Il garde la valeur
+`values.signataire` — l'identifiant d'une personne : tout le reste de l'application continue de la
+lire ainsi — et range à côté d'elle, sous **`values.<id>Fonction`**, la **clé de la fonction
+retenue** (`champFonction`). La propriété `qualite` du champ fixe facultativement la **fonction
+attendue** par la trame (« Maire » pour un arrêté de délégation de signature) : la liste s'ouvre
+sur elle, sans jamais écarter le rédacteur. La clé de fonction, quand elle désigne un rôle, est
+passée à `enrichirSignataire` (`opts.roleId`) : une personne qui porte plusieurs rôles signe sous
+celui de la fonction retenue — sauf si une délégation s'applique, la qualité imprimée venant alors
+de la délégation, qui est un fait du référentiel.
+
+L'écran de rédaction (`src/ui/signer-picker.js`) en fait un **choix en deux temps** : la **fonction**
+d'abord (groupée « Fonctions (rôles) » / « Par délégation de signature »), puis, **parmi les
+personnes qui ont qualité**, celle qui signe. Quand une fonction ne peut être tenue que par une
+personne, celle-ci est retenue d'office ; un choix délibéré du rédacteur n'est jamais défait. Le
+même sélecteur sert dans la pastille du document, dans l'acte modificatif, et la chaîne de
+délégations reste affichée sous le champ.
+
+**Les délégations de signature** (`config.delegations`) forment un **arbre** : une autorité
+(`fromId`) délègue à quelqu'un (`toId`) une **qualité** (`qualiteM`/`qualiteF`, propre à la
+délégation et non au rôle : « adjoint au maire **en charge de l'urbanisme** »), pour des matières
+données, éventuellement ciblées sur une **famille** et un **type d'acte**, avec sa **décision**
+(`acteRefId`, une référence du référentiel ; à défaut l'intitulé libre `acte`) et ses dates
+(`du`/`au`). La **sous-délégation** est en principe interdite, mais l'arbre n'est pas borné : elle
+est dérogatoire, pas impossible.
+
+**Chaque chaîne relève d'une organisation.** Une délégation est donnée *dans le nom d'une
+organisation* : celle de son délégant par défaut (`entiteDeDelegation`), ou celle qu'un `entityId`
+explicite impose — le cas du maire qui délègue dans le nom du CCAS qu'il préside.
+`meilleureDelegation` **écarte les délégations d'une autre organisation** : la chaîne d'un
+établissement ne se mêle pas à celle de la commune, même si une même personne y tient des
+délégations des deux côtés. Elle ne retient en outre qu'une délégation **en vigueur à la date de
+l'acte** (`values.dateSignature`).
+
+**Les autorités autonomes.** Toutes les chaînes ne descendent pas du maire : un établissement
+public (office, centre de gestion, syndicat) a sa propre autorité de tête — le **président de son
+conseil d'administration** — et sa propre chaîne, parallèle. Une personne **sans délégation
+entrante** est traitée comme une autorité de tête (`signataire.autonome`) : son rôle lui donne sa
+qualité, et l'organisation qu'elle engage sa formule d'autorité. La démonstration le montre avec
+l'office public de l'habitat (`ent-oph`) : une trame propre (`tpl-marche-oph`), ses références
+(`ref-oph-reglement`, `ref-oph-deliberation`), son circuit de validation (`cir-oph`), et une
+décision signée par le directeur général sur délégation du président.
+
+**Les décisions fondant la signature** (`decisionsDeSignature`). Chaque étage de la chaîne tient
+son pouvoir de **décisions**, que le référentiel désigne : sur une **personne**, le champ
+`fondementRefId` dit de quoi elle tient sa compétence quand elle est l'**autorité de tête** (la
+délibération qui donne délégation au maire, une élection) ; sur une **délégation**, un **délégataire**
+en a DEUX — la **décision de nomination** (`nomination`, l'acte qui l'a nommé à sa fonction) et la
+**décision de délégation** (`acte`, celle qui lui a donné le pouvoir de signer). Chacune se
+renseigne de deux façons : d'un **acte publié au recueil** (`nominationCle`, `acteCle`, dont le lien
+est recalculé au rendu — c'est l'adresse du recueil en ligne) ou d'un **lien externe**
+(`nominationUrl`, `acteUrl`, le texte étant ailleurs), ou encore d'une **référence du référentiel**
+qui porte son adresse de source (`nominationRefId`, `acteRefId`) ; `nominationSource`/`acteSource`
+retient d'où elle vient. `libelleDecision` résout la référence (ou l'intitulé libre) et
+`lienDecision` l'adresse, et `decisionsDeSignature` rend la série — une entrée
+`{ refId, label, niveau, acteur, lien }` **par décision**, du sommet de la chaîne vers le
+signataire (la nomination avant la délégation à chaque étage), **sans répéter** une décision déjà
+visée. Une décision n'est **renseignée** que si son **intitulé ET son lien** le sont : `decisionsManquantes`
+nomme les manques, et **l'écran Délégations refuse de créer** une délégation dont l'une des deux
+n'est pas renseignée — un signataire ne se configure pas sans ses deux décisions. Une **trame** les
+insère dans un bloc `visas` par une **entrée de chaîne** (`{ chaine: true }`, écran de l'éditeur de
+visas : « Les décisions fondant la signature, étage par étage ») : l'emplacement est celui de la
+trame, la série vient du référentiel, et `compile` l'éclate en autant de visas, **chacun porteur de
+son lien** — que les exports écrivent en clair : `<a>` (HTML web et imprimable), `<ref href>` (Akoma
+Ntoso), `[texte](lien)` (Markdown). Sur une signature par subdélégation (maire → adjoint → chef de
+bureau), l'acte vise ainsi, dans l'ordre : la délibération qui a donné son pouvoir au maire, puis,
+pour chaque étage, la nomination et la délégation. Une délégation **déjà enregistrée** sans ses deux
+décisions n'est pas refusée, mais **signalée** : badge « Décisions à compléter » dans l'organigramme
+et sur la fiche, alerte « Délégation incomplète », et contrôle de conformité **à l'attention** de
+l'écran de révision.
+
+`src/lib/delegations.js` porte tout le modèle : `genreDe`, `avecArticle`, `qualiteDeRole`,
+`qualitePersonne` (rôle forcé facultatif), `newDelegation`, `qualiteDeDelegation`, `delegationsVers`,
+`enVigueur`, `scoreDelegation`, `chaineDeSignature`, `lignesQualites`, `libelleDecision`,
+`decisionsDeSignature`, `enrichirSignataire`, `arbreDelegations` ; `src/lib/fonctions.js` porte le
+catalogue des **fonctions** (`fonctionsDeSignature`, `personnesAyantQualite`, `fonctionPourPersonne`,
+`fonctionParCle`, `libelleFonction`, `champFonction`) et `src/ui/signer-picker.js` le sélecteur. La chaîne se remonte de délégation en
+délégation (profondeur bornée, garde anti-cycle) : `chaineDeSignature` rend les étages du sommet
+vers le signataire, `meilleureDelegation` choisissant, parmi les délégations d'une personne, la
+plus précise (organisation, puis famille, puis type d'acte, puis générale). À la compilation,
+`buildContext` **lit d'abord l'entité** — c'est elle qui décide de la chaîne applicable — puis
+résout le signataire, et pose dans `ctx.signataire` : `genre`, `qualite`, `qualiteArticle(Maj)`,
+`delegue`, `autonome`, la chaîne (`chaine`), les décisions visées (`decisions`), les lignes prêtes
+(`qualites`) et l'**autorité de tête** (`autorite`, avec son `entiteId`) — celle dont le pouvoir
+descend. La formule d'autorité de
+l'entité accepte un jeton `{qualite}`, remplacé par la qualité accordée de l'autorité de tête
+(« {qualite} de Valmont-sur-Loire » → « Le Maire de Valmont-sur-Loire »).
+
+Le rendu (`render.js` : `personSignatureName`, `personRole`, `personRoleLines`) et les exports
+(Akoma Ntoso, Markdown, Word, HTML) impriment successivement :
+
+> Le Maire,
+> Par délégation, l'adjoint au maire en charge de l'urbanisme,
+> Par subdélégation, le chef de bureau Urbanisme,
+> Karim BENALI
+
+Seul le **nom du signataire** s'imprime. L'arbre se règle dans l'écran **Délégations** — un écran de
+plein droit de l'atelier, présenté en **organigramme** (ou en liste), où chaque acteur a une **fiche**
+détaillée. Il est **visible par tous les comptes**, et **modifiable par les seuls administrateurs et
+éditeurs** (permission `delegations.gerer`) ; le rédacteur choisit le signataire **par sa fonction**
+(voir plus haut) et voit la chaîne résultante **sous le champ « Signataire »**.
+
+#### 2.7.2 bis L'écran « Délégations »
+
+L'organigramme est un **écran de plein droit** de l'atelier, et non plus un onglet de
+l'Administration : savoir qui peut signer à la place de qui n'est pas une donnée réservée.
+Il est donc **visible par tous les comptes** (`VIEW_PERMS.delegations = null`), tandis que sa
+**modification** est gardée par la permission `delegations.gerer` — accordée aux seuls
+administrateurs et éditeurs. Un compte qui ne l'a pas lit exactement la même fiche, sans les
+champs de saisie.
+
+Deux présentations, au choix :
+
+- **Organigramme** — l'arbre des chaînes, dessiné en CSS (descentes et barres de fratrie, sans
+  élément décoratif) : chaque chaîne part de son **autorité de tête** et descend, de délégation
+  en sous-délégation. Un nœud reste **court** — qui, sous quelle qualité, dans quelle
+  organisation, avec sa pastille de rang et, le cas échéant, la mention « suspendue », « échue »
+  ou « à venir ». Sur un écran étroit, l'arbre **défile horizontalement** plutôt que de tasser
+  les cartes.
+- **Liste** — la même arborescence, indentée, lisible sans défilement latéral.
+
+Cliquer un nœud ouvre sa **fiche** (une fenêtre) : l'identité et la qualité accordée en genre,
+puis **ce que la signature donnera** — les lignes « Le Maire, / Par délégation, … » et les
+décisions visées, recalculées à la frappe —, puis le **pouvoir** (délégant, délégataire,
+organisation), l'**étendue** (qualités au masculin et au féminin, matières, famille, type
+d'acte), la **décision et la durée** (référence ou intitulé libre, dates, état). L'**autorité de
+tête** a sa propre fiche : rôle, organisation, décision fondant son pouvoir, liste de ses
+délégataires.
+
+**Créer une délégation n'écrit rien avant confirmation.** La fiche d'une délégation neuve
+travaille sur un **brouillon** : l'aperçu la lit comme si elle était déjà au référentiel, mais
+le référentiel n'est touché qu'au moment de « Créer la délégation » — abandonner la fiche ne
+laisse donc aucune délégation vide derrière elle. Une délégation dont le délégant est vide,
+inconnu ou forme un cycle n'apparaît dans aucun arbre : elle est signalée « non rattachée »,
+sous l'organigramme, ce qui permet de la retrouver et de la corriger.
+
+#### 2.7.2 ter Le signataire : la qualité, le compte, le champ de compétence
+
+Un signataire n'est pas un agent comme un autre : c'est l'**auteur de l'acte**, celui dont la
+signature engage la collectivité. L'application en tire trois conséquences, réunies dans
+`src/lib/signataires.js` — un module **pur** (ni DOM, ni état).
+
+**1. Une qualité, qui découle d'une désignation.** Le rôle **`signataire`** est **cumulable**
+(comme `reviseur`) : il n'enlève aucun profil, il ajoute la qualité de signer. Il ne se choisit
+pas dans une liste, il **découle d'une désignation** : dès qu'une personne est désignée dans
+l'organigramme des **Délégations** — comme **délégant** ou comme **délégataire** —
+`assurerRoleSignataire(users, personId)` attribue la qualité au **compte rattaché à cette
+personne** (`user.personId`), sans qu'il faille être administrateur : un **éditeur** (qui peut
+modifier les délégations) l'attribue de la même façon. Le geste est idempotent, et journalisé
+(`journaliser("role.signataire")`). Le rôle ouvre l'écran **Signature & publication** — par la
+permission `actes.signer`, distincte de `signature.gerer` (la publication) —, et son onglet
+**« Ma signature »**, qui est l'onglet par défaut d'un signataire.
+
+**2. Un compte, et deux rapprochements.** Un signataire signe **avec son compte**. En production,
+l'annuaire de la collectivité (OIDC) délivre le compte de l'application **et** provisionne le même
+agent sur l'**outil de signature** : deux rapprochements en découlent.
+
+- la **personne du référentiel** — celle qui porte la qualité — est rattachée à son **compte** de
+  l'application par `user.personId` (champ « Personne du référentiel — qui signe » dans
+  **Comptes et rôles**) ;
+- ce compte est rapproché du **compte de l'outil de signature**, dérivé de façon déterministe par
+  `compteOutilDeSignature` (`SIG-<LOGIN>`) pour que le rapprochement ait un objet vérifiable — un
+  identifiant, et non une simple case cochée.
+
+`etatRapprochement(config, users, personId)` dit l'état des deux (`{ personne, compte, declare,
+courriel, compteOutil, ok, motif }`), `rapprocher` l'écrit sur la **personne**
+(`personne.signature = { compteId, courriel, compteOutil, rapprocheLe, par }` — la qualité suit
+l'export), `deRapprocher` l'efface. L'état se lit et se corrige à trois endroits : la **fiche d'un
+acteur** dans l'écran **Délégations**, la **fiche du compte** (Comptes et rôles), et l'onglet
+**« Ma signature »**. Un signataire **sans compte**, dont le compte est **désactivé**, **sans
+adresse**, ou **non rapproché**, ne peut pas signer — la signature serait anonyme. L'application
+le dit au moment où on le désigne, dans le sélecteur de signataire de la rédaction
+(`src/ui/signer-picker.js`, avertissement sous le champ), et le panneau de l'outil de signature
+affiche le **compte de signature** retenu.
+
+**3. Un champ de compétence.** Un signataire ne voit, dans l'atelier, que les actes dont la
+signature relève de lui : ceux qu'il **signe lui-même**, et ceux que signent ses **délégataires**
+— car c'est alors sa propre signature qui est engagée, par délégation puis subdélégation. La
+compétence se lit dans la **chaîne de signature** de l'acte (`chaineDeSignature`,
+`src/lib/delegations.js`), dans le périmètre de l'acte (organisation, famille de la trame, type
+d'acte, date de signature — une délégation limitée à un autre service ou à une autre famille ne
+s'y invite pas) :
+
+- `etapesDeSignature(config, acte, trame)` — la chaîne de l'acte (le signataire désigné, lu sur
+  `acte.values.signataire`) ;
+- `competenceDeSignature(config, acte, trame, personId)` — `{ ok, effectif, rang, etapes }` :
+  `effectif` dit que la personne est le **dernier étage** (c'est sa signature que l'acte attend),
+  `rang` sa place depuis la tête ;
+- `competenceDuCompte` / `peutSignerActe` — la même question posée au compte, par sa personne ;
+- `signatairesPourActe(config, users, acte, trame)` — les comptes dont la signature est engagée
+  (l'homologue de `reviseursPour` de `src/lib/revision.js`) ;
+- `fileSignature(config, user, actes, trameDe)` — ce que l'onglet « Ma signature » met sous les
+  yeux : `aSigner` (les actes qui attendent **sa** signature), `engagee` (les actes signés au
+  titre de sa délégation, qu'il doit pouvoir suivre) ;
+- `placeDansChaine` (« autorité de tête », « par délégation », « par subdélégation ») et
+  `situationDeSignature` (ce que la personne signe en général : en son nom, et/ou au titre de ses
+  délégations).
+
+`visibleActes()` (`src/ui/state.js`) ouvre au compte, en plus de son périmètre administratif et de
+sa compétence de révision, les actes dont sa signature relève (`parSignature`). La qualité étant
+**cumulable**, la visibilité est **l'union** de ce que donnent les rôles du compte ; le
+**champ de compétence** est ce que la qualité de signataire ajoute — et il est **seul** à décider
+de ce que contiennent les deux listes de l'onglet « Ma signature ».
+
+**Le jeu de démonstration.** Les comptes dont la personne figure dans une chaîne de signature
+reçoivent la qualité au démarrage (`migrateDemoSignataires`, `src/lib/store.js`) — purement
+additif, et réservé au jeu de démonstration, comme les migrations de la révision. La
+démonstration montre ainsi la qualité sur les quatre comptes de la commune et de l'office qui
+signent, ou dont la signature est engagée (l'adjoint, le chef du bureau Urbanisme, la directrice
+du CCAS, la directrice générale de l'office) ; leurs actes non encore rapprochés affichent
+l'avertissement et le geste de rapprochement.
+
+### 2.7.3 L'identité reconnue sans rôle : le visiteur
+
+**Le recueil public est l'interface de l'installation pour qui n'a pas de compte** (§ 2.6 bis) :
+c'est là qu'un visiteur arrive, et c'est de là qu'il se connecte. La porte de l'application, dans
+l'en-tête du recueil (`porteApplication`, `views/recueil-public.js`), dit donc **l'état de la
+session** :
+
+- **sans session** : « **Se connecter** » — un bouton, non un simple lien, parce que c'est la
+  porte de l'application vue de la rue ; il ouvre l'écran de connexion (comptes de l'application
+  ou annuaire, selon le référentiel) ;
+- **session ouverte** : « Retour à l'application » ;
+- **visiteur** (voir ci-dessous) : « Mon accès », qui mène à l'écran d'explication.
+
+**Un compte authentifié dont aucun rôle d'application n'est reconnu est un visiteur.** L'identité
+est vérifiée — l'annuaire a reconnu la personne — mais l'application ne lui ouvre **rien** :
+`estVisiteur(user)` (`lib/users.js`) est vrai quand le compte n'a aucun rôle, ou porte le rôle
+`visiteur`. Ses permissions sont **vides par construction** : `can()` refuse tout dès que le
+compte porte `visiteur`, quel que soit le reste — une qualité résiduelle (un réviseur dont le
+groupe a disparu) ne doit pas lui rouvrir un accès, et l'annuaire qui ne reconnaît aucun groupe
+**efface** les qualités cumulables qu'il portait (`applyOidcUser`, `lib/oidc.js`).
+
+Le rôle ne se contente pas d'être un état : il est **attribuable**. Un administrateur peut donner
+le profil « Visiteur » à un compte (Comptes et rôles), et la politique d'annuaire « agent sans
+groupe reconnu » peut valoir « aucun accès » (rôle Visiteur) ou un rôle de repli — voir le réglage
+« Rôles et périmètre » de l'onglet **Administration › Annuaire**.
+
+**L'écran « pas d'accès »** (`views/sans-acces.js`, monté par `app.js` **avant** la coquille de
+l'atelier) remplace alors l'application. Il dit qui est connecté, pourquoi il n'a pas d'accès —
+et **les groupes reçus de l'annuaire**, ce qui évite « je suis pourtant dans le bon groupe » —,
+donne le **contact du service qui gère l'application** (Administration › Identité, champs
+« Contact d'aide »), et propose deux gestes : **Consulter l'espace public** (le recueil) et
+**Changer de compte**. Un visiteur n'entre ni dans la présence collaborative, ni dans la
+navigation : il n'est pas un poste de travail.
 
 ### 2.7 bis Annuaire de la collectivité (OpenID Connect)
 
@@ -452,9 +1144,10 @@ Le mode d'authentification est un **réglage du référentiel** (`config.auth`) 
    `jwks_uri`, RS/PS/ES) — sauf désactivation explicite de ce dernier contrôle. Chaque
    contrôle est affiché à l'administrateur après une connexion réelle.
 3. **Groupes → rôle.** Le rôle est le **premier groupe reconnu** (`roleClaim`, chemin pointé :
-   `groups`, `realm_access.roles`…) selon `roleMap`. Aucun groupe reconnu : **refus** (défaut)
-   ou rôle de repli. Le périmètre (services, entité) suit des revendications dont les codes
-   sont rapprochés du référentiel.
+   `groups`, `realm_access.roles`…) selon `roleMap`. Aucun groupe reconnu : le compte devient
+   **Visiteur** (défaut) ou reçoit le rôle de repli — voir § 2.7.3. Dans les deux cas l'agent
+   est authentifié ; ce qui change est ce que l'application lui ouvre (ici, rien). Le périmètre
+   (services, entité) suit des revendications dont les codes sont rapprochés du référentiel.
 4. **Désactivation automatique des comptes de démonstration.** Brancher l'annuaire
    (`disableDemo`, défaut vrai) désactive les comptes du jeu de démonstration :
    - l'écran de connexion ne les propose plus ;
@@ -480,7 +1173,8 @@ Le mode d'authentification est un **réglage du référentiel** (`config.auth`) 
 placé devant l'application). C'est écrit tel quel dans `docs/ADMINISTRATION.md`.
 
 **Écrans.** Écran de connexion (`views/connexion.js`), panneau de connexion et retour du
-fournisseur (`ui/oidc.js`), onglet **Référentiel › Annuaire (OIDC)** (mode, fournisseur,
+fournisseur (`ui/oidc.js`), écran « pas d'accès » du visiteur (`views/sans-acces.js`, § 2.7.3),
+onglet **Administration › Annuaire (OIDC)** (mode, fournisseur,
 correspondance des groupes, porte de secours), **Comptes et rôles** (provenance des comptes,
 actions masquées quand l'annuaire est branché).
 
@@ -488,7 +1182,7 @@ actions masquées quand l'annuaire est branché).
 
 Une installation de démonstration doit **se voir** : un bandeau orange « Démonstration »
 (avec une phrase d'explication) est affiché **en tête de l'application**, au-dessus de
-l'en-tête, sur l'écran de connexion comme une fois connecté.
+l'en-tête, sur l'écran de connexion, une fois connecté, **et sur le recueil public**.
 
 Le réglage vit dans le référentiel, sous `brand.demo` (booléen) et `brand.demoText` (texte
 libre, facultatif) :
@@ -497,7 +1191,7 @@ libre, facultatif) :
   une installation neuve, un référentiel importé ou des données effacées réaffichent le
   bandeau. On ne peut donc pas produire des actes réels dans une démonstration par simple
   oubli ;
-- coupé par l'**administrateur** (`Référentiel › Identité › Mention de démonstration`) au
+- coupé par l'**administrateur** (`Administration › Identité › Mention de démonstration`) au
   moment où l'installation est **adaptée en production** ; le réglage suit le référentiel
   exporté/importé ;
 - il marque **l'application, pas les documents** : un acte exporté, publié ou imprimé ne
@@ -507,7 +1201,19 @@ libre, facultatif) :
 
 ### 2.8.1 Circuit de validation (le parapheur)
 
-Un acte n'est pas signé à l'issue de sa rédaction : il franchit un **circuit de validation**,
+Le parapheur est une **fonction expérimentale, éteinte par défaut** (§ 2.1
+`experimental.parapheur`) : on l'active dans `Administration › Expérimentale`. Éteint, il
+**n'existe pas** pour l'application — `circuitFor` ne résout aucun circuit, l'écran
+Parapheur, son entrée de menu, l'onglet « Circuits de validation » de l'Administration, le
+réglage de circuit d'une trame et la carte Parapheur de la fiche d'un acte disparaissent
+(gardés par `parapheurActif`, `src/lib/validation.js`), la porte de signature ne
+s'applique plus, et l'état de validation n'est pas transmis au dépôt. Activer l'option
+**régénère les actes de démonstration** (`regenerateDemoActes`, `src/ui/state.js`) : ils
+portent, ou non, leur passage au parapheur (`src/lib/demo-actes.js`), et la validation ne
+se génère que si l'option est active. Les circuits enregistrés sont conservés ; le réglage
+suit le référentiel exporté/importé.
+
+Actif, un acte n'est pas signé à l'issue de sa rédaction : il franchit un **circuit de validation**,
 défini dans le référentiel (§ 2.1 `circuits`) et résolu par `circuitFor` — le circuit désigné
 par la trame, sinon le plus **spécifique** des circuits actifs correspondant à la trame, à sa
 famille d'actes et à l'entité signataire. Sans circuit applicable, l'acte part directement en
@@ -542,6 +1248,77 @@ L'écran **Parapheur** présente quatre files : *à valider par moi*, *en cours*
 la trace des décisions (auteur, date, observation) et propose la décision quand l'étape est
 de votre ressort.
 
+### 2.8.1 bis La révision : le contrôle entre la décision d'envoyer et l'envoi
+
+Le **réviseur** s'intercale entre le geste du rédacteur (« Envoyer en signature ») et l'**envoi
+effectif**. Le geste du rédacteur ne fait donc pas partir l'acte : il le **soumet** au réviseur
+(`demanderRevision`). Le réviseur reçoit un **rapport de conformité** (`src/lib/conformite.js`),
+peut **corriger** l'acte, puis :
+
+- le **valider** (`validerRevision`) : l'acte part alors en signature, par le **même chemin** que
+  le bouton « Envoyer en signature » (`envoyerEnSignature`, `src/ui/views/signature.js`) ;
+- le **rejeter** (`rejeterRevision`) : l'acte **revient en brouillon** chez son rédacteur, et le
+  **motif** (obligatoire) lui est communiqué.
+
+Deux principes, les mêmes que le parapheur (`src/lib/revision.js`, module pur) :
+
+**1. Une compétence, pas un rôle vague.** Un acte n'est révisé que s'il existe un **réviseur
+compétent** pour lui ; sans réviseur compétent, la révision n'a **pas lieu** et l'acte part
+directement en signature (comportement historique préservé — `revisionRequise`). La qualité se
+donne de deux façons :
+
+- à un **compte**, par le rôle cumulable « Réviseur » et sa **compétence propre** (`user.revision`) ;
+- à un **service entier**, ou à certains de ses **bureaux**, par la déclaration portée sur le
+  service (`service.reviseur`, Administration › Services : « Qualité de réviseur ») — le cas d'un
+  service des affaires juridiques dont les agents contrôlent les actes des autres services.
+
+Une **compétence** se limite à certains **services** (les services dont les actes relèvent du
+réviseur), **familles** de trames, **trames**, **types d'actes** et **entités signataires** ; une
+liste vide vaut « tout » (`competenceCouvre`). Les compétences d'un compte sont la **réunion** de
+la sienne et de celles des services dont il relève (`competencesDe`).
+
+```js
+Competence = { services:[], trameIds:[], familyIds:[], actTypes:[], entityIds:[] }  // vide = tout
+Reviseur   = { actif, bureaux:[], ...Competence }        // porté par un service
+Revision   = { statut:"en_attente"|"valide"|"rejete",
+               demandeeLe, demandeePar, demandeeParNom, empreinte, reviseurs:[],
+               laboratoire, corrections, corrige,
+               valideLe, validePar, valideParNom, rapport,
+               rejeteLe, rejetePar, rejeteParNom, motif }
+```
+
+**2. La révision porte sur un texte.** L'**empreinte** du texte soumis (`empreinteTexte`,
+`values` + `overrides`, FNV-1a — la même que le parapheur) est mémorisée. Si l'acte est réécrit
+après coup — par le rédacteur, ou par le réviseur lui-même avant de valider —, l'empreinte le
+dit : la révision devient **caduque** (`revisionAJour`) et doit être reprise. Le dossier de
+révision consigne ce que le réviseur a corrigé (`corrige`, `corrections`, mesuré sur l'historique
+de travail de l'acte).
+
+**Ordre et portes.** La révision est indépendante du parapheur : l'ordre est **parapheur →
+révision → signature**, et la porte d'envoi vérifie d'abord le parapheur, puis la révision
+(`pretPourSignature`). Le service de signature applique la même règle de son côté : l'état de la
+révision lui est transmis au dépôt (`normaliserRevision`) et il refuse d'ouvrir un circuit sur un
+acte dont la révision n'est pas `valide` — `409 revision_incomplete`, ce que la fiche affiche.
+
+**Le recours de l'administrateur.** Un administrateur peut **trancher** n'importe quelle révision
+(`peutTrancherRevision`, comme il peut tenir n'importe quelle étape du parapheur), mais son rôle
+ne rend pas la révision obligatoire du seul fait qu'il est administrateur : c'est la **compétence**
+qui décide de l'existence de la porte.
+
+**Écrans.** L'écran **Révision** (`src/ui/views/revision.js`) présente quatre files — *à réviser
+par moi*, *en attente d'un autre réviseur*, *révisés*, *rejetés* — avec, pour l'acte choisi, le
+dossier de la révision, le rapport de conformité et la décision. Sur la fiche d'un acte et à
+l'en-tête de la rédaction, le rédacteur lit l'état de la révision et le **motif** d'un rejet. Les
+gestes partagés vivent dans `src/ui/revision-actions.js`, les cartes dans
+`src/ui/revision-cartes.js` (`etatRevision` pour l'état affiché, « caduque » compris).
+
+> **Démonstrateur.** La démonstration livre **deux réviseurs** : Amandine ROUSSEL (affaires
+> juridiques, compétente pour tous les services et tous les actes) et Isabelle DAVAL (directrice
+> des affaires juridiques, transverse, dont la compétence propre porte sur les actes d'engagement
+> financier). Le service **Affaires générales** tient par ailleurs la qualité de réviseur pour ses
+> agents. Les actes de démonstration montrent une révision en attente, une révision validée
+> (avec correction) et un acte rejeté, revenu en brouillon.
+
 ### 2.8.2 Caractère exécutoire et délais
 
 Un acte signé n'est pas encore **exécutoire**. Il le devient lorsque la dernière **formalité
@@ -563,10 +1340,88 @@ Une formalité est une **constatation**, pas une déduction : l'agent l'atteste 
 référence, modalité, destinataires le cas échéant), l'application l'horodate, la signe de son
 auteur et la journalise. Elle peut être **corrigée** ou **effacée** (le journal garde l'un et
 l'autre). L'écran **Exécution & délais** classe les actes signés en *formalités à accomplir*,
-*recours ouvert*, *définitifs* et *tous*, avec les alertes correspondantes.
+*recours*, *définitifs* et *tous*, avec les alertes correspondantes.
 
 Statuts d'exécution : `brouillon` (non signé), `en_attente` (formalités requises manquantes),
-`executoire` (recours ouvert), `definitif` (délai de recours échu).
+`executoire` (recours ouvert), `recours` (recours introduit, voir ci-dessous), `definitif`
+(délai de recours échu).
+
+#### 2.8.2 ter Recours introduit, et pièces de l'exécution
+
+**Le recours est un fait, pas une échéance.** L'administration apprend qu'un recours a été
+introduit par la pièce qu'elle reçoit (requête enregistrée au greffe, lettre du requérant,
+déféré du préfet) ; elle le **note** (`enregistrerRecours`, `src/lib/execution.js`) avec sa
+**date d'introduction**, sa **nature** (`RECOURS_TYPES` : gracieux, hiérarchique, contentieux,
+référés, déféré préfectoral), son auteur, sa référence et une observation libre. Comme une
+formalité, la mention peut être **corrigée** ou **retirée** (journalisée).
+
+```js
+acte.execution.recours = {
+  introduitLe:"2026-05-20", type:"contentieux",
+  demandeur:"M. et Mme VASSEUR (par Me Lorrain)", ref:"requête n° 2601894 — TA d'Orléans",
+  note:"…", by, byName, enregistreLe }
+```
+
+Un recours **ferme le délai** : l'acte passe au statut `recours` (et non `definitif`), même une
+fois le délai expiré, et il le reste **jusqu'à la décision du juge**. Conséquence directe : une
+**attestation de non-recours ne peut pas être délivrée** pour un acte contesté — la fonction le
+vérifie elle-même et refuse d'attester le faux.
+
+Deux **pièces** se délivrent depuis l'échéancier (`src/lib/execution-documents.js`), imprimées
+sur le papier A4 commun (`paper.js`) et enregistrées en PDF par l'impression du navigateur
+(`printHtml`, `src/lib/export.js`). Leur en-tête est celui de l'entité (et non la charte de
+l'acte) : ce ne sont pas des actes, mais des écrits administratifs de la collectivité.
+
+| Pièce | Pour quel acte | Contenu |
+|---|---|---|
+| **État des formalités** | **tout acte signé**, quel que soit son état | tableau des formalités (date, référence, modalité, auteur, requise ou non), certificat de transmission éventuel, puis *Délais et situation* (exécutoire, délai, recours) |
+| **Attestation de non-recours** | acte **`definitif`** et **sans recours** seulement | identification de l'acte, attestation qu'aucun recours n'a été porté à la connaissance de la collectivité, formalités par lesquelles l'acte est devenu exécutoire, date d'expiration du délai, bloc de signature de l'autorité |
+
+La délivrance d'une pièce est un **fait du dossier** : elle entre au journal
+(`document.etat_formalites`, `document.attestation_non_recours`), comme la constatation d'une
+formalité.
+
+
+#### 2.8.2 bis Transmission au contrôle de légalité par API
+
+**Fonction expérimentale, éteinte par défaut** (`experimental.controleLegalite`, Administration ›
+Expérimentale). Activée, elle **s'intercale automatiquement entre le retour signé et la
+publication** ; éteinte, la transmission reste une **constatation manuelle** (§ 2.8.2) et l'étape
+n'existe pas.
+
+```js
+CONTROLE_LEGALITE = { id:"controle-legalite", service:"Télétransmission au contrôle de légalité",
+                      destinataire:"Préfecture — contrôle de légalité", mode:"ctes",
+                      apiUrl:"https://api.ctes.valmont-sur-loire.fr/v1/transmissions" }
+certificat = { nature, emisPar, emisLe, destinataire, reference, algorithme:"SHA-256",
+               empreinte,   // SHA-256 du document transmis
+               sceau,       // SHA-256 de reference|recuLe|destinataire|empreinte
+               mention:"Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14" }
+```
+
+Le déroulé, dans `publierApresSignature()` (`src/ui/views/signature.js`) :
+
+1. l'acte signé est adressé à l'**API d'envoi** — `POST /v1/actes/{id}/transmission` —, ce qui
+   **trace aussi l'appel sortant** vers `apiUrl` dans le journal du service (`recordExternal`,
+   service `controle-legalite`) ;
+2. l'**accusé de réception** revient ; il **vaut certificat informatique de transmission** ;
+3. le certificat est **déposé sur le document** — `acte.original.transmission` (l'empreinte du
+   paquet signé n'est pas touchée : le certificat est une pièce du dossier, pas une signature) et
+   la mention est imprimée sur la **version en ligne** (`buildWebVersion`, `src/lib/eli.js`) ;
+4. la formalité est **constatée** au nom de l'agent (`enregistrerFormalite`, avec `certificat`) ;
+5. l'acte est **publié** (§ 2.8.2), avec le certificat joint à l'enregistrement de publication.
+
+L'ordre **signé → transmis → publié** est tenu **côté service**, pas seulement côté client : le
+drapeau accompagne le dépôt (`POST /v1/actes`, champ `controleLegalite`), la transmission d'un
+acte non signé est refusée (`409 acte_non_signe`), et la publication d'un acte soumis à l'étape
+est refusée tant que la transmission manque (`409 transmission_absente`) — après le contrôle de
+signature, avant celui de la date. La transmission est **idempotente** (un acte déjà transmis
+renvoie son certificat), et `GET /v1/actes/{id}/transmission` relit le certificat. Le même
+contrat est porté par les deux services (`index.html` et `src/server/mysql/actes.mjs`).
+
+Un acte **déposé avant l'activation** ne porte pas l'exigence : le service le publiera sans
+transmission. Le certificat se lit sur la **fiche de l'acte**, dans l'**échéancier**, sur
+l'**original signé** (bloc « Certificat de transmission ») et sur le **document publié**.
 
 ### 2.8.3 Registre : recherche, corbeille, journal, versions
 
@@ -581,7 +1436,7 @@ Statuts d'exécution : `brouillon` (non signé), `en_attente` (formalités requi
 - **Journal d'audit** — collection `journal` (300 dernières entrées) : `{ id, at, action,
   cible, cibleLabel, acteId, detail, to, by, byName, role }`. `to` désigne les destinataires
   de la **notification** : un identifiant de compte, `role:<rôle>`, `service:<service>`, ou
-  `tous`. L'écran **Référentiel › Journal d'audit** affiche tous les faits, du plus récent au
+  `tous`. L'écran **Administration › Journal d'audit** affiche tous les faits, du plus récent au
   plus ancien, avec recherche plein texte.
 - **Historique des brouillons** — `acte.revisions` (vingt dernières) : à chaque
   enregistrement, l'état **précédent** est conservé (valeurs, écarts, libellé, auteur, date).
@@ -590,6 +1445,7 @@ Statuts d'exécution : `brouillon` (non signé), `en_attente` (formalités requi
 
 Actions journalisées (libellés de l'écran) : `parapheur.depot`, `parapheur.accord`,
 `parapheur.passe`, `parapheur.renvoi`, `parapheur.refus`, `parapheur.reprise`,
+`revision.depot`, `revision.validation`, `revision.rejet`,
 `signature.depot`, `signature.signe`, `signature.refus`, `publication.publie`,
 `formalite.transmission`, `formalite.publication`, `formalite.notification`,
 `formalite.effacement`, `acte.creation`, `acte.enregistrement`, `acte.restauration`,
@@ -613,6 +1469,86 @@ Trois signaux, réunis dans la collection `presence` et le journal :
 `journal` et `presence` sont des collections **silencieuses** : leurs conflits ne
 déclenchent pas de toast, et le service MySQL ne les recopie pas dans `sb_journal` (ce sont
 elles-mêmes des flux).
+
+### 2.8.5 Les assistants (Plume et Publia)
+
+Deux aides en langage naturel, **désactivables séparément** et réglées dans le référentiel
+(`config.assistant.atelier` / `config.assistant.public` — seuls les ÉCARTS aux réglages
+livrés y sont rangés) :
+
+| | **Plume** — atelier | **Publia** — recueil public |
+|---|---|---|
+| Objet | le **mode d'emploi** de l'outil | les **actes publiés** |
+| Connaissance | le guide d'utilisation (`src/wiki.js`), public, + le nom de l'écran courant | les publications du registre public : métadonnées, et le texte des dix plus récents |
+| Jamais | le contenu d'un acte, d'une trame, d'un brouillon, d'un compte | un brouillon, un acte non publié, un compte |
+| Visibilité | atelier, session ouverte, hors recueil | recueil public uniquement |
+
+**Identité réglable.** Le **nom** et l'**icône** de chaque assistant se changent dans le
+référentiel (`config.assistant.<qui>.nom` / `.avatar`, une adresse d'image). L'interface les relit
+partout — pastille, panneau, bulle d'invitation, menu du compte : elle est construite **une fois**
+et son identité est rafraîchie, sans reconstruire la conversation. Un nom ou une icône **vide**
+n'est pas un choix : `assistantSettings` retombe sur les valeurs livrées, et `assistantIdentite`
+est la seule source de ce que l'interface affiche.
+
+**Préférence de poste.** Chaque agent peut **masquer** un assistant pour son seul compte (menu du
+compte), comme l'apparence claire ou sombre : `assistantPref` / `reglerPrefAssistant` rangent ce
+choix dans le stockage du navigateur, **par compte** (`scribae.assistant.<qui>.<userId>`), hors du
+référentiel — l'absence de réglage vaut **allumé**. Ce n'est pas le réglage *Éteint* de
+l'Administration, qui vaut pour toute l'installation. `assistantVisible(config, user, qui)` croise
+les deux ; l'interface retire alors la pastille et le panneau, et n'envoie plus rien au moteur.
+
+**Règle de confidentialité.** Ce qui n'est pas dans la colonne « Connaissance » n'est jamais
+composé dans l'invite : il n'y a rien à filtrer, parce que rien n'est transmis. L'assistant de
+l'atelier ne *peut pas* voir un acte — aucune fonction ne le lui donne, et la connaissance est
+construite à partir du seul guide, qui est public.
+
+**Moteur interchangeable** (`Administration › Assistants`) :
+`auto` (défaut — le moteur intégré s'il existe, l'adresse personnalisée sinon),
+`integre` (le plugin `ai-text` de Perchance, via `hostGenerateText`),
+`personnalise` (API de la collectivité). Deux protocoles sont acceptés : **complétions de
+conversation** (`messages` rôle/contenu, flux SSE ou réponse JSON — OpenAI, Mistral, Groq,
+OpenRouter, Ollama, vLLM, LM Studio…) et **appel simple** (`{ prompt } → { texte }`). Le
+**relais sans CORS** de la plateforme est proposé en option pour un service qui n'autorise
+pas l'origine de l'application. Sans moteur disponible — c'est le cas d'une page servie en
+statique tant qu'aucune adresse n'est réglée —, l'assistant ne lève pas : il **explique
+pourquoi** et renvoie à l'Administration.
+
+**Budget de connaissance.** La fenêtre utile du moteur intégré est de 6 000 jetons ; le guide
+entier en ferait 21 000. `chapitresPertinents()` (mots pondérés par leur rareté, titre et
+mots-clés comptés davantage que le corps) classe les chapitres ; `contexteAtelier` joint les
+trois premiers, ceux de l'écran courant, puis un socle, **tronqués plutôt qu'écartés**, avec la
+table des matières complète sous les yeux du modèle. Le budget est lu du moteur lui-même
+(`getMetaObject().countTokens`) quand il est disponible, estimé sinon.
+
+**Écran.** `src/ui/assistant.js` pose les deux pastilles **hors de la coquille**
+(`document.body`), une fois, au démarrage : elles ne sont pas reconstruites aux redessins et
+une conversation en cours survit au changement d'écran ; c'est leur visibilité qui suit la
+route. Chaque assistant porte une **bulle d'invitation** (une question proposée, tirée au sort,
+proposée une fois par chargement) et un **panneau** : accueil, messages, questions proposées,
+zone de saisie, arrêt de la génération en cours, effacement.
+
+**Renvois cliquables, et l'acte consulté.** Les réponses renvoient **par des liens**, jamais par
+une adresse à composer. `guideSommaire()` suffixe chaque ligne du sommaire de
+« `— lien : [titre](#/aide/<id>)` » (`lienChapitre`), et `contexteAtelier` donne le lien du
+chapitre courant : Plume termine par ce lien, recopié tel quel. De même, `contextePublic` donne à
+chaque acte publié son lien (`hrefActe`, `[numéro — objet](?acte=<clé>)`), que Publia recopie.
+Le panneau intercepte les clics sur `a[href]` (`routeInterne`) et ouvre la route **dans
+l'application** — `#/aide/<id>` pour le guide, `recueil/<clé>` pour un acte — sans recharger la
+page ni ouvrir d'onglet. Ce que le moteur ne fait **jamais** : inventer une adresse, ou parler de
+« clé », de « paramètre », d'identifiant technique — le lecteur clique, il ne compose rien.
+
+**L'acte que l'on consulte.** Quand la route est un acte du recueil, `acteConsulte()` (écran) lit
+l'acte déjà chargé par la vue — à défaut, le registre ; `contextePublic({ …, acte })` en compose
+une section à part : fiche (nature, numéro, objet, autorité, matière, dates, ELI), état de
+rédaction (initiale, modificative, consolidée ; en vigueur ou supplantée), **toutes les versions
+publiées sous le même identifiant** (celle qui est consultée est marquée), le lien, et le **texte**
+(tronqué sur fin de ligne par `suiteTronquee`). L'instruction demande alors de répondre **d'abord
+sur cet acte**. Trois questions d'acte (`QUESTIONS_ACTE`) passent en tête des questions proposées.
+
+**Réglages par assistant** : allumé/éteint, **nom** et **icône**, moteur (adresse, clé, en-tête,
+modèle, protocole, relais), **instruction** donnée au moteur (rôle et consignes) et **questions
+proposées** (étiquette + question), ajoutables et supprimables. « Rétablir les réglages livrés »
+efface les écarts.
 
 ## 2.9 Persistance et base de données
 
@@ -663,7 +1599,7 @@ indexées les champs utiles aux recherches (`numero`, `statut`, `service_id`,
 `v_collection`).
 
 **Réglage.** `kv.actesDb` — propre au poste, jamais exporté avec le référentiel,
-jamais partagé. Écran **Référentiel › Base de données** (réservé à
+jamais partagé. Écran **Administration › Base de données** (réservé à
 `referentiel.gerer`) : choix du mode, adresse et jeton, test de connexion,
 transfert de données dans les deux sens.
 
@@ -761,7 +1697,7 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    **périmètre** décide de ce qui est visible (voir 2.7). Le menu du compte permet de
    **changer de compte** et rappelle le périmètre courant. La session est conservée d'une
    visite à l'autre.
-1. **Référentiel** — identité, entités, personnes, rôles, **services et bureaux**, références
+1. **Administration** — identité, entités, personnes, rôles, **services et bureaux**, références
    juridiques, mentions, numérotation, vocabulaires. Import/export JSON. L'onglet **Base de
    données** règle le mode de persistance et, le cas échéant, l'adresse et le jeton du
    serveur MySQL / MariaDB (voir 2.9). (administrateurs)
@@ -778,46 +1714,87 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    gestionnaire et, au besoin, du bureau), duplication, statut (brouillon/publiée/archivée),
    export JSON.
 3. **Éditeur de trame** (administrateurs et éditeurs) — 3 volets : plan / page WYSIWYG /
-   inspecteur. Édition inline ; insertion de champs, clauses conditionnelles, commentaires
-   (avec niveau et référence juridique) ; règles avec test immédiat. Commentaires et règles
+   inspecteur. Édition inline ; **réserve d'éléments** sous le plan (champs, informations
+   remplies automatiquement, blocs) d'où partent tous les gestes : on **glisse** un champ dans
+   le texte — il se pose exactement où on le lâche —, un bloc avant ou après un autre ; le
+   **clic** équivaut au glisser (cliquer la puce l'arme, puis cliquer dans le texte), pour qui
+   ne maîtrise pas le glisser. Le type d'un champ se choisit **sur des cartes**, jamais dans
+   une liste déroulante ; les questions du formulaire forment une liste **repliable**. Le volet
+   inspecteur porte quatre onglets — « Ce bloc », « Questions », « Contrôles », « Trame » :
+   clauses conditionnelles, commentaires (avec niveau et référence juridique), règles avec test
+   immédiat. Commentaires et règles
    sont **signés du service** du compte qui les a saisis (l'auteur n'est pas saisi à la main).
 4. **Rédiger** (services) — l'onglet ouvre d'abord le **choix de l'acte à rédiger** : la
    rédaction en cours, un acte enregistré encore modifiable, ou une trame du référentiel
    (liste filtrée par le périmètre, avec recherche). Le **document est ensuite le
    formulaire** : page A4 éditable en place,
    pastilles de champs cliquables, saisie possible aussi depuis le panneau de droite
-   (« À compléter » / « Contrôle & écarts »). Le texte du modèle peut être réécrit : les
+   (« À compléter » / « Contrôle & écarts »). Le **numéro** se réserve de là — bouton
+   « Réserver le prochain numéro », ou **« Demander le numéro »** quand la collectivité le fait
+   attribuer par un service externe (§ 2.1 bis). Le texte du modèle peut être réécrit : les
    réécritures deviennent des **écarts « hors trame »** (conservés, signalés, non
    bloquants, visibles des administrateurs). Export bloqué seulement par un contrôle
-   bloquant de la trame. L'en-tête indique **où en est l'acte dans son circuit de validation**
-   (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la fiche de l'acte porte la
-   carte du parapheur.
-4 bis. **Parapheur** — l'écran du valideur (voir 2.8.1) : *à valider par moi*, *en cours*,
+   bloquant de la trame. Si le parapheur est actif, l'en-tête indique **où en est l'acte dans
+   son circuit de validation** (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la
+   fiche de l'acte porte la carte du parapheur ; éteint, rien de tout cela n'apparaît.
+4 bis. **Parapheur** (seulement si `experimental.parapheur`, voir 2.8.1) — l'écran du valideur :
+   *à valider par moi*, *en cours*,
    *validés*, *renvoyés ou refusés*. On y donne son **bon pour accord** (ou son avis), on
    **renvoie** l'acte en rédaction, on le **refuse**, ou on **reprend** un circuit — chaque
    décision étant motivée par une observation. Un acte validé puis **réécrit** voit sa
    validation devenir **caduque** : l'écran le dit et propose de reprendre le circuit.
+4 ter. **Révision** (seulement s'il existe un réviseur compétent, voir 2.8.1 bis) — l'écran du
+   réviseur : *à réviser par moi*, *en attente d'un autre réviseur*, *révisés*, *rejetés*. Le
+   réviseur y lit le **rapport de conformité** de l'acte, le **corrige** au besoin, puis le
+   **valide** — l'acte part alors en signature — ou le **rejette** en motivant, l'acte revenant
+   en brouillon chez son rédacteur. Du côté du rédacteur, « Envoyer en signature » **soumet**
+   l'acte au réviseur au lieu de l'envoyer, et l'en-tête de la rédaction comme la fiche de l'acte
+   affichent l'état de la révision et le **motif** d'un rejet.
 5 bis. **Exécution & délais** — l'échéancier (voir 2.8.2) : *formalités à accomplir*,
-   *recours ouvert*, *définitifs*, *tous les actes signés*. On y **constate** la transmission
-   au contrôle de légalité, la publication (hors chaîne ELI) ou la notification, et l'on voit
-   la date d'**exécutoire**, le **délai de recours** restant et les retards.
+   *recours*, *définitifs*, *tous les actes signés*. On y **constate** la transmission
+   au contrôle de légalité, la publication (hors chaîne ELI) ou la notification, l'on y
+   **note l'existence d'un recours** (date d'introduction, nature, auteur — voir 2.8.2 ter) et
+   l'on y **délivre les pièces du dossier** (l'**état des formalités** pour tout acte signé,
+   l'**attestation de non-recours** pour un acte définitif que personne n'a contesté) ; on y voit
+   la date d'**exécutoire**, le **délai de recours** restant et les retards. Quand la
+   **télétransmission** est active (§ 2.8.2 bis), la transmission ne se constate plus à la
+   main : elle est faite par l'API d'envoi au retour de la signature, et l'échéancier en
+   affiche le **certificat** (« Transmis au contrôle de légalité le … à … », référence,
+   sceau).
+5 ter. **Délégations** — l'**organigramme des délégations de signature** (voir 2.7.2) : les
+   chaînes de signature présentées en **arbre** — une autorité de tête, puis ses délégataires,
+   puis les sous-délégations — ou en **liste** indentée sur les écrans étroits. Cliquer un
+   acteur ouvre sa **fiche** : le pouvoir reçu (délégant, organisation, décision fondant la
+   signature), l'étendue (famille, type d'acte, matières), les dates, et **la signature que
+   cela produira** (les lignes de qualité et les visas). Visible par **tous les comptes** ;
+   modifiable par les seuls **administrateurs et éditeurs** (`delegations.gerer`) — les autres
+   lisent la même fiche, sans les champs de saisie.
 5. **Actes** — registre **filtré par le périmètre du compte** : numéro, objet, nature
    (d'origine / modificatif / consolidée / importé), conformité à la trame (« conforme » ou
-   « N écart(s) »), entité, **service et bureau**, signature, statut, **parapheur**,
+   « N écart(s) »), entité, **service et bureau**, signature, statut, **parapheur** (colonne
+   présente seulement si la fonction expérimentale est active),
    **exécution** ; « Reprendre » rouvre le document, « Voir » l'affiche, « Modifier » lance un
    acte modificatif. Le registre signale ce qui attend un geste (actes à valider, formalités en
    retard, actes à la corbeille) et permet de **mettre un acte à la corbeille** (suppression
-   réversible, écran **Corbeille** — voir 2.8.3). La **recherche globale** (Ctrl+K ou « / »)
+   réversible, écran **Corbeille** — voir 2.8.3) — **pour un brouillon seulement** : un acte
+   signé ou publié porte à la place **« Retirer / abroger »**, qui propose de rédiger un acte
+   d'abrogation (voir 2.5 bis). Le registre affiche le badge **« abrogé »** ou
+   **« abrogation prévue »** à côté du statut, et la fiche de l'acte dit par quoi il a été
+   abrogé. La **recherche globale** (Ctrl+K ou « / »)
    retrouve n'importe quel acte, trame, personne, service, référence ou compte.
 6. **Modifier un acte** — choisir un acte du registre ou importer le fichier de l'acte
    publié ; le document en vigueur s'ouvre **éditable comme dans un traitement de texte**
-   (réécrire un article, l'abroger ou le rétablir, insérer un article) ; à la confirmation,
+   (réécrire un article, l'abroger ou le rétablir, insérer un article, **ajouter ou retirer un
+   paragraphe, une ligne de liste, une ligne de tableau**, **réattribuer un numéro** ou **tout
+   renuméroter**) ; à la confirmation,
    production simultanée de l'**acte modificatif** et de la **version consolidée** (présentée
    par défaut dans sa rédaction en vigueur, mentions sous les articles modifiés ; le suivi des
    modifications s'affiche sur option). Le
    modificatif part en signature puis est publié ; sa publication publie la version
    consolidée, qui **supplante** l'acte initial, lequel demeure accessible via l'historique
-   des modifications.
+   des modifications. Un acte peut aussi **prévoir, dans son propre texte, l'abrogation d'un
+   autre acte ou de l'un de ses articles** — onglet « Abrogations » de la rédaction (voir
+   2.5 bis).
 7. **Signature & publication** — l'application est cliente de l'API REST du service :
    dépôt de l'acte finalisé, ouverture du circuit auprès du prestataire de signature
    (écran distinct), retour de l'acte signé par notification, suivi du circuit. Un
@@ -826,16 +1803,30 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
 8. **Publications** — onglet « Publication (ELI) » : versement de la version en ligne au
    recueil, attribution de l'**identifiant ELI**, date de publication et date
    d'opposabilité, conservation de l'original signé. L'écran « Publications (ELI) » est
-   le **registre public** : recherche d'un acte, résolution d'un identifiant ELI,
-   consultation de la version en ligne, des métadonnées, des versions et de l'original
-   signé (avec vérification de la signature).
+   le **registre de l'administration** : recherche d'un acte, résolution d'un identifiant
+   ELI, consultation du texte (rendu dans la page), des métadonnées, des versions et de
+   l'original signé (avec vérification de la signature) ; il donne accès au **recueil
+   public**. (permission `signature.gerer`)
+8 bis. **Le recueil public** — un **site sans compte** (routes `recueil`, servies avant la porte
+   de connexion : `?recueil=1` et `?acte=<clé>` dans la page, `/recueil` et `/recueil/<clé>` sur un
+   déploiement serveur). Sa **page d'accueil** se lit comme celle d'un site : une entrée avec la
+   recherche, un **carrousel des derniers actes publiés** (le thème mis en avant sur chaque carte),
+   les **thèmes** en grille — la matière de chaque acte, par laquelle on accède à ses actes —, puis
+   la liste complète groupée par année. Chaque acte s'y lit dans la page, avec ses métadonnées.
+   Rien de l'administration n'y figure,
+   seulement la structure et le titre du recueil (voir 2.6 bis). Le **recueil ouvert** (2.6 ter)
+   ajoute ce que lisent les moteurs et les agents : une adresse stable par acte, ses
+   représentations (JSON, Markdown, texte, Akoma Ntoso), ses métadonnées de page, et les fichiers
+   du site (`llms.txt`, `recueil.json`, `sitemap.xml`, `robots.txt`). (public)
 9. **Guide** — wiki d'utilisation intégré, écrit pour un agent administratif peu à
    l'aise avec l'informatique (voir section 6).
 10. **Documentation technique** — les documents livrés avec le logiciel, lus dans
    l'application : `docs/ADMINISTRATION.md` (exploitation, sécurité, sauvegardes,
    auto-hébergement), `server/README.md` (installation), `SPEC.md`, `README.md`,
    `TODO.md`. Sommaire, recherche visuelle, impression et téléchargement du fichier
-   source. Accessible depuis le menu, et depuis un encart au bas du « Guide ».
+   source. **Réservé aux administrateurs** (permission `docs.voir`) : entrée de menu,
+   renvoi du menu du compte et encart au bas du « Guide » n'apparaissent que pour eux,
+   et toute route `docs` menée par un autre rôle retombe sur le premier écran permis.
 
 ## 6. Guide d'utilisation (« wiki »)
 
@@ -854,12 +1845,14 @@ autonome à transmettre aux collègues.
 | Écrire un acte, pas à pas | choisir l'acte à rédiger, compléter le document : pastilles, réécritures, enregistrement, export | tous |
 | Contrôle & écarts | comprendre les messages et les passages réécrits | tous |
 | Enregistrer, imprimer, envoyer | où arrive le fichier, comment le joindre à un courriel | tous |
+| Faire valider un acte (le parapheur) | le circuit de validation avant la signature | tous |
+| Faire réviser un acte avant sa signature | le contrôle du réviseur : rapport de conformité, correction, validation ou rejet motivé | tous |
 | Retrouver un acte | le registre, les statuts, reprendre un brouillon | tous |
 | Faire signer un acte | le circuit de signature, le prestataire, l'original signé | tous |
-| Publier l'acte (ELI et opposabilité) | version en ligne, identifiant ELI, dates | tous |
+| Publier l'acte (ELI et opposabilité) | version en ligne, identifiant ELI, dates, recueil public | tous |
 | Modifier un acte déjà écrit | acte modificatif, version consolidée, import | tous |
 | Préparer une trame | l'éditeur de trame, champs, règles, commentaires signés de leur service | administrateurs et éditeurs |
-| Qui peut faire quoi : les comptes et les rôles | se connecter, les trois rôles, ce que chacun débloque | tous |
+| Qui peut faire quoi : les comptes et les rôles | se connecter, les six rôles (dont le réviseur et le signataire, cumulables, et le visiteur, sans accès), ce que chacun débloque | tous |
 | Glossaire | tous les termes, en une phrase | tous |
 | Dépannage | les petits ennuis et leur solution | tous |
 | Fiche mémo | une page à afficher près du poste | tous |
@@ -893,3 +1886,7 @@ dont les positions sont calculées à partir des éléments de l'interface (voir
   résumé quotidien, l'**export et la rétention** du journal d'audit, la lecture du journal
   technique `sb_journal` depuis l'application, et le **verrou de rédaction exclusif** (le
   verrou actuel avertit, il n'empêche pas).
+- **Suivi du contentieux.** L'échéancier note l'**existence d'un recours** et sa **date
+  d'introduction** (§ 2.8.2 ter) et en tire le statut de l'acte ; il ne tient pas le dossier de
+  l'instance — mémoires, dates d'audience, jugement. L'issue se consigne dans l'**observation**
+  attachée au recours.

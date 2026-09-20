@@ -31,3 +31,19 @@ kv = {import:kv-plugin}
 // code du service lui-même. Sans lui, l'écran « Signature & publication » et la
 // consultation des publications restent inaccessibles.
 createServerSocket = {import:server-plugin}
+
+// Relais HTTP sans CORS, utilisé par la numérotation externe (Administration ›
+// Numérotation) : un nombre croissant de collectivités prennent leur numéro
+// d'acte dans un outil tiers (Grist, tableur en ligne, référentiel interne) où
+// la création d'une ligne attribue le numéro. Le navigateur ne peut pas appeler
+// ces services directement (CORS), le relais s'en charge. Voir
+// src/lib/numbering.js.
+superFetch = {import:super-fetch-plugin}
+
+// Moteur de langage des deux assistants (Administration › Assistants) : celui
+// de l'atelier, qui explique le mode d'emploi de l'outil, et celui du recueil
+// public, qui répond sur les actes publiés. Les prompts envoyés à ce moteur ne
+// contiennent JAMAIS le contenu des actes — voir src/lib/assistant.js. Une
+// collectivité peut brancher son propre moteur à la place (Administration ›
+// Assistants), et l'application s'en passe proprement quand il n'y en a pas.
+generateText = {import:ai-text-plugin}

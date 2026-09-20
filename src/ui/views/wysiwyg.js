@@ -11,8 +11,10 @@ import { h, clear, button } from "../dom.js";
 import { templateParts } from "../../lib/compile.js";
 import { hasEcart } from "../../lib/redaction.js";
 import { normalizeSpace } from "../../lib/util.js";
-import { personName, documentSheetHeader, documentSheetFooter } from "../../lib/render.js";
+import { personName, personSignatureName, personRoleLines, documentSheetHeader, documentSheetFooter } from "../../lib/render.js";
 import { styleForDoc } from "../../lib/styles.js";
+import { signerPicker } from "../signer-picker.js";
+import { champFonction } from "../../lib/fonctions.js";
 
 // ---------------------------------------------------------------- sérialisation
 // Reconstitue la source (texte + jetons `{{…}}`) d'une zone éditable. Les
@@ -147,7 +149,17 @@ function openTokenEditor(widget, part, rx, addr) {
 
   if (field) {
     if (field.help) body.appendChild(h("p", { class: "fr-hint", text: field.help }));
-    body.appendChild(controlFor(field, rx.values[field.id], apply));
+    // Le périmètre de l'acte décide des fonctions proposables et de la chaîne de
+    // délégations (voir src/ui/signer-picker.js).
+    const scope = {
+      entityId: rx.values.__entityId || "", familyId: rx.trame.familyId || "",
+      actTypeId: rx.trame.actTypeId || "", date: rx.values.dateSignature || "",
+    };
+    body.appendChild(controlFor(field, rx.values[field.id], apply, {
+      config: rx.config, scope,
+      fonctionKey: rx.values[champFonction(field.id)] || "",
+      onFonction: (cle) => { rx.values[champFonction(field.id)] = cle; rx.paintSoon(); rx.paintPanelSoon(); },
+    }));
     if (!field.required) {
       foot.appendChild(button("Effacer", { variant: "tertiary", size: "sm", onClick: () => { apply(""); } }));
     }
@@ -222,8 +234,10 @@ function refreshWidget(widget, rx, part) {
 }
 
 // Contrôle de saisie d'un champ, adapté à son type (utilisé par la bulle).
-export function controlFor(field, value, onChange) {
-  const config = {};
+// `opts` porte ce dont certains types ont besoin en plus du champ lui-même : la
+// configuration du référentiel et le périmètre de l'acte, pour le signataire.
+export function controlFor(field, value, onChange, opts = {}) {
+  const config = opts.config || configRef || {};
   switch (field.type) {
     case "textarea": {
       const ta = h("textarea", { class: "fr-textarea", rows: 4, placeholder: field.placeholder || "" });
@@ -251,6 +265,15 @@ export function controlFor(field, value, onChange) {
       return selectOf([{ value: "", label: "— Sélectionner —" }, ...(field.options || []).map((o) => ({ value: o, label: o }))], value, onChange);
     case "person":
       return selectOf([{ value: "", label: "— Sélectionner —" }, ...(state_config_people()).map((p) => ({ value: p.id, label: personName(p) }))], value, onChange);
+    case "signataire":
+      // Deux temps : la fonction, puis qui signe parmi ceux qui la tiennent.
+      return signerPicker({
+        field, config, scope: opts.scope || {},
+        personId: value || "", fonctionKey: opts.fonctionKey || "",
+        onPerson: (v) => onChange(v),
+        onFonction: (cle) => opts.onFonction?.(cle),
+        showQualite: true,
+      });
     case "entity":
       return selectOf([{ value: "", label: "— Sélectionner —" }, ...(state_config_entities()).map((e) => ({ value: e.id, label: e.name }))], value, onChange);
     case "ref":
@@ -406,8 +429,10 @@ export function buildRedactionDoc(rx) {
         box.appendChild(place);
         const right = h("div", { class: "doc-signature-block" });
         if (node.signataire) {
-          right.appendChild(h("p", { class: "doc-signature-role", text: (rx.config.roles || []).find((r) => r.id === node.signataire.roles?.[0])?.label || "" }));
-          right.appendChild(h("p", { class: "doc-signature-name", text: personName(node.signataire) }));
+          for (const ligne of personRoleLines(node.signataire, rx.config)) {
+            right.appendChild(h("p", { class: "doc-signature-role", text: ligne }));
+          }
+          right.appendChild(h("p", { class: "doc-signature-name", text: personSignatureName(node.signataire) }));
         } else {
           right.appendChild(h("p", { class: "rw-hint-inline", text: "Signataire à choisir dans le panneau de droite" }));
         }

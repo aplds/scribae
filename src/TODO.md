@@ -16,17 +16,45 @@ validé, ni exécutoire, ni retrouvable, ni partagé) :
   et **empreinte du texte validé** : réécrire l'acte après validation rend celle-ci
   caduque. Le service de signature refuse (409 `validation_incomplete`) d'ouvrir un
   circuit sur un acte non validé.
+  C'est une **fonction expérimentale, éteinte par défaut** (`experimental.parapheur`,
+  Administration › Expérimentale) : beaucoup de collectivités ont déjà leur propre
+  circuit interne, en amont de « Envoyer en signature ». Éteint, `circuitFor` ne
+  résout aucun circuit et tout le parapheur disparaît de l'interface ; l'activer
+  régénère les actes de démonstration pour que l'écran ne soit pas vide.
+- **Révision** — `src/lib/revision.js` (rôle « Réviseur » **cumulable**, compétence
+  par compte ou portée par un service — ou certains de ses bureaux —, ciblage
+  services / familles / trames / types d'actes / entités ; `en_attente`, `valide`,
+  `rejete` ; **empreinte du texte révisé**) ; `src/lib/conformite.js` (le **rapport de
+  conformité** remis au réviseur) ; `src/ui/views/revision.js` (file « à réviser par
+  moi / en attente d'un autre réviseur / révisés / rejetés ») ; `src/ui/revision-actions.js`
+  et `src/ui/revision-cartes.js` (gestes et cartes partagés avec la fiche d'acte). Le
+  geste du rédacteur **soumet** l'acte au lieu de l'envoyer ; le réviseur le **corrige**,
+  le **valide** (l'acte part alors en signature) ou le **rejette** (l'acte revient en
+  brouillon, avec le motif). Sans réviseur compétent, la révision **n'a pas lieu**. Ordre
+  **parapheur → révision → signature** ; le service refuse (409 `revision_incomplete`)
+  d'ouvrir un circuit sur un acte non révisé.
 - **Caractère exécutoire** — `src/lib/execution.js` (formalités requises ou non
   selon la trame, date d'exécutoire = dernière formalité requise accomplie, délai
-  de recours contentieux à compter de cette date, alertes de retard) ;
-  `src/ui/views/execution.js` (échéancier) ; `src/ui/execution-actions.js` (la
-  constatation d'une formalité, partagée avec la fiche d'acte). Une formalité est
-  une ATTESTATION de l'agent — l'application ne devine rien.
+  de recours contentieux à compter de cette date, recours introduit qui ferme le
+  délai, alertes de retard) ; `src/ui/views/execution.js` (échéancier) ;
+  `src/ui/execution-actions.js` (la constatation d'une formalité **et d'un
+  recours**, partagée avec la fiche d'acte) ; `src/lib/execution-documents.js`
+  (l'état des formalités et l'attestation de non-recours). Une formalité — comme
+  un recours — est une ATTESTATION de l'agent : l'application ne devine rien.
+- **Transmission au contrôle de légalité par API** — `src/lib/legalite.js` : l'étape
+  s'intercale entre le retour signé et la publication (`POST /v1/actes/{id}/transmission`),
+  l'accusé de réception vaut certificat de transmission (« Transmis au contrôle de légalité
+  le … à … », référence, empreinte, sceau) et est déposé sur le document ; l'ordre
+  signé → transmis → publié est tenu par le service (`409 transmission_absente`,
+  `409 acte_non_signe`). **Fonction expérimentale, éteinte par défaut**
+  (`experimental.controleLegalite`, Administration › Expérimentale) : la télétransmission
+  suppose une convention et des identifiants auprès de la préfecture ; éteinte, la
+  transmission se constate à la main.
 - **Registre et recherche** — `src/lib/search.js` + `src/ui/global-search.js`
   (recherche globale Ctrl+K / « / », actes, trames, personnes, services,
   références, comptes, aide) ; corbeille (`src/ui/views/corbeille.js`, suppression
   réversible `deletedAt`, restauration, suppression définitive) ; **journal
-  d'audit lisible** (Référentiel › Journal d'audit) ; historique des brouillons
+  d'audit lisible** (Administration › Journal d'audit) ; historique des brouillons
   (`src/lib/revisions.js`, vingt versions, restauration).
 - **Collaboration** — `src/lib/collab.js` + `src/ui/collab.js` : présence des
   postes (battement 25 s, `BroadcastChannel` + sondage), verrou souple de
@@ -37,12 +65,58 @@ validé, ni exécutoire, ni retrouvable, ni partagé) :
 
 Reste à faire, par ordre d'intérêt :
 
-- [ ] **Signer « pour ordre » / délégation.** Aujourd'hui l'étape est ouverte au
-      rôle qui la porte (et à tout administrateur, comme recours en cas d'absence).
-      Une vraie **suppléance** (vacances, intérim, délégation temporaire) serait la
-      suite logique — avec sa trace au journal.
-- [ ] **Délégation de signature dans le parapheur.** Le référentiel connaît les
-      délégations de signature des actes ; le circuit ne les lit pas encore.
+- [x] **Délégation de signature des actes (livré).** Le référentiel porte l'arbre
+      des délégations (`config.delegations`, écran Délégations) et l'acte
+      signé au bout de la chaîne imprime les qualités traversées, seul le nom du
+      signataire étant écrit (voir `src/lib/delegations.js`). Les chaînes sont
+      rattachées à une organisation : un établissement autonome (l'office public
+      de l'habitat de la démonstration) a SA propre autorité de tête et sa propre
+      chaîne, indépendante de celle de la commune.
+- [ ] **Numérotation externe : le relais hors de l'environnement d'édition.** Le relais HTTP
+      sans CORS (`hostSuperFetch()`) vient de l'hébergement : il existe dans l'édition en
+      ligne, pas dans le déploiement `src/server/`. Une installation auto-hébergée ne peut
+      donc appeler un service de numérotation qu'en **appel direct**, avec l'origine de
+      l'application déclarée origine de confiance chez le service. La suite serait un
+      **relais côté service** (un `/v1/proxy` qui reprend une adresse, des en-têtes et un
+      corps, avec une liste d'hôtes autorisés) posé par `src/server/web/host.js` dans
+      `__SCRIBA_HOST__` — la clé ne sortirait alors pas du serveur de la collectivité.
+- [ ] **Numérotation externe : une source par entité.** Le référentiel ne porte qu'UNE source
+      (`config.numbering.source`, avec `config.numbering.externe`) pour toutes les entités : la
+      table de numérotation distingue les entités par le jeton `{entityCode}`. Une collectivité
+      qui numérote chaque établissement dans un **document distinct** (une table Grist par
+      office) aurait besoin d'une source par entité — le point d'accroche est
+      `numberingSettings()` (`src/lib/numbering.js`), qui décide aujourd'hui de la source.
+- [ ] **Numérotation externe : reprendre un numéro déjà attribué.** Rien n'empêche de rejouer
+      la demande après un échec (le service a pu créer la ligne sans que la réponse arrive) :
+      une **clé d'idempotence** portée par la requête, ou la lecture de la dernière ligne
+      créée, éviterait de consommer deux numéros. À traiter le jour où une collectivité
+      numérote réellement par API.
+- [ ] **Télétransmission : adresse et identifiants du contrôle de légalité.** L'API d'envoi
+      est aujourd'hui une constante du module (`CONTROLE_LEGALITE`, `src/lib/legalite.js`) et
+      une simulation côté service. En exploitation, il faudrait la **configurer dans le
+      référentiel** (adresse, identifiants, format attendu par la préfecture) et gérer les
+      **refus** du contrôle de légalité (rejet, demande d'observations) — l'aller-retour
+      complet, aujourd'hui réduit à l'accusé de réception.
+- [ ] **Vérifier un certificat de transmission depuis le registre.** Le sceau est vérifié à
+      l'affichage de l'**original signé** (`verifierCertificatTransmission` : SHA-256 des
+      mentions rapproché de l'empreinte du document). La même vérification depuis la
+      **publication** (côté citoyen, où le certificat est joint au document publié) serait la
+      suite logique.
+- [ ] **Suppléance dans le parapheur.** L'étape du parapheur reste ouverte au rôle
+      qui la porte (et à tout administrateur, comme recours en cas d'absence) ; le
+      circuit ne lit pas encore les délégations. Une vraie **suppléance** (vacances,
+      intérim, délégation temporaire) serait la suite logique — avec sa trace au
+      journal.
+- [ ] **Suppléance de réviseur.** Comme pour le parapheur, la révision n'est ouverte qu'aux
+      réviseurs **compétents** (et à tout administrateur, comme recours) ; une **suppléance**
+      (absence, intérim) qui élargirait temporairement la compétence — avec sa trace au journal —
+      serait la suite logique.
+- [ ] **Révision des versions consolidées.** Une version consolidée ne suit pas le chemin de
+      révision (elle est publiée avec l'acte modificatif qui l'a produite). Le rapport de
+      conformité pourrait néanmoins être établi pour l'acte modificatif, qui, lui, est révisé.
+- [ ] **compétence par bureau sur le compte.** La compétence d'un compte se règle aujourd'hui par
+      service, famille, trame, type d'acte et entité ; le **bureau** n'est réglable que sur la
+      qualité portée par un service. Un ciblage par bureau côté compte compléterait la finesse.
 - [ ] **Notification du valideur.** Le journal prévient d'un dépôt au parapheur,
       mais rien n'est envoyé par courriel : il faudrait un envoi réel (service de
       messagerie) ou un résumé quotidien.
@@ -71,6 +145,16 @@ publication → ELI) fonctionne sans serveur, y compris après rechargement.
       il suffit de poser `window.__SCRIBA_SELF_HOSTED__` et l'adresse avant `host.js`.
 - [ ] **Bandeau « démonstration statique ».** Signaler dans l'interface que rien n'est
       partagé (aujourd'hui : le libellé du mode de persistance seulement).
+- [ ] **L'état durable de l'émulateur de serveur de l'ÉDITEUR se réinitialise.** Ce n'est pas
+      le logiciel : c'est l'émulateur à une tabulation (générateur non enregistré) qui, au-delà
+      d'une ou deux publications (chaque enregistrement porte le document publié, l'Akoma
+      Ntoso, le JSON-LD, le Markdown, le texte et la page de l'original signé), rend un état
+      illisible au chargement suivant — « État illisible, réinitialisation » — et repart à
+      vide. Conséquence visible : dans l'APERÇU, le recueil public se vide après un
+      rechargement, alors que le registre local dit toujours les actes publiés. Le générateur
+      enregistré (service « natif ») et l'auto-hébergement (MariaDB, `sb_etat`) ne sont pas
+      concernés. Signalé à la plateforme (rapport `cc69c32c`). Rien à corriger côté Scribae en
+      attendant : re-publier un ou deux actes pour regarnir l'aperçu.
 
 ## Auto-hébergement (chantier livré — suite possible)
 
@@ -84,7 +168,7 @@ Reste à faire, par ordre d'importance :
 
 - [x] **SSO / annuaire (livré — OIDC).** Le référentiel peut brancher l'annuaire de la
       collectivité en OpenID Connect (`config.auth`, `src/lib/oidc.js`, onglet
-      **Référentiel › Annuaire (OIDC)**) : flux code d'autorisation + PKCE, vérification du
+      **Administration › Annuaire (OIDC)**) : flux code d'autorisation + PKCE, vérification du
       jeton (émetteur, audience, validité, nonce, signature JWKS), groupes → rôles,
       périmètre par revendications, reprise ou création des comptes. Le brancher **désactive
       automatiquement les comptes de démonstration**, de façon réversible (`syncDemoAccounts`).
@@ -109,7 +193,7 @@ Reste à faire, par ordre d'importance :
 
 Livré : façade de persistance à trois pilotes (local / service partagé / serveur
 MySQL-MariaDB), synchronisation par enregistrement avec révisions et conflits,
-miroir hors ligne, file d'écritures différées, écran **Référentiel › Base de
+miroir hors ligne, file d'écritures différées, écran **Administration › Base de
 données**, service de données Node + `schema.sql` dans `src/server/mysql/`.
 
 Reste à faire, par ordre d'intérêt :
@@ -119,7 +203,7 @@ Reste à faire, par ordre d'intérêt :
       fusion par champ (par `updatedAt`) serait plus juste pour les objets
       longs, mais demande une politique de fusion par type d'objet.
 - [~] **Journal lisible dans l'application (partiellement livré).** Le **journal
-      d'audit de l'application** (Référentiel › Journal d'audit) est consultable et
+      d'audit de l'application** (Administration › Journal d'audit) est consultable et
       filtrable, et la collection `journal` est synchronisée. Ce qui manque est le
       journal **technique** de la base (`sb_journal`, côté MySQL) : les collections
       `presence` et `journal` n'y sont plus recopiées (c'était du bruit), mais il
@@ -136,6 +220,32 @@ Reste à faire, par ordre d'intérêt :
 - [ ] **Pilote local plus riche.** Le mode local repose sur le stockage du
       navigateur (IndexedDB). Un pilote SQLite/OPFS donnerait des requêtes locales — utile
       seulement si le mode local devait devenir autre chose qu'une démonstration.
+
+## Éditeur de trame : l'intuitivité (chantier en cours)
+
+Le public visé n'a **aucune compétence informatique**. La règle de conception est écrite dans
+`src/README.md` (« L'éditeur de trame : glisser-déposer, jamais liste déroulante ») : montrer
+plutôt que nommer, glisser plutôt que choisir dans une liste. Livré en v1.1.0 : la réserve, le
+glisser-déposer, le geste de repli au clic, les cartes de type, les questions repliables et les
+onglets renommés. Restent ouverts :
+
+- [ ] **Un premier pas guidé.** À l'ouverture d'une trame neuve, dire quoi faire (« prenez un
+      intitulé dans la réserve », « créez votre première question ») plutôt que de montrer un
+      squelette silencieux.
+- [ ] **Créer une trame sans formulaire.** La fenêtre « Nouvelle trame » demande encore une
+      **famille** et un **type d'acte** en listes déroulantes : les proposer en cartes, ou les
+      déduire d'un modèle de départ.
+- [ ] **Modèles de départ de trame** (arrêté individuel, décision, délibération…) : partir d'un
+      exemple est plus simple que d'un document vide.
+- [ ] **Ranger les questions par groupe.** Les groupes existent dans le modèle (`field.group`) et
+      organisent le formulaire du rédacteur, mais l'onglet « Questions » les ignore encore.
+- [ ] **Annuler / rétablir** dans l'éditeur de trame : supprimer un bloc est aujourd'hui
+      définitif — la corbeille de l'accueil ne rattrape qu'une *trame*, jamais un bloc.
+- [ ] **Le geste tactile.** Le glisser-déposer HTML5 **ne fonctionne pas au doigt** (ni sur iOS,
+      ni de façon fiable sur Android) : c'est le geste de repli (clic, puis clic) qui couvre les
+      tablettes. Le mériterait : un glisser fondé sur les *pointer events*, dans `src/ui/dnd.js`.
+- [ ] **Le glisser dans le rédacteur** (`views/wysiwyg.js`) : l'éditeur de trame glisse, la
+      rédaction non — les mêmes primitives y serviraient.
 
 ## Autres chantiers (déjà listés dans SPEC § 5)
 
@@ -167,21 +277,31 @@ Reste à faire, par ordre d'intérêt :
 
 ## Jeu de démonstration (livré — pistes)
 
-Livré : `src/lib/demo-actes.js` pose **onze actes** au premier démarrage, dont sept réellement
-signés (vérifiables), trois prêts à signer et un brouillon incomplet. Deux de ces actes sont des
-**actes individuels non publiables** (trame `tpl-revalorisation`, `publishable: false`), l'un
-signé et l'autre prêt à signer. Le jeu est remis à niveau quand `SEED_VERSION` change, et
+Livré : `src/lib/demo-actes.js` pose **quinze actes** au premier démarrage, dont **dix signés**
+(vérifiables) — trois d'entre eux illustrent la **révision** (un acte en attente, un acte révisé
+et validé, un acte rejeté, revenu en brouillon), et deux sont des **actes individuels non
+publiables** (trame `tpl-revalorisation`, `publishable: false`). Le jeu est remis à niveau quand `SEED_VERSION` change, et
 seulement si les trames et les actes sont ceux de la démonstration (trames `tpl-*`, actes
 `acte-demo-*`) : un registre réel n'est jamais touché.
 
-- [ ] **Publications de démonstration.** Le registre public (`GET /v1/publications`) est vide
-      au démarrage : l'état du service ne survit pas à un redémarrage. On pourrait, au premier
-      démarrage et si le service répond, publier deux ou trois actes de démonstration pour que
-      l'écran « Publications » (côté citoyen) soit garni lui aussi — au prix d'un amorçage qui
-      dépend du réseau.
-- [ ] **Actes de démonstration plus variés.** Le jeu couvre cinq trames (nomination,
-      délégation, régie, subvention, revalorisation/non publiable) ; ajouter des trames (état
-      civil, voirie, marchés publics) donnerait des actes encore plus divers.
+- [x] **Publications de démonstration.** Fait : `src/ui/demo-publications.js` (`amorcerRecueil`)
+      publie au premier démarrage les actes que la fiction déclare publiés, par le même chemin
+      que l'écran de signature, pour que le **recueil public** soit garni. Idempotent et
+      silencieux ; un service injoignable le laisse simplement vide.
+- [~] **Retirer une publication du recueil** (dépublier) — **livré dans l'application**, **reste à
+      porter au service auto-hébergé**. L'écran **Publications (ELI)** porte le retrait sous la
+      permission `publications.depublier` (administrateur seul) : avertissement en grand, **motif
+      technique obligatoire**, motif conservé sur l'acte et inscrit au **journal** d'audit
+      (`publication.depublie`), l'acte redevenant *signé*, donc publiable à nouveau ; le **service
+      de l'environnement d'édition** (index.html) expose la route
+      `POST /v1/publications/{cle}/retrait`. Ce qui manque : le **service Node/MySQL**
+      (`src/server/mysql/actes.mjs`) n'expose pas cette route — sur une pile auto-hébergée, le
+      geste aboutit à une erreur. À ajouter là-bas (même règle : motif exigé, trace au journal,
+      l'acte redevient *signé*), et à couvrir par `actes.test.mjs`.
+- [ ] **Actes de démonstration plus variés.** Le jeu couvre sept trames (nomination,
+      délégation, permis de construire, marché d'un établissement autonome, régie, subvention,
+      revalorisation/non publiable) ; ajouter des trames (état civil, voirie, marchés publics de
+      la commune) donnerait des actes encore plus divers.
 - [ ] **Réinitialiser le jeu de démonstration** depuis le référentiel (bouton « Réinstaller le
       jeu de démonstration »), plutôt que de dépendre d'un changement de `SEED_VERSION` ou de
       `clearAll()`.

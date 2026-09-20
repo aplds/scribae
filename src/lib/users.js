@@ -1,16 +1,38 @@
 // ============================================================================
 // Comptes et profils d'accès.
 //
-// Trois profils, du plus large au plus étroit :
+// Quatre profils, du plus large au plus étroit :
 //   administrateur  administre l'application (référentiel, comptes, API, données)
 //   editeur         rédige, modifie et commente les trames ; règle les feuilles
 //                   de style des actes ; rédige des actes
+//   reviseur        contrôle un acte avant sa signature, le corrige, le valide
+//                   ou le rejette (voir src/lib/revision.js)
+//   signataire      signe les actes dont la signature relève de lui — les siens,
+//                   et ceux de ses délégataires ; ne voit que ceux-là dans
+//                   l'atelier (voir src/lib/signataires.js)
 //   redacteur       rédige un acte et les actions associées (exporter, envoyer
 //                   en signature, publier) ; ne voit que ses propres actes
 //
+// Un compte AUTHENTIFIÉ mais sans rôle d'application est un **visiteur** : il a
+// une identité vérifiée (l'annuaire l'a reconnu) mais aucun accès à l'atelier —
+// il ne lui reste que l'espace public. C'est le cas d'un agent de l'annuaire
+// dont aucun groupe ne correspond à un rôle, ou d'un compte dont les rôles ont
+// été retirés. Le rôle `visiteur` matérialise cet état (aucune permission) :
+// l'application peut alors l'expliquer au lieu de refuser la connexion.
+//
+// Le rôle RÉVISEUR se CUMULE (`user.roles`), et le rôle SIGNATAIRE aussi : un
+// éditeur des affaires juridiques est éditeur *et* réviseur ; un adjoint au
+// maire est signataire (et souvent rédacteur par ailleurs). Le premier rôle de
+// la liste est le rôle principal — celui qui s'affiche, qui classe et qui est
+// lu par ce qui ne connaît qu'un rôle (annuaire, collaboration). `user.role`
+// reste donc écrit, en miroir du rôle principal, et `rolesOf` est la seule
+// porte d'entrée : un compte enregistré avant le cumul (rôle unique) est lu
+// sans migration.
+//
 // Les permissions sont déclarées une seule fois (PERMS) : c'est cette table qui
-// sert à la fois au contrôle d'accès (`can`) et à la documentation affichée
-// dans l'écran « Comptes et rôles » et dans le guide.
+// sert à la fois au contrôle d'accès (`can`, qui interroge TOUS les rôles du
+// compte) et à la documentation affichée dans l'écran « Comptes et rôles » et
+// dans le guide.
 //
 // Deux provenances de comptes (`source`) :
 //   demo   compte du jeu de démonstration — l'authentification est simulée (on
@@ -33,48 +55,155 @@ export const ROLES = {
   },
   editeur: {
     id: "editeur", label: "Éditeur", rank: 2, badge: "info",
-    summary: "Rédige, modifie et commente les trames de son service (et règle les feuilles de style des actes). Rédige des actes et voit ceux de son service ou de son bureau. Porte les étapes du parapheur confiées à son rôle : bon pour accord, avis, renvoi, refus.",
+    summary: "Rédige, modifie et commente les trames de son service (et règle les feuilles de style des actes). Rédige des actes et voit ceux de son service ou de son bureau. Tient l'organigramme des délégations de signature. Porte les étapes du parapheur confiées à son rôle : bon pour accord, avis, renvoi, refus.",
+  },
+  reviseur: {
+    id: "reviseur", label: "Réviseur", rank: 2, badge: "warning", cumulable: true,
+    summary: "Contrôle l'acte entre l'envoi à signature décidé par le rédacteur et l'envoi effectif. Il en reçoit le rapport de conformité, peut corriger l'acte, le valider — il part alors en signature — ou le rejeter, l'acte revenant en brouillon chez son rédacteur avec le motif du rejet. Sa compétence est limitée aux services, trames, familles ou types d'actes que le référentiel lui confie ; le rôle se cumule avec celui d'éditeur.",
+  },
+  signataire: {
+    id: "signataire", label: "Signataire", rank: 2, badge: "brand", cumulable: true,
+    summary: "Signe les actes dont la signature relève de lui : ceux qu'il signe en son nom, et ceux que signent ses délégataires, par délégation puis subdélégation. Dans l'atelier, il ne voit que les actes de son champ de compétence. Il signe avec son compte, rapproché de celui que l'outil de signature lui connaît. Le rôle se cumule avec les autres, et se donne en désignant quelqu'un comme signataire (écran Délégations) ou depuis les comptes.",
   },
   redacteur: {
     id: "redacteur", label: "Rédacteur", rank: 1, badge: "success",
     summary: "Rédige un acte à partir d'une trame de son service et procède aux actions associées (enregistrer, exporter, envoyer en signature, publier). Ne voit que ses propres actes, dans son périmètre. Le registre des trames ne lui est pas ouvert : il choisit son modèle dans l'écran « Rédiger un acte ».",
   },
+  // Aucune permission : le visiteur est authentifié (son identité est vérifiée),
+  // mais l'application ne lui ouvre rien. Il est accueilli par un écran qui le
+  // lui explique et le renvoie vers l'espace public, qu'il consulte sans compte.
+  visiteur: {
+    id: "visiteur", label: "Visiteur", rank: 0, badge: "warning",
+    summary: "Compte authentifié sans accès à l'application : aucun écran de l'atelier ne lui est ouvert. Il ne lui reste que le recueil public, qu'il consulte sans compte. C'est l'état d'un agent de l'annuaire dont aucun groupe ne correspond à un rôle.",
+  },
 };
 
-export const ROLE_ORDER = ["administrateur", "editeur", "redacteur"];
+export const ROLE_ORDER = ["administrateur", "editeur", "reviseur", "signataire", "redacteur", "visiteur"];
+
+// Le rôle du compte authentifié mais sans accès.
+export const VISITEUR = "visiteur";
+
+// Rôles faits pour se CUMULER avec un autre (le rôle principal reste alors
+// celui de la liste qui a le rang le plus élevé). Un réviseur est presque
+// toujours un éditeur : la qualité de réviseur dit ce qu'il contrôle, pas ce
+// qu'il rédige. Un signataire, de même : la qualité dit ce qu'il signe, pas ce
+// qu'il fait du reste de sa journée.
+export const ROLES_CUMULABLES = ["reviseur", "signataire"];
+export const estCumulable = (role) => ROLES_CUMULABLES.includes(role);
+
+// ------------------------------------------------------------------ les rôles
+// `rolesOf` est la SEULE lecture des rôles d'un compte : elle accepte aussi
+// bien `roles` (cumul) que `role` seul (compte enregistré avant le cumul).
+export function rolesOf(user) {
+  const list = Array.isArray(user?.roles) ? user.roles.filter((r) => ROLES[r]) : [];
+  if (list.length) return [...new Set(list)];
+  return user?.role && ROLES[user.role] ? [user.role] : [];
+}
+
+export const hasRole = (user, role) => rolesOf(user).includes(role);
+
+// Un compte sans rôle d'application — ou dont le rôle est « Visiteur » — est un
+// visiteur : authentifié, mais sans accès. C'est la question que pose
+// l'application AVANT d'ouvrir l'atelier (voir src/ui/app.js).
+export function estVisiteur(user) {
+  if (!user) return false;
+  return hasRole(user, VISITEUR) || rolesOf(user).length === 0;
+}
+
+// Rôle principal : le rang le plus élevé, départagé par l'ordre de référence
+// (donc l'administrateur l'emporte, puis l'éditeur sur le rédacteur). Une
+// QUALITÉ qui se cumule ne peut pas devenir principale : le réviseur dit ce
+// qu'on contrôle, le signataire ce qu'on signe — pas ce qu'on est — sans quoi
+// un rédacteur à qui l'on ajoute l'une de ces qualités se retrouverait « profil
+// réviseur ». Une qualité seule (compte monté par l'annuaire sans rôle
+// ordinaire) reste le principal par défaut, faute de mieux.
+export function primaryRoleId(user) {
+  const roles = rolesOf(user);
+  if (!roles.length) return "";
+  const pick = (list) => list.slice().sort((a, b) =>
+    (ROLES[b].rank - ROLES[a].rank) || (ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b)))[0];
+  return pick(roles.filter((r) => !estCumulable(r))) || pick(roles);
+}
+
+// Ramène une liste de rôles à une forme canonique : connus, dédoublonnés, le
+// principal EN PREMIER (c'est lui que porte `user.role`).
+export function normalizeRoles(roles) {
+  const list = (Array.isArray(roles) ? roles : [roles]).filter((r) => ROLES[r]);
+  const uniq = [...new Set(list)];
+  const principal = primaryRoleId({ roles: uniq });
+  return uniq.sort((a, b) => (a === principal ? -1 : b === principal ? 1 : ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b)));
+}
+
+// Applique une liste de rôles à un compte : `roles` fait foi, `role` le suit.
+export function setRoles(user, roles) {
+  const list = normalizeRoles(roles);
+  if (!list.length) return rolesOf(user);
+  user.roles = list;
+  user.role = list[0];
+  return list;
+}
+
+export const toggleRole = (user, role) => {
+  const list = rolesOf(user);
+  return setRoles(user, list.includes(role) ? list.filter((r) => r !== role) : [...list, role]);
+};
+
 
 // `owner: true` = l'agent ne voit que ce qu'il a produit lui-même.
 export const PERMS = [
   { key: "trames.voir", label: "Consulter les trames", roles: ["administrateur", "editeur"] },
   { key: "trames.gerer", label: "Créer, modifier, dupliquer et commenter les trames (éditeur de trame)", roles: ["administrateur", "editeur"] },
   { key: "trames.styles", label: "Modifier les feuilles de style des actes (charte graphique)", roles: ["administrateur", "editeur"] },
-  { key: "actes.rediger", label: "Rédiger un acte", roles: ["administrateur", "editeur", "redacteur"] },
+  { key: "actes.rediger", label: "Rédiger un acte", roles: ["administrateur", "editeur", "reviseur", "redacteur"] },
   { key: "actes.gerer", label: "Modifier, supprimer et importer des actes (modificatif, consolidation)", roles: ["administrateur", "editeur"] },
   { key: "actes.tous", label: "Voir et rouvrir les actes de tous les agents", roles: ["administrateur", "editeur"] },
   { key: "actes.valider", label: "Porter une étape du parapheur : bon pour accord, avis, renvoi, refus", roles: ["administrateur", "editeur"] },
-  { key: "signature.gerer", label: "Envoyer en signature et publier au recueil", roles: ["administrateur", "editeur", "redacteur"] },
+  { key: "actes.reviser", label: "Contrôler un acte avant sa signature (révision) : rapport de conformité, correction, validation, rejet", roles: ["administrateur", "reviseur"] },
+  // Signer et PUBLIER sont deux gestes distincts : le signataire signe ce qui
+  // relève de sa compétence (voir src/lib/signataires.js) sans pour autant
+  // déposer les actes au recueil. L'écran « Signature & publication » s'ouvre
+  // par `actes.signer` ; l'onglet de publication, lui, demande `signature.gerer`.
+  { key: "actes.signer", label: "Signer un acte (signature directe, ou au titre d'une délégation) et accéder à l'écran de signature", roles: ["administrateur", "editeur", "reviseur", "redacteur", "signataire"] },
+  { key: "signature.gerer", label: "Publier au recueil (identifiant ELI), consulter les publications, constater les formalités d'exécution", roles: ["administrateur", "editeur", "reviseur", "redacteur"] },
+  // L'organigramme des délégations est LISIBLE par tous les comptes (voir
+  // src/ui/app.js, VIEW_PERMS) ; cette permission ne garde que sa modification.
+  { key: "delegations.gerer", label: "Gérer l'organigramme des délégations de signature (qui peut signer à la place de qui)", roles: ["administrateur", "editeur"] },
+  { key: "publications.depublier", label: "Retirer une publication du recueil (dépublier)", roles: ["administrateur"] },
   { key: "referentiel.gerer", label: "Gérer le référentiel (identité, entités, personnes, rôles, références…)", roles: ["administrateur"] },
   { key: "comptes.gerer", label: "Créer des comptes, changer les rôles, désactiver, supprimer", roles: ["administrateur"] },
   { key: "api.gerer", label: "Connecter des API et consulter le journal des échanges", roles: ["administrateur"] },
+  { key: "docs.voir", label: "Consulter la documentation technique (exploitation, installation, sécurité)", roles: ["administrateur"] },
 ];
 
 export const ROLE_KEYS = ROLE_ORDER.slice();
 
 const BY_KEY = new Map(PERMS.map((p) => [p.key, p]));
 
-export const roleOf = (user) => ROLES[user?.role] || null;
-export const roleLabel = (user) => roleOf(user)?.label || "—";
+export const roleOf = (user) => ROLES[primaryRoleId(user)] || null;
+export const roleLabel = (user) => rolesOf(user).map((r) => ROLES[r].label).join(" + ") || "—";
 export const roleBadge = (user) => roleOf(user)?.badge || "info";
+// Toutes les pastilles du compte (rôle principal puis les qualités cumulées).
+export const badgesOf = (user) => normalizeRoles(rolesOf(user)).map((r) => ROLES[r]);
 
 export function can(user, perm) {
   if (!user || user.active === false) return false;
+  // Un visiteur n'a aucun accès, quoi que porte son compte par ailleurs : le
+  // rôle « Visiteur » prime sur toute qualité résiduelle (un réviseur dont le
+  // groupe a disparu ne doit pas garder la révision).
+  if (hasRole(user, VISITEUR)) return false;
   const p = BY_KEY.get(perm);
   if (!p) return false;
-  return p.roles.includes(user.role);
+  return rolesOf(user).some((r) => p.roles.includes(r));
 }
 
 export const permsOf = (role) => PERMS.filter((p) => p.roles.includes(role)).map((p) => p.key);
 export const rolesWith = (perm) => BY_KEY.get(perm)?.roles || [];
+// Les permissions qu'un compte tient de L'ENSEMBLE de ses rôles : c'est ce que
+// l'écran « Comptes et rôles » affiche pour un compte à rôles cumulés.
+export const permsOfUser = (user) => {
+  const roles = rolesOf(user);
+  return PERMS.filter((p) => roles.some((r) => p.roles.includes(r))).map((p) => p.key);
+};
 
 export const fullName = (u) => [u?.firstName, u?.lastName].filter(Boolean).join(" ") || u?.login || "—";
 const parts = (u) => [u?.firstName, u?.lastName].filter(Boolean);
@@ -88,7 +217,7 @@ export function slugLogin(firstName, lastName) {
 }
 
 export function newUser(over = {}) {
-  return {
+  const u = {
     id: "u-" + Math.random().toString(36).slice(2, 9),
     civility: "", firstName: "", lastName: "", login: "", email: "",
     role: "redacteur", entityId: "", service: "", personId: "",
@@ -100,6 +229,10 @@ export function newUser(over = {}) {
     lastLogin: "",
     ...over,
   };
+  // `roles` fait foi ; `role` n'en est que le reflet (rôle principal), pour ce
+  // qui ne connaît qu'un rôle : annuaire, présence, journal.
+  setRoles(u, u.roles && u.roles.length ? u.roles : (u.role ? [u.role] : ["redacteur"]));
+  return u;
 }
 
 // Provenance d'un compte : ce que l'écran « Comptes et rôles » affiche, et ce
@@ -138,10 +271,14 @@ const bureauOf = (config, code, name) =>
 // Chaque compte est rattaché à un ou plusieurs **services** (voir src/lib/scope.js) :
 //   - deux administrateurs (le rôle administrateur voit tout, quel que soit le
 //     service — c'est le rôle d'administration de l'application) ;
-//   - deux éditeurs et quatre rédacteurs dans leur service ;
+//   - deux éditeurs et six rédacteurs dans leur service ;
 //   - un éditeur **transverse** (directrice des affaires juridiques) rattaché à
 //     *tous* les services par l'administrateur : il voit tout ;
 //   - deux comptes dont le périmètre est **restreint à certains bureaux** ;
+//   - deux **réviseurs** (le rôle se cumule avec celui d'éditeur) : Amandine
+//     ROUSSEL, des affaires juridiques, compétente pour tous les services et
+//     tous les actes, et Isabelle DAVAL, limitée aux actes d'engagement
+//     financier — la compétence d'un réviseur se règle au cas par cas ;
 // sans rattachement de bureau, un compte a accès à tout son service.
 export function seedUsers(config) {
   const at = new Date(Date.UTC(2026, 8, 1, 7, 30)).toISOString();
@@ -165,11 +302,15 @@ export function seedUsers(config) {
       email: "sophie.leclerc@valmont-sur-loire.fr", role: "editeur", entityId: ent("VSL"),
       personId: "p-leclerc", memberships: [member("SG")] }),
     mk({ id: "u-roussel", civility: "Madame", firstName: "Amandine", lastName: "ROUSSEL", login: "a.roussel",
-      email: "amandine.roussel@valmont-sur-loire.fr", role: "editeur", entityId: ent("VSL"),
+      email: "amandine.roussel@valmont-sur-loire.fr", roles: ["editeur", "reviseur"], entityId: ent("VSL"),
       personId: "p-roussel", memberships: [member("AG", "Affaires juridiques")] }),
     mk({ id: "u-daval", civility: "Madame", firstName: "Isabelle", lastName: "DAVAL", login: "i.daval",
-      email: "isabelle.daval@valmont-sur-loire.fr", role: "editeur", entityId: ent("VSL"),
-      personId: "p-daval", memberships: all() }),
+      email: "isabelle.daval@valmont-sur-loire.fr", roles: ["editeur", "reviseur"], entityId: ent("VSL"),
+      personId: "p-daval", memberships: all(),
+      // Compétence RESTREINTE : la directrice des affaires juridiques ne révise
+      // que les actes d'engagement financier (marchés, subventions) — un
+      // réviseur peut n'être compétent que pour certains types d'actes.
+      revision: { trameIds: [], familyIds: ["fam-marches", "fam-associations"], actTypes: [], services: [], entityIds: [] } }),
     mk({ id: "u-bernard", civility: "Monsieur", firstName: "Éric", lastName: "BERNARD", login: "e.bernard",
       email: "eric.bernard@valmont-sur-loire.fr", role: "redacteur", entityId: ent("VSL"),
       personId: "p-bernard", memberships: [member("CAB")] }),
@@ -182,19 +323,25 @@ export function seedUsers(config) {
     mk({ id: "u-leblanc", civility: "Madame", firstName: "Sarah", lastName: "LEBLANC", login: "s.leblanc",
       email: "sarah.leblanc@valmont-sur-loire.fr", role: "redacteur", entityId: ent("VSL"),
       personId: "p-leblanc", memberships: [member("ACC", "Accueil physique")] }),
+    mk({ id: "u-benali", civility: "Monsieur", firstName: "Karim", lastName: "BENALI", login: "k.benali",
+      email: "karim.benali@valmont-sur-loire.fr", role: "redacteur", entityId: ent("VSL"),
+      personId: "p-benali", memberships: [member("URB", "Urbanisme")] }),
+    mk({ id: "u-marchand", civility: "Madame", firstName: "Nadia", lastName: "MARCHAND", login: "n.marchand",
+      email: "nadia.marchand@valmont-sur-loire.fr", role: "redacteur", entityId: ent("OPH"),
+      personId: "p-marchand", memberships: [member("OPH")] }),
   ];
 }
 
 // Combien d'administrateurs actifs resterait-il ? Garde-fou : on ne supprime pas
 // le dernier, et on ne se retire pas soi-même le rôle.
 export function activeAdmins(users) {
-  return users.filter((u) => u.role === "administrateur" && u.active !== false);
+  return users.filter((u) => hasRole(u, "administrateur") && u.active !== false);
 }
 
 // Identifiants des comptes livrés avec la démonstration : sert à reconnaître un
 // jeu de comptes de démonstration (pour le remettre à niveau) sans jamais
 // toucher à des comptes créés à la main.
-export const DEMO_USER_IDS = ["u-dubois", "u-mercier", "u-leclerc", "u-roussel", "u-daval", "u-bernard", "u-martin", "u-garnier", "u-leblanc"];
+export const DEMO_USER_IDS = ["u-dubois", "u-mercier", "u-leclerc", "u-roussel", "u-daval", "u-bernard", "u-martin", "u-garnier", "u-leblanc", "u-benali", "u-marchand"];
 export const isDemoUser = (u) => !!u && (u.source === "demo" || (!u.source && DEMO_USER_IDS.includes(u.id)));
 export const isDemoUsers = (users) =>
   Array.isArray(users) && users.length > 0 && users.every((u) => isDemoUser(u));

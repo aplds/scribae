@@ -2,7 +2,7 @@
 // Parapheur — le circuit de validation des actes.
 //
 // Avant d'être signé, un acte passe par un CIRCUIT : les étapes définies dans le
-// référentiel (Référentiel › Circuits de validation), chacune confiée à un rôle.
+// référentiel (Administration › Circuits de validation), chacune confiée à un rôle.
 // Cet écran est le bureau du valideur : ce qui m'attend, ce qui attend un autre,
 // ce qui est prêt à partir en signature.
 //
@@ -13,15 +13,16 @@
 // que ce qui a été approuvé.
 // ============================================================================
 import {
-  state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById,
+  state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById, parapheurActif,
 } from "../state.js";
 import { h, button } from "../dom.js";
 import { emptyState, helpLink } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel, inScope } from "../../lib/scope.js";
 import {
-  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS,
+  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, peutValider,
 } from "../../lib/validation.js";
+import { hasRole, primaryRoleId } from "../../lib/users.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
 import { docOfActe } from "./modifier.js";
 
@@ -35,6 +36,17 @@ const TABS = [
 ];
 
 export function renderParapheur(root, params) {
+  // Fonction expérimentale éteinte : l'écran n'est pas proposé, mais un lien
+  // ancien peut encore y mener — on l'explique plutôt que d'afficher un vide.
+  if (!parapheurActif()) {
+    root.appendChild(emptyState(
+      "Le parapheur est une fonction expérimentale, désactivée dans cette installation. Les actes partent directement en signature depuis « Signature & publication ».",
+      button("Ouvrir les fonctions expérimentales", {
+        variant: "secondary",
+        onClick: () => { state.ui = { ...(state.ui || {}), refTab: "experimental" }; navigate("referentiel"); },
+      })));
+    return;
+  }
   const ui = (state.parapheur = state.parapheur || { tab: "aMoi", acteId: "" });
   const config = state.config;
   const file = fileParapheur();
@@ -113,11 +125,14 @@ export function renderParapheur(root, params) {
 const etapeMienne = (a) => !!state.user && !!etapePourUI(a);
 
 // `etapePour` du module validation a besoin du config ; on factorise l'appel.
+// Les rôles se lisent par `hasRole` (un compte peut en cumuler) : l'étape est
+// mienne si je tiens le rôle de l'étape — l'administrateur tient toutes les
+// étapes, comme recours.
 function etapePourUI(a) {
   const etape = (a.validation?.steps || []).find((s) => s.statut === "en_attente");
   if (!etape) return null;
-  if (!state.user || (state.user.role !== "administrateur" && state.user.role !== "editeur")) return null;
-  if (state.user.role !== "administrateur" && etape.role !== state.user.role) return null;
+  if (!peutValider(state.user)) return null;
+  if (!hasRole(state.user, "administrateur") && etape.role !== primaryRoleId(state.user)) return null;
   if (etape.serviceScoped && a.serviceId && !inScope(state.config, state.user, a)) return null;
   return etape;
 }
@@ -159,7 +174,7 @@ function carteActe(a, paint) {
     h("div", { class: "fr-row" },
       button("Voir l'acte", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
       can("actes.rediger") ? button("Ouvrir en rédaction", { variant: "tertiary", size: "sm", icon: "note", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null,
-      can("signature.gerer") && v?.statut === "valide" ? button("Signer", { variant: "tertiary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
+      can("actes.signer") && v?.statut === "valide" ? button("Signer", { variant: "tertiary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
     ),
   ));
 
@@ -210,7 +225,7 @@ function carteActe(a, paint) {
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small", text: `Circuit achevé le ${formatDate(String(v.closLe || "").slice(0, 10))}. L'acte peut être envoyé en signature.` }),
       h("div", { class: "fr-row" },
-        can("signature.gerer") ? button("Aller à la signature", { variant: "primary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
+        can("actes.signer") ? button("Aller à la signature", { variant: "primary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
         can("actes.gerer") ? button("Reprendre le circuit", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }) : null)));
   }
   if (v.statut === "refuse" || v.statut === "renvoye") {
@@ -242,4 +257,3 @@ function etapeEl(s, i, v) {
     ),
   );
 }
-

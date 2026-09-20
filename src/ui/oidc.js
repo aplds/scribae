@@ -18,7 +18,7 @@
 import { h, clear, button, icon, modal, toast } from "./dom.js";
 import { textField, selectField, choiceField, confirmDialog, helpLink } from "./components.js";
 import { state, loginWithClaims, applyAuthMode } from "./state.js";
-import { ROLES, ROLE_ORDER, accountUsable, isDemoUser, sourceOf } from "../lib/users.js";
+import { ROLES, ROLE_ORDER, accountUsable, isDemoUser, sourceOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
 import {
   AUTH_MODES, UNKNOWN_POLICIES, authConfig, emptyAuth, isOidc, isTestProvider,
@@ -74,7 +74,7 @@ export function loginPanel() {
       h("span", { class: "oidc-login__url fr-mono", text: test ? "aucun fournisseur branché" : String(auth.issuer) }),
     ),
     cta,
-    test ? h("p", { class: "fr-small fr-muted", text: "L'annuaire d'essai est intégré à l'application : il exerce tout le mécanisme (jetons, groupes, rôles, périmètre) sans aucun appel réseau. Ses jetons ne sont pas vérifiés — ce n'est pas une authentification. Branchez votre fournisseur dans Référentiel › Annuaire." }) : null,
+    test ? h("p", { class: "fr-small fr-muted", text: "L'annuaire d'essai est intégré à l'application : il exerce tout le mécanisme (jetons, groupes, rôles, périmètre) sans aucun appel réseau. Ses jetons ne sont pas vérifiés — ce n'est pas une authentification. Branchez votre fournisseur dans Administration › Annuaire." }) : null,
     slot,
     recoveryBox(auth),
   );
@@ -87,7 +87,7 @@ function recoveryBox(auth) {
   if (auth.allowRecovery === false) return null;
   return h("details", { class: "oidc-login__recovery" },
     h("summary", { text: "L'annuaire est injoignable ?" }),
-    h("p", { class: "fr-small fr-muted", text: "Cette porte de secours ramène l'installation sur les comptes de l'application (ceux de la démonstration redeviennent disponibles). Elle évite de rester bloqué à l'écran de connexion quand le fournisseur d'identité ne répond plus. Un administrateur peut la retirer dans Référentiel › Annuaire, une fois l'annuaire éprouvé ; en production, le contrôle d'accès réel reste la protection du service de données." }),
+    h("p", { class: "fr-small fr-muted", text: "Cette porte de secours ramène l'installation sur les comptes de l'application (ceux de la démonstration redeviennent disponibles). Elle évite de rester bloqué à l'écran de connexion quand le fournisseur d'identité ne répond plus. Un administrateur peut la retirer dans Administration › Annuaire, une fois l'annuaire éprouvé ; en production, le contrôle d'accès réel reste la protection du service de données." }),
     h("div", { class: "fr-row" },
       button("Revenir aux comptes de l'application", {
         variant: "secondary", size: "sm", icon: "refresh",
@@ -160,7 +160,11 @@ export async function handleAuthReturn() {
     }
     setAuthError("");
     try {
-      showAuthControl(res, session);
+      // Un visiteur n'a pas à recevoir le contrôle de connexion par-dessus son
+      // écran : il n'a pas ouvert de session dans l'atelier, et sa page dit
+      // déjà, groupes compris, pourquoi l'accès lui est fermé. Le contrôle
+      // reste pour tous ceux qui entrent réellement dans l'application.
+      if (!estVisiteur(session.user)) showAuthControl(res, session);
     } catch (e) {
       // L'affichage du contrôle ne doit jamais faire échouer une connexion
       // pourtant vérifiée : on se contente de le signaler dans la console.
@@ -195,6 +199,10 @@ export function showAuthControl(res, session) {
       h("p", { text: "Le fournisseur a authentifié " + (u.firstName || "") + " " + (u.lastName || "") + " (" + (u.email || session.linked) + ")." }),
       h("p", { class: "fr-small fr-muted", text: "Rôle attribué par l'annuaire : " + (ROLES[u.role]?.label || u.role) + " · Groupe reconnu : " + (u.oidcClaim || "—") + " · Périmètre : " + scopeLabel(state.config, u) }),
       checks,
+      estVisiteur(u) ? h("div", { class: "fr-alert fr-alert--warning" },
+        h("p", { class: "fr-alert__title", text: "Aucun accès à l'application" }),
+        h("p", { text: "L'identité est vérifiée, mais aucun de vos groupes ne correspond à un rôle de l'application : votre compte est Visiteur. Vous arrivez sur la page d'accueil publique, qui explique la situation et donne le contact du service qui gère l'application." }),
+      ) : null,
       (res.warnings || []).length ? h("div", { class: "fr-alert fr-alert--warning" }, ...res.warnings.map((w) => h("p", { text: w }))) : null,
       h("p", { class: "fr-small fr-muted", text: session.created ? "Un compte a été créé pour cet agent dans l'application." : "Le compte existant a été repris (" + session.linked + ")." }),
     ),
@@ -228,7 +236,7 @@ function testProviderDialog(auth) {
         ? h("span", { class: "fr-badge fr-badge--error", text: "connexion refusée" })
         : h("span", { class: "oidc-test__role" },
           h("span", { class: "fr-badge fr-badge--" + role.badge, text: role.label }),
-          h("span", { class: "fr-small fr-muted", text: (it.services || []).join(", ") || "aucun service" })),
+          h("span", { class: "fr-small fr-muted", text: pv.role.visiteur ? "aucun accès" : ((it.services || []).join(", ") || "aucun service") })),
     );
     row.addEventListener("click", async () => {
       m.close();
@@ -376,14 +384,14 @@ export function annuairePanel(save, redraw, card) {
       textField({ label: "Revendication des groupes", value: a.roleClaim, placeholder: "groups", help: "Chemin dans le jeton : « groups », « roles », « realm_access.roles »…", onChange: (v) => { a.roleClaim = v.trim(); commit(); redraw(); } }),
       selectField({
         label: "Agent sans groupe reconnu", value: a.unknownPolicy, options: UNKNOWN_POLICIES.map((p) => ({ value: p.id, label: p.label })),
-        help: "« Refuser » est le réglage sûr : sans groupe d'application, l'agent n'entre pas.",
+        help: "« Aucun accès » est le réglage sûr : l'agent est authentifié par l'annuaire, mais l'application ne lui ouvre rien — il arrive sur un écran qui le lui explique et le renvoie vers l'espace public.",
         onChange: (v) => { a.unknownPolicy = v; commit(); redraw(); },
       }),
     ),
     a.unknownPolicy === "default" ? selectField({
       label: "Rôle de repli", value: a.defaultRole,
       options: ROLE_ORDER.map((r) => ({ value: r, label: ROLES[r].label })),
-      help: "Le rôle le plus étroit est recommandé : celui d'un agent qui n'a rien demandé.",
+      help: "Le rôle le plus étroit est recommandé : « Rédacteur » pour un agent qui n'a rien demandé, « Visiteur » pour ne lui ouvrir aucun accès.",
       onChange: (v) => { a.defaultRole = v; commit(); },
     }) : null,
     h("h3", { class: "oidc-sub", text: "Correspondance des groupes" }),

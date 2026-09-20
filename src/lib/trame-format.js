@@ -45,7 +45,7 @@ const AIDE = {
   bloc: {
     "commun à tous les blocs": "id, type (obligatoire), when (condition d'affichage facultative, ex. \"exists(dateEffet)\"), notes (tableau de commentaires).",
     "text — bloc à texte": "Types title, authority, enact, para, raw : propriété « text ».",
-    "blocs à liste": "Types visas et considerants : « items » = [ { id, refId, text, refKind, refScope, when } ] (refId = référence du référentiel ; laisser \"\" et remplir text pour un texte libre).",
+    "blocs à liste": "Types visas et considerants : « items » = [ { id, refId, text, refKind, refScope, chaine, when } ] (refId = référence du référentiel ; laisser \"\" et remplir text pour un texte libre ; chaine: true = les décisions fondant la signature, étage par étage de la chaîne de délégations (la nomination puis la délégation), résolues depuis le référentiel).",
     article: "numMode (\"auto\" | \"manual\"), num (numéro si manual), heading (intitulé facultatif), blocks (blocs imbriqués : para, list, table), when.",
     list: "ordered (booléen), items = [ { id, text, when } ].",
     table: "caption (légende), columns = [\"Colonne 1\", …], rows = [[\"cellule\", …], …].",
@@ -55,8 +55,9 @@ const AIDE = {
   "types de blocs (body[].type)": list(NODE_TYPES),
   "types de champs (fields[].type)": list(FIELD_TYPES),
   champ: {
-    propriétés: "id, label, type, group (regroupement à l'écran), required (booléen), help, placeholder, options (pour choice/multichoice), refKind (pour ref/reflist), appliesWhen (condition d'affichage).",
+    propriétés: "id, label, type, group (regroupement à l'écran), required (booléen), help, placeholder, options (pour choice/multichoice), refKind (pour ref/reflist), qualite (pour signataire), appliesWhen (condition d'affichage).",
     "id du champ": "L'identifiant « id » est AUSSI le nom utilisé dans le texte : un champ { id: \"objet\" } se remplit avec {{objet}}. Choisissez des identifiants simples, sans accent ni espace, et uniques. « signataire » est le champ spécial qui alimente le bloc signature ; « numero », « objet », « dateSignature » et « dateEffet » sont reconnus par le registre.",
+    "champ signataire": "Un champ de type « signataire » ne fait pas choisir un nom dans l'annuaire : on y désigne d'abord la FONCTION (la qualité qui donne compétence pour signer — un rôle, ou une délégation de signature), puis, parmi les personnes qui la tiennent, celle qui signe. L'identifiant du champ reste celui d'une personne. La propriété « qualite » fixe la fonction attendue (clé « role:<id de rôle> » ou « del:<id de délégation> ») ; vide, la fonction est laissée au choix de celui qui rédige.",
     types: list(FIELD_TYPES),
   },
   "niveaux de règle (rules[].level)": list(RULE_LEVELS),
@@ -102,7 +103,7 @@ function exampleTrame() {
       { id: "debut", label: "Début de l'occupation", type: "date", group: "Occupation", required: true },
       { id: "fin", label: "Fin de l'occupation", type: "date", group: "Occupation", required: true },
       { id: "redevance", label: "Redevance annuelle", type: "money", group: "Occupation", required: false },
-      { id: "signataire", label: "Signataire", type: "person", group: "Signature", required: true },
+      { id: "signataire", label: "Signataire", type: "signataire", group: "Signature", required: true, qualite: "role:maire", help: "La fonction attendue : c'est elle qui donne compétence pour signer. Le rédacteur choisira ensuite, parmi les personnes qui la tiennent, celle qui signe. Laissez « qualite » vide pour le laisser choisir la fonction lui-même." },
     ],
     rules: [
       { id: "r-1", level: "blocking", expr: "exists(demandeur) && exists(lieu)", message: "Le demandeur et l'emplacement sont obligatoires.", author: "Affaires générales", date: "" },
@@ -175,7 +176,12 @@ function normalizeItem(raw, warnings) {
   if (raw == null) return null;
   if (typeof raw === "string") return { id: uid("it"), text: raw, when: "" };
   if (typeof raw !== "object") return null;
-  return { id: asString(raw.id) || uid("it"), refId: asString(raw.refId), text: asString(raw.text), refKind: asString(raw.refKind), refScope: asString(raw.refScope), when: asString(raw.when) };
+  return {
+    id: asString(raw.id) || uid("it"), refId: asString(raw.refId), text: asString(raw.text),
+    refKind: asString(raw.refKind), refScope: asString(raw.refScope), when: asString(raw.when),
+    // Les décisions fondant la signature (voir src/lib/delegations.js).
+    chaine: raw.chaine === true,
+  };
 }
 
 function normalizeField(raw, warnings, where) {

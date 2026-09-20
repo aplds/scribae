@@ -15,15 +15,20 @@
 //
 // Ce qui vient de l'annuaire est traduit en compte de l'application
 // (`applyOidcUser`) : identité, rôle (groupes → rôles) et périmètre (services,
-// entité). Un agent inconnu est créé à sa première connexion si l'administrateur
-// l'a autorisé ; sinon la connexion est refusée avec un message explicite.
+// entité). Le rôle de l'annuaire devient le rôle PRINCIPAL du compte ; les
+// qualités cumulées attribuées dans l'application (le rôle « Réviseur », par
+// exemple) sont conservées — elles ne viennent pas des groupes. Un agent
+// inconnu est créé à sa première connexion si l'administrateur l'a autorisé ;
+// sinon la connexion est refusée avec un message explicite. Un agent dont aucun
+// groupe ne correspond à un rôle devient **Visiteur** : authentifié, sans accès,
+// accueilli par un écran qui le lui explique (voir src/ui/views/sans-acces.js).
 //
 // L'annuaire d'essai intégré (`TEST_IDENTITIES`) exerce le même chemin de code
 // sans réseau : il sert à vérifier le branchement, et il est signalé comme tel
 // (ses jetons ne sont pas vérifiés, il ne s'agit pas d'une authentification).
 // ============================================================================
 import { authConfig, isTestProvider, redirectUriFor, DEFAULT_AUTH } from "./auth.js";
-import { newUser, uniqueLogin } from "./users.js";
+import { newUser, uniqueLogin, rolesOf, estCumulable, setRoles, VISITEUR } from "./users.js";
 
 export class AuthError extends Error {
   constructor(message, code = "auth_error") {
@@ -360,22 +365,27 @@ export function claimValues(claims, path) {
 }
 
 // Correspondance groupe → rôle. Le PREMIER groupe reconnu décide ; sans
-// correspondance, on applique la politique choisie (refus ou rôle de repli).
+// correspondance, on applique la politique choisie : le rôle de repli, ou le
+// rôle **Visiteur** — le compte est bien authentifié (l'annuaire a reconnu la
+// personne), mais l'application ne lui ouvre rien : l'écran d'accueil le lui
+// explique et le renvoie vers l'espace public (voir src/ui/views/sans-acces.js).
+// On ne refuse donc plus la connexion : refuser ne dirait pas pourquoi, alors
+// qu'un visiteur n'a, lui non plus, aucun accès (ses permissions sont vides).
 export function mapRole(auth, claims) {
   const values = claimValues(claims, auth.roleClaim);
   const map = (auth.roleMap || []).filter((m) => m && m.claim && m.role);
   for (const v of values) {
     const hit = map.find((m) => String(m.claim) === v);
-    if (hit) return { role: hit.role, matched: v, values, denied: false, reason: "" };
+    if (hit) return { role: hit.role, matched: v, values, denied: false, visiteur: false, reason: "" };
   }
+  const motif = "Aucun groupe reconnu ne donne accès à l'application" +
+    (values.length ? " (groupes reçus : " + values.join(", ") + ")" : " (l'annuaire n'annonce aucun groupe)") + ".";
   if (auth.unknownPolicy === "default" && auth.defaultRole) {
-    return { role: auth.defaultRole, matched: "", values, denied: false, reason: "" };
+    return { role: auth.defaultRole, matched: "", values, denied: false, visiteur: false, reason: "" };
   }
   return {
-    role: "", matched: "", values, denied: true,
-    reason: "Aucun groupe reconnu ne donne accès à l'application" +
-      (values.length ? " (groupes reçus : " + values.join(", ") + ")" : " (l'annuaire n'annonce aucun groupe)") +
-      ". Demandez à votre administrateur de vous rattacher à un groupe d'utilisateurs.",
+    role: VISITEUR, matched: "", values, denied: false, visiteur: true,
+    reason: motif + " Le compte est authentifié sans accès : l'application ne lui ouvre que l'espace public. Demandez à votre administrateur de vous rattacher à un groupe d'utilisateurs.",
   };
 }
 
@@ -485,6 +495,15 @@ export function applyOidcUser(config, users, claims) {
     const patched = { ...existing, ...res.patch };
     delete patched.deactivatedBy;
     delete patched.deactivatedAt;
+    // Le rôle de l'annuaire devient le rôle PRINCIPAL ; les qualités cumulées
+    // attribuées dans l'application (le rôle « Réviseur », par exemple) sont
+    // conservées : elles ne viennent pas des groupes, mais d'une décision de
+    // l'administrateur, et l'annuaire n'a pas à les effacer. Sauf quand
+    // l'annuaire ne reconnaît AUCUN rôle : le compte devient Visiteur, et une
+    // qualité résiduelle ne doit pas lui rouvrir un accès.
+    const principal = res.patch.role || res.role;
+    const qualites = principal && principal !== VISITEUR ? rolesOf(existing).filter(estCumulable) : [];
+    setRoles(patched, principal ? [principal, ...qualites] : rolesOf(existing));
     // Un compte repris par l'annuaire garde son historique : seuls l'identité,
     // le rôle et le périmètre sont repris.
     const users2 = list.map((u) => (u.id === existing.id ? patched : u));

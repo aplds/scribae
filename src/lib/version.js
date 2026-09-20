@@ -22,7 +22,7 @@
 //     et il faut corriger `APP_VERSION`.
 // ============================================================================
 
-export const APP_VERSION = "1.0.1";
+export const APP_VERSION = "1.2.0";
 
 // Date de la version courante (ISO, AAAA-MM-JJ).
 export const APP_RELEASED = "2026-09-20";

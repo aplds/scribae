@@ -105,7 +105,7 @@ export function renderApiTab(root, ctx) {
     h("div", { class: "fr-row" },
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Journal des échanges" }),
       button("Vider", { variant: "tertiary", size: "sm", icon: "trash", onClick: () => { clearLog(); } })),
-    h("p", { class: "fr-small fr-muted", text: "Chaque ligne est un échange réel : la requête envoyée et la réponse reçue. Les appels en bleu vont au service ; ceux en violet partent vers le prestataire de signature." }),
+    h("p", { class: "fr-small fr-muted", text: "Chaque ligne est un échange réel : la requête envoyée et la réponse reçue. Les appels en bleu vont au service ; ceux en violet partent vers le prestataire de signature, ceux en vert vers l'API d'envoi du contrôle de légalité, et ceux en orange vers le service de numérotation." }),
   );
   const journalBox = h("div", { class: "api-journal" });
   journalCard.appendChild(journalBox);
@@ -205,6 +205,12 @@ function exemplePour(operationId) {
       const a = state.actes.find((x) => x.api?.signatureId && (x.original || x.statut === "signee" || x.statut === "publie"));
       return a ? { method: "GET", path: `/v1/signatures/${a.api.signatureId}/document-signe` } : null;
     }
+    case "lireTransmission": {
+      // Le service ne connaît que les transmissions qu'il a faites lui-même
+      // (celles constatées à la main vivent au dossier, pas chez lui).
+      const a = state.actes.find((x) => x.api?.acteId && x.execution?.transmission?.api && x.statut !== "brouillon");
+      return a ? { method: "GET", path: `/v1/actes/${a.api.acteId}/transmission` } : null;
+    }
     case "deposerActe": {
       const a = state.actes.find((x) => x.trameId) || state.actes[0];
       if (!a) return null;
@@ -257,14 +263,26 @@ function clip(v, depth = 0) {
   return v;
 }
 
+// Le journal mêle quatre origines : l'API du service, le prestataire de
+// signature, l'API d'envoi du contrôle de légalité, et le service de
+// numérotation (Administration › Numérotation).
+const SERVICES = {
+  api: { label: "API", kind: "api" },
+  prestataire: { label: "Prestataire", kind: "prestataire" },
+  "controle-legalite": { label: "Contrôle de légalité", kind: "legalite" },
+  numerotation: { label: "Numérotation", kind: "numerotation" },
+};
+const serviceOf = (e) => SERVICES[e.service] || { label: e.service || "Service", kind: "prestataire" };
+
 function entryEl(e) {
   const isApi = e.service === "api";
+  const svc = serviceOf(e);
   const url = isApi ? e.path : e.url;
   const status = e.status || 0;
   const tone = status === 0 ? "error" : status < 300 ? "success" : status < 400 ? "info" : "error";
-  return h("details", { class: "api-entry api-entry--" + (isApi ? "api" : "prestataire") },
+  return h("details", { class: "api-entry api-entry--" + svc.kind },
     h("summary", {},
-      h("span", { class: "api-svc", text: isApi ? "API" : "Prestataire" }),
+      h("span", { class: "api-svc", text: svc.label }),
       h("span", { class: "api-method api-method--" + String(e.method || "GET").toLowerCase(), text: e.method || "GET" }),
       h("code", { class: "fr-mono api-entry__url", text: url }),
       h("span", { class: "fr-badge fr-badge--" + tone, text: status ? String(status) : "échec" }),
@@ -307,15 +325,21 @@ export function curlOf(e) {
   const isApi = e.service === "api";
   const url = isApi ? BASE + e.path : e.url;
   const req = e.request || {};
+  // Deux formes d'appel sortant : celui qui DÉCRIT la requête entière (le
+  // service de numérotation : url, méthode, en-têtes, corps) et celui qui ne
+  // porte que le corps (le prestataire). On les distingue pour que la commande
+  // copiée soit exacte dans les deux cas.
+  const detaille = !isApi && req && typeof req === "object" && "body" in req && "headers" in req;
   const lines = [`curl -i -X ${e.method || "GET"} '${url}'`];
-  if (isApi) {
-    lines.push("  -H 'content-type: application/json'");
-    for (const [k, v] of Object.entries(req.headers || {})) {
+  if (isApi || detaille) {
+    const entetes = req.headers || {};
+    if (!Object.keys(entetes).some((k) => k.toLowerCase() === "content-type")) lines.push("  -H 'content-type: application/json'");
+    for (const [k, v] of Object.entries(entetes)) {
       if (k.toLowerCase() === "authorization") lines.push(`  -H 'Authorization: ${v}'`);
       else lines.push(`  -H '${k}: ${v}'`);
     }
   }
-  const body = isApi ? req.body : req;
+  const body = isApi ? req.body : (detaille ? req.body : req);
   if (body != null && body !== "") lines.push(`  --data-raw '${JSON.stringify(body)}'`);
   return lines.join(" \\\n");
 }

@@ -1,6 +1,7 @@
 import { formatDate } from "./util.js";
 import { amendmentMentions, amendmentMention } from "./amend.js";
 import { styleForDoc, paperPadding } from "./styles.js";
+import { qualitePersonne } from "./delegations.js";
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -14,9 +15,32 @@ export function personName(p) {
   return [p.civility, p.firstName, p.lastName].filter(Boolean).join(" ").trim();
 }
 
+// Le nom du signataire tel qu'il s'imprime : « Prénom Nom ». La civilité n'y
+// figure pas — la qualité, juste au-dessus, dit déjà de qui il s'agit
+// (« Le Maire, »), et la reprendre ferait doublon. `personName` (avec civilité)
+// reste la forme des listes, des menus et des sélecteurs.
+export function personSignatureName(p) {
+  if (!p) return "";
+  return [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
+}
+
+// La qualité qui s'imprime sous (ou plutôt au-dessus de) le nom : celle du
+// référentiel, accordée en genre. « label » n'est qu'un repère de liste
+// (« Adjoint / Adjointe au maire ») : il ne doit jamais s'imprimer.
 export function personRole(p, config) {
-  const id = p?.roles?.[0];
-  return (config.roles || []).find((r) => r.id === id)?.label || p?.fonction || "";
+  if (!p) return "";
+  return p.qualite || qualitePersonne(config, p);
+}
+
+// Les lignes de qualité d'une signature : une seule quand le signataire agit en
+// son nom, toute la chaîne de délégations sinon — « Le Maire, », « Par
+// délégation, l'adjoint au maire en charge de l'urbanisme, », « Par
+// subdélégation, le chef de bureau Urbanisme, ». Voir src/lib/delegations.js.
+export function personRoleLines(p, config) {
+  if (!p) return [];
+  if ((p.qualites || []).length) return p.qualites;
+  const q = personRole(p, config);
+  return q ? [q] : [];
 }
 
 // Marques de modification (ajout / suppression) utilisées par la version
@@ -183,7 +207,20 @@ export function renderNode(node, config, opts = {}) {
         // la charte peut ainsi l'italiser, la graisser ou la mettre en petites
         // capitales sans toucher au texte de la référence elle-même.
         li.appendChild(el("span", "doc-visas-label", [(config.vocab.visasLabel || "Vu"), " "].join("")));
-        li.appendChild(document.createTextNode(it.text));
+        // Une décision fondant la signature porte son LIEN : le visa devient un
+        // lien cliquable — sur le recueil en ligne, dans le HTML autonome, dans
+        // le Word et dans le PDF imprimé depuis le navigateur. Le texte, lui,
+        // reste celui de la référence : l'adresse ne s'imprime jamais en clair.
+        if (it.lien) {
+          const a = el("a", "doc-visas-link", [it.text]);
+          a.setAttribute("href", it.lien);
+          a.setAttribute("target", "_blank");
+          a.setAttribute("rel", "noopener noreferrer");
+          a.setAttribute("title", it.lien);
+          li.appendChild(a);
+        } else {
+          li.appendChild(document.createTextNode(it.text));
+        }
         ul.appendChild(li);
       }
       element = ul;
@@ -207,19 +244,28 @@ export function renderNode(node, config, opts = {}) {
       if (node.heading) head.appendChild(el("span", cls("article-heading"), " – " + node.heading));
       sec.appendChild(head);
       const abrogated = node.change?.action === "abrogate";
+      // Un article abrogé n'a plus de rédaction en vigueur : son intitulé reste
+      // (la numérotation s'y appuie) et la mention de l'acte qui l'a abrogé se
+      // lit dessous. Sa RÉDACTION n'est conservée que si l'appelant la demande
+      // (`opts.abrogations`) : elle est alors rangée dans un bloc que la page du
+      // recueil masque par défaut et révèle à la demande (« Afficher les
+      // articles abrogés ») — la version papier, elle, ne la montre jamais.
+      if (abrogated && !opts.tracking) sec.classList.add("doc-article--abroge");
       if (!opts.tracking) {
         // Sans le suivi des modifications : la mention de l'acte modificatif
         // sous l'intitulé, et le seul texte en vigueur.
         const mention = amendmentMention(node, opts.mentions, config);
         if (mention) sec.appendChild(el("p", "doc-amend-mention", mention));
       }
-      // Un article abrogé n'a plus de rédaction en vigueur : seule sa mention
-      // subsiste (l'intitulé continue d'exister, pour la numérotation).
-      if (!(abrogated && !opts.tracking)) {
+      const garderRedaction = abrogated && !opts.tracking && !!opts.abrogations;
+      if (!(abrogated && !opts.tracking) || garderRedaction) {
+        const corps = garderRedaction ? el("div", "doc-abroge-corps") : sec;
+        if (garderRedaction) corps.appendChild(el("p", "doc-abroge-label", "Rédaction abrogée"));
         for (const b of node.blocks || []) {
-          if (!opts.tracking && b.change?.kind === "del") continue;
-          sec.appendChild(renderNode(b, config, opts));
+          if (!opts.tracking && b.change?.kind === "del" && !garderRedaction) continue;
+          corps.appendChild(renderNode(b, config, opts));
         }
+        if (corps !== sec) sec.appendChild(corps);
       }
       element = sec;
       break;
@@ -260,10 +306,12 @@ export function renderNode(node, config, opts = {}) {
       box.appendChild(el("p", cls("signature-place"), `Fait à ${node.place}, le ${node.date}`));
       const right = el("div", cls("signature-block"));
       if (node.signataire) {
-        if (node.showFunction !== false && config.vocab) {
-          right.appendChild(el("p", cls("signature-role"), personRole(node.signataire, config)));
+        if (node.showFunction !== false) {
+          for (const ligne of personRoleLines(node.signataire, config)) {
+            right.appendChild(el("p", cls("signature-role"), ligne));
+          }
         }
-        right.appendChild(el("p", cls("signature-name"), personName(node.signataire)));
+        right.appendChild(el("p", cls("signature-name"), personSignatureName(node.signataire)));
       }
       box.appendChild(right);
       element = box;

@@ -68,7 +68,16 @@ const ICONS = {
   refresh: "M20 12a8 8 0 11-3-6M20 4v5h-5",
   palette: "M12 3a9 9 0 000 18h1.5a2 2 0 001.5-3.3 2 2 0 011.5-3.2H18a3 3 0 003-3A9 9 0 0012 3zM7.5 11.5h.01M10 7.5h.01M15 8h.01",
   sun: "M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9zM12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7",
+  search: "M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4",
+  left: "M15 5l-7 7 7 7",
+  right: "M9 5l7 7-7 7",
+  globe: "M12 3a9 9 0 100 18 9 9 0 000-18zM3.5 9h17M3.5 15h17M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z",
+  // Organigramme : une case en tête, trois en dessous. C'est l'écran des
+  // délégations de signature (voir src/ui/views/delegations.js).
+  org: "M9 3h6v4H9zM12 7v3M6 10h12M6 10v3M12 10v3M18 10v3M3.5 13h5v4h-5zM9.5 13h5v4h-5zM15.5 13h5v4h-5z",
   moon: "M20.5 14.6A8.5 8.5 0 019.4 3.5a7.6 7.6 0 1011.1 11.1z",
+  // Bulle de conversation : les assistants (Plume et Publia) et leur réglage.
+  bulle: "M4 4h16v11H10l-6 5V4z",
 };
 
 export function icon(name, size = 16) {
@@ -160,12 +169,24 @@ export function toast(message, kind = "info") {
   setTimeout(() => { t.classList.remove("is-visible"); setTimeout(() => t.remove(), 300); }, 3200);
 }
 
+// Une option du `select` : soit une option simple (`{value, label}`), soit un
+// groupe (`{label, options}`), rendu par un `<optgroup>` — c'est ainsi que la
+// liste des polices se lit par familles.
 export function select(options, value, onChange, opts = {}) {
   const s = h("select", { class: "fr-select", on: { change: (e) => onChange(e.target.value) } });
-  for (const o of options) {
+  const optionEl = (o) => {
     const opt = h("option", { value: o.value, text: o.label });
     if (String(o.value) === String(value ?? "")) opt.selected = true;
-    s.appendChild(opt);
+    return opt;
+  };
+  for (const o of options) {
+    if (Array.isArray(o.options)) {
+      const g = h("optgroup", { label: o.label });
+      for (const oo of o.options) g.appendChild(optionEl(oo));
+      s.appendChild(g);
+    } else {
+      s.appendChild(optionEl(o));
+    }
   }
   if (opts.multiple) s.multiple = true;
   return s;

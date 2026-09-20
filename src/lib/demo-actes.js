@@ -5,24 +5,29 @@
 // ce module-ci produit les ACTES qui peuplent le registre (voir SEED_VERSION
 // dans src/lib/store.js, qui décide quand le jeu est posé).
 //
-// Sept actes sont rédigés ET signés — ce ne sont pas des coquilles vides. Le
+// Dix actes sont rédigés ET signés — ce ne sont pas des coquilles vides. Le
 // document est compilé depuis sa trame, exporté en Akoma Ntoso, puis signé par
 // le même chemin de code que l'écran « Signature & publication » (ECDSA P-256,
 // certificat et horodatage de démonstration). L'original signé de ces actes se
 // vérifie donc exactement comme un acte signé à la main.
 //
-// Quatre actes sont en cours de rédaction : trois sont prêts à être envoyés en
-// signature, un est un brouillon incomplet. L'atelier de signature et la file
-// « à compléter » ont ainsi de quoi travailler dès le premier écran.
+// Cinq actes sont en cours de rédaction : deux sont prêts à être envoyés en
+// signature, deux sont revenus en brouillon (un incomplet, un rejeté en
+// révision), et un est en attente de révision. L'atelier de signature, la file
+// « à compléter » et l'écran « Révision » ont ainsi de quoi travailler dès le
+// premier écran.
 //
 // Deux actes illustrent les actes individuels NON PUBLIABLES (trame
-// `tpl-revalorisation`) : l'un est signé, l'autre prêt à signer. Ils sont
+// `tpl-revalorisation`) : l'un est signé, l'autre attend son réviseur. Ils sont
 // conservés au registre et ne passent jamais par la publication.
 //
 // Chaque acte porte enfin son DOSSIER :
 //   • le passage au parapheur (`parapheur`), avec les étapes déjà franchies et
 //     celles qui attendent encore — deux actes en cours de validation donnent
 //     de quoi travailler à l'écran « Parapheur » ;
+//   • la RÉVISION (`revision`) : l'acte contrôlé par un réviseur, selon qu'il
+//     attend, qu'il a été révisé (et corrigé) ou qu'il a été rejeté — le motif
+//     du rejet, lui, est communiqué au rédacteur ;
 //   • les formalités d'exécution (`execution`) : transmission au contrôle de
 //     légalité, publication, notification — dont une publication oubliée, pour
 //     que l'échéancier ait quelque chose à signaler ;
@@ -41,13 +46,15 @@ import { styleForDoc } from "./styles.js";
 import { buildSignedPackage, PRESTATAIRE } from "./signature.js";
 import { locateAddr } from "./redaction.js";
 import { circuitFor, demarrerValidation, appliquerDecision, empreinteTexte } from "./validation.js";
-import { enregistrerFormalite } from "./execution.js";
+import { demanderRevision, validerRevision, rejeterRevision } from "./revision.js";
+import { enregistrerFormalite, enregistrerRecours } from "./execution.js";
+import { certificatTransmission, CONTROLE_LEGALITE } from "./legalite.js";
 import { ajouterRevision } from "./revisions.js";
 
 // Suivi technique des circuits de signature (identique à celui que le service
 // attribue : ACT-0001 pour l'acte déposé, SIG-0001 pour le circuit, DOC-0001
 // pour le dossier ouvert chez le prestataire).
-const DOC = ["DOC-0001-8C41", "DOC-0002-A907", "DOC-0003-51DE", "DOC-0004-B2F6", "DOC-0005-77AC", "DOC-0006-E130", "DOC-0007-4F52"];
+const DOC = ["DOC-0001-8C41", "DOC-0002-A907", "DOC-0003-51DE", "DOC-0004-B2F6", "DOC-0005-77AC", "DOC-0006-E130", "DOC-0007-4F52", "DOC-0008-2E7B", "DOC-0009-3D1A", "DOC-0010-C4D9"];
 
 const SPECS = [
   {
@@ -69,7 +76,7 @@ const SPECS = [
       typeActe: "delegation",
     },
     execution: {
-      transmission: { at: "2026-01-22", ref: "2026-01-DELEG-0184", mode: "ctes", byName: "Sophie LECLERC" },
+      transmission: { at: "2026-01-22", ref: "2026-01-DELEG-0184", mode: "ctes", recuLe: "2026-01-22T09:14:00", byName: "Sophie LECLERC" },
       publication: { at: "2026-01-27", ref: "RAA n° 2026-02 du 27 janvier 2026", mode: "recueil", byName: "Sophie LECLERC" },
     },
   },
@@ -91,7 +98,7 @@ const SPECS = [
       service: "Accueil de la mairie",
     },
     execution: {
-      transmission: { at: "2026-02-04", ref: "2026-02-NOM-0041", mode: "ctes", byName: "Julien MERCIER" },
+      transmission: { at: "2026-02-04", ref: "2026-02-NOM-0041", mode: "ctes", recuLe: "2026-02-04T10:27:00", byName: "Julien MERCIER" },
       publication: { at: "2026-02-09", ref: "RAA n° 2026-03 du 9 février 2026", mode: "recueil", byName: "Julien MERCIER" },
     },
   },
@@ -119,7 +126,7 @@ const SPECS = [
       abroge: "",
     },
     execution: {
-      transmission: { at: "2026-02-12", ref: "2026-02-REG-0007", mode: "ctes", byName: "Isabelle DAVAL" },
+      transmission: { at: "2026-02-12", ref: "2026-02-REG-0007", mode: "ctes", recuLe: "2026-02-12T15:06:00", byName: "Isabelle DAVAL" },
       publication: { at: "2026-02-16", ref: "RAA n° 2026-04 du 16 février 2026", mode: "recueil", byName: "Isabelle DAVAL" },
     },
   },
@@ -147,7 +154,7 @@ const SPECS = [
     // Publiée ? Non : la transmission est partie, la publication a été oubliée.
     // C'est le cas que l'échéancier doit rattraper.
     execution: {
-      transmission: { at: "2026-03-09", ref: "2026-03-SUB-0112", mode: "ctes", byName: "Éric BERNARD" },
+      transmission: { at: "2026-03-09", ref: "2026-03-SUB-0112", mode: "ctes", recuLe: "2026-03-09T11:38:00", byName: "Éric BERNARD" },
     },
   },
   {
@@ -163,14 +170,14 @@ const SPECS = [
       objet: "attribution d'une subvention exceptionnelle à l'association Solidarité Valmont",
       dateSignature: "2026-03-12",
       dateEffet: "",
-      signataire: "p-faure",
+      signataire: "p-martin",
       association: "Solidarité Valmont",
       objetSubvention: "une action d'aide alimentaire et d'accompagnement des personnes isolées",
       montant: 1800,
       imputation: "6574 — subventions de fonctionnement (budget du CCAS)",
     },
     execution: {
-      transmission: { at: "2026-03-16", ref: "2026-03-CCAS-0028", mode: "ctes", byName: "Hélène MARTIN" },
+      transmission: { at: "2026-03-16", ref: "2026-03-CCAS-0028", mode: "ctes", recuLe: "2026-03-16T08:52:00", byName: "Hélène MARTIN" },
       publication: { at: "2026-03-20", ref: "RAA n° 2026-06 du 20 mars 2026", mode: "recueil", byName: "Hélène MARTIN" },
     },
   },
@@ -284,7 +291,7 @@ const SPECS = [
     // Acte individuel : transmis le jour même, mais pas encore notifié à
     // l'intéressée — et sans notification, il ne lui est pas opposable.
     execution: {
-      transmission: { at: "2026-09-18", ref: "2026-09-RH-0155", mode: "ctes", byName: "Julien MERCIER" },
+      transmission: { at: "2026-09-18", ref: "2026-09-RH-0155", mode: "ctes", recuLe: "2026-09-18T16:03:00", byName: "Julien MERCIER" },
     },
   },
   // Même trame, acte encore en rédaction : prêt à signer. Le circuit de
@@ -305,10 +312,145 @@ const SPECS = [
       partVariable: 1800,
       motif: "",
     },
-    // Validé par le parapheur (un seul bon pour accord pour un acte individuel) :
-    // il ne reste plus qu'à le signer, puis à le notifier.
+    // Validé par le parapheur (un seul bon pour accord pour un acte individuel),
+    // puis ENVOYÉ AU RÉVISEUR : le contrôle du service des affaires juridiques
+    // attend. C'est l'acte que l'écran « Révision » met en tête de sa file.
     parapheur: [{}],
+    revision: "attente",
     revisions: 1,
+  },
+  // Le cas de la chaîne de délégations : un permis de construire signé par le
+  // chef du bureau Urbanisme, qui tient sa compétence du maire par l'adjoint à
+  // l'urbanisme — et par subdélégation de celui-ci. Le document porte les trois
+  // lignes de qualité, et seul le nom du signataire (Karim BENALI). Voir
+  // src/lib/delegations.js et l'écran « Délégations ».
+  {
+    id: "acte-demo-412",
+    trameId: "tpl-permis-construire",
+    signed: true,
+    at: "2026-09-17T11:30:00",
+    createdBy: "u-benali", createdByName: "Karim BENALI",
+    api: { acteId: "ACT-0008", signatureId: "SIG-0008", docId: DOC[7], deposeLe: "2026-09-17T11:04:00" },
+    values: {
+      numero: "2026-412-VSL",
+      objet: "permis de construire une maison individuelle",
+      dateSignature: "2026-09-17",
+      dateEffet: "",
+      signataire: "p-benali",
+      demandeur: "p-leblanc",
+      adresseTerrain: "12 rue des Tilleuls",
+      parcelle: "section AB n° 214",
+      natureTravaux: "la construction d'une maison individuelle de 138 m²",
+      surfacePlancher: 138,
+      prescriptions: "",
+    },
+    execution: {
+      transmission: { at: "2026-09-18", ref: "2026-09-URB-0317", mode: "ctes", recuLe: "2026-09-18T09:41:00", byName: "Karim BENALI" },
+      publication: { at: "2026-09-22", ref: "RAA n° 2026-19 du 22 septembre 2026", mode: "recueil", byName: "Karim BENALI" },
+    },
+  },
+  // Le cas de l'AUTORITÉ AUTONOME : une décision de l'office public de
+  // l'habitat, signée par son directeur général sur délégation du président de
+  // son conseil d'administration. La chaîne est indépendante de celle de la
+  // commune : elle ne remonte pas au maire, mais au président de l'office. Voir
+  // src/lib/delegations.js et l'écran « Délégations ».
+  {
+    id: "acte-demo-413",
+    trameId: "tpl-marche-oph",
+    entity: "oph",
+    signed: true,
+    at: "2026-09-18T15:10:00",
+    createdBy: "u-marchand", createdByName: "Nadia MARCHAND",
+    api: { acteId: "ACT-0009", signatureId: "SIG-0009", docId: DOC[8], deposeLe: "2026-09-18T14:47:00" },
+    values: {
+      numero: "2026-413-OPH",
+      objet: "passation du marché de réhabilitation des façades de la résidence des Tilleuls",
+      dateSignature: "2026-09-18",
+      dateEffet: "",
+      signataire: "p-marchand",
+      objetMarche: "la réhabilitation des façades de la résidence des Tilleuls",
+      titulaire: "SARL Bâtir Ensemble",
+      montant: 186500,
+      procedure: "appel-offres-ouvert",
+      duree: "huit mois à compter de l'ordre de service",
+    },
+    // Révisé par Isabelle DAVAL, directrice des affaires juridiques : sa
+    // COMPÉTENCE PROPRE (le compte) porte sur les actes d'engagement financier —
+    // marchés et subventions. Elle tient par ailleurs la qualité du service des
+    // affaires générales, qui contrôle l'ensemble des actes : la compétence d'un
+    // compte est la RÉUNION de la sienne et de celles de ses services (voir
+    // src/lib/revision.js). Elle a corrigé le texte avant de valider (`corrige`) :
+    // la trace de la correction reste au dossier de l'acte.
+    revision: { statut: "valide", par: "u-daval", parName: "Isabelle DAVAL", corrige: true },
+    execution: {
+      transmission: { at: "2026-09-21", ref: "2026-09-OPH-0042", mode: "ctes", recuLe: "2026-09-21T14:19:00", byName: "Nadia MARCHAND" },
+    },
+  },
+  // Le cas du RECOURS : un permis de construire délivré au printemps, dont le
+  // délai de recours est échu — mais qu'un voisin a attaqué devant le tribunal
+  // administratif dans ce délai. L'acte n'est donc pas « définitif » : il est
+  // contesté, et aucune attestation de non-recours ne peut être délivrée (voir
+  // `recours` dans src/lib/execution.js).
+  {
+    id: "acte-demo-414",
+    trameId: "tpl-permis-construire",
+    signed: true,
+    at: "2026-04-08T10:35:00",
+    createdBy: "u-benali", createdByName: "Karim BENALI",
+    api: { acteId: "ACT-0010", signatureId: "SIG-0010", docId: DOC[9], deposeLe: "2026-04-08T10:02:00" },
+    values: {
+      numero: "2026-414-VSL",
+      objet: "permis de construire un garage et une extension pour une maison d'habitation",
+      dateSignature: "2026-04-08",
+      dateEffet: "",
+      signataire: "p-benali",
+      demandeur: "p-daval",
+      adresseTerrain: "8 chemin des Vignes",
+      parcelle: "section AC n° 417",
+      natureTravaux: "la construction d'un garage accolé et d'une extension de 42 m²",
+      surfacePlancher: 62,
+      prescriptions: "L'accès au terrain se fera par le chemin des Vignes, dans les conditions définies par le service de la voirie.",
+    },
+    execution: {
+      transmission: { at: "2026-04-09", ref: "2026-04-URB-0112", mode: "ctes", recuLe: "2026-04-09T11:14:00", byName: "Karim BENALI" },
+      publication: { at: "2026-04-13", ref: "RAA n° 2026-08 du 13 avril 2026", mode: "recueil", byName: "Karim BENALI" },
+    },
+    recours: {
+      introduitLe: "2026-05-20",
+      type: "contentieux",
+      demandeur: "M. et Mme VASSEUR, voisins du projet (par Me Lorrain, avocat)",
+      ref: "requête n° 2601894 — greffe du tribunal administratif d'Orléans",
+      note: "Recours en annulation pour erreur d'appréciation et atteinte aux conditions de desserte. Mémoire en défense à produire pour le 15 novembre 2026.",
+      by: "u-daval", byName: "Isabelle DAVAL",
+    },
+  },
+  // Le cas du REJET EN RÉVISION : l'acte a été soumis au réviseur, qui l'a
+  // REJETÉ en motivant son refus. L'acte est revenu en BROUILLON chez son
+  // rédacteur, avec le motif — c'est ce que le rédacteur lit sur sa fiche.
+  // L'écran « Révision » garde la trace du rejet.
+  {
+    id: "acte-demo-415",
+    trameId: "tpl-subvention",
+    at: "2026-09-17T11:15:00",
+    createdBy: "u-leblanc", createdByName: "Sarah LEBLANC",
+    values: {
+      numero: "2026-415-VSL",
+      objet: "attribution d'une subvention de fonctionnement à l'association Valmont Randonnée",
+      dateSignature: "2026-09-17",
+      dateEffet: "",
+      signataire: "p-faure",
+      association: "Valmont Randonnée",
+      objetSubvention: "des sorties pédestres mensuelles ouvertes à tous",
+      montant: 2200,
+      imputation: "6574 — subventions de fonctionnement aux associations",
+    },
+    // Le parapheur est achevé ; le rejet vient de la révision.
+    parapheur: [{}, {}],
+    revision: {
+      statut: "rejete", par: "u-roussel", parName: "Amandine ROUSSEL",
+      motif: "Le montant annoncé dans l'article 1er ne correspond pas à la délibération du 9 septembre (2 500 € et non 2 200 €), et la convention n'est pas visée. À corriger avant nouvel envoi.",
+    },
+    revisions: 2,
   },
 ];
 
@@ -339,6 +481,13 @@ function entiteIdDe(config, code) {
   const found = (config.entities || []).find((e) => String(e.code).toUpperCase() === code);
   return found?.id || (config.entities || [])[0]?.id || "";
 }
+
+// L'entité d'un acte de démonstration : la commune par défaut, ou celle que
+// nomme `spec.entity` (« ccas », « oph »…). C'est ce qui permet de montrer des
+// actes pris par une organisation AUTONOME, dans son propre nom.
+const ENTITE_DE_SPEC = { ccas: "CCAS", oph: "OPH" };
+const entiteIdDuSpec = (config, spec) =>
+  entiteIdDe(config, ENTITE_DE_SPEC[spec.entity] || (spec.entity ? String(spec.entity).toUpperCase() : "VSL"));
 
 // ------------------------------------------------------- dossier de l'acte
 // Les acteurs du parapheur, par rôle, tels que la démonstration les fait
@@ -376,13 +525,35 @@ function poserParapheur(acte, config, trame, spec) {
 }
 
 // Rejoue les formalités d'exécution constatées (transmission, publication,
-// notification).
-function poserFormalites(acte, spec) {
+// notification). La transmission de la démonstration a été faite par l'API
+// d'envoi du contrôle de légalité : elle porte donc son certificat, construit
+// exactement comme celui du service (mêmes mentions, même sceau). L'empreinte
+// est celle du document signé — c'est pourquoi les formalités sont posées APRÈS
+// la signature, dans seedActes.
+async function poserFormalites(acte, spec) {
   const e = spec.execution;
   if (!e) return;
   for (const id of ["transmission", "publication", "notification"]) {
-    if (e[id]) enregistrerFormalite(acte, id, e[id]);
+    if (!e[id]) continue;
+    const f = { ...e[id] };
+    if (id === "transmission" && f.recuLe && !f.certificat) {
+      f.certificat = await certificatTransmission({
+        reference: f.ref, recuLe: f.recuLe,
+        destinataire: CONTROLE_LEGALITE.destinataire,
+        empreinte: acte.original?.document?.sha256 || "",
+      });
+      if (acte.original) acte.original.transmission = f.certificat;
+    }
+    enregistrerFormalite(acte, id, f);
   }
+}
+
+// Rejoue la constatation d'un recours : l'administration a reçu la requête, et
+// elle en note la date d'introduction. C'est ce fait — et non une échéance — qui
+// ferme le délai de recours contentieux (voir src/lib/execution.js).
+function poserRecours(acte, spec) {
+  if (!spec.recours) return;
+  enregistrerRecours(acte, spec.recours);
 }
 
 // Reconstitue l'historique des brouillons : les états antérieurs de l'acte, du
@@ -404,6 +575,34 @@ function poserRevisions(acte, spec) {
   }
 }
 
+// Rejoue la RÉVISION d'un acte (voir src/lib/revision.js). `spec.revision` décrit
+// le sort de l'acte devant le réviseur :
+//   undefined          aucune révision (aucun réviseur compétent à l'époque)
+//   "attente"          soumis, personne n'a encore statué
+//   { statut: "valide"|"rejete", par, parName, motif, corrige }
+// L'empreinte est posée avec les fonctions du module : l'acte de démonstration
+// est donc exactement dans l'état où le laisserait le geste réel.
+function poserRevision(acte, config, spec) {
+  if (!spec.revision) return;
+  const r = spec.revision === "attente" ? {} : spec.revision;
+  const auteur = nomme(spec.createdBy, spec.createdByName);
+  const reviseur = r.par ? nomme(r.par, r.parName) : nomme("u-roussel", "Amandine ROUSSEL");
+  const base = Date.parse(spec.at || "") || Date.now();
+  demanderRevision(acte, auteur, { reviseurs: [] });
+  acte.revision.demandeeLe = new Date(base - 3600000).toISOString();
+  if (!r.statut) return;
+  // Le réviseur a pu corriger l'acte avant de statuer : l'empreinte soumise est
+  // alors celle d'avant sa correction, et `revision.corrige` devient vrai.
+  if (r.corrige) acte.revision.empreinte = "0000000000000000";
+  if (r.statut === "valide") validerRevision(acte, reviseur);
+  else rejeterRevision(acte, reviseur, r.motif || "");
+  const quand = new Date(base + 5400000).toISOString();
+  if (acte.revision.valideLe) acte.revision.valideLe = quand;
+  if (acte.revision.rejeteLe) acte.revision.rejeteLe = quand;
+  // Le rejet renvoie l'acte en brouillon chez son rédacteur.
+  if (r.statut === "rejete") acte.statut = "brouillon";
+}
+
 export async function seedActes(config, trames) {
   const trameOf = (id) => (trames || []).find((t) => t.id === id);
   const actes = [];
@@ -411,7 +610,7 @@ export async function seedActes(config, trames) {
     const trame = trameOf(spec.trameId);
     if (!trame) continue;
     const values = {
-      __entityId: spec.entity === "ccas" ? entiteIdDe(config, "CCAS") : entiteIdDe(config, "VSL"),
+      __entityId: entiteIdDuSpec(config, spec),
       __overrides: spec.overrides || {},
       ...spec.values,
     };
@@ -444,6 +643,7 @@ export async function seedActes(config, trames) {
     // l'ordre réel), formalités APRÈS (elles suivent la signature).
     poserParapheur(acte, config, trame, spec);
     poserRevisions(acte, spec);
+    poserRevision(acte, config, spec);
     if (spec.signed) {
       try {
         const auteur = auteurOf(doc);
@@ -468,7 +668,8 @@ export async function seedActes(config, trames) {
         acte.statut = "pret";
       }
     }
-    poserFormalites(acte, spec);
+    await poserFormalites(acte, spec);
+    poserRecours(acte, spec);
     actes.push(acte);
   }
 

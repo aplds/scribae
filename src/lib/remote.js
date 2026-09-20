@@ -70,10 +70,11 @@ function pushEntry(entry) {
   return entry;
 }
 
-// Appels sortants émis par la passerelle vers le prestataire de signature :
-// ils n'ont pas le même destinataire que l'API, mais ils partagent le journal.
-export function recordExternal({ method, url, request, response, status: st, ms, flow, label }) {
-  return pushEntry({ service: "prestataire", method, url, request, response, status: st, ms, flow, label });
+// Appels sortants émis par la passerelle vers un service tiers (prestataire de
+// signature, contrôle de légalité) : ils n'ont pas le même destinataire que
+// l'API, mais ils partagent le journal.
+export function recordExternal({ service = "prestataire", method, url, request, response, status: st, ms, flow, label }) {
+  return pushEntry({ service, method, url, request, response, status: st, ms, flow, label });
 }
 
 // ------------------------------------------------------------------ connexion

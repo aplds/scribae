@@ -1,16 +1,25 @@
-import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour } from "../state.js";
+import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, parapheurActif, regenerateDemoActes } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
-import { download, pickFile, uid, formatDate } from "../../lib/util.js";
-import { textField, selectField, choiceField, confirmDialog, promptDialog, sectionHeader, helpLink } from "../components.js";
+import { download, pickFile, uid, formatDate, todayIso } from "../../lib/util.js";
+import { textField, selectField, choiceField, fontField, confirmDialog, promptDialog, sectionHeader, helpLink } from "../components.js";
 import { clearAll, saveConfig } from "../../lib/store.js";
 import * as db from "../../lib/db/index.js";
 import { seedConfig, seedTrames } from "../../lib/seed.js";
 import { amendVocab } from "../../lib/amend.js";
+import { abrogationVocab } from "../../lib/abrogations.js";
 import { newService, newBureau } from "../../lib/scope.js";
 import { newCircuit, newStep, STEP_ROLES, STEP_KINDS } from "../../lib/validation.js";
+import { newCompetence, competenceLabel } from "../../lib/revision.js";
 import { DELAIS_DEFAUT } from "../../lib/execution.js";
+import { CONTROLE_LEGALITE } from "../../lib/legalite.js";
+import { publicationSettings } from "../../lib/eli.js";
+import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
 import { annuairePanel } from "../oidc.js";
+import {
+  numberingSettings, demanderNumero, relaisDisponible,
+  SOURCES, TRANSPORTS, METHODES, JETONS, EXTERNE_DEFAUT, GABARIT_GRIST,
+} from "../../lib/numbering.js";
 
 const TABS = [
   { id: "identite", label: "Identité" },
@@ -26,6 +35,9 @@ const TABS = [
   { id: "acttypes", label: "Types d'actes" },
   { id: "circuits", label: "Circuits de validation" },
   { id: "delais", label: "Exécution & délais" },
+  { id: "publication", label: "Publication" },
+  { id: "assistants", label: "Assistants" },
+  { id: "experimental", label: "Expérimentale" },
   { id: "annuaire", label: "Annuaire (OIDC)" },
   { id: "base", label: "Base de données" },
   { id: "journal", label: "Journal d'audit" },
@@ -38,7 +50,7 @@ export function renderReferentiel(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Référentiel" }),
+      h("h1", { class: "page-head__title", text: "Administration" }),
       h("p", { class: "page-head__sub", text: "Tout ce qui est configurable : marques, entités, services et bureaux, personnes, rôles, références juridiques, mentions, numérotation, vocabulaire. Rien de tout cela n'est codé dans l'application." }),
     ),
     h("div", { class: "page-head__actions" }, helpLink("administrateurs", "Aide")),
@@ -46,6 +58,9 @@ export function renderReferentiel(root) {
 
   const tabs = h("div", { class: "fr-tabs" });
   for (const t of TABS) {
+    // Le parapheur est une fonction expérimentale : éteint, son onglet de
+    // réglage n'est pas proposé (voir Administration › Expérimentale).
+    if (t.id === "circuits" && !parapheurActif()) continue;
     tabs.appendChild(h("button", {
       class: "fr-tab" + (ui.refTab === t.id ? " fr-tab--active" : ""),
       text: t.label,
@@ -93,7 +108,7 @@ export function renderReferentiel(root) {
         );
       })(),
       textField({ label: "Police d'interface", value: c.brand.uiFont || "", onChange: (v) => { c.brand.uiFont = v; save(); } }),
-      textField({ label: "Police des documents", value: c.brand.documentFont || "", help: "Valeur de repli. La présentation des actes (police, logo, en-tête, filets…) se règle par feuille de style.", onChange: (v) => { c.brand.documentFont = v; save(); } }),
+      fontField({ label: "Police des documents", value: c.brand.documentFont || "", help: "Valeur de repli, quand une feuille de style ne dit rien — et police du papier des écrits qui ne sont pas des actes (états, attestations). La présentation des actes se règle par feuille de style.", onChange: (v) => { c.brand.documentFont = v; save(); } }),
       can("trames.styles") ? h("p", { class: "fr-hint", style: { margin: "2px 0 0" } },
         "La charte graphique des actes — polices, logo, en-tête, diviseurs — se règle dans ",
         button("Feuilles de style", { variant: "tertiary", size: "sm", onClick: () => navigate("styles") }),
@@ -108,7 +123,7 @@ export function renderReferentiel(root) {
       textField({ label: "Adresse électronique", value: c.brand.supportEmail || "", onChange: (v) => { c.brand.supportEmail = v; save(); } }),
     ));
     body.appendChild(card("Mention de démonstration",
-      "Tant qu'elle est affichée, un bandeau en tête de l'application rappelle que cette installation n'est pas en production : données fictives, signature électronique simulée. Coupez-la au moment de la mise en service réelle — le bandeau disparaît immédiatement.",
+      "Tant qu'elle est affichée, un bandeau en tête de l'application — et sur le recueil public — rappelle que cette installation n'est pas en production : données fictives, signature électronique simulée. Coupez-la au moment de la mise en service réelle : le bandeau disparaît immédiatement, partout.",
       choiceField({
         label: "Afficher le bandeau « Démonstration »",
         value: c.brand.demo !== false,
@@ -179,17 +194,33 @@ export function renderReferentiel(root) {
         amField("mentionInsert", "Mention d'un article inséré"),
         amField("mentionThen", "Liaison entre deux modifications successives"),
       ),
+      h("div", { class: "fr-grid fr-grid--2" },
+        amField("renumberNotice", "Avertissement de renumérotation", "S'ajoute à l'avertissement de la version consolidée quand les articles ont été renumérotés d'un bout à l'autre."),
+        amField("abrogationNotice", "Avertissement d'un acte abrogé dans son ensemble", "Affiché quand TOUTES les dispositions de l'acte ont été abrogées."),
+      ),
+    ));
+
+    // Tournures de l'abrogation PRÉVUE par un acte : la clause de fin de
+    // dispositif par laquelle un acte abroge un autre acte, ou l'un de ses
+    // articles. Elle prend effet à l'ENTRÉE EN VIGUEUR de l'acte qui la porte
+    // (voir src/lib/abrogations.js et l'onglet « Abrogations » de la rédaction).
+    c.vocab.abrogation = { ...abrogationVocab(c) };
+    const ab = c.vocab.abrogation;
+    const abField = (key, label, help) => textField({
+      label, value: ab[key], help,
+      onChange: (v) => { ab[key] = v; save(); },
+    });
+    body.appendChild(card("Abrogation — tournures",
+      "La clause par laquelle un acte prévoit l'abrogation d'un autre acte, ou d'un article d'un autre acte. Jetons : {target} (l'acte visé, dans une phrase) {targetCap} (le même, en tête de phrase) {abroge} (« abrogé » / « abrogée », accordé) {article} {articleLabel} {self} (« le présent arrêté ») {selfDe} (« du présent arrêté ») {designation} {designationLower} {designationThe}.",
+      abField("heading", "Intitulé de l'article d'abrogation"),
+      abField("acte", "Abrogation d'un acte entier"),
+      abField("article", "Abrogation d'un article"),
+      abField("texte", "Acte visé qui n'est pas dans l'application"),
     ));
   }
 
   if (ui.refTab === "numerotation") {
-    body.appendChild(card("Numérotation et identifiants", "Le motif compose le numéro d'acte ; le motif ELI compose l'identifiant persistant et les URI de publication.",
-      textField({ label: "Motif du numéro", value: c.numbering.pattern, help: "Jetons : {year} {seq} {entityCode}", onChange: (v) => { c.numbering.pattern = v; save(); } }),
-      textField({ label: "Prochain numéro de séquence", value: c.numbering.seq, type: "number", onChange: (v) => { c.numbering.seq = Number(v) || 0; save(); } }),
-      textField({ label: "Longueur de la séquence", value: c.numbering.pad, type: "number", onChange: (v) => { c.numbering.pad = Number(v) || 3; save(); } }),
-      textField({ label: "Année de référence", value: c.numbering.year, type: "number", onChange: (v) => { c.numbering.year = Number(v) || new Date().getFullYear(); save(); } }),
-      textField({ label: "Motif ELI", value: c.numbering.eliPattern, help: "Jetons : {baseUri} {actTypeId} {year} {seq} {entityCode}", onChange: (v) => { c.numbering.eliPattern = v; save(); } }),
-    ));
+    body.appendChild(numerotationPanel(save, redraw));
   }
 
   if (ui.refTab === "entites") {
@@ -217,14 +248,28 @@ export function renderReferentiel(root) {
 
   if (ui.refTab === "personnes") {
     body.appendChild(listPanel({
-      title: "Personnes", help: "Signataires et bénéficiaires d'actes. Chaque personne peut porter des références (acte de nomination, contrat…).",
-      items: c.people, factory: () => ({ id: uid("p"), civility: "Madame", firstName: "", lastName: "", entityId: c.entities[0]?.id || "", roles: [] }),
+      title: "Personnes", help: "Signataires et bénéficiaires d'actes. Chaque personne peut porter des références (acte de nomination, contrat…) et la décision qui fonde son pouvoir de signer, visée automatiquement sur les actes où elle est l'autorité.",
+      items: c.people, factory: () => ({ id: uid("p"), civility: "Madame", firstName: "", lastName: "", entityId: c.entities[0]?.id || "", roles: [], accord: "", fondementRefId: "" }),
       fields: () => [
         { key: "civility", label: "Civilité", type: "select", options: ["Madame", "Monsieur", "Monsieur le", "Madame la"] },
         { key: "firstName", label: "Prénom", type: "text" },
         { key: "lastName", label: "Nom", type: "text" },
         { key: "entityId", label: "Entité", type: "select", options: c.entities.map((e) => ({ value: e.id, label: e.name })), placeholder: "—" },
         { key: "roles", label: "Rôles", type: "multichoice", options: c.roles.map((r) => ({ value: r.id, label: r.label })) },
+        {
+          key: "accord", label: "Accord des qualités", type: "select", placeholder: "",
+          help: "Déduit de la civilité. À forcer au cas par cas : certaines femmes maire tiennent à « le maire » plutôt qu'à « la maire ».",
+          options: [
+            { value: "", label: "Automatique (d'après la civilité)" },
+            { value: "m", label: "Masculin — « le maire »" },
+            { value: "f", label: "Féminin — « la maire »" },
+          ],
+        },
+        {
+          key: "fondementRefId", label: "Décision fondant son pouvoir de signer", type: "select",
+          placeholder: "— Aucune —", options: refsDecision(c),
+          help: "La décision par laquelle cette personne tient sa compétence — la délibération qui donne délégation au maire, une élection… Elle est visée sur les actes qu'elle signe, en tête des décisions de délégation, et l'acte publié porte son lien si la référence a une adresse (Administration › Références).",
+        },
       ],
       save,
     }));
@@ -232,9 +277,13 @@ export function renderReferentiel(root) {
 
   if (ui.refTab === "roles") {
     body.appendChild(listPanel({
-      title: "Rôles", help: "Fonctions utilisables pour qualifier une personne (apparaît sous la signature).",
-      items: c.roles, factory: () => ({ id: uid("role"), label: "Nouveau rôle" }),
-      fields: () => [{ key: "label", label: "Libellé", type: "text" }],
+      title: "Rôles", help: "Fonctions utilisables pour qualifier une personne. Chaque rôle porte ses deux formes, masculine et féminine : c'est d'elles que vient l'accord des qualités dans les actes (« Le maire » / « La maire »). Le libellé, lui, n'est qu'un repère de liste — il ne s'imprime jamais.",
+      items: c.roles, factory: () => ({ id: uid("role"), label: "Nouveau rôle", m: "", f: "" }),
+      fields: () => [
+        { key: "label", label: "Libellé (repère de liste)", type: "text" },
+        { key: "m", label: "Qualité au masculin", type: "text", help: "Sans article : « maire », « directeur général des services », « adjoint au maire »." },
+        { key: "f", label: "Qualité au féminin", type: "text", help: "Sans article : « maire », « directrice générale des services », « adjointe au maire »." },
+      ],
       save,
     }));
   }
@@ -249,7 +298,7 @@ export function renderReferentiel(root) {
         { key: "entityId", label: "Entité rattachée", type: "select", options: c.entities.map((e) => ({ value: e.id, label: e.name })), placeholder: "— toutes —" },
         { key: "scope", label: "Portée", type: "select", options: [{ value: "all", label: "Générale" }, { value: "entity", label: "Par entité" }] },
         { key: "active", label: "En vigueur", type: "boolean" },
-        { key: "source", label: "URL de la source", type: "text" },
+        { key: "source", label: "Adresse (lien vers le texte)", type: "text", help: "L'adresse où le texte se lit. Les visas qui citent cette référence — et les décisions de délégation qui la désignent — la portent sur l'acte publié : le lecteur clique, sur le web comme en PDF. Facultative pour une citation sans adresse." },
       ],
       save,
     }));
@@ -270,9 +319,12 @@ export function renderReferentiel(root) {
 
   if (ui.refTab === "familles") {
     body.appendChild(listPanel({
-      title: "Familles d'actes", help: "Classement des trames (nominations, délégations, tarifs…).",
-      items: c.families, factory: () => ({ id: uid("fam"), label: "Nouvelle famille" }),
-      fields: () => [{ key: "label", label: "Libellé", type: "text" }],
+      title: "Familles d'actes", help: "Classement des trames (nominations, délégations, tarifs…). Chaque famille est un THÈME du recueil public : c'est par elle que les lecteurs parcourent les actes publiés. La présentation s'affiche sous le libellé, sur la page d'accueil du recueil.",
+      items: c.families, factory: () => ({ id: uid("fam"), label: "Nouvelle famille", description: "" }),
+      fields: () => [
+        { key: "label", label: "Libellé", type: "text" },
+        { key: "description", label: "Présentation du thème", type: "textarea", rows: 2, help: "Une phrase qui dit ce que regroupe ce thème, à l'attention du public. Facultative." },
+      ],
       save,
     }));
   }
@@ -304,6 +356,18 @@ export function renderReferentiel(root) {
 
   if (ui.refTab === "delais") {
     body.appendChild(delaisPanel(save, redraw));
+  }
+
+  if (ui.refTab === "publication") {
+    body.appendChild(publicationPanel(save, redraw));
+  }
+
+  if (ui.refTab === "assistants") {
+    body.appendChild(assistantsPanel(save, redraw));
+  }
+
+  if (ui.refTab === "experimental") {
+    body.appendChild(experimentalPanel(save, redraw));
   }
 
   if (ui.refTab === "journal") {
@@ -551,9 +615,67 @@ function servicesPanel(save, redraw) {
     box.appendChild(h("div", { class: "fr-row", style: { marginTop: "6px" } },
       button("Ajouter un bureau", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { rec.bureaux.push(newBureau()); save(); redraw(); } }),
     ));
+
+    box.appendChild(reviseurBlock(rec, save, redraw));
     listEl.appendChild(box);
   });
   return wrap;
+}
+
+// QUALITÉ DE RÉVISEUR portée par un service : ses agents contrôlent les actes
+// avant leur signature — c'est ainsi qu'un service des affaires juridiques
+// révise les actes des autres services. Une compétence sans filtre vaut « tous
+// les services, tous les actes » ; restreindre la qualité à certains bureaux
+// n'engage que les agents de ces bureaux. Voir src/lib/revision.js.
+//
+// Ce bloc n'ÉCRIT `rec.reviseur` que si l'administrateur s'en sert : un service
+// sans qualité de réviseur ne doit pas se retrouver affublé d'un réglage vide
+// dans le référentiel — et donc dans son export JSON.
+function reviseurBlock(rec, save, redraw) {
+  const c = state.config;
+  const actif = rec.reviseur?.actif === true;
+  const ecrire = (patch) => {
+    if (!rec.reviseur) rec.reviseur = newCompetence({ actif: true, bureaux: [] });
+    Object.assign(rec.reviseur, patch);
+    save(); redraw();
+  };
+
+  const box = h("div", { class: "service-reviseur" },
+    h("label", { class: "fr-check" },
+      h("input", { type: "checkbox", checked: actif, on: { change: (e) => {
+        if (e.target.checked) { ecrire({ actif: true }); return; }
+        if (rec.reviseur) { rec.reviseur.actif = false; save(); }
+        redraw();
+      } } }),
+      h("span", {}, h("strong", { text: "Qualité de réviseur" }),
+        h("span", { class: "fr-small fr-muted", text: " — les agents de ce service contrôlent les actes avant leur signature." }))),
+  );
+  if (!actif) return box;
+
+  const cur = rec.reviseur;
+  box.appendChild(h("p", { class: "fr-hint", text: "Ne rien cocher vaut « tous les services, tous les actes » : c'est le cas d'un service qui contrôle l'ensemble des actes de la collectivité. Ce que ce service révise : " + competenceLabel(c, cur) + "." }));
+  if (rec.bureaux.length) box.appendChild(choiceField({
+    label: "Bureaux concernés", value: cur.bureaux, multi: true,
+    help: "Vide : tout le service. Sinon, seuls les agents de ces bureaux tiennent la qualité.",
+    options: rec.bureaux.map((b) => ({ value: b.id, label: b.name || b.id })),
+    onChange: (v) => ecrire({ bureaux: v }),
+  }));
+  const champ = (label, value, options, help, apply) => options.length
+    ? choiceField({ label, value, multi: true, help, options, onChange: apply })
+    : null;
+  box.appendChild(champ("Services dont les actes relèvent de ce réviseur", cur.services,
+    (c.services || []).map((s) => ({ value: s.id, label: (s.code ? s.code + " — " : "") + s.name })),
+    "Vide : tous les services.", (v) => ecrire({ services: v })));
+  box.appendChild(champ("Familles de trames", cur.familyIds,
+    (c.families || []).map((f) => ({ value: f.id, label: f.label })),
+    "Vide : toutes.", (v) => ecrire({ familyIds: v })));
+  box.appendChild(champ("Types d'actes", cur.actTypes,
+    (c.actTypes || []).map((t) => ({ value: t.id, label: t.label })),
+    "Vide : tous.", (v) => ecrire({ actTypes: v })));
+  box.appendChild(champ("Entités signataires", cur.entityIds,
+    (c.entities || []).map((e) => ({ value: e.id, label: (e.code ? e.code + " — " : "") + e.name })),
+    "Vide : toutes.", (v) => ecrire({ entityIds: v })));
+  return box;
 }
 
 async function removeService(rec, save, redraw) {
@@ -630,6 +752,13 @@ function listPanel({ title, help, items, fields, factory, save }) {
 }
 
 const normOpt = (o) => (typeof o === "string" ? { value: o, label: o } : o);
+
+// Les références qui peuvent fonder un pouvoir de signer : des décisions et
+// autres actes, pas des codes ni des règlements — on ne tient pas un pouvoir de
+// signer du code général des collectivités territoriales.
+const refsDecision = (c) => (c.refs || [])
+  .filter((r) => r.active !== false && !["code", "reglement", "instruction"].includes(r.kind))
+  .map((r) => ({ value: r.id, label: (r.label || r.id).slice(0, 110) }));
 
 // ------------------------------------------------------------------ données
 function exportAll() {
@@ -788,6 +917,203 @@ function etapeEdit(s, j, cir, paint) {
   return sub;
 }
 
+// ------------------------------------------------------------ numérotation
+// D'où vient le numéro d'acte. Deux sources : la séquence de l'application, ou
+// un service externe à qui on le DEMANDE au moment de rédiger. Le cas d'usage
+// courant est un document Grist : la création d'une ligne y attribue le numéro,
+// et le service renvoie la ligne créée. La composition du numéro et
+// l'identifiant ELI se règlent juste à côté ; le détail de l'appel est dans
+// src/lib/numbering.js.
+function numerotationPanel(save, redraw) {
+  const c = state.config;
+  const n = (c.numbering = { ...numberingSettings(c) });
+  const ext = (n.externe = { ...EXTERNE_DEFAUT, ...(n.externe || {}) });
+  const externe = n.source === "externe";
+  const wrap = h("div", { class: "fr-stack", style: { maxWidth: "900px" } });
+
+  wrap.appendChild(card("Source du numéro",
+    "Qui attribue le numéro de l'acte. La séquence de l'application suffit à la plupart des collectivités ; celles qui numérotent ailleurs — dans un document Grist, un tableur en ligne, un référentiel interne — font attribuer le numéro par ce service.",
+    choiceField({
+      label: "Attribution du numéro", value: n.source, options: SOURCES,
+      onChange: (v) => { n.source = v; save(); redraw(); },
+    }),
+    n.source === "externe"
+      ? h("p", { class: "fr-small fr-muted", text: "Le numéro n'est plus réservé dans l'application : il est demandé au service au moment de rédiger, et la ligne créée chez le service fait foi. L'application conserve la référence de cette ligne sur l'acte." })
+      : h("p", { class: "fr-small fr-muted", text: "Le numéro est pris dans la séquence réglée ci-dessous, incrémentée à chaque réservation depuis l'écran de rédaction." }),
+    externe ? externeBloc(ext, save, redraw) : null,
+  ));
+
+  const seqFields = h("div", { class: "fr-grid fr-grid--2" });
+  if (externe) {
+    seqFields.appendChild(textField({
+      label: "Motif du numéro attribué par le service", value: ext.pattern,
+      help: "Vide, c'est le motif principal qui s'applique. Le jeton {valeur} y reçoit la valeur rendue par le service.",
+      onChange: (v) => { ext.pattern = v; save(); },
+    }));
+    seqFields.appendChild(textField({
+      label: "Longueur de la séquence", type: "number", value: String(n.pad),
+      help: "Nombre de chiffres du rang, quand le service rend un nombre : avec 3, la valeur 12 donne « 012 » ; une valeur plus longue n'est pas tronquée.",
+      onChange: (v) => { n.pad = Number(v) || 3; save(); },
+    }));
+  } else {
+    seqFields.appendChild(textField({
+      label: "Prochain numéro de séquence", type: "number", value: String(n.seq),
+      help: "Incrémenté d'un à chaque numéro réservé depuis l'écran de rédaction.",
+      onChange: (v) => { n.seq = Number(v) || 0; save(); },
+    }));
+    seqFields.appendChild(textField({
+      label: "Longueur de la séquence", type: "number", value: String(n.pad),
+      help: "Nombre de chiffres du rang : 3 donne « 0412 ».",
+      onChange: (v) => { n.pad = Number(v) || 3; save(); },
+    }));
+  }
+
+  const compo = h("div", { class: "fr-grid fr-grid--2" },
+    textField({
+      label: "Motif du numéro", value: n.pattern,
+      help: externe
+        ? "Jetons : {valeur} {year} {seq} {entityCode} {entity} {objet} {date}. {seq} reçoit la valeur du service, complétée par des zéros si c'est un nombre."
+        : "Jetons : {year} {seq} {entityCode}",
+      onChange: (v) => { n.pattern = v; save(); },
+    }),
+    textField({
+      label: "Année de référence", type: "number", value: String(n.year),
+      help: "Alimente le jeton {year} — l'année de la numérotation, pas forcément l'année civile.",
+      onChange: (v) => { n.year = Number(v) || new Date().getFullYear(); save(); },
+    }),
+  );
+
+  const carte = card("Composition du numéro",
+    "Le motif compose le numéro de l'acte à partir de ses jetons ; il vaut pour les deux sources.",
+    compo, seqFields);
+  wrap.appendChild(carte);
+
+  wrap.appendChild(card("Identifiant ELI",
+    "Le motif ELI compose l'identifiant persistant et les URI de publication. Il ne dépend pas de la source du numéro.",
+    textField({ label: "Motif ELI", value: n.eliPattern, help: "Jetons : {baseUri} {actTypeId} {year} {seq} {entityCode}", onChange: (v) => { n.eliPattern = v; save(); } }),
+  ));
+
+  return wrap;
+}
+
+// Le bloc de l'API externe : l'adresse, l'authentification, la requête, et la
+// lecture de la réponse. On peut tout régler à la main ; le bouton « Pré-remplir
+// pour Grist » pose la forme attendue par l'API de Grist.
+function externeBloc(ext, save, redraw) {
+  const box = h("div", { class: "fr-stack", style: { borderTop: "1px solid var(--border)", marginTop: "16px", paddingTop: "16px" } });
+
+  box.appendChild(h("div", { class: "fr-row", style: { flexWrap: "wrap", alignItems: "center" } },
+    h("strong", { style: { flex: "1 1 auto" }, text: "Service de numérotation" }),
+    !relaisDisponible()
+      ? h("span", { class: "fr-badge fr-badge--warning", text: "relais indisponible ici" })
+      : null,
+    button("Pré-remplir pour Grist", {
+      variant: "tertiary", size: "sm", icon: "check",
+      onClick: () => { Object.assign(ext, GABARIT_GRIST); save(); redraw(); },
+    })));
+
+  box.appendChild(selectField({
+    label: "Transport", value: ext.transport, options: TRANSPORTS,
+    help: relaisDisponible()
+      ? "Le relais atteint un service qui refuserait l'appel d'un navigateur, mais les en-têtes — clé comprise — transitent par lui. L'appel direct ne passe par personne, et exige que le service autorise l'origine de l'application (CORS)."
+      : "Le relais n'est pas disponible dans cet environnement (il vient de l'hébergement). Seul l'appel direct est possible, et l'API doit alors autoriser l'origine de l'application (CORS).",
+    onChange: (v) => { ext.transport = v; save(); redraw(); },
+  }));
+
+  box.appendChild(textField({
+    label: "Adresse de l'API", value: ext.url,
+    placeholder: "https://docs.getgrist.com/api/docs/VOTRE_DOCUMENT/tables/Numerotation/records",
+    help: "Les jetons y sont remplacés : {year} {entityCode} {entity} {objet} {date} {trameId} {actTypeId}.",
+    onChange: (v) => { ext.url = v.trim(); save(); redraw(); },
+  }));
+
+  box.appendChild(selectField({
+    label: "Méthode", value: ext.method, options: METHODES,
+    help: "Créer une ligne (POST) est le moyen le plus courant de faire attribuer un numéro : le service rend alors la ligne créée.",
+    onChange: (v) => { ext.method = v; save(); redraw(); },
+  }));
+
+  box.appendChild(textField({
+    label: "En-têtes de la requête", value: ext.headers, rows: 3,
+    help: "Un « Nom: valeur » par ligne. L'authentification se met ici — par exemple « Authorization: Bearer … ». Les jetons y sont remplacés.",
+    onChange: (v) => { ext.headers = v; save(); },
+  }));
+
+  if (["POST", "PUT", "PATCH"].includes(String(ext.method).toUpperCase())) {
+    box.appendChild(textField({
+      label: "Corps de la requête", value: ext.body, rows: 5,
+      help: 'JSON, jetons remplacés. Grist attend {"records":[{"fields":{…}}]}.',
+      onChange: (v) => { ext.body = v; save(); },
+    }));
+  }
+
+  box.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+    textField({
+      label: "Chemin de la valeur du numéro", value: ext.valeur,
+      help: "Où lire le numéro dans la réponse : « records[0].id », ou « records[0].fields.Numero ».",
+      onChange: (v) => { ext.valeur = v; save(); },
+    }),
+    textField({
+      label: "Chemin de la référence (facultatif)", value: ext.reference,
+      help: "L'identifiant de la ligne créée, conservé sur l'acte et au journal, pour retrouver l'attribution chez le service.",
+      onChange: (v) => { ext.reference = v; save(); },
+    }),
+  ));
+
+  box.appendChild(textField({
+    label: "Délai d'attente (secondes)", type: "number", value: String(Math.round((Number(ext.timeoutMs) || EXTERNE_DEFAUT.timeoutMs) / 1000)),
+    help: "Passé ce délai, la demande échoue : le numéro n'est pas attribué, et l'acte reste sans numéro.",
+    onChange: (v) => { ext.timeoutMs = Math.max(1, Number(v) || 15) * 1000; save(); },
+  }));
+
+  const live = h("div", { class: "fr-small fr-muted", style: { flex: "1 1 260px" } });
+  box.appendChild(h("div", { class: "fr-row", style: { alignItems: "center" } },
+    button("Tester l'appel", {
+      variant: "secondary", size: "sm", icon: "refresh", disabled: !ext.url,
+      onClick: (e) => tester(e.currentTarget, ext, live),
+    }),
+    live));
+
+  box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" },
+    text: "Jetons disponibles : " + JETONS.map(([j, quoi]) => `${j} — ${quoi}`).join(" · ") + "." }));
+  box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" },
+    text: "La clé d'API est conservée dans le référentiel : elle part donc dans les sauvegardes JSON et, en base partagée, dans la base commune. Restreignez les droits de la clé chez le service (création sur la seule table de numérotation)." }));
+
+  return box;
+}
+
+async function tester(btn, ext, live) {
+  const methode = String(ext.method || "POST").toUpperCase();
+  if (methode !== "GET") {
+    const ok = await confirmDialog("Tester l'appel ?",
+      "Le test utilise la méthode réglée : il CRÉERA une ligne chez le service, donc consommera un numéro. À réserver aux essais.",
+      { confirmLabel: "Tester" });
+    if (!ok) return;
+  }
+  btn.disabled = true;
+  clear(live);
+  live.appendChild(h("span", { class: "spinner", "aria-hidden": "true" }));
+  live.appendChild(h("span", { text: " Appel en cours…" }));
+  try {
+    const c = state.config;
+    const r = await demanderNumero({ ...c, numbering: numberingSettings(c) }, {
+      entityId: (c.entities || [])[0]?.id || "",
+      objet: "Essai depuis le référentiel",
+      date: todayIso(),
+    }, { label: "Essai de numérotation" });
+    clear(live);
+    live.appendChild(h("span", { class: "fr-badge fr-badge--success", text: "numéro obtenu" }));
+    live.appendChild(h("span", { text: ` ${r.numero}${r.ref ? " · référence " + r.ref : ""}` }));
+    toast("Numéro obtenu : " + r.numero, "success");
+  } catch (e) {
+    clear(live);
+    live.appendChild(h("span", { class: "fr-badge fr-badge--error", text: "échec" }));
+    live.appendChild(h("span", { text: " " + String((e && e.message) || e) }));
+    toast(String((e && e.message) || e), "error");
+  }
+  btn.disabled = false;
+}
+
 // ------------------------------------------------------------ délais
 // Les délais ne sont pas des constantes juridiques universelles : ce sont des
 // objectifs de gestion, réglables par la collectivité. Le seul qui soit
@@ -817,6 +1143,354 @@ function delaisPanel(save, redraw) {
   wrap.appendChild(h("div", { class: "fr-row" },
     button("Rétablir les valeurs par défaut", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => { c.delais = { ...DELAIS_DEFAUT }; save(); redraw(); } })));
   return wrap;
+}
+
+// ------------------------------------------------------- publication au recueil
+// Le recueil des actes administratifs — son titre, la règle d'entrée en
+// vigueur, et surtout L'AUTOMATISME : faut-il publier l'acte dès le retour
+// signé ? Une administration qui publie déjà dans son propre système ne le veut
+// pas ; elle éteint cet automatisme ici, et l'acte signé s'arrête au registre.
+function publicationPanel(save, redraw) {
+  const c = state.config;
+  const d = publicationSettings(c);
+  const p = (c.publication = { ...(c.publication || {}) });
+  const opp = (p.opposabilite = { ...d.opposabilite });
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("h2", { class: "fr-card__title", text: "Publication au recueil" }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Ce que produit la publication d'un acte : le recueil auquel il est déposé, et à partir de quand il devient opposable. Le recueil lui-même se consulte publiquement, sans compte — l'écran « Publications (ELI) » en donne le lien." }));
+
+  wrap.appendChild(textField({
+    label: "Titre du recueil", value: p.recueil ?? d.recueil,
+    help: "Le titre sous lequel les actes sont publiés : « Recueil des actes administratifs », « Recueil des actes de la commune »… Il s'affiche en tête du recueil public et sur chaque acte.",
+    onChange: (v) => { p.recueil = v; save(); },
+  }));
+
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+
+  wrap.appendChild(choiceField({
+    label: "Publication automatique après signature",
+    value: d.auto !== false,
+    options: [{ value: true, label: "Automatique (défaut)" }, { value: false, label: "Désactivée" }],
+    help: "Automatique : dès que la signature revient, un acte publiable est publié au recueil (et devient opposable). Désactivée : l'acte signé reste au registre — la publication n'a lieu que si on la demande depuis l'écran « Signature & publication ». C'est le réglage d'une administration qui publie dans son propre système, ou qui garde la main sur chaque dépôt.",
+    onChange: (v) => { p.auto = v === true; save(); redraw(); },
+  }));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted" },
+    h("span", { text: d.auto !== false
+      ? "Actuellement : le retour signé publie l'acte. "
+      : "Actuellement : le retour signé n'entraîne aucune publication — les actes signés attendent, dans « Signature & publication ». " }),
+    button("Ouvrir le recueil public", { variant: "tertiary", size: "sm", icon: "globe", onClick: () => navigate("recueil") })));
+
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+
+  wrap.appendChild(sectionHeader("Entrée en vigueur"));
+  wrap.appendChild(selectField({
+    label: "Règle d'opposabilité", value: opp.mode,
+    options: [{ value: "lendemain", label: "Le lendemain de la publication" }, { value: "jours", label: "Après un nombre de jours" }],
+    help: "La date d'entrée en vigueur — donc le point de départ du délai de recours — se calcule à partir de la date de publication. Elle reste modifiable acte par acte au moment de publier.",
+    onChange: (v) => { opp.mode = v; save(); redraw(); },
+  }));
+  if (opp.mode === "jours") {
+    wrap.appendChild(textField({
+      label: "Nombre de jours après la publication", type: "number", value: String(opp.jours ?? 1),
+      onChange: (v) => { opp.jours = Math.max(0, Number(v) || 0); save(); },
+    }));
+  }
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Le recueil public est le pendant « citoyen » de la publication : il ne demande aucun compte, et ne montre que les actes réellement publiés. Sa présentation suit la charte de la structure (Administration › Identité) et la feuille de style de chaque acte." }));
+  return wrap;
+}
+
+// ------------------------------------------------------- fonctions expérimentales
+// Des fonctions livrées avec l'application, mais éteintes par défaut : elles ne
+// conviennent pas à toutes les organisations, et leur comportement peut encore
+// évoluer. L'administrateur les active en connaissance de cause — le réglage
+// suit les données exportées et importées.
+function experimentalPanel(save, redraw) {
+  const c = state.config;
+  const x = (c.experimental = c.experimental || { parapheur: false, controleLegalite: false });
+  if (x.controleLegalite === undefined) x.controleLegalite = false;
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("h2", { class: "fr-card__title", text: "Fonctions expérimentales" }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Ces fonctions sont livrées avec l'application, mais éteintes par défaut : elles ne conviennent pas à toutes les organisations, et leur comportement peut encore changer. Activez-les en connaissance de cause." }));
+  wrap.appendChild(choiceField({
+    label: "Circuit de validation des actes (parapheur)",
+    value: !!x.parapheur,
+    options: [{ value: true, label: "Activé" }, { value: false, label: "Désactivé (par défaut)" }],
+    help: "Fait franchir à chaque acte un circuit d'étapes (bon pour accord, avis) défini dans le référentiel, avant l'envoi en signature. La plupart des collectivités ont déjà leur propre circuit interne, en amont de « Envoyer en signature » : laissez désactivé si c'est votre cas.",
+    // `touch` (et non `save`) : l'activation change AUSSI le menu de gauche et
+    // les onglets — il faut redessiner la coquille, pas seulement la vue.
+    onChange: async (v) => {
+      x.parapheur = v;
+      touch("config");
+      // Les actes de démonstration portent (ou non) leur passage au parapheur :
+      // on les reconstruit pour que le changement se voie immédiatement.
+      if (await regenerateDemoActes()) toast("Actes de démonstration reconstruits pour suivre le réglage.");
+    },
+  }));
+  if (x.parapheur) {
+    wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: "Le parapheur est activé" }),
+      h("p", { class: "fr-small", text: "L'onglet « Circuits de validation » de l'Administration et l'écran « Parapheur » sont de nouveau accessibles. Un acte dont le circuit n'est pas achevé ne peut pas être envoyé en signature, et sa modification après validation rend celle-ci caduque." }),
+      h("div", { class: "fr-row" },
+        button("Régler les circuits de validation", {
+          variant: "secondary", size: "sm", icon: "check",
+          onClick: () => { state.ui.refTab = "circuits"; redraw(); },
+        }))));
+  } else {
+    wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" },
+      text: "Parapheur désactivé : les actes rédigés partent directement en signature, et un acte signé publiable est publié au recueil automatiquement. Les circuits éventuellement enregistrés dans le référentiel sont conservés — les réactiver les remet en service tels quels." }));
+  }
+
+  // La transmission au contrôle de légalité : une étape de plus, entre le
+  // retour signé et la publication, qui passe par l'API d'envoi de la
+  // préfecture (voir src/lib/legalite.js). Éteinte, rien n'est envoyé et la
+  // formalité se constate à la main depuis l'échéancier, comme avant.
+  wrap.appendChild(choiceField({
+    label: "Transmission au contrôle de légalité (télétransmission @ctes)",
+    value: !!x.controleLegalite,
+    options: [{ value: true, label: "Activée — API d'envoi" }, { value: false, label: "Désactivée (par défaut)" }],
+    help: "L'étape s'intercale automatiquement entre le retour signé et la publication : l'acte signé est télétransmis à l'API d'envoi du contrôle de légalité, l'accusé de réception de la préfecture est déposé sur le document (« Transmis au contrôle de légalité le … à … »), puis l'acte est publié. Tant que la transmission n'a pas abouti, l'acte n'est pas publié. La télétransmission suppose une convention et des identifiants d'accès auprès de la préfecture : laissez désactivé si vous n'en avez pas.",
+    onChange: async (v) => {
+      x.controleLegalite = v;
+      // La transmission ne change que la chaîne automatique : aucun acte de
+      // démonstration n'a besoin d'être reconstruit (les transmissions déjà
+      // constatées, elles, restent au dossier).
+      touch("config");
+    },
+  }));
+  if (x.controleLegalite) {
+    wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: "La transmission au contrôle de légalité est activée" }),
+      h("p", { class: "fr-small", text: `Chaque acte signé sera télétransmis à « ${CONTROLE_LEGALITE.destinataire} » par l'API d'envoi (${CONTROLE_LEGALITE.apiUrl}), puis publié. Le certificat de transmission est déposé sur l'original signé et sur la version publiée.` }),
+      h("p", { class: "fr-small fr-muted", text: "Les actes déposés AVANT l'activation ne portent pas cette exigence : le service les publiera sans transmission. Les actes signés à partir de maintenant la portent." }),
+      h("div", { class: "fr-row" },
+        button("Régler les délais d'exécution", { variant: "secondary", size: "sm", icon: "gear", onClick: () => { state.ui.refTab = "delais"; redraw(); } }),
+        button("Ouvrir l'échéancier", { variant: "tertiary", size: "sm", icon: "list", onClick: () => navigate("execution") }))));
+  } else {
+    wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" },
+      text: "Transmission désactivée : rien n'est adressé à l'API du contrôle de légalité, et l'étape ne s'intercale pas entre la signature et la publication. La transmission — quand votre organisation en a l'obligation — se constate à la main, depuis la fiche de l'acte ou l'échéancier." }));
+  }
+  return wrap;
+}
+
+// ------------------------------------------------------------------ assistants
+// Deux aides en langage naturel, livrées avec l'application : « Plume », dans
+// l'atelier, qui explique le mode d'emploi de l'outil — sans jamais recevoir le
+// contenu d'un acte — et « Publia », sur le recueil public, qui répond sur les
+// actes publiés. On règle ici ce qui doit l'être : s'ils répondent ou non, quel
+// moteur de langage les fait parler, l'instruction qu'ils reçoivent, et les
+// questions qu'ils proposent. Voir src/lib/assistant.js.
+const CE_QU_IL_SAIT = {
+  atelier: "Le guide d'utilisation de l'application, et le nom de l'écran où se trouve l'agent. Jamais le contenu des actes, des trames, des brouillons ou des comptes : rien de tout cela ne lui est transmis.",
+  public: "Les actes PUBLIÉS au recueil — ce que le recueil montre déjà à tout visiteur. Ni brouillon, ni acte non publié, ni compte.",
+};
+
+function assistantsPanel(save, redraw) {
+  const wrap = h("div", { class: "fr-stack", style: { maxWidth: "1000px" } });
+  wrap.appendChild(card("Deux assistants, deux savoirs",
+    "Plume, dans l'atelier, explique le mode d'emploi de l'outil ; Publia, sur le recueil public, répond sur les actes publiés. Chacun ne reçoit que ce qu'il a le droit de savoir : aucune question n'emporte le contenu d'un acte, et l'assistant de l'atelier ne peut pas en voir — rien ne lui est jamais transmis.",
+    h("p", { class: "fr-small fr-muted", text: "Le moteur de langage qui les fait parler est interchangeable : celui de Perchance, quand il est disponible, ou celui de la collectivité — une adresse d'API, une clé, un nom de modèle. C'est ce qui permet de les faire fonctionner hors de Perchance, ou de garder les échanges sur son propre réseau." }),
+    h("p", { class: "fr-small fr-muted", text: "Le NOM et L'ICÔNE de chaque assistant se changent ci-dessous : l'interface suit partout — pastille, panneau, bulle d'invitation. Le nom et l'icône livrés sont rappelés en repère." }),
+    h("p", { class: "fr-small fr-muted", text: "Les deux s'éteignent séparément : éteint, un assistant disparaît complètement de son interface — pas de pastille, pas de panneau. Cette décision vaut pour toute l'installation ; chaque agent peut en outre masquer un assistant allumé pour son seul compte, dans le menu de son nom." })));
+  wrap.appendChild(carteAssistant("atelier", save, redraw));
+  wrap.appendChild(carteAssistant("public", save, redraw));
+  return wrap;
+}
+
+function carteAssistant(qui, save, redraw) {
+  const livré = ASSISTANTS[qui];
+  const s = assistantSettings(state.config, qui);
+  const a = assistantIdentite(state.config, qui);
+  // Le réglage BRUT (celui du référentiel), et non la valeur effective : un champ
+  // vide doit se voir comme vide — c'est ainsi qu'on revient à ce qui est livré.
+  const brut = (cle) => String(((state.config.assistant || {})[qui] || {})[cle] || "");
+  const ecrire = (patch) => { reglerAssistant(state.config, qui, patch); save(); };
+  const box = h("div", { class: "fr-card" });
+
+  box.appendChild(h("h2", { class: "fr-card__title", style: { display: "flex", alignItems: "center", gap: "10px" } },
+    h("img", { class: "assist-admin__avatar", src: a.avatar, alt: "", style: { width: "34px", height: "34px", borderRadius: "50%", objectFit: "cover", flex: "none" } }),
+    h("span", { text: a.nom + " — " + a.titre })));
+  box.appendChild(h("p", { class: "fr-card__sub", text: "Ce qu'il sait : " + CE_QU_IL_SAIT[qui] }));
+
+  box.appendChild(choiceField({
+    label: "Disponibilité",
+    value: s.actif !== false,
+    options: [{ value: true, label: "Allumé" }, { value: false, label: "Éteint" }],
+    help: "Éteint, l'assistant disparaît de son interface et ne peut plus être ouvert. Aucune question n'est alors transmise à un moteur de langage.",
+    // `touch` (et non `save`) : éteindre l'assistant doit le faire disparaître
+    // sur-le-champ — c'est la coquille entière qu'il faut redessiner, pas
+    // seulement cet écran.
+    onChange: (v) => { ecrire({ actif: v }); touch("config"); redraw(); },
+  }));
+
+  box.appendChild(h("hr", { class: "fr-sep" }));
+  box.appendChild(sectionHeader("Nom et icône"));
+  box.appendChild(h("p", { class: "fr-small fr-muted", text: "Le nom se lit partout où l'assistant se montre, et son icône est une image (une adresse, ou une image convertie en adresse). Laissez un champ vide pour revenir à ce que l'application livre." }));
+  const apercu = h("div", { class: "assist-admin__apercu" },
+    h("img", { class: "assist-admin__apercu-img", src: a.avatar, alt: "" }),
+    h("span", { class: "assist-admin__apercu-nom", text: a.nom }));
+  const majApercu = () => {
+    const neuf = assistantIdentite(state.config, qui);
+    apercu.querySelector(".assist-admin__apercu-img").src = neuf.avatar;
+    apercu.querySelector(".assist-admin__apercu-nom").textContent = neuf.nom;
+  };
+  box.appendChild(apercu);
+  box.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+    textField({
+      label: "Nom", value: brut("nom"), placeholder: livré.nom,
+      help: "Le nom livré est « " + livré.nom + " ».",
+      onChange: (v) => { ecrire({ nom: v }); majApercu(); },
+    }),
+    textField({
+      label: "Icône (adresse de l'image)", value: brut("avatar"), placeholder: livré.avatar,
+      help: "Une adresse d'image (PNG, JPG, SVG…) ou une image encodée en « data: ». L'icône livrée sert de repère tant que le champ est vide.",
+      onChange: (v) => { ecrire({ avatar: v }); majApercu(); },
+    })));
+
+  box.appendChild(h("hr", { class: "fr-sep" }));
+  box.appendChild(choiceField({
+    label: "Moteur de langage",
+    value: s.moteur,
+    options: [
+      { value: "auto", label: "Automatique" },
+      { value: "integre", label: "Intégré (Perchance)" },
+      { value: "personnalise", label: "Personnalisé (API)" },
+    ],
+    help: "Automatique : le moteur intégré quand il est disponible (sur Perchance), l'adresse ci-dessous sinon — c'est le réglage qui fonctionne partout. Intégré : uniquement Perchance. Personnalisé : uniquement l'adresse ci-dessous, ce qui laisse les échanges sur votre réseau.",
+    onChange: (v) => { ecrire({ moteur: v }); redraw(); },
+  }));
+
+  const moteur = moteurDe(state.config, qui);
+  if (moteur.type === "aucun") {
+    box.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: "Aucun moteur disponible" }),
+      h("p", { class: "fr-small", text: moteur.raison })));
+  }
+
+  if (s.moteur !== "integre") {
+    box.appendChild(h("hr", { class: "fr-sep" }));
+    box.appendChild(sectionHeader("Moteur personnalisé"));
+    box.appendChild(h("p", { class: "fr-small fr-muted", text: "L'API de la collectivité. Deux formes sont prises en charge : l'API des complétions de conversation (messages rôle/contenu, flux SSE — OpenAI, Mistral, Groq, OpenRouter, Ollama, vLLM, LM Studio…) et un appel simple qui reçoit « prompt » et rend « texte »." }));
+    box.appendChild(textField({
+      label: "Adresse du service", value: s.url, placeholder: "https://llm.mon-organisme.fr/v1/chat/completions",
+      help: "L'adresse complète de l'API. Le service doit accepter les appels venus de cette page (CORS) — sinon, activez le relais ci-dessous.",
+      onChange: (v) => ecrire({ url: v.trim() }),
+    }));
+    box.appendChild(selectField({
+      label: "Forme de l'API", value: s.protocole,
+      options: [{ value: "openai", label: "Complétions de conversation (/chat/completions)" }, { value: "texte", label: "Appel simple ({ prompt } → { texte })" }],
+      onChange: (v) => { ecrire({ protocole: v }); redraw(); },
+    }));
+    box.appendChild(textField({
+      label: "Modèle (facultatif)", value: s.modele, placeholder: "ex. mistral-large, llama3.1:70b",
+      help: "Transmis tel quel. Laissez vide si le service n'en attend pas.",
+      onChange: (v) => ecrire({ modele: v.trim() }),
+    }));
+    box.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+      textField({
+        label: "Clé d'accès (facultative)", type: "password", value: s.cle, placeholder: "— aucune —",
+        help: "Enregistrée dans le référentiel : elle apparaît dans un export de données. Utilisez une clé dédiée à cet usage, que vous pouvez révoquer.",
+        onChange: (v) => ecrire({ cle: v }),
+      }),
+      selectField({
+        label: "En-tête qui porte la clé", value: s.entete,
+        options: [{ value: "authorization", label: "Authorization: Bearer …" }, { value: "x-api-key", label: "x-api-key: …" }, { value: "aucune", label: "Ne pas envoyer de clé" }],
+        onChange: (v) => ecrire({ entete: v }),
+      }),
+    ));
+    box.appendChild(choiceField({
+      label: "Passer par le relais sans CORS",
+      value: s.relais === true,
+      options: [{ value: false, label: "Non (appel direct)" }, { value: true, label: "Oui" }],
+      help: "Un service qui n'autorise pas l'origine de l'application restera injoignable depuis le navigateur (règle CORS). Le relais de la plateforme contourne cette limite ; il n'existe que sur Perchance. À n'activer que si le service est bien le vôtre : le relais voit alors passer la requête.",
+      onChange: (v) => { ecrire({ relais: v }); redraw(); },
+    }));
+  }
+
+  box.appendChild(h("hr", { class: "fr-sep" }));
+  box.appendChild(sectionHeader("Instruction donnée au moteur"));
+  box.appendChild(textField({
+    label: "Rôle et consignes", rows: 10, value: s.instruction,
+    help: "Le texte qui ouvre chaque échange : ce que l'assistant est, ce qu'il ne fait jamais, et sa manière de répondre. Laissez vide pour revenir à l'instruction livrée.",
+    onChange: (v) => ecrire({ instruction: v }),
+  }));
+
+  box.appendChild(h("hr", { class: "fr-sep" }));
+  box.appendChild(promptsAssistant(qui, s, ecrire, redraw));
+
+  box.appendChild(h("hr", { class: "fr-sep" }));
+  const resultat = h("div", { class: "assist-essai" });
+  box.appendChild(h("div", { class: "fr-row" },
+    button("Tester le moteur", {
+      variant: "secondary", size: "sm", icon: "refresh",
+      onClick: async (ev) => {
+        const b = ev.currentTarget;
+        b.disabled = true;
+        clear(resultat);
+        resultat.appendChild(h("p", { class: "fr-small fr-muted", text: "Test en cours…" }));
+        try {
+          const publications = qui === "public" ? (state.recueil?.liste || []) : null;
+          const question = qui === "public" ? "Quels actes sont publiés au recueil ?" : "À quoi sert cette application, en deux phrases ?";
+          const texte = await repondre({ config: state.config, qui, question, publications });
+          clear(resultat);
+          resultat.appendChild(h("div", { class: "fr-alert fr-alert--success" },
+            h("p", { class: "fr-alert__title", text: "Le moteur a répondu" }),
+            h("p", { class: "fr-small", text: texte || "(réponse vide)" })));
+        } catch (e) {
+          clear(resultat);
+          resultat.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+            h("p", { class: "fr-alert__title", text: "Pas de réponse" }),
+            h("p", { class: "fr-small", text: (e && (e.raison || e.message)) || String(e) })));
+        } finally { b.disabled = false; }
+      },
+    }),
+    button("Rétablir les réglages livrés", {
+      variant: "tertiary", size: "sm", icon: "refresh",
+      onClick: async () => {
+        if (!(await confirmDialog("Rétablir les réglages livrés de " + a.nom + " ?", "Le nom, l'icône, le moteur, l'instruction et les prompts proposés reviennent à ce que l'application livre. Vos modifications sont perdues ; les préférences des agents (assistant masqué pour leur compte) ne sont pas touchées."))) return;
+        reinitialiserAssistant(state.config, qui);
+        save();
+        redraw();
+        toast("Réglages de " + a.nom + " rétablis.");
+      },
+    })));
+  box.appendChild(resultat);
+  return box;
+}
+
+function promptsAssistant(qui, s, ecrire, redraw) {
+  const box = h("div", { class: "fr-stack" });
+  const liste = Array.isArray(s.prompts) ? s.prompts : [];
+  box.appendChild(sectionHeader("Questions proposées (" + liste.length + ")"));
+  box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" },
+    text: (!liste.length
+      ? "Aucune question proposée : l'assistant n'affiche que sa zone de saisie."
+      : "Ces questions s'affichent sous forme de boutons à l'ouverture de l'assistant, et l'une d'elles est soufflée de temps en temps dans une petite bulle. Elles servent d'exemples — l'agent peut toujours écrire la sienne.") }));
+  liste.forEach((p, i) => {
+    box.appendChild(h("div", { class: "assist-prompt" },
+      h("div", { class: "assist-prompt__tete" },
+        h("span", { class: "assist-prompt__num", text: String(i + 1) }),
+        h("div", { class: "assist-prompt__etiquette" },
+          textField({
+            label: "Étiquette du bouton", value: p.label,
+            placeholder: "ex. Comment rédiger un acte ?",
+            onChange: (v) => { p.label = v; ecrire({ prompts: liste }); },
+          })),
+        h("button", {
+          class: "fr-btn fr-btn--tertiary fr-btn--icon fr-btn--sm", type: "button", title: "Supprimer cette question",
+          on: { click: () => { ecrire({ prompts: liste.filter((x) => x !== p) }); redraw(); } },
+        }, icon("trash", 15))),
+      textField({
+        label: "Question posée à l'assistant", rows: 2, value: p.texte,
+        placeholder: "ex. Comment est-ce que je rédige un acte à partir d'une trame ?",
+        onChange: (v) => { p.texte = v; ecrire({ prompts: liste }); },
+      })));
+  });
+  box.appendChild(h("div", { class: "fr-row" },
+    button("Ajouter une question", {
+      variant: "secondary", size: "sm", icon: "plus",
+      onClick: () => { ecrire({ prompts: [...liste, { id: nouvelIdPrompt(), label: "Nouvelle question", texte: "" }] }); redraw(); },
+    })));
+  return box;
 }
 
 // --------------------------------------------------------- journal d'audit
@@ -878,14 +1552,23 @@ const JOURNAL_ACTIONS = {
   "parapheur.refus": ["Refus au parapheur", "error"],
   "parapheur.renvoi": ["Renvoi en rédaction", "warning"],
   "parapheur.reprise": ["Reprise du circuit", "warning"],
+  "revision.depot": ["Envoi en révision", "info"],
+  "revision.validation": ["Révision", "success"],
+  "revision.rejet": ["Rejet en révision", "warning"],
   "signature.depot": ["Envoi en signature", "info"],
   "signature.signe": ["Signature", "success"],
   "signature.refus": ["Signature refusée", "warning"],
   "publication.publie": ["Publication", "success"],
+  "publication.depublie": ["Retrait du recueil", "error"],
   "formalite.transmission": ["Transmission au contrôle de légalité", "info"],
   "formalite.publication": ["Publication constatée", "info"],
   "formalite.notification": ["Notification", "info"],
   "formalite.effacement": ["Constatation effacée", "warning"],
+  "recours.enregistrement": ["Recours enregistré", "warning"],
+  "recours.effacement": ["Mention de recours retirée", "warning"],
+  "numero.attribution_externe": ["Numéro attribué par un service", "info"],
+  "document.etat_formalites": ["État des formalités délivré", "info"],
+  "document.attestation_non_recours": ["Attestation de non-recours délivrée", "info"],
   "acte.creation": ["Création d'acte", "info"],
   "acte.enregistrement": ["Enregistrement d'acte", "info"],
   "acte.restauration": ["Retour à une version", "warning"],

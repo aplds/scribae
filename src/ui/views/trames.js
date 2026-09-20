@@ -5,7 +5,7 @@ import { newTrame, tramePublishable } from "../../lib/schema.js";
 import { targetLabel, serviceById, servicesInScope, coversAllServices, authorLabel } from "../../lib/scope.js";
 import { download, pickFile } from "../../lib/util.js";
 import { exampleTrameFile, readTrameFile } from "../../lib/trame-format.js";
-import { confirmDialog, promptDialog, statusBadge, emptyState, selectField, textField, orgFields } from "../components.js";
+import { confirmDialog, promptDialog, statusBadge, emptyState, textField, choiceField, orgFields } from "../components.js";
 import { helpLink } from "../components.js";
 import { modal } from "../dom.js";
 
@@ -171,22 +171,40 @@ function trameCard(t, redraw) {
 
 function createTrame() {
   const config = state.config;
-  let name = "Nouvelle trame";
+  // Pas de nom prérempli : « Nouvelle trame » se retrouverait tel quel dans la liste.
+  // Vide, on retombe sur un nom composé du type d'acte — au moins descriptif.
+  let name = "";
   let familyId = config.families?.[0]?.id || "";
   let actTypeId = config.actTypes?.[0]?.id || "decision";
   let serviceId = coversAllServices(config, state.user) ? "" : (servicesInScope(config, state.user)[0]?.id || "");
   let bureauId = "";
   const body = h("div", {},
-    textField({ label: "Nom de la trame", value: name, required: true, onChange: (v) => (name = v) }),
-    selectField({ label: "Famille", value: familyId, required: true, options: (config.families || []).map((f) => ({ value: f.id, label: f.label })), onChange: (v) => (familyId = v) }),
-    selectField({ label: "Type d'acte", value: actTypeId, options: (config.actTypes || []).map((a) => ({ value: a.id, label: a.label })), onChange: (v) => (actTypeId = v) }),
+    h("p", { class: "fr-small fr-muted", text: "Trois réponses suffisent pour commencer. La trame est créée avec un squelette prêt à compléter (intitulé, autorité, visas, considérants, formule d'édiction, article, signature) : vous le remplirez ensuite dans l'éditeur, en glissant ce qu'il vous faut." }),
+    textField({
+      label: "Comment appellerez-vous cette trame ?", value: name, required: true,
+      help: "Le nom que verront vos collègues dans la liste. Exemple : « Arrêté de nomination d'un agent ».",
+      onChange: (v) => (name = v),
+    }),
+    choiceField({
+      label: "De quelle nature sont les actes qu'elle produira ?",
+      value: actTypeId,
+      options: (config.actTypes || []).map((a) => ({ value: a.id, label: a.label })),
+      help: "Ce choix donne sa formule d'édiction à l'acte (« ARRÊTE », « DÉCIDE »…) et son intitulé de départ.",
+      onChange: (v) => (actTypeId = v),
+    }),
+    choiceField({
+      label: "Dans quel domaine ?",
+      value: familyId,
+      options: (config.families || []).map((f) => ({ value: f.id, label: f.label })),
+      help: "Une famille regroupe les trames d'un même sujet : elle sert à les retrouver et à leur appliquer la même charte.",
+      onChange: (v) => (familyId = v),
+    }),
     orgFields({
       serviceId, bureauId,
       label: "Service gestionnaire",
       help: "Le service (et éventuellement le bureau) auquel la trame est réservée. Sans service, la trame est générale : tous les services peuvent la remplir.",
       onChange: (s, b) => { serviceId = s; bureauId = b; },
     }),
-    h("p", { class: "fr-small fr-muted", text: "La trame est créée avec un squelette minimal (intitulé, autorité, visas, considérants, formule d'édiction, article, signature) que vous complétez dans l'éditeur." }),
   );
   const m = modal({
     title: "Nouvelle trame",
@@ -196,10 +214,10 @@ function createTrame() {
       button("Créer", {
         variant: "primary",
         onClick: () => {
-          const t = newTrame({ name: name.trim() || "Nouvelle trame", familyId, actTypeId, version: versionTag(), serviceId, bureauId });
           // L'intitulé et la formule d'édiction reprennent le référentiel (type
           // d'acte choisi, vocabulaire) plutôt que les valeurs génériques.
           const typeLabel = (config.actTypes || []).find((a) => a.id === actTypeId)?.label || "Acte";
+          const t = newTrame({ name: name.trim() || typeLabel + " — nouvelle trame", familyId, actTypeId, version: versionTag(), serviceId, bureauId });
           const titleNode = t.body.find((n) => n.type === "title");
           if (titleNode) titleNode.text = `${typeLabel} n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}`;
           const enactNode = t.body.find((n) => n.type === "enact");

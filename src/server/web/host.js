@@ -15,6 +15,14 @@
 // `config.js` (produit par le conteneur à partir de son environnement) peut poser
 // `window.__SCRIBA_CONFIG__ = { apiBase, apiToken }`. Rien n'est obligatoire : sans
 // jeton, seules les lectures publiques de l'API fonctionnent.
+//
+// Un troisième service d'hôte est FACULTATIF : un relais HTTP sans CORS
+// (`superFetch`), que réclame la numérotation externe (Administration ›
+// Numérotation) pour atteindre un service tiers — Grist, par exemple. Il n'est
+// **pas** fourni ici : une installation auto-hébergée ne peut donc appeler un
+// service de numérotation qu'en « appel direct », avec l'origine de l'application
+// déclarée origine de confiance chez le service. Un relais côté service est au
+// programme (voir `src/TODO.md`) : il aurait sa place dans ce fichier.
 // ============================================================================
 (function () {
   "use strict";

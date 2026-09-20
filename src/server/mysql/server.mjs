@@ -103,7 +103,9 @@ function corsHeaders(req) {
 }
 
 function send(req, res, status, body, extra = {}) {
-  const payload = body === null || body === undefined ? "" : JSON.stringify(body);
+  // Le corps peut être une chaîne : certaines routes publiques servent du texte
+  // (robots.txt, llms.txt), du XML ou du HTML, pas du JSON.
+  const payload = body === null || body === undefined ? "" : (typeof body === "string" ? body : JSON.stringify(body));
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "x-service": SERVICE,
@@ -417,6 +419,18 @@ async function handle(req, res) {
     }
     send(req, res, out.status, out.body, out.headers || {});
     return;
+  }
+
+  // --- le recueil ouvert : /robots.txt, /llms.txt, /sitemap.xml, /recueil… ----
+  // Ces adresses sont celles du SITE, pas de l'API : elles sont servies par le
+  // domaine du recueil (voir nginx.conf) et le domaine `actes.mjs` les tient,
+  // puisqu'il détient les publications. Une lecture ne touche pas la base.
+  if (req.method === "GET" || req.method === "HEAD") {
+    const out = api.route({ method: req.method, path: pathname + url.search, headers: req.headers, body: null, ip }, {
+      authorize: () => null,
+      rate: () => false,
+    });
+    if (out) { send(req, res, out.status, out.body, out.headers || {}); return; }
   }
 
   send(req, res, 404, err("Ressource inconnue : " + pathname, { code: "ressource_inconnue" }));

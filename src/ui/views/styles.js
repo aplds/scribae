@@ -20,7 +20,7 @@
 // ============================================================================
 import { state, touch, applyBrand, redrawView } from "../state.js";
 import { h, clear, button, toast, field as frField, fitPaper } from "../dom.js";
-import { textField, selectField, choiceField, confirmDialog, helpLink, emptyState } from "../components.js";
+import { textField, selectField, choiceField, fontField, confirmDialog, helpLink, emptyState } from "../components.js";
 import { download, pickFile } from "../../lib/util.js";
 import {
   emptyStyle, stylesOf, styleSummary, styleTraits, sampleDocument, generalStyle, STYLE_PRESETS, applyPreset,
@@ -34,7 +34,7 @@ const f = (key, label, kind, opts = {}) => ({ key, label, kind, ...opts });
 
 const SELECTS = {
   titreAlign: [{ value: "left", label: "À gauche" }, { value: "center", label: "Centré" }, { value: "right", label: "À droite" }],
-  titreRule: [{ value: "none", label: "Aucune marque" }, { value: "line", label: "Filet simple" }, { value: "double", label: "Filet double" }, { value: "underline", label: "Souligné" }],
+  titreRule: [{ value: "none", label: "Aucune marque" }, { value: "line", label: "Filet simple" }, { value: "double", label: "Filet double" }, { value: "underline", label: "Souligné" }, { value: "box", label: "Encadré" }],
   ruleStyle: [{ value: "line", label: "Trait simple" }, { value: "double", label: "Trait double" }, { value: "dotted", label: "Pointillé" }, { value: "none", label: "Aucun" }],
   divider: [{ value: "none", label: "Aucun filet" }, { value: "line", label: "Filet simple" }, { value: "dotted", label: "Pointillé" }, { value: "double", label: "Filet double" }],
   ecks: [{ value: "plain", label: "Texte seul" }, { value: "rule", label: "Entre deux filets" }, { value: "band", label: "Bandeau" }, { value: "box", label: "Encadré" }],
@@ -45,15 +45,27 @@ const SELECTS = {
   logoAlign: [{ value: "left", label: "À gauche" }, { value: "center", label: "Centré" }, { value: "right", label: "À droite" }],
   frame: [{ value: "none", label: "Aucun" }, { value: "line", label: "Filet simple" }, { value: "double", label: "Filet double" }, { value: "heavy", label: "Filet épais" }],
   numPosition: [{ value: "inline", label: "À la suite du titre" }, { value: "block", label: "Au-dessus du titre" }, { value: "margin", label: "Dans la marge de gauche" }],
-  headingRule: [{ value: "none", label: "Aucune" }, { value: "line", label: "Filet simple" }, { value: "dotted", label: "Souligné pointillé" }],
+  headingRule: [{ value: "none", label: "Aucune" }, { value: "line", label: "Filet simple" }, { value: "dotted", label: "Souligné pointillé" }, { value: "box", label: "Encadré" }],
   visasLabel: [{ value: "plain", label: "Normal" }, { value: "italic", label: "Italique" }, { value: "bold", label: "Gras" }, { value: "smallcaps", label: "Petites capitales" }],
-  listMarker: [{ value: "disc", label: "Puces" }, { value: "dash", label: "Tirets" }, { value: "decimal", label: "Numérotée" }, { value: "none", label: "Aucune" }],
+  listMarker: [{ value: "disc", label: "Puces ●" }, { value: "circle", label: "Cercle ○" }, { value: "square", label: "Carré ▪" }, { value: "dash", label: "Tiret –" }, { value: "none", label: "Aucune" }],
+  listNumbering: [
+    { value: "decimal", label: "1. 2. 3." },
+    { value: "degree", label: "1° 2° 3°" },
+    { value: "parenth", label: "1) 2) 3)" },
+    { value: "lalpha", label: "a) b) c)" },
+    { value: "ualpha", label: "A) B) C)" },
+    { value: "lroman", label: "i. ii. iii." },
+    { value: "uroman", label: "I. II. III." },
+    { value: "none", label: "Aucune" },
+  ],
   align3: [{ value: "left", label: "À gauche" }, { value: "center", label: "Centré" }, { value: "right", label: "À droite" }],
   weight: [{ value: "400", label: "Normal" }, { value: "600", label: "Semi-gras" }, { value: "700", label: "Gras" }],
 };
 
 const YES_NO = [{ value: true, label: "Oui" }, { value: false, label: "Non" }];
 const TOKENS = "Jetons disponibles : {{entity.name}}, {{entity.nameWithArt}}, {{entity.code}}, {{brand.name}}, {{numero}}, {{objet}}, {{dateSignature}}, {{date}}, {{actType}}, {{style.label}}.";
+const FONT_HELP = "Les polices proposées, rangées par familles — des polices répandues sur les postes, disponibles sans rien installer. La police choisie est celle de l'écran, du PDF, du fichier Word et de la version publiée ; « Autre » permet d'indiquer une police de la collectivité ou une pile CSS complète.";
+const SIDES_HELP = "Les côtés tracés autour de l'encadré. Sans effet tant que la présentation ci-dessus n'est pas « Encadré » — un filet se pose ainsi d'un seul côté, ou l'encadré s'ouvre.";
 
 const GROUPS = [
   {
@@ -79,7 +91,7 @@ const GROUPS = [
   {
     id: "typo", title: "Typographie",
     fields: [
-      f("fontFamily", "Police du corps", "text", { wide: true, help: "Ex. « 'Times New Roman', Times, serif » — ou une police de la collectivité." }),
+      f("fontFamily", "Police du corps", "font", { wide: true, help: FONT_HELP }),
       f("fontSize", "Taille du corps (pt)", "num"),
       f("lineHeight", "Interligne", "num"),
       f("letterSpacing", "Interlettrage (em)", "num"),
@@ -98,13 +110,14 @@ const GROUPS = [
     id: "title", title: "Intitulé de l'acte",
     sub: "La première ligne du document — celle qui porte le numéro et l'objet.",
     fields: [
-      f("titleFont", "Police de l'intitulé", "text", { wide: true, help: "Vide = police du corps." }),
+      f("titleFont", "Police de l'intitulé", "font", { wide: true, inherit: true, help: "« Héritée » : l'intitulé reprend la police du corps." }),
       f("titleSize", "Taille (em)", "num"),
       f("titleWeight", "Graisse", "text", { placeholder: "700" }),
       f("titleAlign", "Alignement", "select", { options: SELECTS.titreAlign }),
       f("titleCase", "Capitales", "bool"),
       f("titleSpacing", "Interlettrage des capitales (em)", "num"),
-      f("titleRule", "Marque sous l'intitulé", "select", { options: SELECTS.titreRule }),
+      f("titleRule", "Marque de l'intitulé", "select", { options: SELECTS.titreRule }),
+      f("titleBoxSides", "Bordures de l'encadré", "sides", { wide: true, help: SIDES_HELP }),
       f("titleMargin", "Espace sous l'intitulé (em)", "num"),
       f("titleColor", "Couleur de l'intitulé", "color-empty", { help: "Vide = couleur des intitulés." }),
     ],
@@ -140,11 +153,12 @@ const GROUPS = [
     id: "articles", title: "Articles",
     sub: "Les intitulés d'article (« Article 1er — Objet ») et leur séparation.",
     fields: [
-      f("headingFont", "Police des intitulés d'article", "text", { wide: true, help: "Vide = police du corps." }),
+      f("headingFont", "Police des intitulés d'article", "font", { wide: true, inherit: true, help: "« Héritée » : les intitulés d'article reprennent la police du corps." }),
       f("headingSize", "Taille (em)", "num"),
       f("headingWeight", "Graisse", "text", { placeholder: "700" }),
       f("headingCase", "Intitulés en capitales", "bool"),
-      f("headingRule", "Filet sous l'intitulé", "select", { options: SELECTS.headingRule }),
+      f("headingRule", "Marque de l'intitulé d'article", "select", { options: SELECTS.headingRule }),
+      f("headingBoxSides", "Bordures de l'encadré", "sides", { wide: true, help: SIDES_HELP }),
       f("articleNumberLayout", "Place du numéro", "select", { options: SELECTS.numPosition }),
       f("headingColor", "Couleur des intitulés", "color-empty", { help: "Vide = couleur du texte." }),
       f("articleDivider", "Filet entre les articles", "select", { options: SELECTS.divider }),
@@ -152,9 +166,11 @@ const GROUPS = [
     ],
   },
   {
-    id: "lists", title: "Listes à puces",
+    id: "lists", title: "Listes",
+    sub: "La puce des listes à puces et la numérotation des listes numérotées. C'est le rédacteur qui choisit, bloc par bloc dans la trame, entre liste à puces et liste numérotée ; ici, la charte dit à quoi elles ressemblent.",
     fields: [
-      f("listMarker", "Puces", "select", { options: SELECTS.listMarker }),
+      f("listMarker", "Puces (listes à puces)", "select", { options: SELECTS.listMarker, legacy: { decimal: "Numérotée 1. (héritée)" } }),
+      f("listNumbering", "Numérotation (listes numérotées)", "select", { options: SELECTS.listNumbering, help: "S'applique aux listes que la trame déclare « numérotées » — par exemple « 1° 2° 3° », l'usage des énumérations administratives." }),
       f("listIndent", "Retrait (px)", "num"),
     ],
   },
@@ -162,6 +178,7 @@ const GROUPS = [
     id: "enact", title: "Formule d'édiction (« ARRÊTE » / « DÉCIDE »)",
     fields: [
       f("enactStyle", "Présentation", "select", { options: SELECTS.ecks }),
+      f("enactBoxSides", "Bordures de l'encadré", "sides", { wide: true, help: SIDES_HELP }),
       f("enactCase", "En capitales", "bool"),
     ],
   },
@@ -169,6 +186,7 @@ const GROUPS = [
     id: "mentions", title: "Mentions (recours, publication, notification)",
     fields: [
       f("mentionStyle", "Présentation", "select", { options: SELECTS.mention }),
+      f("mentionBoxSides", "Bordures de l'encadré", "sides", { wide: true, help: SIDES_HELP }),
       f("mentionSize", "Taille (em)", "num"),
       f("mentionItalic", "Italique", "bool"),
     ],
@@ -188,6 +206,7 @@ const GROUPS = [
     fields: [
       f("signatureAlign", "Position", "select", { options: SELECTS.signAlign }),
       f("signatureStyle", "Présentation", "select", { options: SELECTS.signStyle }),
+      f("signatureBoxSides", "Bordures de l'encadré", "sides", { wide: true, help: SIDES_HELP }),
       f("signatureSpace", "Espace pour la signature (px)", "num", { help: "Hauteur laissée au-dessus du nom, sous la ligne ou dans l'encadré." }),
       f("signatureWidth", "Largeur du bloc (% de la page)", "num"),
       f("signatureNameWeight", "Graisse du nom", "select", { options: SELECTS.weight }),
@@ -457,7 +476,10 @@ export function renderStyles(root) {
         class: "styles-preset", type: "button",
         on: { click: () => applyPresetTo(p) },
       },
-        h("span", { class: "styles-preset__name", text: p.label }),
+        h("span", { class: "styles-preset__tete" },
+          h("span", { class: "styles-preset__name", text: p.label }),
+          p.badge ? h("span", { class: "styles-preset__badge" + (p.badgeKind === "warning" ? " styles-preset__badge--warning" : ""), text: p.badge }) : null,
+        ),
         h("span", { class: "styles-preset__hint", text: p.hint }),
       ));
     }
@@ -672,8 +694,40 @@ function styleField(fl, sheet, set) {
     case "bool":
       control = choiceField({ label: fl.label, value: value !== false && value !== "false", options: YES_NO, help: fl.help, onChange: (v) => set(fl.key, v, fl) });
       break;
-    case "select":
-      control = selectField({ label: fl.label, value: String(value ?? ""), options: fl.options, help: fl.help, onChange: (v) => set(fl.key, v, fl) });
+    case "select": {
+      // Une feuille enregistrée avant un changement de nomenclature garde sa
+      // valeur : on lui rend son option, pour qu'elle reste lisible — et
+      // modifiable — dans la liste déroulante.
+      let options = fl.options || [];
+      const legacy = fl.legacy && fl.legacy[String(value ?? "")];
+      if (legacy && !options.some((o) => String(o.value) === String(value))) options = [...options, { value: value, label: legacy }];
+      control = selectField({ label: fl.label, value: String(value ?? ""), options, help: fl.help, onChange: (v) => set(fl.key, v, fl) });
+      break;
+    }
+    case "sides": {
+      // Un encadré dont on coche les côtés. L'état vit ici (et non dans une
+      // fermeture sur la valeur de la feuille) : les clics s'enchaînent sans
+      // reconstruire l'écran, qui n'est pas redessiné à chaque réglage.
+      const sides = { value: String(value || "tblr") };
+      const sideBtn = (key, label) => h("button", {
+        type: "button",
+        class: "styles-side" + (sides.value.includes(key) ? " is-on" : ""),
+        "aria-pressed": String(sides.value.includes(key)),
+        onClick: (e) => {
+          const on = new Set(sides.value.split(""));
+          if (on.has(key)) on.delete(key); else on.add(key);
+          sides.value = "tblr".split("").filter((x) => on.has(x)).join("");
+          e.currentTarget.classList.toggle("is-on", sides.value.includes(key));
+          e.currentTarget.setAttribute("aria-pressed", String(sides.value.includes(key)));
+          set(fl.key, sides.value, fl);
+        },
+      }, label);
+      control = frField(fl.label, h("div", { class: "styles-sides" },
+        sideBtn("t", "Haut"), sideBtn("r", "Droite"), sideBtn("b", "Bas"), sideBtn("l", "Gauche")), { help: fl.help });
+      break;
+    }
+    case "font":
+      control = fontField({ label: fl.label, value, inherit: fl.inherit, help: fl.help, onChange: (v) => set(fl.key, v, fl) });
       break;
     case "num":
       control = textField({ label: fl.label, value: value ?? "", type: "number", help: fl.help, placeholder: fl.placeholder, onChange: (v) => set(fl.key, v, fl) });

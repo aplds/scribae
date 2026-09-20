@@ -84,12 +84,12 @@ L'application répond sur `http://<serveur>:${HTTP_PORT}` (par défaut `http://l
 ## 4. Première ouverture
 
 1. Ouvrez l'application et connectez-vous avec un compte administrateur de démonstration ;
-2. **Référentiel › Base de données** : le mode doit déjà être « **Serveur externe — MySQL /
+2. **Administration › Base de données** : le mode doit déjà être « **Serveur externe — MySQL /
    MariaDB** », l'adresse **vide** (même origine) et le jeton celui de `.env`. Cliquez
    *Tester la connexion* ;
 3. *Envoyer les données à la base* pour y installer le référentiel de départ (la base est
    vide au premier démarrage) ;
-4. **Référentiel › Identité › Mention de démonstration** : masquez le bandeau orange quand
+4. **Administration › Identité › Mention de démonstration** : masquez le bandeau orange quand
    l'installation devient une installation de service.
 
 Chaque poste se connecte à la **même** base : les données (référentiel, trames, actes,
@@ -188,8 +188,29 @@ service.
 | Le navigateur bloque les appels (`CORS`) | application et API sur des origines différentes | renseigner `CORS_ORIGINS` avec l'origine de l'application |
 | La signature ne fonctionne pas | page servie en `http://` (hors `localhost`) | passer en HTTPS (WebCrypto exige un contexte sécurisé) |
 | Page blanche | modules non chargés | ouvrir la console : vérifier que `/src/ui/app.js` répond 200 et que le montage `APP_DIR` pointe bien sur le dossier contenant `src/` |
+| Un acte publié n'apparaît pas sur `/recueil` | la façade ne route pas le recueil vers l'API | `nginx.conf` intercepte `/robots.txt`, `/llms.txt`, `/sitemap.xml`, `/recueil.json` et `/recueil` **avant** la page de l'application (`location /`) ; vérifier que le conteneur `web` a bien été recréé après modification |
 
-## 10. Arborescence
+## 10. Recueil ouvert : ce que la façade sert sans JavaScript
+
+Le service sert lui-même les adresses que lisent les **moteurs de recherche** et les **agents**
+(voir `../lib/recueil.js` et `mysql/actes.mjs`). nginx les route vers l'API **avant** la page de
+l'application :
+
+| Adresse | Contenu |
+|---|---|
+| `/robots.txt` | ce qui peut être parcouru, et où trouver le plan |
+| `/llms.txt` | le recueil présenté aux agents, en Markdown (convention `llms.txt`) |
+| `/sitemap.xml` | le plan du site : une adresse par acte publié |
+| `/recueil.json` | l'index complet des actes publiés, lisible par machine |
+| `/recueil` | la liste des actes, en HTML rendu côté serveur |
+| `/recueil/<clé>` | la page d'un acte, en HTML rendu côté serveur |
+| `/recueil/<clé>.<ext>` | une représentation : `.json`, `.md`, `.txt`, `.akn` |
+
+Ces réponses portent un `cache-control` public court. Les actes **retirés** du recueil disparaissent
+aussi de ces adresses. Aucun réglage n'est nécessaire côté application : c'est la publication qui
+ouvre l'acte.
+
+## 11. Arborescence
 
 ```
 src/server/

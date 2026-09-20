@@ -33,11 +33,16 @@ export const AUTH_MODES = [
   },
 ];
 
-// Un agent dont aucun groupe n'est reconnu :
-//   deny    on refuse la connexion (défaut, sûr : l'annuaire est la seule porte)
-//   default on lui donne `defaultRole` (utile pendant la mise en service)
+// Ce qu'on fait d'un agent de l'annuaire dont AUCUN groupe ne correspond à un
+// rôle. Dans les deux cas l'agent est bien authentifié — l'annuaire a reconnu la
+// personne — et c'est ce qu'on lui OUVRE qui change :
+//   deny    rien : le compte prend le rôle **Visiteur** (aucune permission).
+//           L'application l'accueille, lui explique qu'il n'a pas d'accès, lui
+//           donne le contact du service qui gère l'application, et le renvoie
+//           vers l'espace public (voir src/ui/views/sans-acces.js).
+//   default le rôle de repli (utile pendant la mise en service).
 export const UNKNOWN_POLICIES = [
-  { id: "deny", label: "Refuser la connexion" },
+  { id: "deny", label: "Aucun accès (rôle Visiteur)" },
   { id: "default", label: "Attribuer le rôle de repli" },
 ];
 
@@ -61,6 +66,8 @@ export const DEFAULT_AUTH = {
   // Revendication portant les groupes, et correspondance groupe → rôle.
   roleClaim: "groups",
   roleMap: DEFAULT_ROLE_MAP,
+  // Aucun groupe reconnu : « deny » ouvre un accès Visiteur (aucune permission),
+  // « default » attribue `defaultRole`.
   unknownPolicy: "deny",
   defaultRole: "redacteur",
   // Revendications du périmètre : le service (code de `config.services`) et
@@ -134,7 +141,7 @@ export const issuerLabel = (auth) => {
 export const providerLabel = (auth) => (isTestProvider(auth) ? "Annuaire d'essai" : issuerLabel(auth));
 
 // Ce qui manque pour que la connexion fonctionne — affiché tel quel dans
-// l'écran de connexion et dans « Référentiel › Annuaire ».
+// l'écran de connexion et dans « Administration › Annuaire ».
 export function providerProblems(auth) {
   const out = [];
   if (!auth || auth.mode !== "oidc") return out;

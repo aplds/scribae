@@ -86,7 +86,7 @@ export function toggleTheme() {
 
 // ------------------------------------------------------- couleur de la marque
 // Les jetons `--brand` et `--brand-soft` sont posés par la configuration
-// (Référentiel › Identité) sur la couleur de la collectivité — un bleu très
+// (Administration › Identité) sur la couleur de la collectivité — un bleu très
 // foncé, illisible sur un fond sombre. On les adapte donc au thème : éclaircis
 // en mode sombre, tels quels en mode clair.
 const hex2rgb = (hex) => {

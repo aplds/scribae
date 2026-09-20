@@ -1,11 +1,11 @@
 import {
   state, init, parseRoute, navigate, onChange, applyBrand, setViewRenderer, can, logout,
-  currentUser, emit, signalerEcranCollab, libererRedaction,
+  currentUser, emit, signalerEcranCollab, libererRedaction, parapheurActif,
 } from "./state.js";
 import { h, clear, icon, button, badge, toast } from "./dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "./brand.js";
 import { versionBadge, releasedLabel } from "../lib/version.js";
-import { fullName, roleOf, initialsOf } from "../lib/users.js";
+import { fullName, roleLabel, badgesOf, initialsOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
 import { storageAvailable } from "../lib/store.js";
 import { applyTheme, onSystemThemeChange } from "../lib/theme.js";
@@ -15,23 +15,30 @@ import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
 import { demoNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
+import { renderSansAcces } from "./views/sans-acces.js";
 import { handleAuthReturn } from "./oidc.js";
 import { renderComptes } from "./views/comptes.js";
 import { renderTrames } from "./views/trames.js";
 import { renderEditor } from "./views/editor.js";
 import { renderRediger } from "./views/rediger.js";
 import { renderActes } from "./views/actes.js";
+import { renderDelegations } from "./views/delegations.js";
 import { renderReferentiel } from "./views/referentiel.js";
 import { renderStyles } from "./views/styles.js";
 import { renderAide } from "./views/aide.js";
 import { renderModifier, renderActeDetail } from "./views/modifier.js";
 import { renderSignature } from "./views/signature.js";
 import { renderPublications } from "./views/publications.js";
+import { renderRecueilPublic, retirerMetaRecueil } from "./views/recueil-public.js";
+import { amorcerRecueil } from "./demo-publications.js";
+import { appliquerAbrogations } from "./abrogations-apply.js";
 import { renderDocs } from "./views/docs.js";
 import { renderParapheur } from "./views/parapheur.js";
+import { renderRevision } from "./views/revision.js";
 import { renderExecution } from "./views/execution.js";
 import { renderCorbeille } from "./views/corbeille.js";
 import { monterBarreCollab } from "./collab.js";
+import { monterAssistants, assistantsChooser } from "./assistant.js";
 import { installerRaccourcis, ouvrirRecherche } from "./global-search.js";
 
 const NAV = [
@@ -40,21 +47,26 @@ const NAV = [
     { id: "rediger", label: "Rédiger un acte", icon: "plus", perm: "actes.rediger" },
     { id: "modifier", label: "Modifier un acte", icon: "refresh", perm: "actes.gerer" },
     { id: "actes", label: "Actes", icon: "list", perm: "actes.rediger" },
-    { id: "parapheur", label: "Parapheur", icon: "check", perm: "actes.valider" },
+    { id: "delegations", label: "Délégations", icon: "org" },
+    { id: "parapheur", label: "Parapheur", icon: "check", perm: "actes.valider", experimental: true },
+    { id: "revision", label: "Révision", icon: "eye", perm: "actes.reviser" },
   ] },
   { group: "Publier", items: [
-    { id: "signature", label: "Signature & publication", icon: "lock", perm: "signature.gerer" },
+    { id: "signature", label: "Signature & publication", icon: "lock", perm: "actes.signer" },
     { id: "execution", label: "Exécution & délais", icon: "list", perm: "actes.rediger" },
     { id: "publications", label: "Publications (ELI)", icon: "eye", perm: "signature.gerer" },
+    // Le recueil public est ouvert à tous, y compris hors de l'atelier : sa
+    // place dans le menu est une commodité, non un droit.
+    { id: "recueil", label: "Recueil public", icon: "globe" },
   ] },
   { group: "Configurer", items: [
-    { id: "referentiel", label: "Référentiel", icon: "grid", perm: "referentiel.gerer" },
+    { id: "referentiel", label: "Administration", icon: "grid", perm: "referentiel.gerer" },
     { id: "styles", label: "Feuilles de style", icon: "palette", perm: "trames.styles" },
     { id: "corbeille", label: "Corbeille", icon: "trash", perm: "actes.rediger" },
   ] },
   { group: "Aide", items: [
     { id: "aide", label: "Guide", icon: "info" },
-    { id: "docs", label: "Documentation technique", icon: "doc" },
+    { id: "docs", label: "Documentation technique", icon: "doc", perm: "docs.voir" },
   ] },
 ];
 
@@ -68,20 +80,30 @@ const VIEW_PERMS = {
   rediger: "actes.rediger",
   actes: "actes.rediger",
   acte: "actes.rediger",
+  // L'organigramme des délégations est visible par TOUS les comptes : savoir qui
+  // peut signer à la place de qui n'est pas une donnée réservée. Ce sont les
+  // modifications qui sont gardées (permission « delegations.gerer », contrôlée
+  // dans la vue).
+  delegations: null,
   modifier: "actes.gerer",
-  signature: "signature.gerer",
+  signature: "actes.signer",
   publications: "signature.gerer",
   publication: "signature.gerer",
   referentiel: "referentiel.gerer",
   styles: "trames.styles",
   comptes: "comptes.gerer",
   parapheur: "actes.valider",
+  revision: "actes.reviser",
   execution: "actes.rediger",
   corbeille: "actes.rediger",
   aide: null,
-  docs: null,
+  // La documentation technique (exploitation, installation, sécurité) est
+  // réservée aux administrateurs.
+  docs: "docs.voir",
 };
-const allowed = (view) => !VIEW_PERMS[view] || can(VIEW_PERMS[view]);
+// Le parapheur est une fonction expérimentale : éteint, son écran n'est pas
+// accessible, même par un lien direct (voir src/lib/validation.js).
+const allowed = (view) => (!VIEW_PERMS[view] || can(VIEW_PERMS[view])) && (view !== "parapheur" || parapheurActif());
 const firstAllowedView = () => ["trames", "rediger", "actes", "signature", "publications", "aide"].find(allowed) || "aide";
 
 const VIEWS = {
@@ -90,6 +112,7 @@ const VIEWS = {
   rediger: renderRediger,
   actes: renderActes,
   acte: renderActeDetail,
+  delegations: renderDelegations,
   modifier: renderModifier,
   referentiel: renderReferentiel,
   styles: renderStyles,
@@ -98,11 +121,18 @@ const VIEWS = {
   publication: renderConsultationRoute,
   comptes: renderComptes,
   parapheur: renderParapheur,
+  revision: renderRevision,
   execution: renderExecution,
   corbeille: renderCorbeille,
   aide: renderAide,
   docs: renderDocs,
 };
+
+// Les écrans PUBLICS échappent à la coquille : ni session, ni navigation, ni
+// compte. Le recueil est un site à part, servi par la même page (« #/recueil »,
+// « #/recueil/<clé> ») : c'est ce qui permet de le citer et de le partager.
+const EST_PUBLIQUE = (view) => view === "recueil";
+let publicMode = false;
 
 // La consultation d'une publication est un sous-écran du registre.
 function renderConsultationRoute(root, params) {
@@ -126,7 +156,6 @@ function storageBadge() {
 // est une préférence de POSTE : elle n'est pas enregistrée dans le référentiel.
 function userMenu() {
   const u = currentUser();
-  const role = roleOf(u);
   const wrap = h("div", { class: "app-user-wrap" });
   const menu = h("div", { class: "app-user__menu", hidden: true });
   const close = () => { menu.hidden = true; document.removeEventListener("click", onDoc); };
@@ -139,7 +168,11 @@ function userMenu() {
 
   menu.appendChild(h("div", { class: "app-user__head" },
     h("span", { class: "app-user__headname", text: fullName(u) }),
-    h("span", { class: "fr-small fr-muted", text: (u.email || u.login) + " · " + role.label }),
+    h("span", { class: "fr-small fr-muted", text: (u.email || u.login) + " · " + roleLabel(u) }),
+    // Les rôles CUMULÉS se lisent d'un coup d'œil : un éditeur-réviseur porte
+    // deux pastilles, et l'on voit laquelle il tient de l'annuaire.
+    h("span", { class: "fr-row", style: { gap: "4px", flexWrap: "wrap", margin: "2px 0" } },
+      ...badgesOf(u).map((b) => h("span", { class: "fr-badge fr-badge--" + b.badge, text: b.label }))),
     h("span", { class: "fr-small fr-muted", text: "Périmètre : " + scopeLabel(state.config, u) }),
     // Compte rattaché à l'annuaire : on rappelle d'où vient le rôle, pour que
     // l'agent (et l'administrateur à qui il montre son écran) le voie.
@@ -148,11 +181,16 @@ function userMenu() {
       : null,
   ));
   if (can("comptes.gerer")) menu.appendChild(item("Comptes et rôles", "lock", () => navigate("comptes")));
-  if (can("referentiel.gerer")) menu.appendChild(item("Référentiel", "gear", () => navigate("referentiel")));
+  if (can("referentiel.gerer")) menu.appendChild(item("Administration", "gear", () => navigate("referentiel")));
   menu.appendChild(item("Guide d'utilisation", "info", () => navigate("aide")));
-  menu.appendChild(item("Documentation technique", "doc", () => navigate("docs")));
+  if (can("docs.voir")) menu.appendChild(item("Documentation technique", "doc", () => navigate("docs")));
   menu.appendChild(h("hr", { class: "app-user__sep" }));
   menu.appendChild(themeChooser());
+  // Les assistants (Plume, Publia) : l'agent peut les éteindre POUR SON COMPTE,
+  // comme il choisit l'apparence de son poste. Le réglage de l'installation
+  // (Administration › Assistants) reste, lui, à l'administrateur.
+  const assistants = assistantsChooser();
+  if (assistants) menu.appendChild(assistants);
   menu.appendChild(item("Changer de compte", "x", () => logout()));
   // La version en service : c'est ici qu'un agent la lit quand on lui demande
   // « quelle version tourne ? ». Elle vient de src/lib/version.js (source unique).
@@ -174,7 +212,7 @@ function userMenu() {
     h("span", { class: "app-user__avatar", text: initialsOf(u) }),
     h("span", { class: "app-user__text" },
       h("span", { class: "app-user__name", text: fullName(u) }),
-      h("span", { class: "app-user__role", text: role.label }),
+      h("span", { class: "app-user__role", text: roleLabel(u) }),
     ),
     icon("down", 14),
   );
@@ -189,7 +227,7 @@ function shell() {
     .split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 
   // Bandeau de démonstration : en tête, au-dessus de l'en-tête. Il disparaît
-  // quand l'administrateur l'a coupé (Référentiel › Identité).
+  // quand l'administrateur l'a coupé (Administration › Identité).
   const notice = demoNotice(can("referentiel.gerer")
     ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
     : null);
@@ -227,7 +265,7 @@ function shell() {
       }, icon("info", 15), h("span", { text: "Rechercher" }), h("kbd", { text: "Ctrl K" })),
       userBar,
       button("Guide", { variant: "secondary", icon: "info", size: "", onClick: () => navigate("aide") }),
-      can("referentiel.gerer") ? h("span", { class: "app-header__ref" }, button("Référentiel", { variant: "secondary", icon: "gear", size: "", onClick: () => navigate("referentiel") })) : null,
+      can("referentiel.gerer") ? h("span", { class: "app-header__ref" }, button("Administration", { variant: "secondary", icon: "gear", size: "", onClick: () => navigate("referentiel") })) : null,
       themeButton(),
       userMenu(),
     ),
@@ -235,7 +273,7 @@ function shell() {
 
   const nav = h("nav", { class: "app-nav" });
   for (const g of NAV) {
-    const items = g.items.filter((it) => !it.perm || can(it.perm));
+    const items = g.items.filter((it) => (!it.perm || can(it.perm)) && (!it.experimental || parapheurActif()));
     if (!items.length) continue;
     nav.appendChild(h("div", { class: "app-nav__group", text: g.group }));
     for (const it of items) {
@@ -261,7 +299,7 @@ export function renderApp(root) {
 }
 
 function drawView() {
-  if (!mainEl) return;
+  if (!mainEl || publicMode) return;
   clear(mainEl);
   if (!allowed(state.route.view)) state.route = { view: firstAllowedView(), params: {} };
   const view = VIEWS[state.route.view] || renderTrames;
@@ -308,6 +346,10 @@ async function boot() {
   root.appendChild(h("div", { class: "fr-card", style: { margin: "40px auto", maxWidth: "420px" }, text: "Chargement…" }));
   applyTheme();
   await inlineStylesheets();
+  // La route (un lien profond « #/recueil », par exemple) est lue AVANT
+  // l'initialisation : un visiteur qui suit le lien du recueil ne voit pas
+  // l'écran de connexion clignoter avant la bascule.
+  parseRoute();
   try {
     await init();
   } catch (e) {
@@ -340,15 +382,38 @@ async function boot() {
   db.onStatus(() => { if (state.ready) emit(); });
   // Raccourcis globaux (Ctrl+K, « / ») : posés une seule fois.
   installerRaccourcis();
+  // Les deux assistants (l'atelier et le recueil) : posés une seule fois, hors
+  // de la coquille, pour qu'une conversation en cours survive aux redessins.
+  // Leur visibilité suit la route. Voir src/ui/assistant.js.
+  monterAssistants();
   renderRoot(root);
   parseRoute();
   // Vérifie la santé de la persistance en tâche de fond (sans bloquer l'affichage).
   db.health().catch(() => {});
+  // Démonstration : le recueil public se remplit au premier démarrage (les
+  // actes que la fiction déclare publiés sont publiés par le chemin réel, et
+  // le service leur attribue leur ELI). Silencieux et sans effet sur une
+  // installation réelle — voir src/ui/demo-publications.js.
+  amorcerRecueil().catch((e) => console.warn("Amorçage du recueil :", e));
+  // Les abrogations prévues par un acte prennent effet au jour de l'ENTRÉE EN
+  // VIGUEUR de cet acte : on regarde, à chaque démarrage, celles dont le terme
+  // est arrivé (idempotent, silencieux). Voir src/ui/abrogations-apply.js.
+  appliquerAbrogations().catch((e) => console.warn("Abrogations :", e));
 }
 
-// Sans session : écran de connexion. Avec session : application.
+// Sans session : écran de connexion. Avec session mais sans rôle d'application :
+// écran « pas d'accès » (le visiteur est authentifié, l'atelier ne lui est pas
+// ouvert). Avec session : application. Les écrans publics (le recueil) passent
+// avant l'un comme avant l'autre : ils ne supposent aucun compte.
 function renderRoot(root) {
-  if (!state.user) { clear(root); renderConnexion(root); return; }
+  publicMode = EST_PUBLIQUE(state.route.view);
+  clear(root);
+  if (publicMode) { renderRecueilPublic(root, state.route.params || {}); return; }
+  // On quitte le recueil : ses métadonnées (titre, canonique, JSON-LD) n'ont
+  // plus lieu d'être dans la page de l'atelier.
+  retirerMetaRecueil();
+  if (!state.user) { renderConnexion(root); return; }
+  if (estVisiteur(state.user)) { renderSansAcces(root); return; }
   renderApp(root);
 }
 

@@ -1,18 +1,26 @@
 // ============================================================================
-// Publications — la partie publique.
+// Publications — le registre de l'administration.
 //
-// C'est le pendant « citoyen » de la publication : un registre consultable et,
-// pour chaque acte, sa version en ligne, ses métadonnées (ELI, dates, recueil),
-// et l'original signé. Rien n'est lu dans les données locales de l'application :
-// tout vient du service de publication, comme le ferait n'importe quel site.
+// La face publique de la publication, c'est le RECUEIL (route « #/recueil »,
+// voir views/recueil-public.js) : un site sans compte, où chacun lit le texte
+// des actes. Cet écran-ci est l'atelier : la liste des publications du service,
+// la résolution d'un identifiant ELI, les formats et l'original signé.
+//
+// La consultation d'une publication emprunte le MÊME rendu que le recueil
+// (views/acte-publie.js) : la notice de l'acte, puis son texte présenté dans la
+// page. Rien n'est lu dans les données locales de l'application — tout vient du
+// service de publication, comme le ferait n'importe quel site.
 // ============================================================================
-import { state, navigate, redrawView } from "../state.js";
-import { h, clear, button, icon, toast, modal } from "../dom.js";
+import { state, navigate, redrawView, can, currentUser, touch, journaliser } from "../state.js";
+import { h, button, toast, modal, icon } from "../dom.js";
 import { emptyState, helpLink } from "../components.js";
-import { get, apiStatus, beginFlow } from "../../lib/remote.js";
+import { get, post, apiStatus, errorMessage, beginFlow } from "../../lib/remote.js";
 import { verifySignedPackage } from "../../lib/signature.js";
 import { download, copyText, formatDate } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
+import { lienRecueil } from "../../lib/recueil.js";
+import { publicationSettings } from "../../lib/eli.js";
+import { corpsDeLActe, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
 import { ouvrirPage } from "./signature.js";
 
 export function renderPublications(root, params) {
@@ -31,8 +39,18 @@ function renderRegistre(root) {
     ),
     h("div", { class: "page-head__actions" },
       helpLink("publication", "Comment faire ?"),
+      button("Recueil public", { variant: "secondary", icon: "globe", onClick: () => navigate("recueil") }),
       button("Signature & publication", { variant: "secondary", icon: "lock", onClick: () => navigate("signature") }),
       button("Actualiser", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => { st.chargement = false; st.liste = null; redrawView(); } }),
+    ),
+  ));
+
+  root.appendChild(h("div", { class: "fr-card" },
+    h("h2", { class: "fr-card__title", text: "Le recueil public" }),
+    h("p", { class: "fr-small fr-muted", text: "Les actes publiés sont consultables par tous, sans compte, dans le recueil public : une recherche, la liste des actes et, pour chacun, son texte — la « version en ligne » d'aujourd'hui. L'identifiant ELI y figure sur chaque acte, et le registre ci-dessous sert à l'administration (métadonnées, formats, original signé)." }),
+    h("div", { class: "fr-row" },
+      button("Ouvrir le recueil public", { variant: "primary", icon: "globe", onClick: () => navigate("recueil") }),
+      button("Copier le lien du recueil", { variant: "secondary", icon: "copy", onClick: async () => { (await copyText(lienRecueil())) ? toast("Lien du recueil copié") : toast("Copie impossible", "warning"); } }),
     ),
   ));
 
@@ -116,11 +134,12 @@ function renderConsultation(root, params) {
   const cle = decodeURIComponent(params.id);
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Version en ligne" }),
-      h("p", { class: "page-head__sub", text: "Acte publié au recueil. Consultable par son identifiant ELI." }),
+      h("h1", { class: "page-head__title", text: "Acte publié" }),
+      h("p", { class: "page-head__sub", text: "Le texte publié au recueil, tel que le public le consulte — l'administration y ajoute les métadonnées, les formats et l'original signé." }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("publication", "Comment faire ?"),
+      button("Recueil public", { variant: "secondary", icon: "globe", onClick: () => navigate("recueil/" + encodeURIComponent(cle)) }),
       button("Registre des publications", { variant: "secondary", icon: "list", onClick: () => navigate("publications") }),
     ),
   ));
@@ -129,7 +148,7 @@ function renderConsultation(root, params) {
     st.cle = cle; st.rec = null; st.chargement = true; st.erreur = null; st.verif = null;
     chargerConsultation(st, cle);
   }
-  if (st.chargement) { root.appendChild(h("p", { class: "fr-muted", text: "Chargement de la version en ligne…" })); return; }
+  if (st.chargement) { root.appendChild(h("p", { class: "fr-muted", text: "Chargement de l'acte publié…" })); return; }
   if (!st.rec) {
     root.appendChild(emptyState(st.erreur || "Publication introuvable.",
       h("div", { class: "fr-row" },
@@ -140,69 +159,10 @@ function renderConsultation(root, params) {
 
   const p = st.rec;
   const onglet = (st.onglet = st.onglet || "texte");
+  const { notice, texte } = corpsDeLActe(p);
 
-  // Bandeau « publication officielle »
-  root.appendChild(h("div", { class: "pub-head" },
-    h("div", { class: "pub-head__left" },
-      h("span", { class: "pub-head__recueil", text: p.recueil || "Recueil des actes administratifs" }),
-      h("span", { class: "fr-badge fr-badge--info", text: p.nature || "Acte" }),
-      h("span", { class: "fr-badge fr-badge--" + (p.kind === "consolidee" ? "success" : p.kind === "modificative" ? "warning" : "info"), text: kindLabelOf(p.kind) }),
-      h("span", { class: "fr-badge fr-badge--" + (p.latest ? "success" : "warning"), text: p.latest ? "version en vigueur" : "version antérieure" }),
-    ),
-    h("div", { class: "pub-head__eli" },
-      h("span", { class: "fr-small fr-muted", text: "ELI" }),
-      h("code", { class: "fr-mono", text: p.eliUri }),
-      h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: async () => { (await copyText(p.eliUri)) ? toast("ELI copié") : toast("Copie impossible", "warning"); } }, icon("copy", 13), h("span", { text: "Copier" }))),
-  ));
+  root.appendChild(notice);
 
-  root.appendChild(h("h2", { class: "pub-title", text: p.objet || p.numero }));
-  root.appendChild(h("p", { class: "fr-small fr-muted", text: [p.numero && "n° " + p.numero, p.entityName, p.auteur].filter(Boolean).join(" · ") }));
-
-  // Colonnes : texte + métadonnées
-  const grid = h("div", { class: "pub-grid" });
-  const main = h("div", {});
-  const aside = h("div", {});
-  grid.appendChild(main); grid.appendChild(aside);
-  root.appendChild(grid);
-
-  // dates / opposabilité
-  aside.appendChild(h("div", { class: "oppo" },
-    h("strong", { text: "Opposabilité" }),
-    h("dl", { class: "pub-dl" },
-      h("dt", { text: "Signé le" }), h("dd", { text: formatDate(p.dateDocument) }),
-      h("dt", { text: "Publié le" }), h("dd", { text: formatDate(p.datePublication) }),
-      h("dt", { text: "Entrée en vigueur" }), h("dd", {}, h("strong", { text: formatDate(p.dateOpposabilite) })),
-    ),
-    h("p", { class: "fr-small", style: { margin: "6px 0 0" }, text: p.opposabiliteRule ? "Règle : " + p.opposabiliteRule + "." : "" }),
-  ));
-
-  aside.appendChild(h("div", { class: "fr-card" },
-    h("h3", { class: "fr-card__title", text: "Pièces et formats" }),
-    h("div", { class: "fr-stack" },
-      button("Original signé", { variant: "primary", icon: "lock", onClick: () => { st.onglet = "original"; redrawView(); } }),
-      button("Version en ligne (HTML)", { variant: "secondary", icon: "eye", onClick: () => ouvrirPage(p.formats.html, "Version en ligne") }),
-      button("Imprimer / PDF", { variant: "secondary", icon: "download", onClick: () => printHtml(p.formats.html) }),
-      button("Akoma Ntoso (.akn.xml)", { variant: "secondary", icon: "download", onClick: () => download(fileName(p) + ".akn.xml", p.formats.akn, "application/xml") }),
-      button("JSON-LD (ELI)", { variant: "secondary", icon: "download", onClick: () => download(fileName(p) + ".jsonld", p.formats.jsonld, "application/ld+json") }),
-    ),
-  ));
-
-  aside.appendChild(h("div", { class: "fr-card" },
-    h("h3", { class: "fr-card__title", text: "Signature" }),
-    h("dl", { class: "pub-dl" },
-      h("dt", { text: "Signataire" }), h("dd", { text: (p.signature?.signataires || []).map((s) => s.nom).filter(Boolean).join(", ") || "—" }),
-      h("dt", { text: "Le" }), h("dd", { text: p.signature?.signeLe ? new Date(p.signature.signeLe).toLocaleString("fr-FR") : "—" }),
-      h("dt", { text: "Algorithme" }), h("dd", { text: p.signature?.algorithme || "—" }),
-      h("dt", { text: "Prestataire" }), h("dd", { text: p.signature?.prestataire?.nom || "—" }),
-      h("dt", { text: "Empreinte" }), h("dd", { class: "fr-mono fr-small", text: (p.original?.sha256 || "").slice(0, 32) + "…" }),
-    ),
-  ));
-
-  if (p.ecarts) {
-    aside.appendChild(h("p", { class: "fr-small fr-muted", text: `${p.ecarts} écart(s) de rédaction par rapport à la trame d'origine.` }));
-  }
-
-  // onglets
   const tabs = h("div", { class: "fr-tabs" });
   for (const t of [{ id: "texte", label: "Texte" }, { id: "metadonnees", label: "Métadonnées" }, { id: "versions", label: "Versions" }, { id: "original", label: "Original signé" }]) {
     tabs.appendChild(h("button", {
@@ -211,19 +171,23 @@ function renderConsultation(root, params) {
       onClick: () => { st.onglet = t.id; redrawView(); },
     }));
   }
-  main.appendChild(tabs);
+  root.appendChild(tabs);
 
   if (onglet === "texte") {
-    main.appendChild(docFrame(p.formats.html));
+    root.appendChild(h("div", { class: "recueil-lecture" }, texte));
+    root.appendChild(blocPieces(p, { admin: true }));
+    root.appendChild(blocSignature(p));
+    if (p.ecarts) root.appendChild(h("p", { class: "fr-small fr-muted", text: `${p.ecarts} écart(s) de rédaction par rapport à la trame d'origine.` }));
+    if (p.versions && p.versions.length > 1) root.appendChild(blocVersions(p, { href: (k) => "#/publication/" + encodeURIComponent(k) }));
+    root.appendChild(blocDonneesPubliques(p));
   } else if (onglet === "metadonnees") {
-    main.appendChild(h("div", { class: "fr-card" },
+    root.appendChild(h("div", { class: "fr-card" },
       h("h3", { class: "fr-card__title", text: "Métadonnées de la publication" }),
       h("p", { class: "fr-small fr-muted", text: "Ces métadonnées accompagnent la version en ligne (JSON-LD / vocabulaire ELI)." }),
       h("pre", { class: "fr-mono fr-codebox", text: p.formats.jsonld || "" }),
       h("div", { class: "fr-row" },
         button("Copier", { variant: "tertiary", size: "sm", icon: "copy", onClick: async () => { (await copyText(p.formats.jsonld)) ? toast("Copié") : toast("Copie impossible", "warning"); } }),
-        button("Télécharger", { variant: "tertiary", size: "sm", icon: "download", onClick: () => download(fileName(p) + ".jsonld", p.formats.jsonld, "application/ld+json") })),
-    ));
+        button("Télécharger", { variant: "tertiary", size: "sm", icon: "download", onClick: () => download(fileName(p) + ".jsonld", p.formats.jsonld, "application/ld+json") }))));
   } else if (onglet === "versions") {
     const card = h("div", { class: "fr-card" }, h("h3", { class: "fr-card__title", text: "Historique des versions publiées sous ce même ELI" }));
     card.appendChild(h("p", { class: "fr-small fr-muted", text: "Un même identifiant ELI désigne l'acte dans le temps : quand l'acte est modifié, la version consolidée est publiée sous ce même identifiant et devient la version en vigueur. Les versions antérieures restent consultables — rien n'est effacé." }));
@@ -243,19 +207,116 @@ function renderConsultation(root, params) {
             ? h("span", { class: "fr-badge fr-badge--info", text: "consultée" })
             : button("Consulter", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(v.cle)) }))));
     });
-    main.appendChild(card);
+    root.appendChild(card);
   } else {
-    main.appendChild(h("div", { class: "fr-card" },
+    root.appendChild(h("div", { class: "fr-card" },
       h("h3", { class: "fr-card__title", text: "Original signé" }),
       h("p", { class: "fr-small fr-muted", text: "L'original signé est la pièce de référence : c'est lui qui est conservé et qui fait foi. La vérification porte sur l'empreinte du document et sur la signature du certificat." }),
-      verificationBox(p, st),
-    ));
-    main.appendChild(docFrame(p.original?.pageHtml, "Original signé indisponible."));
+      verificationBox(p, st)));
+    root.appendChild(docFrame(p.original?.pageHtml, "Original signé indisponible."));
   }
+
+  // Le retrait n'est proposé qu'à qui en a le droit — et il est présenté pour ce
+  // qu'il est : un geste exceptionnel, jamais une formalité courante.
+  if (can("publications.depublier")) root.appendChild(zoneSensible(p, st));
 }
 
-// La version publiée est affichée dans un cadre : c'est bien le document déposé
-// (page autonome), et le cadre prend la hauteur du document pour rester lisible.
+// ------------------------------------------------------------------- retrait
+// RETIRER UN ACTE PUBLIÉ DU RECUEIL. Un acte administratif publié ne se retire
+// pas : le retrait est exceptionnel et ne se justifie que par un motif
+// technique (dépôt en double, erreur de dépôt, acte publié avant d'être signé…).
+// Un acte dont le retrait se justifierait autrement — illégalité, annulation —
+// se modifie ou s'abroge : il reste au recueil, avec son historique. C'est
+// pourquoi l'avertissement est écrit en grand, que le motif est exigé, et que le
+// service le conserve sur l'acte (voir hRetirerPublication).
+function zoneSensible(p, st) {
+  return h("div", { class: "fr-card pub-danger" },
+    h("h2", { class: "fr-card__title", text: "Zone sensible — retirer cet acte du recueil" }),
+    avertissementRetrait(),
+    h("div", { class: "fr-row" },
+      button("Retirer du recueil…", { variant: "danger", icon: "trash", onClick: () => ouvrirRetrait(p, st) })),
+    h("p", { class: "fr-small fr-muted", text: "Ce droit est réservé aux administrateurs (permission « Retirer une publication du recueil »). Le retrait est inscrit au journal d'audit, avec son motif." }),
+  );
+}
+
+// L'avertissement du retrait, en grand : c'est lui qui doit arrêter la main.
+function avertissementRetrait() {
+  return h("div", { class: "pub-danger__hero" },
+    h("p", { class: "pub-danger__alert" },
+      icon("warn", 20),
+      h("span", { text: "Un acte administratif publié ne se retire jamais." })),
+    h("p", { class: "pub-danger__text", text: "Le retrait d'une publication est une mesure exceptionnelle. Seul un motif technique le justifie : dépôt en double, erreur de dépôt, acte publié par erreur avant sa signature, identifiant attribué à tort." }),
+    h("p", { class: "pub-danger__text", text: "Un acte dont le retrait se justifierait autrement — illégalité, annulation, contestation — se modifie ou s'abroge : il reste au recueil, avec son historique. Personne ne doit pouvoir douter de ce qui a été publié, ni quand." }),
+    h("p", { class: "pub-danger__text", text: "Retirer cet acte le fait disparaître du recueil public sur-le-champ. L'acte redevient « signé » (donc publiable de nouveau), et le motif saisi reste attaché à l'acte et au journal d'audit." }),
+  );
+}
+
+function ouvrirRetrait(p, st) {
+  const ta = h("textarea", { class: "fr-textarea", rows: 3, placeholder: "ex. dépôt en double : le même acte a été publié deux fois" });
+  const cb = h("input", { type: "checkbox" });
+  const confirmer = button("Retirer du recueil", { variant: "danger", icon: "trash", disabled: true });
+  const maj = () => { confirmer.disabled = !(ta.value.trim().length >= 8 && cb.checked); };
+  ta.addEventListener("input", maj);
+  cb.addEventListener("change", maj);
+  confirmer.addEventListener("click", async () => {
+    confirmer.disabled = true;
+    const fait = await retirer(p, ta.value.trim(), st);
+    if (fait) m.close(); else confirmer.disabled = false;
+  });
+  const m = modal({
+    wide: true,
+    title: `Retirer du recueil — ${p.numero || p.cle}`,
+    body: h("div", { class: "fr-stack" },
+      avertissementRetrait(),
+      h("div", { class: "fr-field" },
+        h("label", { class: "fr-label", text: "Motif technique du retrait (obligatoire)" }),
+        h("p", { class: "fr-hint", text: "Décrivez la raison technique. Ce motif sera conservé sur l'acte et inscrit au journal d'audit." }),
+        ta),
+      h("label", { class: "fr-check" }, cb, "Je comprends qu'un acte administratif publié ne doit jamais être retiré, et que seul un motif technique justifie ce retrait."),
+    ),
+    actions: (close) => [
+      button("Renoncer", { variant: "secondary", onClick: close }),
+      confirmer,
+    ],
+  });
+}
+
+async function retirer(p, motif, st) {
+  const u = currentUser();
+  const auteur = [u?.firstName, u?.lastName].filter(Boolean).join(" ") || u?.login || "";
+  const flow = beginFlow(`Retrait de publication — ${p.numero || p.cle}`);
+  let res;
+  try {
+    res = await post(`/v1/publications/${encodeURIComponent(p.cle)}/retrait`, { motif, auteur }, {
+      token: publicationSettings(state.config).jetonDemonstration,
+      flow, label: "Retrait de la publication du recueil",
+    });
+  } catch (e) { toast(String((e && e.message) || e), "error"); return false; }
+  if (!res.ok) { toast(errorMessage(res), "error"); return false; }
+
+  const acte = state.actes.find((a) => a.publication?.cle === p.cle || (p.eliUri && a.eli === p.eliUri));
+  if (acte) {
+    acte.retraits = (acte.retraits || []).concat([{ cle: p.cle, motif, auteur, le: new Date().toISOString() }]);
+    acte.publication = null;
+    if (acte.statut === "publie") acte.statut = "signee";
+    acte.updatedAt = new Date().toISOString();
+    touch("actes", { rerender: false });
+  }
+  // Le registre et le recueil ont changé : on invalide leurs caches.
+  state.pubRegistre = { chargement: false };
+  state.pubConsult = {};
+  if (state.recueil) { state.recueil.liste = null; state.recueil.actes = {}; }
+  await journaliser({
+    action: "publication.depublie", cible: "acte", cibleLabel: p.numero || p.cle, acteId: acte?.id,
+    detail: `retiré du recueil — motif technique : ${motif}`, to: ["role:administrateur"],
+  });
+  toast("Acte retiré du recueil. Le retrait est inscrit au journal.", "success");
+  navigate("publications");
+  return true;
+}
+
+// L'original signé, lui, reste une page à part : c'est une pièce, pas la
+// publication. On la montre dans un cadre.
 function docFrame(html, vide) {
   const wrap = h("div", { class: "pub-frame" });
   const frame = h("iframe", { class: "pub-frame__el", sandbox: "allow-same-origin", title: "Document publié", srcdoc: html || `<p>${vide || "Version en ligne indisponible."}</p>` });

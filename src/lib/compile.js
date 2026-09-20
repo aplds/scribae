@@ -1,16 +1,41 @@
 import { safeEval } from "./expr.js";
 import { formatDate, formatMoney, capitalize, titleCase, getPath, isDate, todayIso } from "./util.js";
 import { overrideNode, ecarts as ecartsOf } from "./redaction.js";
+import { enrichirSignataire } from "./delegations.js";
+import { champFonction, roleDeFonction } from "./fonctions.js";
+import { abrogationsDe, blocsAbrogation } from "./abrogations.js";
 
 // --------------------------------------------------------------------------
 // Contexte d'évaluation / d'interpolation
 // --------------------------------------------------------------------------
+// Le signataire arrive tantôt comme identifiant (`values.signataire = "p-faure"`,
+// le cas des actes enregistrés), tantôt comme objet déjà résolu (aperçu d'une
+// feuille de style, acte modificatif). On le ramène toujours à la personne du
+// référentiel : c'est là que vivent sa civilité, ses rôles et son accord.
+function personneDuReferentiel(config, valeur, deja) {
+  const id = typeof valeur === "string" ? valeur : valeur?.id || deja?.id;
+  if (id) {
+    const p = (config.people || []).find((x) => x.id === id);
+    if (p) return p;
+  }
+  return deja && typeof deja === "object" && (deja.lastName || deja.firstName) ? deja : null;
+}
+
+// La formule d'autorité d'une entité peut porter `{qualite}` : on y met la
+// qualité de l'autorité de tête, accordée en genre — « Le maire de … » devient
+// « La maire de … ». Une entité qui n'y fait pas appel garde son texte tel quel.
+function formuleAutorite(entite, ctx) {
+  const f = String(entite.authorityFormula || `L'autorité compétente de ${entite.nameWithArt || entite.name}`);
+  if (!f.includes("{qualite}")) return f;
+  const q = ctx.signataire?.autorite?.qualiteArticleMaj || ctx.signataire?.qualiteArticleMaj || "L'autorité compétente";
+  return f.replace(/\{qualite\}/g, q);
+}
+
 export function buildContext(config, values = {}, extra = {}) {
   const ctx = { ...values, config, today: todayIso(), ...extra };
   const trame = extra.trame;
   const fields = trame?.fields || [];
-  const roleLabel = (p) => (config.roles || []).find((r) => r.id === p?.roles?.[0])?.label || "";
-  const enrich = (p) => (p ? { ...p, fonction: roleLabel(p) } : p);
+  const enrich = (p) => (p ? { ...p, fonction: (config.roles || []).find((r) => r.id === p?.roles?.[0])?.label || "" } : p);
   for (const f of fields) {
     const v = values[f.id];
     if (v == null || v === "") continue;
@@ -19,18 +44,38 @@ export function buildContext(config, values = {}, extra = {}) {
     else if (f.type === "ref") ctx[f.id] = (config.refs || []).find((r) => r.id === v)?.label || v;
     else if (f.type === "reflist") ctx[f.id] = (Array.isArray(v) ? v : [v]).map((id) => (config.refs || []).find((r) => r.id === id)?.label).filter(Boolean);
   }
+  // L'entité est lue en premier : elle détermine dans quelle organisation le
+  // signataire tient sa délégation — une chaîne d'établissement autonome ne se
+  // mêle pas à celle de la commune. Voir src/lib/delegations.js.
   const entId = values.__entityId || extra.entityId;
+  // Le signataire est résolu AVANT les entités : sa qualité accordée alimente la
+  // formule d'autorité de l'entité.
+  //
+  // La FONCTION retenue par le rédacteur (voir src/lib/fonctions.js) peut
+  // désigner le rôle sous lequel il signe : une personne qui porte plusieurs
+  // rôles signe alors sous celui-là. La fonction est rangée à côté du champ
+  // (« signataireFonction »), le champ lui-même restant l'identifiant de la
+  // personne — tout le reste de l'application continue de la lire ainsi.
+  const champSig = (fields || []).find((f) => f.type === "signataire" || f.id === "signataire");
+  const cleFonction = values[champFonction(champSig?.id || "signataire")] || values.signataireFonction || "";
+  ctx.signataire = enrichirSignataire(
+    config,
+    personneDuReferentiel(config, values.signataire, ctx.signataire),
+    {
+      familyId: trame?.familyId || "", actTypeId: trame?.actTypeId || "",
+      entityId: entId || "", date: values.dateSignature || "",
+      roleId: roleDeFonction(cleFonction),
+    },
+  );
   const rawEntity = (config.entities || []).find((e) => e.id === entId) || null;
   const withDefaults = (e) => (e ? {
     ...e,
     nameWithArt: e.nameWithArt || e.name,
-    authorityFormula: e.authorityFormula || `L'autorité compétente de ${e.nameWithArt || e.name}`,
+    authorityFormula: formuleAutorite(e, ctx),
   } : null);
   ctx.entity = withDefaults(rawEntity);
   const rawOrg = (config.entities || []).find((e) => e.kind === "etablissement" || e.kind === "commune") || rawEntity;
   ctx.org = withDefaults(rawOrg);
-  if (!ctx.signataire && values.signataire) ctx.signataire = enrich((config.people || []).find((p) => p.id === values.signataire) || null);
-  else if (ctx.signataire) ctx.signataire = enrich(ctx.signataire);
   return ctx;
 }
 
@@ -199,14 +244,24 @@ export function compile(trame, values, config, opts = {}) {
         break;
       case "visas": {
         const sep = config.vocab?.visaSeparator ?? ",";
-        out.items = (node.items || [])
-          .filter((it) => !it.when || safeEval(it.when, ctx).value)
-          .map((it) => {
-            let t = resolveVisaItem(it, ctx, config);
-            if (t && !/[.;]$/.test(t)) t += sep;
-            return { id: it.id, text: t };
-          })
-          .filter((it) => it.text);
+        const finir = (t) => (t && !/[.;]$/.test(t) ? t + sep : t);
+        const items = [];
+        for (const it of node.items || []) {
+          if (it.when && !safeEval(it.when, ctx).value) continue;
+          // « Les décisions fondant la signature » : un visa par décision et par
+          // acteur de la chaîne, du sommet vers le signataire — la nomination
+          // puis la délégation pour chaque délégataire. Chaque visa porte son
+          // LIEN (le recueil, ou l'adresse externe) : c'est lui que le document
+          // publie, sur le web comme en PDF. Voir src/lib/delegations.js.
+          if (it.chaine && !it.text) {
+            for (const d of ctx.signataire?.decisions || []) {
+              items.push({ id: `${it.id}:${d.refId || d.label}`, text: finir(d.label), lien: d.lien || "" });
+            }
+            continue;
+          }
+          items.push({ id: it.id, text: finir(resolveVisaItem(it, ctx, config)) });
+        }
+        out.items = items.filter((it) => it.text);
         break;
       }
       case "considerants": case "list":
@@ -254,6 +309,29 @@ export function compile(trame, values, config, opts = {}) {
   };
 
   const nodes = (trame.body || []).map((n, i) => resolveNode(n, `body.${i}`)).filter(Boolean);
+
+  // --- abrogations prévues
+  // L'acte peut prévoir, par lui-même, l'abrogation d'un autre acte ou d'un
+  // article d'un autre acte. La clause prend place à la fin du dispositif —
+  // juste avant le bloc de signature — et dit que l'abrogation prend effet à
+  // l'ENTRÉE EN VIGUEUR de l'acte, non à sa publication : la règle est portée
+  // par le texte (vocabulaire « abrogation ») et appliquée par l'application
+  // (voir ui/abrogations-apply.js). L'emplacement est éditable comme les
+  // autres : ses adresses sont `abrogations…`.
+  const abrogations = abrogationsDe(values);
+  if (abrogations.length) {
+    const designation = (config.actTypes || []).find((t) => t.id === trame.actTypeId)?.label || values.designation || "Acte";
+    const matiere = blocsAbrogation(abrogations, { config, designation });
+    const resolved = resolveNode({
+      id: "abrogations", type: "article", abrogation: true, numMode: "auto", heading: matiere.heading,
+      blocks: matiere.blocks.map((text, i) => ({ id: `abrogations-b${i}`, type: "para", text, when: "", notes: [] })),
+      when: "", notes: [],
+    }, "abrogations");
+    if (resolved) {
+      const at = nodes.findIndex((n) => n.type === "signature" || n.type === "mention");
+      if (at < 0) nodes.push(resolved); else nodes.splice(at, 0, resolved);
+    }
+  }
 
   // contrôle structurel : un article vide est presque toujours une erreur de trame
   for (const n of nodes) {
@@ -307,6 +385,10 @@ export function compile(trame, values, config, opts = {}) {
 
 export function nextNumero(config, entity) {
   const n = config.numbering;
+  // Numérotation externe : le numéro ne vient pas de la séquence locale, et
+  // l'application ne peut pas le deviner — il se demande au service, au moment
+  // de rédiger (voir src/lib/numbering.js). On ne propose donc rien ici.
+  if (n.source === "externe") return "";
   const seq = String(n.seq).padStart(n.pad, "0");
   return n.pattern
     .replace("{year}", String(n.year))

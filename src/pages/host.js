@@ -8,6 +8,14 @@
 //   createServerSocket  canal vers l'API du service (dépôt, signature,
 //                       publication, base de données partagée)
 //
+// Un troisième est FACULTATIF : un relais HTTP sans CORS (`superFetch`), que
+// réclame la numérotation externe (Administration › Numérotation) pour atteindre un
+// service tiers — Grist, par exemple — qu'un navigateur ne peut pas appeler
+// lui-même. Il n'est **pas** fourni ici : sur une page statique, la numérotation
+// externe ne fonctionne qu'en **appel direct**, avec l'origine de l'application
+// déclarée origine de confiance chez le service. Un relais côté service est au
+// programme (voir `src/TODO.md`).
+//
 // D'ordinaire l'hébergement les pose sur l'objet global `root`. Sur une page
 // servie en statique (GitHub Pages), aucun des deux n'existe : ce fichier les
 // fournit — sous `window.__SCRIBA_HOST__`, que `hosts.js` consulte en premier —

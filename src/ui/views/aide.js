@@ -1,4 +1,4 @@
-import { state, navigate } from "../state.js";
+import { state, navigate, can } from "../state.js";
 import { h, clear, button, icon, toast } from "../dom.js";
 import { GUIDE, SHOTS, findChapter, chapterIndex, searchGuide } from "../../wiki.js";
 import { APP_NAME, markEl } from "../brand.js";
@@ -83,7 +83,7 @@ function contactBlock() {
     h("h3", { class: "gcontact__title" }, icon("info", 16), h("span", { text: "Besoin d'aide ?" })),
     lines.length
       ? h("p", { text: "En cas de blocage, contactez : " + lines.join(" — ") })
-      : h("p", { text: "En cas de blocage, adressez-vous à l'administrateur de l'application. Ses coordonnées n'ont pas encore été renseignées (on les ajoute dans Référentiel → Identité, champs « Contact d'aide »)." }),
+      : h("p", { text: "En cas de blocage, adressez-vous à l'administrateur de l'application. Ses coordonnées n'ont pas encore été renseignées (on les ajoute dans Administration → Identité, champs « Contact d'aide »)." }),
     h("p", { class: "fr-small fr-muted", text: "Avant d'appeler, notez le message affiché à l'écran : cela fait gagner beaucoup de temps." }),
   );
 }
@@ -239,15 +239,19 @@ function renderHome(root) {
   box.appendChild(h("div", { class: "guide__cards" }, ...GUIDE.chapters.map(chapterCard)));
 
   // Les informaticiens ne cherchent pas dans le guide d'utilisation : on leur
-  // ouvre la documentation d'exploitation depuis l'écran où ils arrivent.
-  box.appendChild(h("div", { class: "guide__tech fr-card fr-card--soft" },
-    h("div", { class: "guide__tech-text" },
-      h("h2", { class: "fr-card__title", text: "Documentation technique (administrateurs)" }),
-      h("p", { class: "fr-small fr-muted", text: "Où vivent les données, sécurité, sauvegardes, installation auto-hébergée, migration depuis la démonstration : les documents livrés avec le logiciel, lisibles ici même." })),
-    h("div", { class: "fr-row" },
-      button("Ouvrir la documentation", { variant: "secondary", icon: "doc", onClick: () => navigate("docs") }),
-      button("Installation (Docker)", { variant: "tertiary", size: "sm", onClick: () => navigate("docs/installation") }),
-    )));
+  // ouvre la documentation d'exploitation depuis l'écran où ils arrivent. Elle
+  // est réservée aux administrateurs (`docs.voir`) : les autres rôles ne voient
+  // pas ce renvoi.
+  if (can("docs.voir")) {
+    box.appendChild(h("div", { class: "guide__tech fr-card fr-card--soft" },
+      h("div", { class: "guide__tech-text" },
+        h("h2", { class: "fr-card__title", text: "Documentation technique (administrateurs)" }),
+        h("p", { class: "fr-small fr-muted", text: "Où vivent les données, sécurité, sauvegardes, installation auto-hébergée, migration depuis la démonstration : les documents livrés avec le logiciel, lisibles ici même." })),
+      h("div", { class: "fr-row" },
+        button("Ouvrir la documentation", { variant: "secondary", icon: "doc", onClick: () => navigate("docs") }),
+        button("Installation (Docker)", { variant: "tertiary", size: "sm", onClick: () => navigate("docs/installation") }),
+      )));
+  }
 
   box.appendChild(contactBlock());
   root.appendChild(box);
