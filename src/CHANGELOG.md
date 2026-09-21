@@ -20,7 +20,807 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 
 ## [Non publié]
 
-*(Rien pour l'instant : la prochaine livraison se décrira ici.)*
+## [1.3.0] — 2026-09-21 — Les actes d'assemblée
+
+### Sécurité
+
+- **Le service n'a plus aucune clé écrite dans le code.** Jusqu'ici, la clé d'écriture qui autorisait
+  les dépôts, les signatures et les publications était inscrite **en clair dans l'application** —
+  donc lisible par quiconque ouvrait la page ou consultait sa source — et ce seul mot de passe
+  ouvrait **toutes** les routes, y compris la réécriture des comptes. Un service neuf s'ouvre
+  désormais **en lecture seule** : il sert le recueil public, et rien d'autre. La **première clé**
+  se dépose une seule fois, depuis *Administration › Base de données* (« Provisionner le service »),
+  et c'est le **poste qui la tire au hasard** : le service n'en conserve que l'**empreinte
+  SHA-256**, jamais la valeur, et l'écran la montre **une seule fois** — perdue, elle ne se
+  remplace qu'en réinstallant l'état du service. Chaque clé porte un **rôle** — `administrateur`,
+  `editeur`, `redacteur`, `lecteur`, et `prestataire` pour la seule notification de signature — et
+  **chaque route dit le rôle qu'elle exige** : un poste muni d'une clé de rédaction ne peut ni
+  publier, ni épingler, ni toucher aux comptes. Les clés se créent (une par poste : « Générer une
+  clé de poste »), se listent et se **révoquent** ; le service refuse de révoquer la **dernière clé
+  d'administration**, pour ne pas se verrouiller lui-même.
+
+- **Les collections ne se lisent plus sans clé.** Les **comptes** (identifiant, courriel, rôles,
+  rattachements, préférences), la configuration et le journal étaient lisibles par **n'importe
+  qui** — la route ne demandait aucun jeton. Cette lecture est fermée, et une **sensibilité par
+  collection** la règle : les trames et les métadonnées sont publiques, les comptes ne le sont ni en
+  lecture ni en écriture. Le public garde exactement ce qui est public : la santé du service, le
+  **registre du recueil** (`/v1/publications`), la résolution des identifiants ELI, et l'état de
+  l'autorisation (`/v1/auth/etat`, qui ne dit que « provisionné » ou non, et les rôles existants).
+
+- **Le webhook du prestataire de signature est authentifié.** La route qui reçoit l'acte signé était
+  **publique** : un tiers pouvait fabriquer un paquet signé portant le nom et la fonction de son
+  choix, le présenter, et faire passer un acte à « signée » — puis le publier. Elle exige désormais
+  une clé de rôle `prestataire` (ou d'administration), et **le document déposé ne se lit plus sans
+  clé** non plus : c'est l'intégrité du circuit qui l'exige, non la commodité.
+
+- **Les documents déposés ne sont plus lisibles par tout le monde.** Les actes dits
+  **individuels** — une revalorisation, une sanction — que la loi ne veut pas voir publiés étaient
+  protégés **à la publication** mais pas **à la lecture** : leur texte intégral se lisait depuis le
+  service, numéro et objet compris. La lecture du dépôt, des circuits de signature et des
+  transmissions exige maintenant une clé ; seules les **publications** restent ouvertes — c'est
+  exactement ce que la publicité de l'acte suppose.
+
+- **La page d'un acte publié n'exécute plus de code.** La version en ligne reçue du service était
+  insérée telle quelle dans la page du recueil : une publication malveillante (ou fautive) faisait
+  donc exécuter du script à **tout visiteur** — sur la page d'accueil de la collectivité. Le
+  fragment passe désormais par un **assainissement** : liste blanche de balises et d'attributs
+  (`<script>`, `<iframe>`, gestionnaires d'événements `on…`, adresses `javascript:`, `vbscript:`
+  et `data:text/html` sont retirés), adresses d'images et de liens contrôlées. Le texte publié
+  légitime — paragraphes, listes, tableaux, emphases, images — traverse intact.
+
+- **La clé du moteur de langage ne vit plus dans le référentiel.** Elle était enregistrée avec la
+  configuration de l'assistant — donc **dans les exports de données et les sauvegardes de la base**.
+  C'est un secret : il ne se sauvegarde pas avec les données qu'il permet d'exploiter. Elle est
+  désormais conservée **par poste**, dans le stockage du navigateur (comme l'apparence), retirée de
+  la configuration à la lecture comme à l'écriture, et **absente de tout export**. Les postes qui
+  doivent interroger un moteur saisissent la leur ; l'aide du champ le dit.
+
+- **Ce que le service laisse comme trace.** Chaque geste sensible — dépôt d'acte, ouverture de
+  circuit de signature, notification reçue, transmission, publication, retrait, épinglage,
+  provisionnement et gestion des clés — laisse une ligne dans un **journal tenu par le SERVICE**,
+  et non par le poste qui a fait le geste. Les lignes sont **chaînées par empreinte SHA-256** :
+  chacune scelle la précédente et son contenu, si bien qu'une modification rompt la chaîne — et
+  l'écran le dit (« Chaîne intègre » / « Chaîne ROMPUE »). Le journal se lit depuis
+  *Administration › Base de données* (« Journal d'audit du service »).
+
+- **Le durcissement de l'API et de la façade.** La comparaison des clés est **à temps constant**
+  (une comparaison naïve laisserait mesurer l'empreinte attendue, octet par octet) ; chaque réponse
+  porte `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` et `Referrer-Policy` ; la
+  façade nginx refuse de se laisser **encadrer par un autre site** (`frame-ancestors 'self'`,
+  `X-Frame-Options: SAMEORIGIN`) et reprend ses en-têtes sur les chemins qui posent les leurs.
+
+- **À l'installation, les valeurs par défaut sont sûres.** Le déploiement auto-hébergé démarre en
+  **comptes locaux avec mot de passe** (`AUTH_MODE=password`) : plus de comptes sans mot de passe
+  par simple oubli. Le **CORS est fermé par défaut** (`CORS_ORIGINS` vide : aucun en-tête n'est
+  posé, aucun autre site ne peut appeler l'API pour le compte d'un agent). Les images Docker
+  (`node:20-alpine`, `mariadb:11`, `nginx:alpine`) sont **épinglées par empreinte** — deux
+  installations à deux dates ne partent plus de deux logiciels différents — et la version de
+  `mysql2` est **fixée**. Chaque jeton d'API porte désormais un **rôle** (`libellé|rôle:empreinte`),
+  au lieu d'un jeton unique tout-puissant.
+
+### Ajouté
+
+- **Une licence, écrite noir sur blanc.** Le dépôt portait un fichier `LICENSE` en GPL-3.0, mais la
+  page publique annonçait « tous droits réservés », et rien ne disait ce qu'il en était du **code
+  produit par l'IA**. `src/LICENSE.md` tranche les trois objets, qui n'ont ni le même auteur ni le
+  même régime : le **logiciel** (GPL-3.0, le fichier `LICENSE` restant à la racine du dépôt), les
+  **actes publiés** — qui ne relèvent pas de la licence du logiciel mais de la loi : la
+  réutilisation se règle par la **mention de réutilisation** du recueil, par défaut la **Licence
+  Ouverte 2.0** (CRPA, art. L. 321-1 et L. 322-6) —, et le **code produit par l'IA**, placé sous la
+  même licence que le reste, ses dépendances gardant les leurs (une seule : `mysql2`, MIT). La
+  section « Licence » de la page publique du dépôt dit désormais la même chose, et le document se
+  lit dans l'application (*Documentation technique › Licence*).
+
+- **Un socle de vérification, exécutable sans navigateur.** Le pari d'architecture — le métier ne
+  touche ni au DOM ni au réseau — devient vérifiable : `npm test` éprouve les modules **purs**
+  (expressions, assainissement du fragment publié, numérotation, version), `npm run lint` **parse
+  tout le JavaScript du dépôt** (`node --check`, sans aucune dépendance : du code qui ne se parse
+  pas ne s'exécute pas), et `npm run verifier` enchaîne les deux. Un **pipeline d'intégration
+  continue** (`.github/workflows/ci.yml`) les exécute à chaque envoi, avec les tests du domaine du
+  service. Tout est décrit dans `src/docs/INDUSTRIALISATION.md`, y compris ce qui **reste à mettre
+  en place** (verrou de dépendances, analyse statique, tests de parcours).
+
+- **L'identifiant ELI est une adresse : les liens ELI d'un acte publié mènent à l'acte, dans
+  l'instance.** Un acte cite ses fondements par leur **identifiant ELI** (« eli:/fr/arr/2026/0464/vsl ») —
+  c'est le visa d'adoption d'une annexe, ou le visa qui rappelle l'acte modificatif. Un identifiant
+  n'est pourtant pas une adresse : aucun navigateur ne sait l'ouvrir, et le lien d'un acte publié ne
+  menait donc nulle part. Le recueil, lui, **connaît ses actes** : il traduit l'identifiant en
+  l'adresse de l'acte visé, et le lecteur reste dans l'instance — la mention écrite (« l'arrêté
+  n°… du …, qui l'adopte ») ne change pas, seul le lien devient réel. Deux règles simples : un
+  identifiant désigne l'**acte** (et non une version), donc c'est la version **en vigueur** qui est
+  atteinte ; un identifiant que le recueil **ne connaît pas** (acte non publié, ou publié ailleurs)
+  reste une **mention**, sans lien — un lien qui ne mène nulle part vaut moins que pas de lien. La
+  même traduction se fait côté service sur un déploiement auto-hébergé, où la page publiée est servie
+  en HTML **sans JavaScript** (voir `src/server/mysql/actes.mjs`).
+
+- **L'identifiant ELI s'ouvre aussi comme une adresse.** Un lecteur qui a un ELI sous les yeux — dans
+  un courrier, dans une citation, dans les données ouvertes — l'ouvre désormais d'un clic : sur un
+  déploiement auto-hébergé, `/eli/arr/2026/0464/vsl` redirige vers la page de l'acte (le service sait
+  résoudre l'identifiant sans JavaScript) ; ailleurs, l'adresse passe par la page (`?eli=…`). Le bloc
+  **« Recueil ouvert »** de chaque acte porte cette adresse, à côté de l'adresse de référence et des
+  représentations lisibles par machine ; un identifiant inconnu du recueil le dit clairement, plutôt
+  que d'échouer en silence.
+
+- **La signature simple : signer dans l'application, sans prestataire branché ni papier.**
+  Toutes les collectivités n'ont pas de prestataire branché en API, et toutes ne veulent pas faire
+  circuler du papier. Le circuit **simple** comble ce vide : le signataire ouvre l'acte dans Scribae,
+  relit le document, coche une déclaration et **signe avec son compte**. La signature est
+  cryptographique et horodatée comme dans le circuit électronique (même paquet, même empreinte
+  SHA-256, même certificat de démonstration), et le service **vérifie l'empreinte** avant
+  d'enregistrer le retour. Ce qui change, c'est ce qui l'accompagne : le nom, la fonction,
+  l'**adresse électronique**, le compte, le moyen d'authentification, le poste et l'horodatage sont
+  consignés dans la part **INTERNE** de l'original (voir ci-dessous), et les courriels adressés au
+  titre de l'acte y sont joints — c'est la trace de **qui** a signé, **quand**, et **de quoi il a
+  été averti**. Le circuit se règle comme les autres : Administration › Signature (circuit général),
+  ou par trame (`simple_impose`, `simple_autorise`). Le dossier de signature simple s'ouvre depuis
+  « Ma signature » (« Vérifier et signer ») comme depuis le circuit de l'acte, et se consulte après
+  coup par « Dossier de signature (interne)… ».
+
+- **L'original signé se partage en deux : une part PUBLIQUE, une part INTERNE.** Ce que le recueil
+  donne à lire et ce que la collectivité doit pouvoir produire ne sont pas la même chose. La
+  **part publique** — diffusée au recueil public, dans l'export JSON de l'original, dans les
+  publications et par toutes les routes ouvertes — ne porte que le **nom**, la **fonction** et la
+  **date** du signataire ; la **part interne** porte les **mentions nominatives** (adresse
+  électronique, personne du référentiel, compte de l'application, compte de signature,
+  authentification, poste, adresse réseau) et la **trace des courriels**. Elle est déposée avec la
+  publication, rangée au registre, et **n'est servie par aucune route publique** : elle se lit dans
+  l'application (« Dossier de signature (interne)… ») ou par la route **protégée**
+  `GET /v1/actes/{id}/dossier-signature`, qui exige le jeton. Le circuit électronique en bénéficie
+  aussi : ses signataires sont réduits de la même façon.
+
+- **Notification par courriel — le service sait parler à un serveur SMTP.** Scribae n'envoie pas de
+  courriel lui-même : il **demande** au service de le faire, et c'est le service qui parle au
+  **serveur SMTP** de la collectivité (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
+  `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME`, `SMTP_REPLY_TO` — voir `src/server/mysql/env.example`).
+  Le **mot de passe SMTP ne quitte jamais le serveur** : l'application ne le voit pas, et l'écran
+  d'administration ne montre que l'état de la chaîne. Le moteur SMTP est écrit pour l'occasion
+  (`src/server/mysql/smtp.mjs`, RFC 5321/2045/2047 : EHLO, STARTTLS, AUTH LOGIN et PLAIN, encodage
+  du sujet, corps en texte **et** en HTML) : pas de dépendance, donc rien à auditer d'autre que ce
+  fichier. Six événements peuvent donner lieu à un message — acte à signer, acte signé, acte publié,
+  acte à valider, acte à réviser, notification à l'intéressé —, chacun activable, avec un nom
+  d'expéditeur, une adresse de réponse et une copie systématique ; Administration › **Courriel**
+  règle la politique, montre l'état du serveur et permet un **message d'essai**. Un courriel qui ne
+  part pas n'est jamais subi : il est **tracé « non envoyé »**, avec son motif, au journal **et**
+  dans le dossier interne de l'acte concerné.
+
+- **Un RÈGLEMENT annexé se publie aussi à part, au recueil, à titre informatif.** Tout ce qu'un acte
+  adopte en annexe n'a pas la même valeur : un règlement intérieur, un règlement d'usage — un texte
+  **normatif** — se consulte pour lui-même, comme un **code**, et non seulement dans la délibération
+  qui l'adopte. Une trame d'annexe peut donc être déclarée **Règlement** (case « C'est un RÈGLEMENT :
+  le publier aussi à part, au recueil », onglet « Trame ») : à la publication de l'acte qui l'adopte,
+  l'annexe est déposée au recueil sous **son propre identifiant stable** (`eli:/fr/reg/…`, créé au
+  premier acte d'adoption puis conservé — les publications successives en sont les **versions**, et
+  c'est la dernière qui est en vigueur). La page du règlement se présente comme celle d'un texte
+  informatif : ni opposabilité, ni « publié le », ni original signé — seule la décision d'adoption
+  fait foi —, mais ses visas (dont celui de son adoption, qui est un lien), son identifiant, son
+  thème et l'acte qui l'adopte. Le règlement compte ainsi parmi les publications : il se cherche, se
+  classe par thème, et son identifiant s'ouvre directement (`?eli=eli:/fr/reg/2026/0418/vsl`, ou
+  `/eli/reg/…` sur un déploiement serveur).
+
+### Modifié
+
+- **La documentation dit enfin ce que l'outil fait.** Le guide affirmait que l'assistant « ne signe
+  pas à votre place et n'envoie pas les messages » : c'est faux depuis que le circuit de signature
+  **simple** existe et que le service sait parler à un SMTP. La page publique affirmait que
+  « l'application n'envoie rien à un service tiers » : les assistants interrogent bien un moteur de
+  langage, et c'est maintenant dit, avec le tableau des données transmises et de leur destinataire
+  (RGPD, art. 13 et 28). La spécification rangeait encore l'assistant dans le **hors périmètre**
+  alors qu'il est livré et actif. La documentation d'exploitation écrit noir sur blanc **ce que la
+  démonstration n'est pas** : ni un mode de conservation (son état est évinçé par ancienneté, sans
+  sauvegarde), ni un service (les dépôts y sont partagés) — une installation qui produit des actes
+  réels n'utilise qu'un service dédié ou sa propre base.
+
+- **Une annexe ne porte plus ni l'autorité compétente ni la mention de publication au recueil.** Une
+  annexe n'émane pas d'une autorité : elle est **adoptée** par un acte, et c'est cet acte qui se
+  publie. Le compilateur retire donc de son document l'**autorité** (« La maire de … ») et la
+  **mention de publication au recueil** (« Le présent arrêté est publié au recueil… ») — le bloc de
+  signature l'était déjà. Les **visas** sont en revanche conservés : un règlement se fonde sur des
+  textes, et le visa de son adoption (« Vu la délibération n°…, qui l'adopte ») le rattache à sa
+  décision, où il devient un lien.
+- **La recherche du recueil efface ce qui n'est pas un résultat.** Dès qu'une recherche est en
+  cours — frappe dans l'entrée, ou choix d'un thème —, le carrousel « Derniers actes administratifs
+  publiés » et la grille « Parcourir par thème » s'effacent au profit des seuls résultats ; ils
+  reviennent quand on efface la recherche ou les filtres.
+- **Le circuit de signature se lit à trois niveaux, et le choix du rédacteur est conservé.** Le
+  sélecteur « Circuit de signature » de la rédaction, comme l'aide de l'administration, décrivent
+  désormais les **trois** circuits (électronique, simple, externe) ; les trames peuvent imposer ou
+  autoriser le circuit simple, en plus des réglages existants. Un acte **engagé** dans un circuit y
+  reste, quel que soit le réglage général : le dépôt au service étant commun aux circuits
+  électronique et simple, l'acte engagé dans le circuit simple n'est plus relu comme
+  « électronique ».
+- **Les dossiers d'administration gagnent l'onglet « Courriel »** et l'aide du circuit de signature
+  décrit les trois circuits, les cas où l'un s'impose, et ce que chacun laisse au public.
+
+### Corrigé
+
+- **Un acte dont la lecture échoue n'est plus condamné à « Acte introuvable ».** Un service qui
+  n'avait pas répondu dans le délai (canal encore froid, page qui vient de se charger) faisait
+  afficher « Acte introuvable » — et la lecture n'était jamais retentée. L'écran distingue
+  désormais la **panne passagère** de l'acte inconnu (« Le recueil est momentanément
+  indisponible »), et propose de **réessayer** ; l'adresse par identifiant ELI (`?eli=…`) suit la
+  même règle quand le registre n'a pas pu être lu.
+
+- **L'aperçu du document dans la fenêtre de signature ne débordait pas de son cadre.** Le cadre
+  (« 38 vh ») n'avait pas de hauteur contrainte sur son enfant : c'est la fenêtre entière qui
+  défilait, et l'aperçu n'en était plus un. Le cadre est désormais celui qui défile.
+
+- **L'espace public porte ses mentions légales et ses mentions d'accessibilité.** Le bas de page du
+  recueil se ferme désormais sur ce que la loi attend d'un site public : des **mentions légales**, qui
+  rappellent à quelles conditions un acte administratif est **publié, exécutoire et opposable** — la
+  publication et la transmission au représentant de l'État valant naissance de l'opposabilité
+  (article L. 2131-1 du code général des collectivités territoriales), et le **délai de recours de deux
+  mois** à compter de la publication (article R. 421-1 du code de justice administrative) —, et des
+  **mentions d'accessibilité**, qui rappellent les obligations du service de communication publique en
+  ligne prévues par l'article 47 de la loi n° 2005-102 du 11 février 2005, l'existence de la
+  **déclaration d'accessibilité** et du schéma pluriannuel, et la possibilité de **signaler un
+  obstacle** — jusqu'à saisir le Défenseur des droits.
+  L'administration **écrit** ces mentions (Administration › **Publication** › « Mentions du recueil
+  public »), les remplace par un **simple lien** — les mentions légales du site principal de la
+  collectivité, sa déclaration d'accessibilité —, ou les **désactive** ; chacune se règle
+  indépendamment. Le texte saisi se replie sous son titre dans le pied de page : présent dans la page,
+  mais sans envahir le bas du recueil. La démonstration montre les **deux formes** : les mentions
+  légales de la Ville de Valmont-sur-Loire y sont écrites, et l'accessibilité renvoie à la déclaration
+  publiée sur le site principal.
+
+- **La démonstration est celle d'une collectivité d'une certaine importance.** Le jeu de données
+  livré (mairie fictive de Valmont-sur-Loire) passe de dix-sept à **soixante-six actes**, répartis
+  sur **vingt et une trames** — nominations et délégations de signature, arrêtés de police, permis
+  de construire, marchés d'un établissement autonome, régies, subventions, engagements de dépense,
+  avenants, concessions funéraires, occupations du domaine public, environnement, périscolaire,
+  conventions, chartes — et il met en avant ce qu'une collectivité montre d'abord :
+  - les **ANNEXES**, c'est-à-dire les documents *adoptés*, qui ne se signent ni ne se publient pour
+    eux-mêmes : le **règlement d'accès à la restauration scolaire**, la **grille tarifaire des
+    services municipaux** (le prix du repas de cantine, de l'accueil du matin et du soir), le
+    règlement intérieur du conseil municipal, la charte de la participation citoyenne, et les
+    documents joints à une manifestation (plan de circulation et de stationnement, programme,
+    déroulé de la cérémonie). Leur texte suit l'original signé de l'acte qui les adopte ;
+  - les **ÉVÉNEMENTS À VENIR** : la **fête du village** « Valmont en fête », le **marché de Noël**
+    et la **cérémonie commémorative du 11 novembre**, chacun organisé par un arrêté du maire, avec
+    son emprise, ses mesures de police et ses annexes — les actes qu'un administré vient consulter.
+  Le **recueil public** s'ouvre donc sur quinze actes publiés, dont quatre à la une (le règlement
+  de la restauration scolaire, la grille tarifaire, la fête du village et le marché de Noël), et
+  huit thèmes. Le registre, lui, montre tout le reste : actes prêts, en attente de révision,
+  incomplets ou revenus en brouillon, pour que chaque écran de l'atelier ait de quoi travailler.
+
+- **Le recueil renvoie vers les autres recueils, et vers les sites de référence.** Une collectivité
+  n'arrive pas vierge : elle a souvent tenu, avant Scribae, d'**autres recueils**. L'administrateur
+  peut désormais les déclarer (Administration › **Publication › Recueils extérieurs et renvois**),
+  sous trois natures : un recueil **« bis »** — tenu à part pour une raison technique (une entité
+  autonome, un périmètre séparé) —, un recueil **inactif** — qui n'est plus alimenté —, pour lequel
+  on précise la **période** couverte (« actes publiés du … au … »), plusieurs recueils inactifs
+  pouvant se succéder au fil des changements de logiciel, et un **site de référence** (Légifrance,
+  service-public.gouv.fr). Chaque renvoi porte un **libellé**, une **adresse** et une **précision**
+  facultative ; on les ordonne et on les retire, et un bouton **« Rétablir les renvois livrés »**
+  fait revenir Légifrance et service-public.gouv.fr. Ces renvois s'affichent **en bas de page** de
+  l'espace public et **à la fin des résultats de recherche**, sous le titre **« Vous ne trouvez pas
+  ce que vous recherchez ? »** — jamais deux fois sur la même page. Le **guide** en explique l'usage
+  (chapitre « Publier l'acte »).
+
+- **Un document Word ou LibreOffice devient une trame.** Le bouton **« Importer une trame »**
+  accepte désormais un **document Word** (`.docx`) ou **LibreOffice** (`.odt`), en plus du
+  fichier de trames JSON. L'application **relit le document** — sans rien installer — et en
+  reconnaît la structure d'un acte : ligne d'autorité (celle de la collectivité, la ligne d'État
+  n'étant retenue qu'à défaut), intitulé (dont le numéro, la date et le « portant … » deviennent
+  `{{numero}}`, `{{dateSignature}}` et `{{objet}}`, et dont l'objet donne son nom à la trame),
+  visas, considérants, formule d'édiction (qui décide du **type d'acte**), articles, divisions
+  (Livre, Titre, Chapitre, Section), listes — celles du traitement de texte comme celles écrites
+  à la main en « 1° », « 1) », « a) » —, tableaux, mention de recours et bloc de signature. Le
+  signataire du document n'est jamais repris (il vient du champ « Signataire »). **Rien n'est
+  enregistré** : la trame proposée s'ouvre dans l'éditeur, précédée d'une bande qui le rappelle,
+  accompagnée de ses **points à vérifier** (ce que la relecture a décidé, et ce qu'elle n'a pas
+  su faire), et l'éditeur choisit de l'enregistrer ou de l'abandonner. Une lecture automatique
+  propose, elle ne décide pas.
+
+- **Une trame reste en brouillon jusqu'à sa mise à disposition.** C'est la règle générale : un
+  modèle se prépare à l'abri, puis s'ouvre. Tant qu'un éditeur n'a pas cliqué **« Mettre à
+  disposition »**, la trame n'apparaît pas dans **« Rédiger un acte »** et son ouverture directe
+  est refusée (sauf à un éditeur, qui doit pouvoir essayer son modèle, et sauf pour une rédaction
+  déjà commencée). Le bouton — carte de la trame, bannière et en-tête de l'éditeur de trame,
+  champ **« Statut »** de l'onglet « Trame » — est le même partout, et le geste inverse
+  (« **Retirer** ») rebascule la trame en brouillon sans toucher aux actes déjà rédigés à partir
+  d'elle. Les deux sont inscrits au **journal** (`trame.disponible` / `trame.retiree`). Une trame
+  **créée, dupliquée ou importée** arrive donc toujours en brouillon ; le badge de son statut dit
+  « **Mise à disposition** », et l'éditeur de trame porte une bande de tête quand elle est encore
+  en brouillon.
+
+- **Épingler un acte, et le recueil public le met à la une.** L'onglet **Actes** porte, sur
+  chaque acte publiable, un bouton **punaise** (permission `publications.epingler`, rôles
+  administrateur et éditeur) qui le fait entrer — ou sortir — de la bande **« À la une »** du
+  **recueil public**. La bande s'affiche sur la page d'accueil du recueil, au-dessus du carrousel
+  des derniers actes (qui, lui, ne les répète pas) : c'est la place d'un **règlement intérieur**,
+  d'une charte, du document qu'un visiteur vient chercher. Elle s'efface dès qu'une recherche ou
+  un filtre est posé, et ne montre que les versions en vigueur. On peut épingler un acte **avant**
+  sa publication : son drapeau part avec la version déposée. Le drapeau suit l'**ACTE** (son
+  identifiant ELI), non la version publiée : un acte **modifié ou consolidé reste à la une** — la
+  route `POST /v1/publications/{cle}/epingle` le pose sur toutes les versions et la publication
+  suivante l'hérite. Le geste est réversible, audit-é au journal (`publication.epingle` /
+  `publication.desepingle`), et le service auto-hébergé (Node/MySQL) comme celui de
+  l'environnement d'édition l'exposent à l'identique ; le jeu de démonstration épingle la
+  délibération qui adopte le règlement intérieur.
+
+- **Chaque bloc de texte a désormais ses propres réglages — et un tableau ou une liste s'éditent
+  vraiment.** Un **paragraphe** règle son alignement, son retrait (alinéa, ou paragraphe entier en
+  retrait) et son encadré ; une **liste** choisit ses puces (ronde, creuse, carrée, tiret, aucune)
+  ou sa numérotation (« 1. », « 1° », « 1) », « a) », « A) », « i. », « I. ») et son numéro de
+  départ ; un **tableau** place sa légende au-dessus ou au-dessous, affiche ou non sa ligne
+  d'en-tête, se dessine en quadrillage, en lignes horizontales seules ou en lignes alternées, et
+  aligne ses cellules ; des **considérants** reçoivent la formule qui les introduit (« Considérant
+  que… », jamais répétée si le texte la porte déjà), leur ponctuation finale et le choix de se lire
+  d'un seul alinéa. Tout se règle **bloc par bloc** — dans l'éditeur de trame (onglet « Ce bloc »)
+  comme par la rédaction (panneau « Mise en forme ») — et la valeur « comme la feuille de style »
+  laisse la charte de la collectivité décider : c'est ce que fait tout bloc qui ne demande rien de
+  particulier, y compris ceux qui existaient avant cette version. Les réglages suivent partout :
+  aperçu, atelier, PDF, Word, HTML autonome, Markdown, Akoma Ntoso, et les réglages ajustés par la
+  rédaction sont signalés comme des écarts, lus en clair (« MODÈLE 1° 2° 3° / VOUS a) b) c) »).
+  L'aperçu d'édition montre le réglage aussitôt — la formule et la ponctuation des considérants y
+  sont écrites en gris, telles que le compilateur les ajoutera.
+
+- **Un tableau s'édite dans le document, une liste aussi.** Dans l'éditeur de trame, le tableau de
+  l'aperçu n'est plus une image : chaque case se réécrit (jetons de champs compris), une gouttière
+  offre d'**insérer ou retirer** chacune de ses colonnes et chacune de ses lignes, et une barre
+  ajoute une colonne ou une ligne à la fin ; l'inspecteur donne en plus la **grille complète** —
+  une case par cellule, et de quoi déplacer, retirer ou ajouter lignes et colonnes. Une liste gagne
+  les mêmes gestes sur chacun de ses éléments (« + » pour insérer le suivant, corbeille pour le
+  retirer) et se termine par « Ajouter un élément ». Aucune de ces commandes n'appartient à l'acte :
+  l'impression les efface toutes.
+
+- **Des vrais comptes, avec mot de passe — sans annuaire et sans service à installer.** Une
+  collectivité qui n'a pas d'annuaire à brancher pouvait jusqu'ici soit choisir un compte dans une
+  liste (démonstration), soit brancher OpenID Connect. Il y a désormais un troisième mode, activé
+  dans le `.env` du déploiement (`AUTH_MODE=password`) : **identifiant et mot de passe**, que le
+  service vérifie lui-même, et une **session** dans un cookie `HttpOnly`. Rien ne fuit : le service
+  ne conserve qu'un **dérivé `scrypt`** scellé (sel et paramètres compris dans la chaîne), jamais le
+  mot de passe ; la comparaison est à temps constant ; le message ne dit jamais si l'identifiant
+  existe ; après cinq échecs le compte se ferme un instant (de plus en plus longtemps, plafond
+  15 minutes). Côté navigateur, l'écran de connexion gagne l'identifiant, le mot de passe avec son
+  œil, et un **jeton anti-CSRF** accompagne chaque écriture (double envoi cookie + en-tête), parce
+  que le cookie de session, lui, est invisible du JavaScript. Le **compte d'administration** se
+  configure dans le `.env` (`ADMIN_LOGIN`, `ADMIN_PASSWORD`) et se crée au premier démarrage ; il
+  crée ensuite les autres depuis *Comptes et rôles* — chaque nouveau compte enchaîne sur la remise
+  de son mot de passe, et un compte sans mot de passe ne peut pas se connecter. Un administrateur
+  enfermé dehors se dépêtre en ligne de commande :
+  `node server.mjs --mot-de-passe <identifiant>` (le mot de passe est lu sur l'entrée standard). La
+  fenêtre d'administration d'un compte dit l'état de son mot de passe (défini, provisoire, bloqué,
+  dernière remise, tentatives manquées) et permet d'en **engendrer un provisoire** — le service le
+  montre **une seule fois**, à transmettre par un canal sûr, et exige son changement à la première
+  connexion. Le **mode démonstration** se règle dans le même `.env` (`DEMO_ACCOUNTS`) : fermé par
+  défaut en mode mot de passe, il peut rester ouvert pour une recette — l'écran de connexion garde
+  alors le raccourci « choisir un compte », servi par le service. Les jetons d'API ne sont plus
+  acceptés dans ce mode : une écriture sans session est refusée, un jeton écrit dans une page
+  publique ne pouvant rien protéger.
+
+- **L'atelier de rédaction se pilote comme un traitement de texte.** Quatre gestes manquaient, et
+  ils sont là. **Cliquer un bloc ouvre ses options** dans le panneau de droite : un onglet « Bloc »
+  apparaît, avec ce que le bloc est (article, division, paragraphe, visas…), d'où il vient, son
+  **intitulé**, son **numéro** (automatique ou écrit à la main), son **échelon** pour une division,
+  ses **éléments** (les visas, les considérants, les items d'une liste, qu'on y écrit, qu'on y
+  déplace et qu'on y supprime), ce qu'on peut **ajouter dedans**, et de quoi le déplacer ou le
+  retirer. **Supprimer un bloc se fait d'un clic** : la corbeille est sur le bloc lui-même, et
+  « Contrôle & écarts » le rétablit à tout moment — le bloc n'est jamais retiré de la trame, il est
+  retiré du document. **Ajouter un paragraphe, un visa, un considérant ou un élément** se fait sans
+  quitter le document : un « + » sur chaque élément insère le suivant, un bouton « Ajouter un visa »
+  ferme chaque liste, et le panneau du bloc propose les ajouts qui ont un sens à cet endroit-là. Ce
+  qui est ajouté ou retiré est un **geste de rédaction, non une modification du modèle** : la trame
+  reste intacte, et l'onglet « Contrôle & écarts » tient la liste de ce qui a changé — chaque ligne
+  pouvant être rétablie ou retirée d'un clic. Enfin, une **bibliothèque de variables** ouvre le
+  panneau de droite : les champs de la trame et les informations que l'application remplit seule
+  (la collectivité, le signataire, la date, le numéro…), cherchables, et qu'on **glisse dans le
+  document** — ou qu'on clique pour les poser d'un clic dans le texte. Les blocs d'un même article
+  reçoivent, au passage, la même barre d'outils que ceux du corps du document : ils se déplacent,
+  se commentent et se suppriment comme les autres.
+- **Réorganiser le document, d'un geste.** Dans l'atelier de rédaction, chaque bloc du document —
+  un article, une division, un visa, un considérant, une mention — se **déplace** désormais pour de
+  bon : deux flèches sur le bloc, ou une prise pour le **glisser** à sa place (la poignée, ou le
+  numéro de l'article, qui est la prise naturelle : c'est ce qu'on vise en pensant « cet
+  article-là »). Le texte déplacé est **renuméroté** — remonter l'article 3 en tête en fait
+  l'article 1er —, mais seuls les numéros que l'application attribue bougent : un numéro écrit à
+  la main reste ce qu'il est. Le déplacement est un geste de rédaction, pas une modification de la
+  trame : le modèle est intact, et l'onglet « Contrôle » dit ce qui a bougé et le défait d'un clic
+  (« Ranger comme la trame »). Un bloc de tête (l'intitulé, l'auteur de l'acte) ne se déplace pas :
+  il est à sa place par nature.
+- **Les divisions : un texte ne se compose pas que d'articles.** Une trame peut désormais ranger
+  son contenu en **Livres, Titres, Chapitres, Sections** — et sous le mot qu'elle veut (« Partie »,
+  « Chapitre liminaire », « Annexe »…), puisque **l'échelle des divisions appartient à la trame**,
+  non au logiciel : l'onglet « Trame » de l'éditeur en règle le nombre d'échelons, le mot de
+  chacun et sa façon de numéroter (chiffres romains, arabes, lettres, ou rien). La hiérarchie est
+  ainsi **pré-intégrée au modèle** : dans le document, une division se place à l'un de ces
+  échelons, en contient d'autres ou des articles, et la numérotation suit — « Livre Ier »,
+  « Titre Ier », « Titre II », « Livre II »… puis le compte repart pour chaque échelon ouvert.
+- **Les annexes : un document adopté par un autre, publié à part.** Un règlement intérieur adopté
+  par une délibération, une grille tarifaire adoptée par une décision : le document **annexé** ne
+  tient pas son existence de lui-même. Une trame peut donc se déclarer de nature **Annexe**
+  (onglet « Trame »), et trois choses s'ensuivent. À la rédaction, l'annexe **désigne l'acte qui
+  l'adopte**, et cet acte **lui est rappelé en tête de ses visas** (« Vu la délibération n°… du …,
+  qui l'adopte ; ») ; réciproquement, l'acte qui adopte **annonce ses annexes** à la fin de son
+  dispositif. À la fiche de l'acte, un encart dit **d'où le document vient** (l'acte d'adoption) et
+  **ce qu'il annexe**, avec un lien vers l'autre fiche. En ligne, la version publiée porte le même
+  encart, puisque l'annexe est publiée **séparément**, sous son propre identifiant ELI.
+- **Modifier une annexe : l'adoption d'une nouvelle rédaction.** Une annexe ne se modifie pas
+  article par article comme un acte ordinaire. L'écran « Modifier » ouvre donc, pour elle, le
+  régime qui lui convient : l'acte modificatif **adopte la nouvelle rédaction** de l'annexe
+  (« … portant adoption de la nouvelle rédaction du règlement intérieur n°… »), l'article premier
+  énonce cette adoption, et le texte, présenté **en suivi des modifications**, part avec l'acte
+  comme une annexe à publier. L'annexe est ensuite modifiée par ce même chemin, et sa fiche
+  enregistre l'acte qui vient de l'adopter. La modification **classique** (mention expresse,
+  article par article) reste à un clic : c'est elle que demande parfois une décision qui vise
+  expressément tel article.
+- **La démonstration montre le mécanisme.** Deux trames et deux actes s'ajoutent à la
+  démonstration : une **délibération** et le **règlement intérieur** qu'elle adopte — un document
+  de nature « Annexe », rangé en **Titres** et **Chapitres**, muni du **visa de son acte
+  d'adoption**, annoncé en fin de dispositif de la délibération, publié **séparément** sous son
+  propre identifiant ELI. Les trames de division et d'annexe ne sont plus seulement décrites :
+  elles se visitent.
+
+- **L'assistant répond même sans moteur de langage.** Quand aucun moteur n'est branché — sur une
+  page servie en statique (GitHub Pages), ou un déploiement sans API —, Plume et Publia ne
+  restent plus muets : ils **cherchent** la réponse dans ce qu'ils savent. Plume rend le chapitre
+  du guide qui traite de la question, avec son lien ; Publia retrouve les actes publiés qui y
+  correspondent, avec leurs dates, leur identifiant ELI et leur lien — et l'acte que le lecteur
+  consulte passe devant. Aucun appel réseau, aucune clé, rien à installer : rien de ce que l'on
+  demande ne sort du navigateur. Ce sont des **extraits, pas des réponses rédigées**, et l'écran
+  le dit dans une note discrète ; dès qu'une adresse de moteur est renseignée (ou sur Perchance),
+  la rédaction reprend la main sans qu'on ait rien d'autre à changer.
+
+- **Signer sur papier (ou par un outil tiers) : le circuit de signature externe.** Tout ne passe pas
+  par un prestataire branché en API. Beaucoup de collectivités font signer leurs actes **sur
+  papier** — ou par un outil que l'application ne pilote pas. Un second circuit existe donc, qui
+  n'appelle **aucune** API de signature : le rédacteur « **envoie à signature** », ce qui veut ici
+  dire **télécharger** le document prêt à signer (une page A4, avec son **bordereau de remise** :
+  référence, objet, entité, trame, empreinte du document remis et marche à suivre) ; le signataire
+  signe **hors de l'application** (stylo, ou outil tiers) ; le rédacteur **rentre la version signée
+  dans la base** — « **Ajouter la version signée** », un **PDF**, dont l'empreinte SHA-256 est
+  calculée à la volée et le fichier déposé ; et le **réviseur certifie la conformité** de la
+  **pièce signée** avec la version numérique qui sera publiée. Son contrôle change de nature : dans
+  ce circuit, il ne porte plus sur le texte **avant** signature, mais sur le document **signé** —
+  c'est ce qui garantit que ce qui est publié est bien ce qui a été signé. La certification est
+  entourée de garde-fous : elle se donne point par point (signataire, conformité du texte,
+  intégrité de la pièce, date), un **refus** exige un motif écrit et renvoie l'acte attendre une
+  version signée conforme, et une **nouvelle** version signée annule la certification précédente.
+  Le circuit se règle à **deux niveaux**, et rien n'est codé en dur : **globalement**
+  (Administration › Signature : circuit électronique, le défaut historique, ou circuit externe),
+  et **par trame** (onglet « Trame » de l'éditeur : *suivre le réglage général*, *circuit externe
+  **imposé***, *circuit externe **autorisé*** — le rédacteur choisit alors, acte par acte, entre
+  les deux —, ou *circuit électronique imposé*). Un acte **déjà engagé** dans un circuit y reste
+  quoi qu'il arrive ensuite : changer le réglage ne déplace pas un acte en cours de route. Sur le
+  **recueil public**, l'« original » d'un acte ainsi signé n'est plus un paquet JSON mais **la
+  version signée elle-même** : le PDF est montré dans la page, tel qu'il a été mis en ligne, avec
+  l'attestation de conformité du réviseur — c'est **lui** qui fait foi, le texte en ligne n'en
+  étant qu'une lecture pratique. Le service tient les mêmes règles de son côté (nouvelles routes
+  `POST /v1/actes/{id}/signature-externe` et `POST /v1/actes/{id}/conformite`, refus de publier
+  tant que la version signée manque — 409 `version_signee_absente` — ou que la conformité n'est
+  pas certifiée quand un réviseur est compétent — 409 `conformite_non_certifiee`) ; et les actes
+  dont la conformité est à certifier sont **ouverts aux réviseurs compétents**, même hors de leur
+  périmètre, sans quoi leur contrôle ne pourrait jamais s'exercer.
+
+- **Commenter un article, ou un passage — et ne plus pouvoir rater un commentaire.** Le commentaire
+  d'une trame se posait par l'inspecteur, sur le bloc sélectionné ; en dehors de ce panneau, il ne
+  se voyait nulle part. Deux gestes lui rendent sa place, et l'un ne va pas sans l'autre.
+  **On commente ce qu'on voit** : un bouton « commenter » est posé sur chaque bloc de la page, et —
+  pour viser une phrase précise — il suffit de **sélectionner le passage** dans le document, ce qui
+  fait apparaître une pastille **« Commenter »** qui ouvre la fenêtre d'écriture **en citant le
+  passage choisi**. **On ne peut plus les manquer** : le commentaire s'affiche **dans la page**,
+  sous le bloc qu'il vise, en bande nettement distincte du texte de l'acte (fond coloré, filet
+  pointillé, nature et auteur rappelés, passage cité en italique) ; un **repère de marge** numéroté
+  marque chaque bloc commenté ; l'en-tête de l'éditeur annonce le compte et ouvre la liste d'un
+  clic ; et un onglet **« Commentaires »** les rassemble tous, rangés par bloc, chacun menant au
+  passage qu'il vise. À la **rédaction**, les consignes laissées par les administrateurs
+  apparaissent de la même façon **sous le passage concerné**, en lecture seule, avec un onglet
+  « Consignes » et un compteur cliquable dans l'en-tête de l'acte : le rédacteur ne peut plus les
+  ignorer. Le passage cité accompagne le commentaire partout — aperçu, inspecteur, exports Akoma
+  Ntoso et Markdown, rapport de conformité.
+
+### Modifié
+
+- **La page d'accueil du logiciel est le recueil public.** Ouvrir l'adresse de l'installation
+  — sans ancre ni paramètre — menait à l'atelier : un visiteur tombait donc sur l'écran de
+  connexion, et l'installation se présentait par sa porte de service. C'est le **recueil des actes
+  publiés** qui s'ouvre désormais : la page que le public peut lire, et que l'on peut citer. La
+  route par défaut est `recueil` (`src/ui/state.js`), si bien que le premier chargement, l'adresse
+  nue, l'ancre vide (`#/`) et **toute adresse inconnue** — une ancre mal recopiée, un écran qui
+  n'existe plus — mènent à la page d'accueil du site, et non à l'atelier (`normaliserRoute`,
+  `src/ui/app.js`). L'atelier reste à un clic : la porte **« Se connecter »** de l'en-tête du
+  recueil, ou l'ancre `#/trames` (que l'application n'écrit jamais elle-même). L'écran de connexion
+  n'est pas pour autant un cul-de-sac : il porte une porte **« Consulter le recueil public »**. Rien
+  d'autre ne change : le recueil ne suppose aucun compte, et un agent connecté y lit exactement ce
+  que lit un passant.
+
+- **L'emblème de la commune a été redessiné.** Le blason de la ville fictive de Valmont-sur-Loire
+  — un écu français, un soleil d'or, deux monts et la Loire — était juste dans ses parties mais
+  approximatif dans son dessin : des rais trop longs et trop écartés du disque solaire, des cimes
+  enneigées trop fines, et des filets clairs là où deux aplats voisins partageaient un bord.
+  Il est repris : rais courts et rapprochés, cimes enneigées lisibles, galon unique, et un liseré
+  de leur propre couleur sur les cimes et les bandes d'eau — c'est ce liseré qui efface le filet
+  que l'anticrénelage laisse entre deux aplats. L'emblème paraît dans l'en-tête, sur l'écran de
+  connexion, dans le guide et sur le recueil public ; c'est le référentiel qui le porte
+  (`brand.logoUrl`), et un référentiel de démonstration reprend celui du jeu livré.
+
+- **L'amorçage du recueil public se fait par étapes, et sait reprendre.** Publier la démonstration
+  demande de déposer puis de publier chaque acte sur le service, un par un. Les actes s'enchaînaient
+  sans respiration, et le service — tenu à un budget de calcul soutenu — finissait par refuser ses
+  gestionnaires. L'amorçage marque désormais une **pause entre deux actes**, s'arrête après deux
+  échecs consécutifs plutôt que d'attendre une réponse qui ne viendra pas, et reprend au démarrage
+  suivant là où il s'était arrêté (ce que le service détient déjà n'est jamais redéposé). Il publie
+  par ailleurs **quinze actes choisis** — les six annexes, les trois événements, et un document de
+  chacune des autres familles — au lieu de tous ceux que la fiction déclare publiés : la
+  démonstration s'ouvre plus vite, et le recueil montre toujours toute la variété.
+
+- **La connexion ne charge plus rien avant d'avoir identifié l'agent.** En mode « comptes locaux »,
+  le référentiel est protégé : l'application interroge d'abord le service (`GET /v1/auth/config`),
+  et ne demande **aucune donnée** tant qu'aucune session n'est ouverte — l'écran de connexion se
+  dessine avec la marque par défaut, et la liste des comptes ne vient plus du référentiel mais de la
+  session ouverte. Corollaire : un référentiel neuf, sur un déploiement qui ferme les comptes de
+  démonstration, ne reçoit **plus** les comptes fictifs (ils n'auraient pas de mot de passe) ; un
+  nouveau compte créé dans *Comptes et rôles* enchaîne directement sur la remise de son mot de
+  passe ; et « Ouvrir une session » (le raccourci de démonstration d'une ligne du tableau) disparaît
+  dans ce mode, puisque seule une session ouverte par le service donne accès aux données. Le menu du
+  compte porte « **Changer mon mot de passe** » et « Se déconnecter » (au lieu de « Changer de
+  compte »), et le changement de mot de passe est proposé d'office quand le mot de passe est
+  provisoire — sans jamais enfermer l'agent, qui peut reporter le geste.
+- **Une annexe ne se signe pas : son texte suit l'acte qui l'adopte.** Jusqu'ici, une annexe (un
+  règlement intérieur adopté par une délibération, une grille tarifaire adoptée par une décision)
+  était traitée comme un acte à part entière : elle se signait, se publiait sous son propre
+  identifiant ELI, et l'acte qui l'adoptait se contentait de l'annoncer. Ce n'est pas la règle :
+  **l'annexe ne tient pas son autorité d'elle-même**. C'est **l'acte qui l'adopte** qui est signé, et
+  **l'original signé de cet acte est désormais suivi du texte de l'annexe**, dans le même document,
+  à la suite de la signature et **sur une page neuve**. Concrètement : le document d'une annexe ne
+  porte plus de bloc de signature et son atelier ne demande plus de signataire (son champ de date
+  devient « Date d'adoption ») ; l'acte d'adoption affiche le texte de ses annexes **en lecture
+  seule sous le document**, avec un bouton qui mène à l'annexe dans son propre acte ; l'écran
+  « Signature & publication » d'une annexe ne propose plus ni envoi en signature ni publication —
+  il renvoie vers l'acte d'adoption ; et les exports (HTML, Word, Markdown, Akoma Ntoso
+  `<attachments>`, impression) portent cette partie annexée. Le rapport de conformité et le schéma
+  Schematron savent qu'une annexe n'a ni signataire ni bloc de signature. La **nature du document**
+  voyage aussi avec l'export Akoma Ntoso (`<ia:nature>`, relu à l'import), et **le lecteur AKN
+  signale** — au lieu de le taire — qu'un fichier est suivi du texte de ses annexes
+  (`<attachments>`) : une annexe demeure un acte à part, joint à son acte d'adoption depuis le
+  registre. Dans la démonstration, le
+  règlement intérieur n'est plus signé ni publié à part : c'est la délibération qui l'adopte (et son
+  original) qui les porte.
+
+- **Les écarts à la trame se lisent désormais par nature.** Un écart n'était qu'un texte réécrit.
+  L'onglet « Contrôle & écarts » distingue maintenant trois choses, chacune dite avec ses mots et
+  défaite d'un clic : les **réécritures** (« modèle » / « vous »), les **réglages de bloc
+  modifiés** (l'échelon d'une division, sa numérotation) et les **changements de structure** (un
+  bloc ou un élément ajouté, un passage retiré). Rien n'est bloqué : ce qu'un rédacteur adapte est
+  conservé, et ce qu'il ajoute ou retire est conservé aussi — mais jamais sans trace.
+
+- **L'acte est nommé comme le référentiel le nomme.** La fiche d'un acte, et les actes
+  modificatifs qui le visent, l'appellent désormais par son **appellation** — « Règlement
+  intérieur n° 2026-77 » plutôt que « Acte n° 2026-77 », « Vu la délibération n°… du… » plutôt que
+  par un mot générique. L'appellation vient du **type d'acte** de la trame
+  (Administration › Référentiel › Types d'actes) : c'est le vocabulaire de la collectivité, et il
+  commande aussi le genre de l'article défini (« le règlement », « la délibération », « l'arrêté »).
+
+- **La page d'accueil du dépôt dit ce que font les assistants, et comment les brancher.** La
+  section « Installer » (GitHub Pages) précise qu'à cette forme les assistants répondent **sans
+  moteur de langage** — ils retrouvent le chapitre du guide ou l'acte publié — et comment donner
+  à une collectivité des réponses rédigées, en renseignant l'adresse de son API de langage
+  (Administration › Assistants).
+
+- **Le guide montre l'atelier tel qu'il est.** Les deux captures du chapitre « Écrire un acte, pas
+  à pas » (« L'écran de rédaction » et « Le panneau Contrôle & écarts ») dataient d'avant la
+  bibliothèque de variables, l'onglet « Bloc » et les outils de structure : elles sont refaites, et
+  leurs repères numérotés montrent désormais la barre d'outils d'un bloc, la bibliothèque de
+  variables, le panneau du bloc désigné et les trois registres du contrôle.
+
+- **Le guide et l'onglet « Annuaire » expliquent les trois façons de se connecter.** Un
+  administrateur qui cherche où se règlent les comptes à mot de passe trouve la réponse là où il
+  cherche : le chapitre du guide s'intitule désormais **« Ouvrir les sessions : annuaire, ou comptes
+  locaux »**, et y décrit les **comptes locaux** (identifiant, mot de passe, mot de passe provisoire
+  à changer à la première connexion) à côté de l'annuaire, en rappelant que ce mode **n'a pas
+  d'écran** — il se règle dans le `.env` du déploiement (`AUTH_MODE=password`,
+  `ADMIN_LOGIN`/`ADMIN_PASSWORD`, `DEMO_ACCOUNTS`). Dans **Administration › Annuaire (OIDC)**, le
+  mode « Comptes locaux (mot de passe) » **n'est plus offert au choix du référentiel** — un mode qui
+  dépend du service ne s'y décide pas, et le proposer aurait pu enfermer dehors un administrateur
+  exigeant un mot de passe que rien ne vérifie ; et quand le déploiement l'impose, l'onglet l'annonce
+  et précise que les comptes de démonstration sont, là aussi, l'affaire du `.env`.
+
+- **Une annexe n'a plus de numéro.** C'est la suite logique de son régime : puisqu'elle n'est ni
+  signée ni publiée pour elle-même, elle n'occupe aucune place au recueil — un numéro n'aurait rien
+  à identifier. Son identité, c'est la **décision** qui la fait exister : celle qui l'**adopte**,
+  celle qui en adopte la **nouvelle rédaction** (sa modification) ou celle qui l'**abroge**. Là où
+  un acte ordinaire montre « n° 2026-416-VSL », l'annexe montre à quoi elle tient — « **Annexe à la
+  délibération n° 2026-416-VSL du 24 septembre 2026** » sur sa fiche, « annexe à 2026-416-VSL » dans
+  le registre, « **Annexe — Règlement intérieur du conseil municipal** » dans une liste. Elle garde
+  un identifiant **interne** (liens, historique), invisible du lecteur. Concrètement : l'atelier ne
+  lui propose **ni champ ni variable** de numéro (donc **aucun numéro n'est consommé**, dans
+  l'application comme auprès d'un service de numérotation), la compilation ne lui donne **pas d'ELI**
+  et son Schematron ne réclame pas de numéro, et les tournures de modification la désignent par sa
+  décision : « portant adoption de la nouvelle rédaction **du règlement (la délibération n° … du …)** ».
+  La trame du règlement, dans la démonstration, en est dépouillée.
+
+### Corrigé
+
+- **La formule d'un considérant ne se répète plus.** Un considérant dont le texte commence par
+  l'**élision** de la formule du bloc — « **Considérant qu'**il est nécessaire… » sous la formule
+  « Considérant que » — recevait la formule une seconde fois, et le document signé s'ouvrait sur
+  « Considérant que Considérant qu'il est nécessaire… ». Le moteur d'assemblage compare désormais le
+  début du texte à la formule **élidée** comme à la formule entière, ainsi qu'à ses ponctuations
+  (« Considérant, ») : un considérant qui porte déjà la formule la garde telle qu'elle est écrite,
+  et rien ne s'y ajoute. Deux actes du jeu de démonstration portaient la faute dans leur document
+  signé ; un nouveau jeu de données les régénère.
+
+- **Le recueil de démonstration se remplit même quand le service répond en retard.** L'amorçage
+  part au démarrage, en même temps que le reste de l'application : si la page est alors occupée (un
+  jeu de démonstration à reconstruire, un registre volumineux à écrire) ou que le canal du service
+  n'est pas encore ouvert, la première lecture du recueil échouait, et le recueil restait **vide de
+  toute la session** — rien à démontrer. Cet amorçage est désormais **repris** quelques fois, à
+  intervalles croissants, tant qu'il reste des actes à publier ; comme il ne redépose jamais ce que
+  le service détient déjà, une reprise ne produit ni doublon ni republication.
+
+- **L'état durable du service ne se relit plus corrompu.** Le service de démonstration range tout
+  son état dans un document JSON unique, écrit dans la mémoire durable qui lui est allouée. Deux
+  défauts se conjuguaient : l'écriture se faisait sur place, si bien qu'un instantané prélevé au
+  milieu du geste (l'environnement peut en prendre à tout moment) donnait un document tronqué —
+  relu ensuite en entier, pour rien, jusqu'à épuiser le budget de calcul d'un gestionnaire ; et
+  l'état, plein d'accents, traversait une couche de persistance qui n'est pas garantie binaire. La
+  version est désormais **effacée avant la première écriture et rétablie en dernier** : un état
+  relu au milieu du geste se reconnaît à sa version, sans rien relire. La lecture contrôle
+  l'en-tête (le document commence toujours par `{"v"` et finit par `}`) avant toute lecture de
+  masse, et l'échappement ASCII — qui protège les accents — se fait par plages, sans expression
+  régulière : c'était le poste le plus coûteux de l'écriture. `GET /v1/health` publie enfin
+  `utilise` (la place occupée) à côté de `capacite`, pour voir venir un état trop gros.
+
+- **Le glisser-déposer ne dépend plus du navigateur, et il fonctionne au doigt.** Déplacer un bloc
+  dans l'éditeur de trame reposait sur le glisser-déposer HTML5 : il ne répond pas au doigt (ni
+  sur iOS, ni de façon fiable sur Android), et le navigateur **interrompt le geste dès que la
+  source quitte le document** — ce qui arrive précisément ici, un re-rendu pouvant suivre la perte
+  du focus d'un bloc en cours d'édition. Le geste passait alors pour mort. Le moteur
+  (`src/ui/dnd.js`) s'appuie désormais sur les **pointer events** : souris, doigt et stylet suivent
+  le même chemin, et le geste ne dépend plus d'une API capricieuse. Deux gains d'usage au passage :
+  **le bloc entier se saisit** (poignée ⠿, intitulé, marges) au lieu d'une poignée de quelques
+  pixels — un appui dans le texte continue d'y placer le curseur, et un appui sur un bouton de la
+  barre d'outils fait ce que dit ce bouton ; et une **étiquette suit le pointeur** pendant le
+  geste, en disant ce qu'on déplace (le doigt, lui, n'a pas de curseur). La hauteur des barres
+  « + » ne change plus pendant le glisser : le document ne se décale plus sous le pointeur, et
+  l'on dépose là où l'on visait.
+- **Un glisser ne peut plus vider une place dans la trame.** L'adresse d'un bloc saisi était relue
+  au lâcher sans vérifier qu'elle désignait encore quelque chose : quand l'arbre avait bougé
+  entre-temps, le déplacement retirait une place **vide** et la réinsérait — la trame se corrompait,
+  et l'éditeur refusait ensuite de s'ouvrir (« Cannot read properties of undefined »). Le
+  déplacement vérifie désormais la source, et les parcours de trame (rendu, commentaires) ignorent
+  une place vide plutôt que d'échouer.
+
+- **L'intitulé d'un acte modificatif ne dit plus « de le ».** Quand l'appellation de l'acte modifié
+  était un nom masculin non élidé (« le règlement »), la phrase de l'acte modificatif donnait
+  « portant modification **de le** règlement » : le « de » n'était pas contracté avec l'article. Il
+  passe désormais par la forme contractée (« de la décision », « du règlement », « de l'arrêté »).
+  Le défaut ne se voyait pas avec les appellations que la démonstration emploie (délibération,
+  décision, arrêté, toutes féminines ou élidées) ; il est apparu avec les annexes, qui sont
+  désignées par leur décision d'adoption (voir ci-dessus).
+
+- **Le service annonçait un délai de blocage sans le transmettre.** Quand une connexion était
+  refusée parce que le compte venait d'être fermé après plusieurs échecs, le service calculait bien
+  le nombre de secondes à attendre (`retry-after`)… et le perdait en chemin : sa fabrique de
+  réponses d'erreur n'acceptait pas d'en-têtes. L'agent voyait « trop de tentatives » sans savoir
+  combien de temps patienter. Trouvé par le nouveau banc d'essai du domaine des comptes
+  (`comptes.test.mjs`, `npm test` dans `src/server/mysql`) — 27 épreuves sans base ni réseau, qui
+  couvrent le scellement, le blocage, l'expiration d'une session, l'anti-CSRF et les droits.
+- **Un bloc ajouté hors article sort dans tous les formats.** Un paragraphe, une liste ou un
+  tableau posé directement dans le corps du texte (ou dans une division) par la rédaction —
+  désormais possible depuis l'atelier — s'affichait bien à l'écran et à l'impression, mais
+  disparaissait du **Markdown** et de l'**Akoma Ntoso** : ces deux écritures ne parcouraient que le
+  contenu des articles. Le Markdown les écrit maintenant comme les blocs d'un article (les
+  marques de modification suivent), et l'Akoma Ntoso les range dans un `<block>` générique que la
+  relecture reprend à l'import — un aller-retour du document ne perd plus ce que la rédaction a
+  ajouté. Les paragraphes, listes et tableaux posés dans une **division** sont couverts par le même
+  chemin.
+- **Sur GitHub Pages, les éléments cachés le sont vraiment.** L'application masque ce qui ne sert
+  pas en posant l'attribut `hidden` ; c'est la plateforme Perchance qui en faisait une règle de
+  style, et une page servie en statique ne l'a pas. Un panneau dont la fermeture faisait
+  `display: flex` restait donc **ouvert** : le panneau de conversation de l'assistant ne se
+  fermait pas, sa zone de saisie s'affichait même sans moteur, et le bouton « Arrêter »
+  apparaissait avant toute génération. La feuille de style reprend la règle manquante
+  (`[hidden] { display: none !important; }`), ce qui rétablit partout le même comportement qu'à
+  l'éditeur.
+- **Un article rangé dans une division retrouve son numéro et son intitulé.** Dans l'atelier de
+  rédaction, les articles placés en Titres ou Chapitres s'affichaient comme de simples
+  paragraphes : ni numéro, ni intitulé, et pas de prise pour les déplacer. Le rendu des articles
+  est désormais le même partout dans le document — un article se déplace aussi **à l'intérieur**
+  d'une division, et se renumérote.
+- **La liste des annexes survit à l'Akoma Ntoso.** Le document annonçait ses annexes à l'écran et
+  dans le Markdown, mais l'export Akoma Ntoso les perdait. Elles y sont maintenant portées par un
+  bloc `<attachments>` — l'élément prévu pour les documents adoptés et annexés —, chacune avec son
+  intitulé et son identifiant ELI.
+- **Un texte structuré n'est plus importé comme vide.** Rouvrir un acte rangé en divisions depuis
+  son Akoma Ntoso signalait à tort qu'aucun article n'avait été trouvé, la recherche ne regardant
+  qu'à la racine du corps ; elle descend maintenant dans les divisions.
+- **Un texte rangé en divisions se modifie comme les autres.** L'écran « Modifier » n'atteignait
+  que les articles du corps : les articles placés dans un **Titre** ou un **Chapitre** (un
+  règlement intérieur, par exemple) n'étaient ni modifiables, ni abrogeables — la modification
+  d'un tel texte était impossible. Les divisions sont désormais parcourues partout où le sont les
+  articles (l'ordre **imprimé** du document, `flatNodes`) : l'éditeur de modification rend
+  éditables les articles de division, un article inséré « après » l'un d'eux prend place **dans
+  cette division**, « ajouter en fin de dispositif » entre dans la **dernière** division quand le
+  texte s'y termine, « abroger tout l'acte » et « tout renuméroter » les couvrent, et la version
+  consolidée y marque ses ajouts et suppressions. Le **rapport de conformité** compte aussi ces
+  articles, au lieu de les ignorer.
+- **« …l'adoption de la nouvelle rédaction DU règlement intérieur… ».** Les tournures d'adoption
+  d'une annexe enchâssaient l'appellation de la cible sans contracter l'article : l'acte
+  modificatif annonçait « …portant adoption de la nouvelle rédaction **de le** règlement
+  intérieur… ». Un jeton `{targetDe}` (« du règlement intérieur n°… », « de la délibération
+  n°… », « de l'arrêté n°… ») corrige l'intitulé, l'objet et l'article premier de l'acte
+  modificatif.
+- **Sur un écran étroit, l'atelier ne garde plus les marges de la page A4.** Les marges réglées
+  dans la charte (2 à 3 cm de chaque côté) laissaient, sur un téléphone, une colonne de texte de
+  quelques mots par ligne. L'atelier de rédaction les réduit en deçà de 1100 px de large : la mise
+  en page de la page — celle de l'impression et des exports — reste inchangée.
+- **Les commentaires ont désormais leur onglet, et le bloc renvoie à eux.** L'inspecteur de
+  l'éditeur de trame prend un cinquième onglet, **« Commentaires »**, qui porte le compte et
+  rassemble tous ceux de la trame (auparavant, ils étaient enterrés au bas de l'onglet « Ce
+  bloc ») ; l'onglet « Ce bloc » n'en garde qu'un renvoi, avec le compte du bloc sélectionné. Le
+  commentaire est aussi plus complet : il peut **citer un passage** (`quote`), conservé à
+  l'import/export du fichier de trame, dans l'Akoma Ntoso (relu par `akn.js`), le Markdown et le
+  rapport de conformité. Le format de fichier des trames documente la nouvelle clé.
+
+### Ajouté
+
+- **Les actes d'assemblée — les délibérations des conseils.** Un acte n'émane pas toujours d'une
+  personne : une **délibération** émane d'une **assemblée** — le conseil municipal d'une commune, le
+  conseil d'administration d'un établissement public. Ces actes ont désormais leur ligne d'autorité
+  propre : ils portent **« Le conseil municipal de … »**, « Le conseil d'administration de … » — et
+  non la formule d'une personne — tandis qu'ils sont **signés par le président de l'assemblée** : le
+  maire, pour un conseil municipal ; le président du conseil d'administration, pour un établissement.
+  Une trame qui produit un acte d'assemblée se déclare par le réglage **« Acte d'assemblée —
+  délibération »**, dans l'inspecteur de trame.
+
+- **L'écran « Administration › Assemblées ».** Les conseils se décrivent comme le reste du
+  référentiel : pour chacun, son **entité de rattachement**, son **nom**, sa **formule d'autorité**
+  (la ligne d'en-tête de l'acte) et la **qualité qui signe** — le maire, ou le président du conseil
+  d'administration. C'est ce dernier choix qui rend la règle **configurable par assemblée**, sans
+  toucher au code : un conseil municipal fait signer son maire, un conseil d'administration son
+  président.
+
+- **Le jeton `{{autorite}}`.** Les trames d'acte d'assemblée le posent dans leur ligne d'autorité :
+  il rend la formule de l'**assemblée** quand l'acte en émane, et celle de l'**entité** sinon. Les
+  jetons `{{conseil.name}}`, `{{conseil.authorityFormula}}` et `{{conseil.signerQualite}}` — proposés
+  dans l'éditeur des trames d'assemblée — disent l'assemblée elle-même.
+
+- **Le contrôle de conformité dit l'assemblée.** Le rapport du réviseur constate que l'acte émane
+  d'une assemblée, rend sa formule d'autorité, et **vérifie que le signataire — ou un délégataire de
+  sa chaîne — tient bien la qualité appelée** par l'assemblée : un signataire hors compétence est
+  signalé.
+
+- **La trame « Délibération du conseil d'administration ».** Le jeu de démonstration gagne cette
+  seconde délibération, celle de l'office public de l'habitat : elle montre une assemblée qui n'est
+  pas le conseil municipal, et une signature qui n'est pas celle du maire.
+
+- **L'export du journal d'audit du service.** La fenêtre du journal, dans *Administration › Base de
+  données*, gagne un bouton **« Exporter (JSON) »** : le journal append-only se télécharge pour être
+  archivé hors du service (le service n'en conserve que les **2 000 dernières entrées** — la
+  rétention est désormais dite dans la fenêtre).
+
+- **Un analyseur de style sans dépendance** (`npm run style`, et `npm run lint` l'appelle). Écrit en
+  quelques lignes de Node, il refuse `debugger` et signale les déclarations `var` et les traces
+  `console.log` laissées dans le code client — sans installer le moindre paquet.
+
+### Modifié
+
+- **L'écrasement sans contrôle de révision (`force`) est réservé à l'administration.** La
+  synchronisation d'une collection acceptait `force` de **tout rôle d'écriture** : un poste muni d'une
+  clé de rédaction pouvait écraser en silence l'écriture d'un autre. Le geste — une reprise de
+  données — exige maintenant le rôle **administrateur**, il est **journalisé**, et les autres rôles
+  reçoivent le conflit au lieu de l'écraser. Même règle côté service auto-hébergé.
+
+- **Une transmission au contrôle de légalité simulée le dit.** Quand aucun appel sortant n'a eu lieu
+  (le cas de la démonstration), l'accusé de réception est marqué **« simulation »**, et la mention
+  portée sur le document est **qualifiée** (« mention de démonstration — transmission simulée, sans
+  appel sortant ») : on ne prend plus un certificat fabriqué pour un certificat opposable. Une
+  intégration @ctes réelle lèvera le marqueur.
+
+- **L'identifiant ELI et son adresse ne se confondent plus.** Le recueil nomme désormais, d'un côté,
+  l'**identifiant** (`eli:/fr/…`, non résoluble tel quel) et, de l'autre, l'**adresse ELI** HTTP qui
+  en dérive — celle qui se cite et s'ouvre. La règle vit dans un point unique (`eliAdresse`), d'où
+  elle alimente aussi le `FRBRuri` du document Akoma Ntoso.
+
+- **`src/lib/revisions.js` devient `src/lib/historique-brouillons.js`.** L'ancien nom jouxtait
+  `revision.js` (le circuit de révision avant signature) pour un objet tout différent — l'historique
+  de travail des brouillons. Le renommage lève l'ambiguïté.
+
+- **Le libellé du geste d'épinglage suit l'état de l'acte.** Un libellé unique — « Épingler à la une
+  du recueil public » / « Retirer de la une du recueil public » —, et la distinction « dès sa
+  publication » réservée aux actes **non publiés** : on ne lit plus qu'un acte publié serait épinglé
+  « dès sa publication ».
 
 ## [1.2.0] — 2026-09-20 — Signer par délégation
 

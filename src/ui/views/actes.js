@@ -1,9 +1,11 @@
 import {
   state, touch, navigate, can, visibleActes, actePubliable, actesCorbeille,
   mettreALaCorbeille, journaliser, circuitDe, parapheur as fileParapheur, parapheurActif,
-  competenceDeSignature,
+  competenceDeSignature, redrawView, currentUser,
 } from "../state.js";
 import { h, button, toast, modal, icon } from "../dom.js";
+import { post, errorMessage, beginFlow } from "../../lib/remote.js";
+import { publicationSettings } from "../../lib/eli.js";
 import { download, formatDate } from "../../lib/util.js";
 import { confirmDialog, emptyState, isDraftable, abrogationBadge, acteStatutLabel as statutLabel, acteStatutColor as statutColor } from "../components.js";
 import { helpLink } from "../components.js";
@@ -14,6 +16,7 @@ import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWo
 import { demarrerValidation, etapeActive, validationAJour, etatParapheur } from "../../lib/validation.js";
 import { resumeExecution } from "../../lib/execution.js";
 import { designationDe, avecArticle } from "../../lib/abrogations.js";
+import { natureOfActe, numeroAffiche } from "../../lib/annexes.js";
 
 export function renderActes(root) {
   const tous = can("actes.tous");
@@ -63,7 +66,9 @@ export function renderActes(root) {
     const ec = editable ? ecartsOfActe(a) : { count: 0, list: [] };
     if (ec.count) withEcarts++;
     tb.appendChild(h("tr", { title: a.createdByName ? "Rédigé par " + a.createdByName : "" },
-      h("td", { class: "fr-mono", text: a.numero || "—" }),
+      // Une annexe n'a pas de numéro : la colonne renvoie à la décision qui
+      // l'adopte (voir `numeroAffiche`, src/lib/annexes.js).
+      h("td", { class: "fr-mono", text: numeroAffiche(a, state.config, state.trames) || "—" }),
       h("td", { text: a.objet || doc?.meta?.objet || "—" }),
       h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
       h("td", {}, !editable
@@ -83,20 +88,29 @@ export function renderActes(root) {
       // changé depuis la validation), ou hors circuit.
       parapheurActif() ? h("td", {}, celluleParapheur(a)) : null,
       h("td", {}, celluleExecution(a)),
-      h("td", {}, a.publication
-        ? h("span", { class: "fr-small" },
-          h("span", { class: "fr-mono", text: a.publication.eliUri || a.eli || "" }),
-          h("br"),
-          h("span", { class: "fr-muted", text: "opposable le " + formatDate(a.publication.dateOpposabilite) }))
-        : !actePubliable(a)
-          ? h("span", { class: "fr-badge fr-badge--warning", title: "Trame non publiable : l'acte est signé et conservé, mais jamais déposé au recueil.", text: "non publiable" })
-          : h("span", { class: "fr-small fr-muted", text: "—" })),
+      h("td", {}, [
+        a.publication
+          ? h("span", { class: "fr-small" },
+            h("span", { class: "fr-mono", text: a.publication.eliUri || a.eli || "" }),
+            h("br"),
+            h("span", { class: "fr-muted", text: "opposable le " + formatDate(a.publication.dateOpposabilite) }))
+          : !actePubliable(a)
+            ? (natureOfActe(a, state.trames) === "annexe"
+              ? h("span", { class: "fr-badge fr-badge--info", title: "Annexe : elle ne se signe ni ne se publie pour elle-même. Son texte suit l'acte qui l'adopte, dans l'original signé.", text: "annexe" })
+              : h("span", { class: "fr-badge fr-badge--warning", title: "Trame non publiable : l'acte est signé et conservé, mais jamais déposé au recueil.", text: "non publiable" }))
+            : h("span", { class: "fr-small fr-muted", text: "—" }),
+        // Mis en avant sur l'accueil du recueil public (voir `basculerEpinglage`).
+        // Le repère n'est posé qu'une fois l'acte PUBLIÉ : épingler un acte encore
+        // en circuit prépare la une, il ne la tient pas — le bouton, lui, reste
+        // allumé, et son infobulle dit ce qui va se passer.
+        a.epingle && a.publication ? h("span", { class: "fr-badge fr-badge--info", style: { marginLeft: "6px" }, title: "Mis en avant dans la bande « À la une » du recueil public.", text: "à la une" }) : null,
+      ]),
       h("td", {}, h("div", { class: "fr-row" },
         editable ? button("Reprendre", { variant: "secondary", size: "sm", icon: "note", title: "Rouvrir le document pour le modifier", onClick: () => openActe(a) }) : null,
         button(doc ? "Voir" : "Ouvrir", { variant: "tertiary", size: "sm", onClick: () => (doc ? navigate("acte/" + a.id) : openActe(a)) }),
         can("actes.gerer")
-          ? (actePubliable(a)
-            ? button("Modifier", { variant: "tertiary", size: "sm", icon: "refresh", title: "Rédiger un acte modificatif", onClick: () => modifierFromActe(a) })
+          ? ((actePubliable(a) || natureOfActe(a, state.trames) === "annexe")
+            ? button(natureOfActe(a, state.trames) === "annexe" ? "Modifier l'annexe" : "Modifier", { variant: "tertiary", size: "sm", icon: "refresh", title: natureOfActe(a, state.trames) === "annexe" ? "Rédiger l'acte modificatif qui adoptera la nouvelle rédaction de l'annexe" : "Rédiger un acte modificatif", onClick: () => modifierFromActe(a) })
             // Un acte non publiable ne se modifie pas par acte modificatif (qui
             // n'existe que pour le texte publié) : on corrige l'acte lui-même.
             : button("Corriger", { variant: "tertiary", size: "sm", icon: "note", title: "Acte non publiable : correction directe, sans acte modificatif", onClick: () => openActe(a) }))
@@ -104,6 +118,9 @@ export function renderActes(root) {
         can("actes.signer") ? button("", { variant: "tertiary", icon: "lock", size: "sm", title: "Signer l'acte (ou suivre son circuit)", onClick: () => signer(a) }) : null,
         can("signature.gerer") ? button("", { variant: "tertiary", icon: "check", size: "sm", title: "Enregistrer une formalité d'exécution (transmission, publication, notification)", onClick: () => { state.execution = { ...(state.execution || {}), acteId: a.id }; navigate("execution"); } }) : null,
         button("", { variant: "tertiary", icon: "download", size: "sm", title: "Exporter", onClick: () => quickExport(a) }),
+        // ÉPINGLER l'acte : le mettre en avant dans la bande « À la une » du
+        // recueil public. La distinction se pose et se retire du même geste.
+        peutEpingler(a) ? boutonEpinglage(a) : null,
         can("actes.gerer")
           // Seul un BROUILLON va à la corbeille : un acte signé ou publié est une
           // pièce du dossier. Il ne s'efface pas — il s'ABROGE, par un acte
@@ -143,6 +160,95 @@ export function renderActes(root) {
 // rouvert dans l'éditeur de rédaction.
 function canEdit(a) {
   return !!a.values && state.trames.some((t) => t.id === a.trameId);
+}
+
+// ------------------------------------------------- ÉPINGLER AU RECUEIL PUBLIC
+// Épingler un acte, c'est le mettre EN AVANT sur la page d'accueil du recueil
+// public, dans sa bande « À la une » : la place d'un règlement intérieur, d'une
+// charte, d'un document qu'on vient chercher — et non d'un acte parmi d'autres.
+//
+// Le drapeau vit d'abord sur l'ACTE : on peut donc épingler un acte qui n'est
+// PAS ENCORE publié — il sera à la une dès sa publication, le dépôt l'emporte
+// avec sa version en ligne (voir views/signature.js). Pour un acte DÉJÀ publié,
+// le geste est aussitôt porté au service, qui est la source du recueil ; c'est
+// lui que lit le visiteur.
+//
+// Le service attache le drapeau à l'ACTE — son identifiant ELI —, non à la
+// version déposée : un acte modifié reste à la une (voir `hEpinglerPublication`
+// et `hPublier`).
+//
+// Un acte non publiable (acte individuel) ne va pas au recueil, et une annexe
+// n'y est publiée que par l'acte qui l'adopte : rien à mettre en avant pour eux,
+// donc pas de bouton. C'est `actePubliable` qui le dit.
+const peutEpingler = (a) => can("publications.epingler") && actePubliable(a);
+
+// Le libellé du geste d'épinglage : UN SEUL, qui dit l'ÉTAT de l'acte. Épinglé,
+// il propose de retirer ; à épingler, il distingue l'acte déjà publié (l'effet
+// est immédiat) de l'acte encore en circuit (« dès sa publication »). Voir
+// NC-III-006 et P-28.
+export const libelleEpinglage = (a) => a.epingle
+  ? "Retirer de la une du recueil public"
+  : (a.publication?.cle
+    ? "Épingler à la une du recueil public"
+    : "Épingler à la une — l'acte y sera mis dès sa publication");
+
+function boutonEpinglage(a) {
+  const b = button("", {
+    variant: "tertiary", icon: "pin", size: "sm",
+    title: libelleEpinglage(a),
+    onClick: () => basculerEpinglage(a),
+    });
+  // Épinglé, le bouton le dit : la punaise reste allumée (voir `.is-on`).
+  if (a.epingle) b.classList.add("is-on");
+  return b;
+}
+
+export async function basculerEpinglage(a) {
+  const epingle = !a.epingle;
+  const avant = !!a.epingle;
+  const cle = a.publication?.cle;
+  a.epingle = epingle;
+  if (cle) {
+    const u = currentUser();
+    const auteur = [u?.firstName, u?.lastName].filter(Boolean).join(" ") || u?.login || "";
+    const flow = beginFlow(`Épinglage — ${a.numero || a.id}`);
+    let res;
+    try {
+      res = await post(`/v1/publications/${encodeURIComponent(cle)}/epingle`, { epingle, auteur }, {
+        token: publicationSettings(state.config).jetonDemonstration,
+        flow, label: epingle ? "Mise à la une du recueil" : "Retrait de la une du recueil",
+      });
+    } catch (e) {
+      a.epingle = avant;
+      toast(String((e && e.message) || e), "error");
+      redrawView();
+      return;
+    }
+    if (!res.ok) {
+      // Le service fait foi : si l'épinglage n'a pas été accepté, l'acte ne se
+      // dit pas épinglé.
+      a.epingle = avant;
+      toast("Le recueil n'a pas été modifié : " + errorMessage(res), "error");
+      redrawView();
+      return;
+    }
+    a.publication = { ...a.publication, epingle };
+    // Le registre et le recueil avaient peut-être déjà lu : on invalide leurs caches.
+    state.pubRegistre = { chargement: false };
+    state.pubConsult = {};
+    if (state.recueil) { state.recueil.liste = null; state.recueil.actes = {}; }
+  }
+  a.updatedAt = new Date().toISOString();
+  touch("actes", { rerender: false });
+  await journaliser({
+    action: epingle ? "publication.epingle" : "publication.desepingle",
+    cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
+    detail: epingle ? "mis à la une du recueil public" : "retiré de la une du recueil public",
+  });
+  toast(epingle
+    ? (cle ? "Acte mis à la une du recueil public" : "Acte épinglé — il sera à la une dès sa publication")
+    : "Acte retiré de la une du recueil public", "success");
+  redrawView();
 }
 
 // Ouvre l'écran de signature avec cet acte déjà sélectionné.

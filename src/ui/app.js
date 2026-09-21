@@ -9,12 +9,13 @@ import { fullName, roleLabel, badgesOf, initialsOf, estVisiteur } from "../lib/u
 import { scopeLabel } from "../lib/scope.js";
 import { storageAvailable } from "../lib/store.js";
 import { applyTheme, onSystemThemeChange } from "../lib/theme.js";
-import { authConfig, isTestProvider } from "../lib/auth.js";
+import { authConfig, isTestProvider, isPassword } from "../lib/auth.js";
 import { themeButton, themeChooser } from "./theme.js";
 import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
 import { demoNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
+import { ouvrirChangementMotDePasse } from "./mot-de-passe.js";
 import { renderSansAcces } from "./views/sans-acces.js";
 import { handleAuthReturn } from "./oidc.js";
 import { renderComptes } from "./views/comptes.js";
@@ -191,7 +192,15 @@ function userMenu() {
   // (Administration › Assistants) reste, lui, à l'administrateur.
   const assistants = assistantsChooser();
   if (assistants) menu.appendChild(assistants);
-  menu.appendChild(item("Changer de compte", "x", () => logout()));
+  // En mode mot de passe, on ne « change » pas de compte en choisissant dans une
+  // liste : on se déconnecte, et l'écran de connexion reprend la main. Le menu
+  // porte donc la déconnexion, plus le changement de son propre mot de passe.
+  if (isPassword(state.config)) {
+    menu.appendChild(item("Changer mon mot de passe", "lock", () => ouvrirChangementMotDePasse({ surFait: () => emit() })));
+    menu.appendChild(item("Se déconnecter", "x", () => logout()));
+  } else {
+    menu.appendChild(item("Changer de compte", "x", () => logout()));
+  }
   // La version en service : c'est ici qu'un agent la lit quand on lui demande
   // « quelle version tourne ? ». Elle vient de src/lib/version.js (source unique).
   menu.appendChild(h("div", {
@@ -304,6 +313,7 @@ function drawView() {
   if (!allowed(state.route.view)) state.route = { view: firstAllowedView(), params: {} };
   const view = VIEWS[state.route.view] || renderTrames;
   const params = state.route.params || {};
+  poserTitreEcran();
   mainEl.className = "app-main" + (state.route.view === "trame" ? " app-main--flush" : "");
   // La présence annonce l'écran courant : les autres postes voient qui travaille
   // où. Le libellé de l'acte, lui, est posé par l'éditeur de rédaction.
@@ -319,6 +329,23 @@ function drawView() {
       h("pre", { class: "fr-mono", text: String(e && e.stack || e) }),
     ));
   }
+}
+
+// Titre du document : chaque écran de l'atelier DIT où l'on est. C'est le
+// premier repère d'un lecteur d'écran, et ce qui nomme l'onglet du navigateur —
+// sans lui, tous les écrans de l'application portaient le titre de la page
+// (RGAA 8.5/8.6). Le recueil public, lui, pose le sien (voir
+// src/ui/views/recueil-public.js).
+const TITRE_ECRAN = Object.fromEntries(
+  NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])).concat([
+    ["trame", "Trame"], ["acte", "Acte"], ["publication", "Publication"],
+  ]),
+);
+
+function poserTitreEcran() {
+  const label = TITRE_ECRAN[state.route.view] || "";
+  const nom = String(state.config?.brand?.name || "").trim();
+  document.title = [label, nom || APP_NAME].filter(Boolean).join(" — ");
 }
 
 // Le CSS est chargé par <link> puis recopié dans un <style> : les styles restent
@@ -346,9 +373,11 @@ async function boot() {
   root.appendChild(h("div", { class: "fr-card", style: { margin: "40px auto", maxWidth: "420px" }, text: "Chargement…" }));
   applyTheme();
   await inlineStylesheets();
-  // La route (un lien profond « #/recueil », par exemple) est lue AVANT
+  // La route (un lien profond « #/recueil/<clé> », par exemple) est lue AVANT
   // l'initialisation : un visiteur qui suit le lien du recueil ne voit pas
-  // l'écran de connexion clignoter avant la bascule.
+  // l'écran de connexion clignoter avant la bascule. Sans ancre ni paramètre,
+  // c'est la route par défaut qui s'applique : le recueil public, la page
+  // d'accueil du site (voir `state.route`).
   parseRoute();
   try {
     await init();
@@ -360,7 +389,7 @@ async function boot() {
     ));
     return;
   }
-  onChange(() => { applyBrand(); renderRoot(root); });
+  onChange(() => { applyBrand(); renderRoot(root); proposerMotDePasse(root); });
   window.addEventListener("hashchange", parseRoute);
   // Retour du fournisseur d'identité (annuaire) : l'URL porte `code` et `state`
   // — on échange le code, on vérifie le jeton et on ouvre la session avant
@@ -387,6 +416,7 @@ async function boot() {
   // Leur visibilité suit la route. Voir src/ui/assistant.js.
   monterAssistants();
   renderRoot(root);
+  proposerMotDePasse(root);
   parseRoute();
   // Vérifie la santé de la persistance en tâche de fond (sans bloquer l'affichage).
   db.health().catch(() => {});
@@ -394,18 +424,55 @@ async function boot() {
   // actes que la fiction déclare publiés sont publiés par le chemin réel, et
   // le service leur attribue leur ELI). Silencieux et sans effet sur une
   // installation réelle — voir src/ui/demo-publications.js.
-  amorcerRecueil().catch((e) => console.warn("Amorçage du recueil :", e));
   // Les abrogations prévues par un acte prennent effet au jour de l'ENTRÉE EN
   // VIGUEUR de cet acte : on regarde, à chaque démarrage, celles dont le terme
   // est arrivé (idempotent, silencieux). Voir src/ui/abrogations-apply.js.
+  // En mode mot de passe, ces deux tâches attendent la SESSION : le registre
+  // n'est lisible qu'une fois identifié, et elles n'ont rien à faire avant.
+  tachesDeFond();
+}
+
+// Les deux tâches de fond qui suivent le démarrage, et que la session peut
+// retarder (mode mot de passe) : on ne les lance qu'une fois, et seulement
+// quand le registre est là.
+let tachesDeFondFaites = false;
+function tachesDeFond() {
+  if (tachesDeFondFaites || !state.ready) return;
+  if (isPassword(state.config) && !state.user) return;
+  tachesDeFondFaites = true;
+  amorcerRecueil().catch((e) => console.warn("Amorçage du recueil :", e));
   appliquerAbrogations().catch((e) => console.warn("Abrogations :", e));
+}
+
+// Mot de passe provisoire : on propose le changement dès l'ouverture de session,
+// une fois par session d'application. Refermer la fenêtre est un report — le
+// menu du compte porte l'entrée « Changer mon mot de passe ».
+let motDePassePropose = false;
+function proposerMotDePasse(root) {
+  if (!state.user) { motDePassePropose = false; return; }
+  if (motDePassePropose || !state.motDePasseAChanger) return;
+  motDePassePropose = true;
+  ouvrirChangementMotDePasse({ obligatoire: true, surFait: () => renderRoot(root) });
+  tachesDeFond();
 }
 
 // Sans session : écran de connexion. Avec session mais sans rôle d'application :
 // écran « pas d'accès » (le visiteur est authentifié, l'atelier ne lui est pas
 // ouvert). Avec session : application. Les écrans publics (le recueil) passent
 // avant l'un comme avant l'autre : ils ne supposent aucun compte.
+//
+// L'accueil du site est le RECUEIL PUBLIC (voir `state.route`) : une adresse
+// qu'on ne sait pas lire — une ancre mal recopiée, un écran qui n'existe plus —
+// ne doit donc pas ouvrir l'atelier, et encore moins l'écran de connexion. Elle
+// ramène à la page d'accueil, c'est-à-dire au recueil.
+function normaliserRoute() {
+  const v = state.route && state.route.view;
+  if (!v || VIEWS[v] || EST_PUBLIQUE(v)) return;
+  state.route = { view: "recueil", params: {} };
+}
+
 function renderRoot(root) {
+  normaliserRoute();
   publicMode = EST_PUBLIQUE(state.route.view);
   clear(root);
   if (publicMode) { renderRecueilPublic(root, state.route.params || {}); return; }

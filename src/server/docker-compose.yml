@@ -18,7 +18,11 @@
 
 services:
   db:
-    image: mariadb:11
+    # Épinglée par EMPREINTE : l'étiquette `mariadb:11` seule désigne ce que le
+    # registre publie ce jour-là — deux installations à deux dates différentes
+    # ne partent alors pas du même logiciel. Reprendre l'étiquette courante :
+    # `docker buildx imagetools inspect mariadb:11`.
+    image: mariadb:11@sha256:79d59758afc91b89b120b0a8904d637f5a3b3e1c4900f29b740d6d46c72fef68
     restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?renseignez DB_ROOT_PASSWORD dans .env}
@@ -49,10 +53,42 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?renseignez DB_PASSWORD dans .env}
       DB_NAME: ${DB_NAME:-scriba}
       DB_POOL: ${DB_POOL:-8}
+      # --- Mode d'authentification -------------------------------------------
+      # `demo`     : comptes de l'application (liste, sans mot de passe) + jetons
+      #              d'API — c'est le mode d'essai ;
+      # `password` : comptes locaux, votés par un mot de passe (le SERVICE les
+      #              vérifie), session par cookie. Les jetons d'API n'y sont plus
+      #              acceptés. Voir env.example.
+      # Le DÉFAUT est « password » : une installation qui démarre sans réglage
+      # ne s'ouvre pas sur des comptes sans mot de passe. Pour un essai,
+      # renseignez explicitement AUTH_MODE=demo dans .env.
+      AUTH_MODE: ${AUTH_MODE:-password}
+      # Comptes de démonstration (choix d'un compte sans mot de passe) : par
+      # défaut allumés en mode demo, éteints en mode password. À éteindre en
+      # service.
+      DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-}
+      # Compte d'administration créé au premier démarrage (mode password).
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NOM: ${ADMIN_NOM:-Administrateur}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_ENTITY: ${ADMIN_ENTITY:-}
+      SESSION_DAYS: ${SESSION_DAYS:-12}
+      MDP_MIN_LONGUEUR: ${MDP_MIN_LONGUEUR:-12}
+      SCRYPT_N: ${SCRYPT_N:-65536}
+      # À LAISSER À `true` en production (HTTPS). Sur un essai en clair
+      # (http://serveur:8080), le navigateur refuserait le cookie de session.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # « libellé:empreinte_sha256 » — la liste des jetons acceptés en écriture.
-      API_TOKENS: ${API_TOKENS:?générez au moins un jeton (voir .env.example)}
-      # L'application est servie par la même origine : « * » suffit dans ce cas.
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # Obligatoire en mode `demo` ; sans objet en mode `password` (la session
+      # remplace le jeton), où l'on peut laisser vide.
+      API_TOKENS: ${API_TOKENS:-}
+      # Origines autorisées à appeler l'API depuis un NAVIGATEUR. L'application
+      # est servie par la même origine : laisser VIDE est le réglage par défaut
+      # — aucun en-tête CORS n'est alors posé, et aucun autre site ne peut
+      # appeler l'API pour le compte d'un agent. « * » n'a de sens que si un
+      # site tiers doit réellement interroger l'API.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       MAX_BODY: ${MAX_BODY:-8388608}
       AUTO_MIGRATE: ${AUTO_MIGRATE:-false}
     depends_on:
@@ -61,14 +97,23 @@ services:
     networks: [interne]
 
   web:
-    image: nginx:alpine
+    # Épinglée par empreinte (voir la note du service `db` ci-dessus).
+    image: nginx:alpine@sha256:62ff2089abf5a9ed33bd232895bef5e22f7bb4b200675cec49a5ebc48e3d4ac8
     restart: unless-stopped
     environment:
       # Adresse de l'API telle que la voit le navigateur. Vide = même origine.
       API_BASE: ${API_BASE:-}
       # Jeton d'écriture remis à l'application (lecture des données publiques
       # comprise sans lui). Il doit correspondre à une empreinte de API_TOKENS.
-      API_TOKEN: ${API_TOKEN:?renseignez API_TOKEN dans .env}
+      # Sans objet en mode `password` : l'application n'a alors que son cookie de
+      # session.
+      API_TOKEN: ${API_TOKEN:-}
+      # Mode d'authentification, tel que l'annonce au NAVIGATEUR (voir
+      # web/config.js.template et web/host.js). Le mode du service
+      # (GET /v1/auth/config) reste autoritaire ; celui-ci n'évite qu'un
+      # aller-retour et un clignotement de l'écran de connexion.
+      AUTH_MODE: ${AUTH_MODE:-}
+      DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-}
     volumes:
       - ./web:/srv/templates:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

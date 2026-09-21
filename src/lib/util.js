@@ -99,6 +99,16 @@ export function pickFile(accept = ".json") {
   });
 }
 
+export function pickBinaryFile(accept = "") {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) input.accept = accept;
+    input.onchange = () => resolve(input.files?.[0] || null);
+    input.click();
+  });
+}
+
 export function getPath(obj, path) {
   if (!path) return obj;
   const parts = String(path).split(".").filter(Boolean);

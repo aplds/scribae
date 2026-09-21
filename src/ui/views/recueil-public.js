@@ -12,19 +12,23 @@
 // identifiants ELI : un acte n'est là que s'il a été réellement publié, et seul
 // l'original signé fait foi.
 // ============================================================================
-import { state, can, navigate } from "../state.js";
+import { state, can, navigate, majUrlRecherche } from "../state.js";
 import { h, clear, button, icon } from "../dom.js";
 import { estVisiteur } from "../../lib/users.js";
 import { demoNotice } from "../notice.js";
 import { get } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { formatDate } from "../../lib/util.js";
-import { filtrerPublications, facettes, parAnnee, parTheme, dernieresPublications, publicationsEnVigueur,
+import { filtrerPublications, facettes, parAnnee, parTheme, dernieresPublications, publicationsEnVigueur, publicationsEpinglees,
   SANS_THEME, themeLabel, themeDescription,
   hrefRecueil, hrefActe, adresseRecueil, adresseActe,
   adresseFichier, urlFormat, FORMATS_OUVERTS, FICHIERS_OUVERTS, autoHeberge,
-  texteDePublication, markdownDePublication, jsonDePublication } from "../../lib/recueil.js";
-import { corpsDeLActe, natureLabel, themeDePublication, themeLabelDePublication, blocOriginal, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
+  estEliUri, publicationParEli,
+  texteDePublication, markdownDePublication, jsonDePublication,
+  recueilsExternes, recueilExterneTypeLabel, urlRecueilExterne, periodeRecueil,
+  mentionsPubliques, blocsMention } from "../../lib/recueil.js";
+import { licenceReutilisation } from "../../lib/recueil.js";
+import { corpsDeLActe, setListePublications, natureLabel, themeDePublication, themeLabelDePublication, blocOriginal, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
 
 export function renderRecueilPublic(root, params) {
   monte = { root, params: params || {} };
@@ -68,13 +72,28 @@ function charger(st) {
 
 // La clé d'un acte porte un « @ » : on la range sous une clé préfixée pour ne
 // jamais confondre « acte non chargé » et « acte en cours de chargement ».
+//
+// Une lecture qui ÉCHOUE se distingue d'un acte qui n'existe pas : un service
+// momentanément indisponible (délai dépassé, canal fermé) ne veut pas dire que
+// l'acte est introuvable, et l'écran doit pouvoir le RÉESSAYER au lieu de
+// condamner la page. Voir `acte()`.
 function chargerActe(st, cle) {
   if (!cle || st.actes["#" + cle]) return;
   st.actes["#" + cle] = { chargement: true };
   get("/v1/publications/" + encodeURIComponent(cle), { label: "Acte publié", source: "lecture" })
-    .then((r) => { st.actes["#" + cle] = r.ok ? r.body : { erreur: (r.body && r.body.erreur) || `Acte introuvable (${r.status}).` }; })
-    .catch((e) => { st.actes["#" + cle] = { erreur: String((e && e.message) || e) }; })
+    .then((r) => { st.actes["#" + cle] = r.ok ? r.body : { erreur: (r.body && r.body.erreur) || `Acte introuvable (${r.status}).`, transitoire: r.status !== 404 }; })
+    .catch((e) => { st.actes["#" + cle] = { erreur: String((e && e.message) || e), transitoire: true }; })
     .finally(() => rafraichir());
+}
+
+// Relire un acte après un échec : la lecture était peut-être seulement prématurée
+// (le service n'était pas encore là), et rien ne justifie de laisser la page sur
+// une erreur qu'un second essai dissiperait.
+function relireActe(st, cle) {
+  if (!cle) return;
+  delete st.actes["#" + cle];
+  chargerActe(st, cle);
+  rafraichir();
 }
 
 // ------------------------------------------------------------------ métadonnées
@@ -175,6 +194,41 @@ function acteMeta(rec) {
 // ------------------------------------------------------------------ la vue
 
 function vue(st, params) {
+  // Les actes publiés connus du recueil : c'est par eux que se résolvent les
+  // liens écrits sous forme d'identifiant ELI, dans les documents publiés.
+  setListePublications(st.liste);
+  // Un acte demandé PAR SON IDENTIFIANT ELI (« ?eli=… ») : c'est une adresse de
+  // l'instance, et elle doit ouvrir l'acte. Le recueil traduit l'identifiant en
+  // celui de l'acte et poursuit normalement — la page, elle, prend l'adresse de
+  // l'acte : le lien ELI a tenu sa promesse, et l'adresse montrée reste celle
+  // qu'on cite (voir src/lib/recueil.js, `adresseEli`).
+  const demande = String(params.eli || "").trim();
+  if (demande && estEliUri(demande) && !params.id) {
+    const cible = publicationParEli(st.liste, demande);
+    if (cible) {
+      params.id = encodeURIComponent(cible.cle);
+      params.eli = "";
+      majUrlRecherche({ acte: cible.cle });
+    } else if (st.erreur) {
+      // Le registre n'a pas pu être lu : on ne peut rien dire de l'identifiant.
+      return h("div", { class: "recueil" }, entete(), h("main", { class: "recueil-main", id: "recueil-contenu", tabindex: "-1" },
+        h("div", { class: "recueil-vide" },
+          h("h2", { text: "Le recueil est momentanément indisponible" }),
+          h("p", { text: st.erreur }),
+          button("Réessayer", { variant: "primary", onClick: () => { st.liste = null; st.erreur = null; st.chargement = false; charger(st); rafraichir(); } }))), pied(st));
+    } else if (!st.liste) {
+      // La liste n'est pas encore là : on ne déclare rien. Le chargement la
+      // fera venir, et la page se redessinera (voir `charger`).
+      return h("div", { class: "recueil" }, entete(), h("main", { class: "recueil-main", id: "recueil-contenu", tabindex: "-1" },
+        h("p", { class: "recueil-vide", text: "Recherche de l'acte…" })), pied(st));
+    } else {
+      return h("div", { class: "recueil" }, entete(), h("main", { class: "recueil-main", id: "recueil-contenu", tabindex: "-1" },
+        h("div", { class: "recueil-vide" },
+          h("h2", { text: "Aucun acte ne porte cet identifiant" }),
+          h("p", { text: `Le recueil ne connaît pas « ${demande} ». L'acte est peut-être publié sous un autre identifiant, ou pas encore publié.` }),
+          h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"))), pied(st));
+    }
+  }
   const cle = params.id ? decodeURIComponent(params.id) : "";
   if (cle) chargerActe(st, cle);
   publierMeta(st, cle);
@@ -192,7 +246,7 @@ function vue(st, params) {
       : null),
     entete(),
     cle ? acte(st, cle) : accueil(st),
-    pied());
+    pied(st));
 }
 
 // La représentation d'un acte, telle qu'un agent la lit : le document brut dans
@@ -218,22 +272,30 @@ function representation(st, cle, format) {
 }
 
 // Les liens internes du recueil portent l'adresse qu'un robot suivrait
-// (« ?acte=<clé> ») — mais dans la page, on les suit sans recharger : le recueil
-// est rendu par l'application, et un rechargement ferait perdre au lecteur sa
-// recherche et son défilement. On intercepte donc les liens qui ne visent que la
-// page elle-même, et on laisse faire tout le reste (nouvel onglet, clic
-// modifié, adresses absolues).
+// (« ?acte=<clé> », « ?eli=<identifiant> ») — mais dans la page, on les suit sans
+// recharger : le recueil est rendu par l'application, et un rechargement ferait
+// perdre au lecteur sa recherche et son défilement. On intercepte donc les liens
+// qui ne visent que la page elle-même, et on laisse faire tout le reste (nouvel
+// onglet, clic modifié, adresses absolues).
+//
+// Les adresses d'acte sont reconnues depuis N'IMPORTE QUEL écran : un acte
+// publié se cite aussi depuis l'atelier (« Publications (ELI) »), et le clic doit
+// mener au recueil — c'est l'adresse publique, la seule que l'on puisse citer.
 document.addEventListener("click", (e) => {
-  if (state.route.view !== "recueil") return;
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
   if (!a) return;
   const url = new URL(a.getAttribute("href"), location.href);
   if (url.origin !== location.origin || url.pathname !== location.pathname) return;
-  if (url.searchParams.get("acte")) {
+  const acte = url.searchParams.get("acte");
+  const eli = url.searchParams.get("eli");
+  if (acte) {
     e.preventDefault();
     const f = url.searchParams.get("format");
-    navigate("recueil/" + encodeURIComponent(url.searchParams.get("acte")), f ? { format: f } : {});
+    navigate("recueil/" + encodeURIComponent(acte), f ? { format: f } : {});
+  } else if (eli) {
+    e.preventDefault();
+    navigate("recueil", { eli });
   } else if (url.searchParams.has("recueil")) {
     e.preventDefault();
     navigate("recueil");
@@ -267,13 +329,17 @@ function entete() {
     ? h("img", { class: "recueil-ident__logo", src: brand.logoUrl, alt: "" })
     : h("span", { class: "recueil-ident__logo recueil-ident__logo--mark", text: (brand.shortName || brand.name || "?").slice(0, 3).toUpperCase() });
   return h("header", { class: "recueil-header" },
+    // Le lien d'évitement est le PREMIER élément focusable de la page : au
+    // clavier, la première tabulation l'atteint et mène droit au contenu, sans
+    // traverser l'en-tête et ses liens (RGAA 12.7).
+    h("a", { class: "recueil-evitement", href: "#recueil-contenu", text: "Aller au contenu" }),
     h("div", { class: "recueil-header__in" },
       h("a", { class: "recueil-ident", href: hrefRecueil(), title: "Accueil du recueil" },
         marque,
         h("span", { class: "recueil-ident__text" },
           h("span", { class: "recueil-ident__org", text: brand.name || "" }),
           h("span", { class: "recueil-ident__title", text: settings.recueil }))),
-      h("div", { class: "recueil-header__out" }, porteApplication())));
+      h("nav", { class: "recueil-header__out", "aria-label": "Navigation principale du recueil" }, porteApplication())));
 }
 
 // ------------------------------------------------------------------ accueil
@@ -288,9 +354,21 @@ function entete() {
 //
 // La liste complète, groupée par année, ferme la page. Les actes gardent leur
 // place dans un recueil : c'est la porte d'entrée qui change.
+//
+// DÈS QU'UNE RECHERCHE EST POSÉE, les étages de PARCOURS s'effacent : le
+// carrousel des derniers actes et la grille des thèmes ne répondent pas à une
+// recherche, et les laisser au-dessus des résultats obligerait le lecteur à les
+// franchir pour lire ce qu'il a demandé. Il ne reste alors que la recherche et
+// ses résultats, et « Effacer les filtres » ramène la page d'accueil telle
+// qu'elle était. `peindreResultats` pose la même règle au fil de la frappe — la
+// page n'est pas redessinée, seuls les résultats le sont.
+let sectionCarrousel = null;
+let sectionThemes = null;
 
 function accueil(st) {
-  const main = h("main", { class: "recueil-main" });
+  const main = h("main", { class: "recueil-main", id: "recueil-contenu", tabindex: "-1" });
+  sectionCarrousel = null;
+  sectionThemes = null;
   if (st.chargement) { main.appendChild(h("p", { class: "recueil-vide", text: "Chargement du recueil…" })); return main; }
   if (st.erreur) {
     main.appendChild(h("div", { class: "recueil-vide" },
@@ -307,10 +385,12 @@ function accueil(st) {
     return main;
   }
   main.appendChild(hero(st));
+  const une = aLaUne(st);
+  if (une) main.appendChild(une);
   const car = carrousel(st);
-  if (car) main.appendChild(car);
+  if (car) { car.hidden = filtreActif(st); sectionCarrousel = car; main.appendChild(car); }
   const themes = themesZone(st);
-  if (themes) main.appendChild(themes);
+  if (themes) { themes.hidden = filtreActif(st); sectionThemes = themes; main.appendChild(themes); }
   main.appendChild(zoneResultats(st, corpus(st).length));
   return main;
 }
@@ -342,7 +422,7 @@ function hero(st) {
   return h("section", { class: "recueil-hero" },
     brand.name ? h("p", { class: "recueil-hero__eyebrow", text: brand.name }) : null,
     h("h1", { class: "recueil-hero__title", text: settings.recueil }),
-    h("p", { class: "recueil-hero__lead", text: "Retrouvez ici les arrêtés, délibérations et décisions publiés"
+    h("p", { class: "recueil-hero__lead", text: "Retrouvez ici les arrêtés, délibérations, décisions et règlements publiés"
       + (brand.name ? " par " + brand.name : "")
       + " : cherchez un acte, ou laissez-vous guider par thème. Chaque acte se lit en ligne, avec son identifiant ELI." }),
     recherche(st),
@@ -361,13 +441,42 @@ function recherche(st) {
   return h("div", { class: "recueil-recherche recueil-recherche--hero" }, icon("search", 19), champ, croix);
 }
 
+// ---------------------------------------------------------------- à la une
+// Les actes ÉPINGLÉS — ceux que l'administration a mis en avant depuis l'onglet
+// « Actes » (voir views/actes.js). Ils ouvrent la page, dans leur propre bande :
+// c'est là qu'on trouve le règlement intérieur, la charte, le document qu'on
+// vient chercher, et non un acte parmi les derniers publiés.
+//
+// La bande s'efface dès qu'une recherche ou un filtre est posé : le lecteur est
+// alors dans ses résultats, et une mise en avant n'y répond pas. Comme le
+// carrousel, elle ne montre que les actes EN VIGUEUR.
+let bandeUne = null;
+
+function aLaUne(st) {
+  bandeUne = null;
+  const epingles = publicationsEpinglees(st.liste || []);
+  if (!epingles.length) return null;
+  const piste = h("ul", { class: "recueil-carrousel__piste recueil-carrousel__piste--une", "aria-label": "Actes mis en avant par l'administration" });
+  for (const p of epingles) piste.appendChild(carte(p, true));
+  bandeUne = h("section", { class: "recueil-section recueil-une", hidden: filtreActif(st) },
+    h("div", { class: "recueil-section__tete" },
+      h("div", { class: "recueil-section__titres" },
+        h("h2", { class: "recueil-section__title", text: "À la une" }),
+        h("p", { class: "recueil-section__sous", text: "Les actes que l'administration met en avant." }))),
+    piste);
+  return bandeUne;
+}
+
 // ---------------------------------------------------------- les derniers actes
 // Un carrousel : la piste défile au doigt, à la molette ou par les flèches, et
 // les points disent où l'on est. Le défilement est NATIF (`scroll-snap`) : sans
 // JavaScript, la piste reste utilisable ; les flèches ne sont qu'un confort. On
-// n'y montre que les actes EN VIGUEUR : un acte ne se présente qu'une fois.
+// n'y montre que les actes EN VIGUEUR : un acte ne se présente qu'une fois — et
+// pas deux fois sur la même page, puisque les actes épinglés ont leur bande
+// au-dessus.
 function carrousel(st) {
-  const derniers = dernieresPublications(st.liste || [], 8);
+  const epingles = new Set(publicationsEpinglees(st.liste || []).map((p) => p.cle));
+  const derniers = dernieresPublications((st.liste || []).filter((p) => !epingles.has(p.cle)), 8);
   if (!derniers.length) return null;
   const piste = h("ul", { class: "recueil-carrousel__piste", tabindex: "0", "aria-label": "Derniers actes administratifs publiés" });
   for (const p of derniers) piste.appendChild(carte(p));
@@ -420,10 +529,13 @@ function fleche(piste, sens, icone, label) {
   }, icon(icone, 18));
 }
 
-function carte(p) {
+function carte(p, une = false) {
   const id = themeDePublication(p);
-  const el = h("li", { class: "recueil-carte" },
+  const el = h("li", { class: "recueil-carte" + (une ? " recueil-carte--une" : "") },
     h("a", { class: "recueil-carte__lien", href: hrefActe(p.cle) },
+      // Le repère de la mise en avant : le lecteur comprend pourquoi cet acte
+      // ouvre la page, et le retrouve tel quel dans la liste.
+      une ? h("span", { class: "recueil-carte__epingle", text: "À la une" }) : null,
       h("span", { class: "recueil-carte__theme" + (id ? "" : " is-sans"),
         text: themeLabelDePublication(p) || "Sans thème" }),
       h("span", { class: "recueil-carte__objet", text: p.objet || p.numero || "Acte" }),
@@ -497,6 +609,14 @@ function zoneResultats(st, total) {
   zone.appendChild(sommaire(st, total, resultats.length));
   zone.appendChild(filtres(st, base));
   zone.appendChild(liste(resultats));
+  // Au bout des résultats — quand le lecteur a cherché ou filtré, ou que sa
+  // recherche ne donne rien —, on lui dit où chercher ailleurs. Sur la liste
+  // complète, non filtrée, le bas de page s'en charge déjà (voir `pied`) : le
+  // bloc n'est pas répété deux fois sur la même page.
+  if (filtreActif(st) || !resultats.length) {
+    const ailleurs = blocAilleurs("resultats");
+    if (ailleurs) zone.appendChild(ailleurs);
+  }
   return zone;
 }
 
@@ -535,6 +655,7 @@ function item(p) {
   return h("li", { class: "recueil-item" },
     h("a", { class: "recueil-item__lien", href: hrefActe(p.cle) },
       h("span", { class: "recueil-item__haut" },
+        p.epingle ? h("span", { class: "recueil-item__epingle", text: "À la une" }) : null,
         theme ? h("span", { class: "recueil-item__theme", text: theme }) : null,
         h("span", { class: "recueil-item__nature", text: natureLabel(p.nature) }),
         h("span", { class: "recueil-item__num", text: p.numero || "" }),
@@ -548,16 +669,22 @@ function item(p) {
 // ------------------------------------------------------------------ un acte
 
 function acte(st, cle) {
-  const main = h("main", { class: "recueil-main" });
+  const main = h("main", { class: "recueil-main", id: "recueil-contenu", tabindex: "-1" });
   const courant = (st.liste || []).find((p) => p.cle === cle) || null;
   main.appendChild(fil(courant));
   const rec = st.actes["#" + cle];
   if (!rec || rec.chargement) { main.appendChild(h("p", { class: "recueil-vide", text: "Chargement de l'acte…" })); return main; }
   if (rec.erreur) {
+    // Une panne passagère n'est pas un acte introuvable : on le dit, et on offre
+    // de réessayer (le service peut n'avoir pas encore répondu).
     main.appendChild(h("div", { class: "recueil-vide" },
-      h("h2", { text: "Acte introuvable" }),
+      h("h2", { text: rec.transitoire ? "Le recueil est momentanément indisponible" : "Acte introuvable" }),
       h("p", { text: rec.erreur }),
-      h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
+      rec.transitoire
+        ? h("div", { class: "recueil-vide__actions" },
+          button("Réessayer", { variant: "primary", onClick: () => relireActe(st, cle) }),
+          h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"))
+        : h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
     return main;
   }
 
@@ -595,7 +722,7 @@ function basculeAbroges(st, texte, nb) {
 }
 
 function fil(courant) {
-  return h("nav", { class: "recueil-fil" },
+  return h("nav", { class: "recueil-fil", "aria-label": "Fil d'Ariane" },
     h("a", { href: hrefRecueil() }, "Recueil des actes"),
     h("span", { class: "recueil-fil__sep", text: "›" }),
     h("span", { text: courant ? [courant.numero, courant.nature ? natureLabel(courant.nature) : ""].filter(Boolean).join(" · ") : "Acte" }));
@@ -650,15 +777,126 @@ function peindreResultats(st) {
     t.classList.toggle("is-on", on);
     t.setAttribute("aria-pressed", on ? "true" : "false");
   }
+  // La mise en avant n'a pas sa place au milieu d'une recherche : elle s'efface
+  // dès qu'un filtre est posé (voir `aLaUne`).
+  if (bandeUne) bandeUne.hidden = filtreActif(st);
+  // Les étages de PARCOURS suivent la même règle : le carrousel et les thèmes
+  // s'effacent dès qu'une recherche est posée, pour laisser les résultats seuls
+  // sous l'entrée (voir `accueil`).
+  if (sectionCarrousel) sectionCarrousel.hidden = filtreActif(st);
+  if (sectionThemes) sectionThemes.hidden = filtreActif(st);
+  // Le renvoi du bas de page suit la même règle : quand le lecteur est dans une
+  // recherche, il l'a sous les yeux au bout de ses résultats — on l'efface donc
+  // du pied de page, pour ne pas le montrer deux fois.
+  const ailleursPied = monte.root.querySelector(".recueil-pied .recueil-ailleurs");
+  if (ailleursPied) ailleursPied.hidden = filtreActif(st);
+}
+
+// -------------------------------------------------- recueils extérieurs
+// « Vous ne trouvez pas ce que vous recherchez ? » — le renvoi du recueil vers
+// les recueils qu'il ne gère pas (un recueil « bis », des recueils inactifs avec
+// leur période) et vers les sites de référence (Légifrance, service-public.gouv.fr).
+//
+// Les renvois sont des données du référentiel (`config.publication.recueilsExternes`,
+// Administration › Publication) : c'est l'administration qui les écrit, les
+// ordonne et les retire. Le bloc se montre à DEUX endroits — en bas de page de
+// l'espace public, et au bout des résultats de recherche (voir `zoneResultats`
+// et `pied`) —, mais jamais deux fois sur la même page.
+function blocAilleurs(variante) {
+  const liste = recueilsExternes(state.config);
+  if (!liste.length) return null;
+  const recueils = liste.filter((r) => r.type !== "ressource");
+  const ressources = liste.filter((r) => r.type === "ressource");
+  return h("section", { class: "recueil-ailleurs" + (variante === "resultats" ? " recueil-ailleurs--resultats" : "") },
+    h("h2", { class: "recueil-ailleurs__titre", text: "Vous ne trouvez pas ce que vous recherchez ?" }),
+    h("p", { class: "recueil-ailleurs__lead", text: "Les actes que vous cherchez figurent peut-être dans un autre recueil, ou sur un site de référence." }),
+    recueils.length ? groupeAilleurs("Autres recueils", recueils) : null,
+    ressources.length ? groupeAilleurs("Sites de référence", ressources) : null);
+}
+
+function groupeAilleurs(titre, liste) {
+  const ul = h("ul", { class: "recueil-ailleurs__liste" });
+  for (const r of liste) ul.appendChild(itemAilleurs(r));
+  return h("div", { class: "recueil-ailleurs__groupe" },
+    h("h3", { class: "recueil-ailleurs__groupe-titre", text: titre }),
+    ul);
+}
+
+function itemAilleurs(r) {
+  const url = urlRecueilExterne(r);
+  const periode = periodeRecueil(r);
+  return h("li", { class: "recueil-ailleurs__item" + (r.type === "inactif" ? " is-inactif" : "") },
+    h("a", { class: "recueil-ailleurs__lien", href: url, target: "_blank", rel: "noopener noreferrer", title: url },
+      h("span", { class: "recueil-ailleurs__nom", text: r.label || url }),
+      icon("globe", 14)),
+    h("span", { class: "recueil-ailleurs__tags" },
+      h("span", { class: "recueil-ailleurs__type recueil-ailleurs__type--" + (r.type || "bis"), text: recueilExterneTypeLabel(r.type) }),
+      periode ? h("span", { class: "recueil-ailleurs__periode", text: periode }) : null),
+    r.note ? h("span", { class: "recueil-ailleurs__note", text: r.note }) : null);
 }
 
 // ------------------------------------------------------------------ pied
 
-function pied() {
+// Les MENTIONS du pied de page : les mentions légales — qui rappellent à quelles
+// conditions un acte publié ici est exécutoire et opposable — et les mentions
+// d'accessibilité. Elles viennent du référentiel (`config.publication.mentions`,
+// voir src/lib/recueil.js, `mentionsPubliques`) : l'administration écrit le
+// texte, le remplace par un simple lien (les mentions du site principal de la
+// collectivité, par exemple) ou l'éteint. Le texte se replie sous son titre
+// (`<details>`) : présent dans la page — donc trouvable et lisible par un agent
+// comme par un moteur —, il ne noie pas le pied de page sous plusieurs écrans de
+// lecture. Un lien, lui, s'affiche tel quel.
+function blocMentions() {
+  const mentions = mentionsPubliques(state.config);
+  if (!mentions.length) return null;
+  const section = h("section", { class: "recueil-pied__mentions" });
+  for (const m of mentions) {
+    if (m.mode === "lien") {
+      section.appendChild(h("p", { class: "recueil-pied__mention-lien" },
+        h("a", { class: "recueil-lien", href: m.url, target: "_blank", rel: "noopener noreferrer", title: m.url, text: m.lienLabel })));
+      continue;
+    }
+    const corps = h("div", { class: "recueil-mention__texte" });
+    for (const b of blocsMention(m.texte)) {
+      if (b.type === "ul") {
+        const ul = h("ul", { class: "recueil-mention__liste" });
+        for (const it of b.items) ul.appendChild(h("li", { text: it }));
+        corps.appendChild(ul);
+      } else {
+        corps.appendChild(h("p", { text: b.texte }));
+      }
+    }
+    section.appendChild(h("details", { class: "recueil-mention" },
+      h("summary", { class: "recueil-mention__titre", text: m.titre }),
+      corps));
+  }
+  return section;
+}
+
+function pied(st) {
   const brand = state.config?.brand || {};
+  // Le renvoi vers les autres recueils vit ici, en bas de page — mais il
+  // s'efface quand le lecteur est dans une recherche : il l'a alors trouvé au
+  // bout de ses résultats (voir `zoneResultats`), et le bloc ne se répète pas.
+  // L'effacement se fait par l'attribut `hidden`, que `peindreResultats` met à
+  // jour au fil de la frappe — le pied de page n'étant pas redessiné.
+  const ailleurs = blocAilleurs();
+  if (ailleurs) ailleurs.hidden = filtreActif(st);
   return h("footer", { class: "recueil-pied" },
+    ailleurs,
     h("p", { class: "recueil-pied__ligne", text: [brand.name, brand.supportName].filter(Boolean).join(" — ") }),
     h("p", { class: "recueil-pied__note", text: "Seul l'original signé fait foi ; le texte diffusé ici est donné à titre informatif." }),
+    // La licence de réutilisation, en clair et sans dépliage : sa publicité est
+    // une obligation (CRPA art. L. 322-1), elle ne doit pas se chercher.
+    (() => {
+      const lic = licenceReutilisation(state.config);
+      return h("p", { class: "recueil-pied__licence" },
+        h("span", { text: "Réutilisation : " }),
+        lic.url
+          ? h("a", { class: "recueil-lien", href: lic.url, target: "_blank", rel: "noopener noreferrer", title: lic.nom, text: lic.nom })
+          : h("span", { text: lic.nom }),
+        h("span", { text: " — " + lic.mention }));
+    })(),
     // Le recueil ouvert, annoncé à ceux qui consultent les données : les fichiers
     // que le service sert aux moteurs et aux agents. Ils n'existent que là où un
     // serveur les sert (voir src/server/mysql/actes.mjs).
@@ -667,5 +905,8 @@ function pied() {
       ...FICHIERS_OUVERTS.flatMap((f, i) => [
         i ? h("span", { class: "recueil-pied__sep", text: " · " }) : null,
         h("a", { class: "recueil-lien", href: adresseFichier(f.nom), title: f.hint, text: f.nom }),
-      ])) : null);
+      ])) : null,
+    // Les mentions viennent en DERNIER : c'est là qu'un lecteur les cherche, et
+    // c'est là qu'un site public les met.
+    blocMentions());
 }

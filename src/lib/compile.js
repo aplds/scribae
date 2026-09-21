@@ -1,9 +1,14 @@
 import { safeEval } from "./expr.js";
-import { formatDate, formatMoney, capitalize, titleCase, getPath, isDate, todayIso } from "./util.js";
-import { overrideNode, ecarts as ecartsOf } from "./redaction.js";
+import { formatDate, formatMoney, capitalize, titleCase, getPath, isDate, todayIso, uid } from "./util.js";
+import { overrideNode, ecarts as ecartsOf, reglagesEcarts } from "./redaction.js";
+import { estSupprime, suppressions, ajoutsDe, sousSuppression } from "./structure.js";
 import { enrichirSignataire } from "./delegations.js";
+import { conseilPourActe, enrichirConseil } from "./conseils.js";
 import { champFonction, roleDeFonction } from "./fonctions.js";
 import { abrogationsDe, blocsAbrogation } from "./abrogations.js";
+import { niveauDe, numeroNiveau, paramsBloc, appliquerFormule } from "./schema.js";
+import { annexesDe, adoptionDe, visaAdoption, nodeAnnexes } from "./annexes.js";
+import { ordreDe, ordresModifies, appliquerOrdre } from "./ordre.js";
 
 // --------------------------------------------------------------------------
 // Contexte d'évaluation / d'interpolation
@@ -33,6 +38,11 @@ function formuleAutorite(entite, ctx) {
 
 export function buildContext(config, values = {}, extra = {}) {
   const ctx = { ...values, config, today: todayIso(), ...extra };
+  // L'acte qui ADOPTE ce document (le cas d'une annexe), et les annexes jointes
+  // à ce document : les deux sont des identifications figées, rangées avec les
+  // valeurs de l'acte (voir src/lib/annexes.js).
+  ctx.adoption = adoptionDe(values);
+  ctx.annexes = annexesDe(values);
   const trame = extra.trame;
   const fields = trame?.fields || [];
   const enrich = (p) => (p ? { ...p, fonction: (config.roles || []).find((r) => r.id === p?.roles?.[0])?.label || "" } : p);
@@ -76,6 +86,19 @@ export function buildContext(config, values = {}, extra = {}) {
   ctx.entity = withDefaults(rawEntity);
   const rawOrg = (config.entities || []).find((e) => e.kind === "etablissement" || e.kind === "commune") || rawEntity;
   ctx.org = withDefaults(rawOrg);
+  // L'ASSEMBLÉE (le cas d'un acte d'assemblée — une délibération). L'acte peut
+  // désigner son conseil (`__conseilId`) ; à défaut, c'est l'assemblée de son
+  // entité. Quand l'acte émane d'une assemblée, la ligne d'autorité rendue par
+  // le jeton `{{autorite}}` est celle du conseil — « Le conseil municipal de … »
+  // —, non celle de l'autorité personne. Voir src/lib/conseils.js.
+  const conseilId = values.__conseilId || extra.conseilId || trame?.conseilId || "";
+  const estAssemblee = !!(trame?.assemblee || conseilId);
+  ctx.conseil = estAssemblee
+    ? enrichirConseil(config, conseilPourActe(config, { entityId: entId, conseilId }), { signataire: ctx.signataire })
+    : null;
+  // L'autorité de l'acte : l'assemblée si l'acte en émane, sinon l'entité. C'est
+  // cette valeur que le jeton `{{autorite}}` rend dans les trames.
+  ctx.autorite = ctx.conseil ? ctx.conseil.authorityFormula : (ctx.entity?.authorityFormula || "");
   return ctx;
 }
 
@@ -197,10 +220,18 @@ export function compile(trame, values, config, opts = {}) {
   const ctx = buildContext(config, values, { trame, entityId: values.__entityId });
   const markMissing = opts.markMissing === true;
   const interp = (t) => interpolate(t, ctx, { markMissing, missing });
+  // Une ANNEXE n'est pas un acte signé : c'est l'acte qui l'adopte qui est signé,
+  // et c'est sa signature qui lui donne son autorité. Elle ne porte donc ni bloc
+  // de signature, ni qualité de signataire à renseigner — et son original est
+  // imprimé à la suite de l'acte qui l'adopte (voir src/lib/annexe-docs.js).
+  const estAnnexeDoc = trame.nature === "annexe";
 
   // --- champs
   for (const f of trame.fields || []) {
     if (f.appliesWhen && !safeEval(f.appliesWhen, ctx).value) continue;
+    // Le signataire d'une annexe, c'est celui de l'acte d'adoption : la question
+    // n'a pas lieu d'être, et son absence n'est pas un manque.
+    if (estAnnexeDoc && f.type === "signataire") continue;
     const v = values[f.id];
     const empty = v == null || v === "" || (Array.isArray(v) && !v.length);
     if (f.required && empty) {
@@ -225,17 +256,50 @@ export function compile(trame, values, config, opts = {}) {
   // --- corps
   const notes = [];
   let articleCounter = 0;
-  const ecartList = ecartsOf(trame, overrides, config);
+  // Compteurs des échelons de division (Livre, Titre, Chapitre…). Un échelon
+  // ouvert remet à zéro ceux qui le suivent — « Chapitre 1 » puis, un nouveau
+  // Titre venu, « Chapitre 1 » de nouveau.
+  const niveauCounters = new Map();
+  let divisionCounter = 0;
+  // Écarts de TEXTE (réécritures) : eux seuls marquent un bloc comme « hors
+  // trame ». Les écarts de RÉGLAGE (échelon, numérotation) sont signalés aussi,
+  // mais ils ne salissent pas la lecture du document.
+  const ecartList = ecartsOf(trame, overrides, config).filter((e) => !sousSuppression(values, e.addr));
+  const reglageList = reglagesEcarts(trame, overrides).filter((e) => !sousSuppression(values, e.path));
   const ecartAddrs = new Set(ecartList.map((e) => e.addr));
   const isEcart = (path) => ecartAddrs.has(path)
     || [...ecartAddrs].some((a) => a.startsWith(path + "."));
+  // Les ÉLÉMENTS d'une liste (visas, considérants, liste) : on y ajoute ceux que
+  // le rédacteur a posés dans ce conteneur-là, puis on applique l'ordre retenu
+  // — le même mécanisme que pour les blocs, et le même que pour un déplacement.
+  const ordonnerPieces = (items, path, resolveAjout) => {
+    for (const a of ajoutsDe(values, `${path}.items`)) {
+      const addr = `${path}.items.${a.rang}`;
+      if (estSupprime(values, addr)) continue;
+      const it = resolveAjout(a, addr);
+      if (it) items.push(it);
+    }
+    const ord = ordreDe(values)[`${path}.items`];
+    return (Array.isArray(ord) && ord.length) ? appliquerOrdre(items, ord) : items;
+  };
+
   const resolveNode = (rawNode, path) => {
+    // Un bloc que le rédacteur a retiré du document : il n'est pas résolu — donc
+    // pas affiché, pas compté, pas exporté. Rien n'est retiré de la trame : un
+    // « Rétablir » le rend tel qu'il était (voir lib/structure.js).
+    if (estSupprime(values, path)) return null;
     // Le rédacteur peut avoir réécrit le texte de la trame : on applique ses
     // écarts au bloc avant de l'interpréter. Les jetons `{{…}}` qu'il n'a pas
     // touchés continuent d'être résolus normalement.
     const node = overrideNode(rawNode, path, overrides);
     if (node.when && !safeEval(node.when, ctx).value) return null;
     const out = { ...node, path, children: [] };
+    // Les réglages propres au bloc (alignement, marqueur de liste, disposition
+    // du tableau, formule des considérants…) sont posés ici, complétés par
+    // leurs défauts : le rendu et les exports les trouvent ensuite sur le nœud
+    // résolu, sans avoir à connaître la structure de la trame. Voir
+    // `paramsBloc` (lib/schema.js).
+    Object.assign(out, paramsBloc(node));
     if (isEcart(path)) out.ecart = true;
     (node.notes || []).forEach((nt) => notes.push({ ...nt, path, nodeType: node.type }));
     switch (node.type) {
@@ -246,8 +310,10 @@ export function compile(trame, values, config, opts = {}) {
         const sep = config.vocab?.visaSeparator ?? ",";
         const finir = (t) => (t && !/[.;]$/.test(t) ? t + sep : t);
         const items = [];
-        for (const it of node.items || []) {
-          if (it.when && !safeEval(it.when, ctx).value) continue;
+        (node.items || []).forEach((it, j) => {
+          const addr = `${path}.items.${j}`;
+          if (estSupprime(values, addr)) return;
+          if (it.when && !safeEval(it.when, ctx).value) return;
           // « Les décisions fondant la signature » : un visa par décision et par
           // acteur de la chaîne, du sommet vers le signataire — la nomination
           // puis la délégation pour chaque délégataire. Chaque visa porte son
@@ -257,24 +323,69 @@ export function compile(trame, values, config, opts = {}) {
             for (const d of ctx.signataire?.decisions || []) {
               items.push({ id: `${it.id}:${d.refId || d.label}`, text: finir(d.label), lien: d.lien || "" });
             }
-            continue;
+            return;
           }
-          items.push({ id: it.id, text: finir(resolveVisaItem(it, ctx, config)) });
-        }
-        out.items = items.filter((it) => it.text);
+          const t = finir(resolveVisaItem(it, ctx, config));
+          if (t) items.push({ id: it.id, text: t, path: addr });
+        });
+        out.items = ordonnerPieces(items, path, (a, addr) => {
+          if (a.node.when && !safeEval(a.node.when, ctx).value) return null;
+          return { id: a.id, text: finir(interp(a.node.text || "")), path: addr, ajout: true };
+        });
         break;
       }
-      case "considerants": case "list":
-        out.items = (node.items || [])
-          .filter((it) => !it.when || safeEval(it.when, ctx).value)
-          .map((it) => ({ id: it.id, text: interp(it.text) }))
-          .filter((it) => it.text !== "");
+      case "considerants": case "list": {
+        const items = [];
+        const p = paramsBloc(node);
+        // La formule du bloc (« Considérant que ») et sa ponctuation finale
+        // s'appliquent au texte de chaque élément — jamais ajoutées deux fois :
+        // `appliquerFormule` laisse intact un texte qui porte déjà la formule.
+        const finir = (t) => {
+          const s = String(t || "").trim();
+          if (!s || !p.fin) return s;
+          return /[.;,:]$/.test(s) ? s : s + p.fin;
+        };
+        (node.items || []).forEach((it, j) => {
+          const addr = `${path}.items.${j}`;
+          if (estSupprime(values, addr)) return;
+          if (it.when && !safeEval(it.when, ctx).value) return;
+          const brut = interp(it.text);
+          if (brut.trim() === "") return;
+          items.push({ id: it.id, text: finir(appliquerFormule(p.formule, brut)), path: addr });
+        });
+        out.items = ordonnerPieces(items, path, (a, addr) => {
+          if (a.node.when && !safeEval(a.node.when, ctx).value) return null;
+          const brut = interp(a.node.text || "");
+          if (brut.trim() === "") return null;
+          return { id: a.id, text: finir(appliquerFormule(p.formule, brut)), path: addr, ajout: true };
+        });
         break;
+      }
       case "table":
         out.columns = (node.columns || []).map(interp);
         out.rows = (node.rows || []).map((r) => r.map(interp));
         out.caption = interp(node.caption || "");
         break;
+      case "division": {
+        divisionCounter++;
+        out.eId = node.eId || `div_${divisionCounter}`;
+        out.level = Math.max(1, Number(node.level) || 1);
+        const niveau = niveauDe(trame, out.level);
+        out.levelLabel = niveau.label || "Division";
+        if (node.numMode === "manual") {
+          out.numLabel = interp(node.num || "");
+        } else {
+          const n = (niveauCounters.get(out.level) || 0) + 1;
+          niveauCounters.set(out.level, n);
+          for (const k of [...niveauCounters.keys()]) if (k > out.level) niveauCounters.delete(k);
+          const rang = numeroNiveau(n, niveau.num);
+          out.numLabel = [out.levelLabel, rang].filter(Boolean).join(" ");
+          out.niveau = n;
+        }
+        out.heading = interp(node.heading || "");
+        out.blocks = resolveBlocks(node, out, path);
+        break;
+      }
       case "article": {
         articleCounter++;
         // eId stable : c'est lui qui permet de viser un article dans un acte
@@ -282,13 +393,7 @@ export function compile(trame, values, config, opts = {}) {
         out.eId = node.eId || `art_${articleCounter}`;
         out.numLabel = node.numMode === "auto" ? numberedLabel(config, articleCounter) : interp(node.num || "");
         out.heading = interp(node.heading || "");
-        out.blocks = (node.blocks || [])
-          .map((b, i) => {
-            const r = resolveNode(b, `${path}.blocks.${i}`);
-            if (r) r.eId = b.eId || `${out.eId}__p_${i + 1}`;
-            return r;
-          })
-          .filter(Boolean);
+        out.blocks = resolveBlocks(node, out, path);
         break;
       }
       case "signature":
@@ -308,7 +413,136 @@ export function compile(trame, values, config, opts = {}) {
     return out;
   };
 
-  const nodes = (trame.body || []).map((n, i) => resolveNode(n, `body.${i}`)).filter(Boolean);
+  // Les blocs contenus dans un article ou une division : même résolution, avec
+  // un identifiant stable par bloc (c'est lui qui permet de viser un paragraphe
+  // dans une modification d'acte).
+  const resolveBlocks = (node, out, path) => {
+    const container = `${path}.blocks`;
+    const list = (node.blocks || [])
+      .map((b, i) => {
+        const r = resolveNode(b, `${container}.${i}`);
+        // Un article ou une division tient son identifiant de son propre rang
+        // (`art_2`, `div_3`) ; les autres blocs le tiennent de leur conteneur.
+        if (r && !r.eId) r.eId = b.eId || `${out.eId}__p_${i + 1}`;
+        return r;
+      })
+      .filter(Boolean);
+    // Les blocs AJOUTÉS par le rédacteur dans cet article ou cette division.
+    for (const a of ajoutsDe(values, container)) {
+      const r = resolveNode(a.node, `${container}.${a.rang}`);
+      if (r) { if (!r.eId) r.eId = a.node?.eId || `aj_${a.id}`; list.push(r); }
+    }
+    return list;
+  };
+
+  // --- l'ordre des blocs
+  // Le rédacteur peut avoir rangé autrement les blocs du document (un article
+  // remonté avant un autre, un chapitre déplacé) : l'ordre choisi vit à part,
+  // dans `values.__ordre`, et s'applique ICI, une fois les blocs résolus. Rien
+  // n'est déplacé dans la trame : seule la lecture change. Voir src/lib/ordre.js.
+  const ordre = ordreDe(values);
+  const ordonner = (list, containerPath) => {
+    const ord = ordre[containerPath];
+    const out = (Array.isArray(ord) && ord.length) ? appliquerOrdre(list, ord) : list;
+    for (const n of out) if (n.blocks) n.blocks = ordonner(n.blocks, `${n.path}.blocks`);
+    return out;
+  };
+  // Renumérotation des articles et des divisions APRÈS réordonnancement : les
+  // numéros suivent l'ordre imprimé. Seuls les numéros automatiques bougent —
+  // un numéro écrit à la main (« Article R. 1 ») reste ce que le rédacteur a
+  // écrit. Les identifiants (`eId`) ne changent pas : ils sont la mémoire des
+  // blocs, pas leur rang.
+  const renumeroter = (list) => {
+    let art = 0;
+    const niveaux = new Map();
+    const walk = (l) => {
+      for (const n of l) {
+        if (n.type === "article") {
+          art++;
+          if (n.numMode === "auto") n.numLabel = numberedLabel(config, art);
+        } else if (n.type === "division" && n.numMode !== "manual") {
+          const niveau = niveauDe(trame, n.level);
+          const k = (niveaux.get(n.level) || 0) + 1;
+          niveaux.set(n.level, k);
+          for (const key of [...niveaux.keys()]) if (key > n.level) niveaux.delete(key);
+          n.numLabel = [niveau.label || "Division", numeroNiveau(k, niveau.num)].filter(Boolean).join(" ");
+          n.niveau = k;
+        }
+        if (n.blocks) walk(n.blocks);
+      }
+    };
+    walk(list);
+  };
+  const corps = (trame.body || []).map((n, i) => resolveNode(n, `body.${i}`)).filter(Boolean);
+  // Les blocs AJOUTÉS au corps par le rédacteur (voir lib/structure.js).
+  for (const a of ajoutsDe(values, "body")) {
+    const r = resolveNode(a.node, `body.${a.rang}`);
+    if (r) { if (!r.eId) r.eId = a.node?.eId || `aj_${a.id}`; corps.push(r); }
+  }
+  // Une ANNEXE ne porte pas les blocs qui appartiennent à un ACTE : trois d'entre
+  // eux sont donc écartés ici, en un seul point.
+  //
+  //   • le bloc de SIGNATURE — le document annexé ne se signe pas : c'est l'acte
+  //     qui l'adopte qui est signé, et sa signature qui lui donne son autorité
+  //     (voir `estAnnexeDoc` ci-dessus) ;
+  //   • l'AUTORITÉ — la ligne qui dit de quelle autorité émane l'acte (« Le
+  //     maire de … ») : une annexe n'émane pas d'une autorité, elle est ADOPTÉE
+  //     par un acte, et c'est cet acte qui porte la formule d'autorité ;
+  //   • la MENTION DE PUBLICATION AU RECUEIL (« Le présent arrêté est publié au
+  //     recueil… ») : une annexe ne se publie pas elle-même — c'est l'acte qui
+  //     l'adopte qui est publié, et cette phrase y suffit.
+  //
+  // Ce qui reste — intitulé, VISAS, articles, divisions, mentions de recours —
+  // est le texte du document adopté, tel qu'il s'imprime à la suite de l'acte
+  // d'adoption. Les visas sont conservés : un règlement se fonde sur des textes,
+  // et le visa de son adoption (« Vu la délibération n°…, qui l'adopte ») est ce
+  // qui le rattache à son acte. Voir src/lib/annexes.js.
+  const ecarteDAnnexe = (n) => estAnnexeDoc
+    && (n.type === "signature" || n.type === "authority" || (n.type === "mention" && n.kind === "publication"));
+  const nodes = ordonner(corps, "body").filter((n) => !ecarteDAnnexe(n));
+  const ordresTouches = ordresModifies(values);
+  if (ordresTouches.length) {
+    issues.push({
+      id: "ordre-modifie", level: "info",
+      message: `L'ordre des blocs a été modifié par rapport à la trame (${ordresTouches.length} endroit${ordresTouches.length > 1 ? "s" : ""}). La trame elle-même n'est pas changée.`,
+    });
+    // Les numéros suivent l'ordre IMPRIMÉ. Sans cela, un article remonté avant
+    // un autre se lirait « Article 2, Article 1er » : le déplacement est un
+    // geste de rédaction, il renumérote le dispositif. Les numéros ÉCRITS À LA
+    // MAIN ne bougent pas — seul ce que l'application numérotait se renumérote.
+    renumeroter(nodes);
+  }
+
+  // --- l'annexe : le visa de son adoption
+  // Un document annexé se lit toujours à la suite de l'acte qui l'adopte : le
+  // visa qui le rappelle vient donc EN TÊTE de ses visas, et il est écrit par
+  // l'application (il n'appartient pas à la trame de le composer, puisque c'est
+  // la rédaction qui choisit l'acte d'adoption). Voir src/lib/annexes.js.
+  const adoption = adoptionDe(values);
+  if (adoption && trame.nature === "annexe" && trame.adoptionVisa !== false) {
+    const texte = visaAdoption(adoption, config);
+    if (texte) {
+      const visa = nodes.find((n) => n.type === "visas");
+      const item = { id: "visa-adoption", text: texte, lien: adoption.eli || "", adoption: true };
+      if (visa) visa.items = [item, ...(visa.items || [])];
+      else {
+        const i = Math.max(nodes.findIndex((n) => n.type === "authority"), nodes.findIndex((n) => n.type === "title")) + 1;
+        nodes.splice(Math.max(0, i), 0, { id: uid("n"), type: "visas", items: [item], path: "adoption", notes: [] });
+      }
+    }
+  }
+
+  // --- les annexes : la liste de ce qui est annexé à l'acte
+  // L'acte qui adopte un ou plusieurs documents les ANNONCE à la fin de son
+  // dispositif, par leur intitulé : c'est ce qui rend l'annexe trouvable depuis
+  // l'acte, et son TEXTE suit l'acte, à la suite de la signature (voir
+  // src/lib/annexe-docs.js).
+  const annexes = annexesDe(values);
+  if (annexes.length) {
+    const resolved = nodeAnnexes(annexes, config);
+    const at = nodes.findIndex((n) => n.type === "signature" || n.type === "mention");
+    if (at < 0) nodes.push(resolved); else nodes.splice(at, 0, resolved);
+  }
 
   // --- abrogations prévues
   // L'acte peut prévoir, par lui-même, l'abrogation d'un autre acte ou d'un
@@ -334,15 +568,41 @@ export function compile(trame, values, config, opts = {}) {
   }
 
   // contrôle structurel : un article vide est presque toujours une erreur de trame
-  for (const n of nodes) {
-    if (n.type !== "article") continue;
-    const hasContent = (n.blocks || []).some((b) => (b.type === "list" || b.type === "table" ? (b.items || b.rows || []).length : String(b.text || "").trim() !== ""));
-    if (!hasContent) issues.push({ id: "struct-" + n.path, level: "warning", message: `${n.numLabel} est sans contenu : clause conditionnelle non remplie ou article à compléter.` });
+  const sansContenu = (n) => (n.blocks || []).some((b) =>
+    (b.type === "list" || b.type === "table") ? (b.items || b.rows || []).length > 0 : String(b.text || "").trim() !== "");
+  const walkContenu = (list) => (list || []).forEach((n) => {
+    if (n.type === "article" && !sansContenu(n)) {
+      issues.push({ id: "struct-" + n.path, level: "warning", message: `${n.numLabel} est sans contenu : clause conditionnelle non remplie ou article à compléter.` });
+    }
+    if (n.blocks) walkContenu(n.blocks);
+  });
+  walkContenu(nodes);
+
+  // --- ce que la rédaction a changé à la STRUCTURE du document
+  // Un bloc retiré, un paragraphe ajouté : ce sont des actes de rédaction, au
+  // même titre qu'une réécriture. On les annonce (aux administrateurs, comme au
+  // rédacteur) sans jamais les bloquer. Voir lib/structure.js.
+  const nbSupprimes = suppressions(values).length;
+  const nbAjouts = Object.values(values?.__ajouts || {}).reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+  if (nbSupprimes || nbAjouts) {
+    issues.push({
+      id: "structure-modifiee", level: "info",
+      message: [
+        nbAjouts ? `${nbAjouts} bloc(s) ou élément(s) ajouté(s) par la rédaction` : "",
+        nbSupprimes ? `${nbSupprimes} passage(s) retiré(s) par la rédaction` : "",
+      ].filter(Boolean).join(" · ") + ". La trame elle-même n'est pas modifiée.",
+    });
   }
 
-  const numero = values.numero || "";
+  // Une ANNEXE n'a pas de numéro propre, et donc pas d'ELI : son texte suit la
+  // décision qui l'adopte, et c'est CETTE décision qui est publiée (voir
+  // src/lib/annexes.js). Le numéro qu'un brouillon ancien pourrait encore
+  // porter est écarté ici, en un seul point, pour que ni le document ni ses
+  // exports ne le montrent. `estAnnexeDoc` est posé plus haut (l'atelier en a
+  // déjà besoin pour écarter le champ « signataire »).
+  const numero = estAnnexeDoc ? "" : (values.numero || "");
   const seq = (String(numero).match(/^\d{4}-(\d+)/) || [])[1] || config.numbering.seq;
-  const eliPattern = config.numbering.eliPattern
+  const eliPattern = estAnnexeDoc ? "" : config.numbering.eliPattern
     .replace("{baseUri}", (config.brand.baseUri || "").replace(/\/$/, ""))
     .replace("{actTypeId}", trame.actTypeId || "acte")
     .replace("{year}", String(config.numbering.year))
@@ -362,11 +622,27 @@ export function compile(trame, values, config, opts = {}) {
       trameVersion: trame.version,
       actTypeId: trame.actTypeId || "decision",
       familyId: trame.familyId || "",
+      // L'appellation de l'acte, telle que le référentiel la nomme (« Arrêté »,
+      // « Délibération », « Règlement intérieur ») : c'est elle qui sert à le
+      // désigner dans une phrase (« Vu la délibération n°… du … »), et à
+      // intituler sa fiche. Voir src/lib/amend.js (`targetPhrase`).
+      designation: (config.actTypes || []).find((t) => t.id === trame.actTypeId)?.label || values.designation || "",
+      // « acte » ou « annexe » : la nature du document, qui commande sa
+      // modification (voir src/lib/annexes.js) et ce qu'en dit le recueil.
+      nature: trame.nature === "annexe" ? "annexe" : "acte",
+      // L'acte qui l'adopte, s'il est connu de la rédaction (annexe).
+      adoption: adoptionDe(values) || undefined,
+      // Les documents annexés à cet acte (vignettes d'identification figées).
+      annexes: annexesDe(values).length ? annexesDe(values) : undefined,
       // Feuille de style désignée par la trame (facultatif). Vide, l'habillage
       // se déduit de l'entité puis de la famille — voir src/lib/styles.js.
       styleId: trame.styleId || "",
       entity: ctx.entity,
       org: ctx.org,
+      // L'assemblée délibérante, quand l'acte en émane (délibérations) — sa
+      // formule d'autorité et la qualité du signataire qu'elle appelle.
+      conseil: ctx.conseil || undefined,
+      autorite: ctx.autorite || "",
       signataire: ctx.signataire,
       dateSignature: values.dateSignature || "",
       dateEffet: values.dateEffet || "",
@@ -375,11 +651,17 @@ export function compile(trame, values, config, opts = {}) {
     },
     ctx,
     nodes,
+    // Les documents ANNEXÉS, résolus par l'appelant qui connaît le registre
+    // (`src/lib/annexe-docs.js`) : l'acte d'adoption est suivi de leur texte,
+    // dans le même document. Voir render.js et export.js.
+    annexeDocs: Array.isArray(opts.annexes) && opts.annexes.length ? opts.annexes : undefined,
     notes,
     issues,
     missing: [...new Set(missing)],
     overrides: { ...overrides },
-    ecarts: ecartList,
+    // Réécritures et réglages modifiés : les deux sont des écarts, présentés
+    // ensemble (un réglage porte `reglage: true`).
+    ecarts: [...ecartList, ...reglageList],
   };
 }
 

@@ -18,8 +18,10 @@ import {
   COLLECTIONS, SHARED_COLLECTIONS, DOCUMENT_COLLECTIONS, SILENT_COLLECTIONS,
   recordsOf, indexOf, diffRecords, reconcile, stableStringify, isLocalOnly, isSingleton,
 } from "./contract.js";
-import { DEFAULT_PUBLICATION } from "../eli.js";
+import { definirCleService } from "../cle-service.js";
 import { hostKv } from "../hosts.js";
+import { modeDeploiement } from "../auth.js";
+import { enteteCsrf } from "../motdepasse.js";
 
 // Les trois modes proposés à l'administrateur. `service` et `external` parlent
 // le même contrat : seul le transport change (socket de l'environnement, ou HTTP
@@ -75,7 +77,10 @@ const DEFAULT_SETTINGS = {
   // reste le stockage du navigateur.
   mode: globalThis.__SCRIBA_SELF_HOSTED__ ? "external" : "local",
   url: globalThis.__SCRIBA_API_BASE__ || "",
-  token: globalThis.__SCRIBA_API_TOKEN__ || DEFAULT_PUBLICATION.jetonDemonstration,
+  // Aucune clé par défaut : une clé inscrite dans le code servi serait publique,
+  // donc inutile comme autorisation. Elle est remise par le déploiement, ou par
+  // l'administrateur (voir src/lib/cles-service.js et l'écran Base de données).
+  token: globalThis.__SCRIBA_API_TOKEN__ || "",
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -123,6 +128,7 @@ async function kvSet(folder, key, value) {
 export async function init() {
   const saved = await kvGet(SETTINGS_FOLDER, "data", null);
   if (saved && typeof saved === "object") settings = { ...DEFAULT_SETTINGS, ...saved };
+  definirCleService(settings.token);
   const queue = await kvGet(PENDING_FOLDER, "data", null);
   if (Array.isArray(queue)) pending = queue;
   try {
@@ -192,10 +198,16 @@ function makeDriver() {
   // empreinte est inscrite dans le service lui-même) : les champs adresse et
   // jeton ne concernent que le serveur externe.
   const external = settings.mode === "external";
+  // Mode « comptes locaux (mot de passe) » : il n'y a pas de jeton d'API — la
+  // porte est la SESSION du service, dans un cookie `HttpOnly`, et les écritures
+  // portent le jeton anti-CSRF relu du cookie (voir src/lib/motdepasse.js).
+  const parSession = modeDeploiement() === "password";
   return serviceDriver.create({
     baseUrl: external ? settings.url : "",
-    token: (external ? settings.token : "") || DEFAULT_SETTINGS.token,
+    token: parSession ? "" : (settings.token || ""),
     transport: mode.transport,
+    credentials: parSession ? "include" : "same-origin",
+    csrf: parSession ? enteteCsrf : null,
     label: mode.short + " · base de données",
   });
 }
@@ -204,6 +216,7 @@ export async function setSettings(patch, { silent = false } = {}) {
   const prevSettings = settings;
   const prevDriver = driver;
   settings = { ...settings, ...(patch || {}) };
+  definirCleService(settings.token);
   try {
     driver = makeDriver();
   } catch (e) {
@@ -254,7 +267,7 @@ export async function test(patch = {}) {
   const external = merged.mode === "external";
   const probe = serviceDriver.create({
     baseUrl: external ? merged.url : "",
-    token: (external ? merged.token : "") || DEFAULT_SETTINGS.token,
+    token: merged.token || "",
     transport: mode.transport,
     label: "test de connexion",
   });
@@ -289,7 +302,14 @@ export async function read(name, { fresh = false } = {}) {
       return value;
     } catch (e) {
       const mirror = await kvGet(MIRROR_FOLDER, name, null);
-      setStatus("offline", `Service injoignable (${(e && e.message) || e}). Données locales de secours utilisées.`);
+      if (fatalStatus(e)) {
+        // Le service répond, mais refuse : clé absente, invalide, ou service non
+        // provisionné. Ce n'est pas une panne réseau — le dire clairement évite
+        // de chercher une coupure qui n'existe pas.
+        setStatus("error", `Le service a refusé la lecture (${(e && e.message) || e}). Données locales de secours utilisées.`);
+      } else {
+        setStatus("offline", `Service injoignable (${(e && e.message) || e}). Données locales de secours utilisées.`);
+      }
       return mirror;
     }
   }
@@ -323,7 +343,9 @@ export async function write(name, value, { force = false } = {}) {
   } catch (e) {
     await kvSet(MIRROR_FOLDER, name, value);
     if (fatalStatus(e)) {
-      setStatus("error", `Écriture refusée (${(e && e.message) || e}). Vérifiez le réglage de la base.`);
+      setStatus("error", modeDeploiement() === "password"
+        ? "Session fermée ou expirée : reconnectez-vous pour continuer (la base a refusé l'écriture)."
+        : `Écriture refusée (${(e && e.message) || e}). Vérifiez le réglage de la base.`);
       return { ok: false, error: (e && e.message) || String(e) };
     }
     await queueWrite({ collection: name, upserts, deletes, force });

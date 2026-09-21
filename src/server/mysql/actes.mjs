@@ -65,19 +65,22 @@ export function createActesApi({
     return d.getDate() + " " + MOIS_FR[d.getMonth()] + " " + d.getFullYear() + " à " + h + " h " + mi;
   }
 
-  function certificatTransmission({ reference, recuLe, destinataire, empreinte }) {
+  function certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration = false }) {
     const d = destinataire || CONTROLE_LEGALITE.destinataire;
     const r = recuLe || nowIso();
     return {
-      nature: "Accusé de réception de télétransmission",
-      emisPar: "Contrôle de légalité — télétransmission @ctes",
+      nature: demonstration ? "Simulation d'accusé de réception de télétransmission" : "Accusé de réception de télétransmission",
+      emisPar: demonstration ? "Simulation locale (aucun appel à l'API @ctes)" : "Contrôle de légalité — télétransmission @ctes",
       emisLe: r,
       destinataire: d,
       reference: String(reference || ""),
       empreinte: String(empreinte || ""),
       algorithme: "SHA-256",
+      demonstration: !!demonstration,
       sceau: sha256([reference, r, d, empreinte].join("|")),
-      mention: "Transmis au contrôle de légalité le " + dateHeureFr(r),
+      mention: demonstration
+        ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + " (mention de démonstration — transmission simulée, sans appel sortant)"
+        : "Transmis au contrôle de légalité le " + dateHeureFr(r),
     };
   }
 
@@ -110,6 +113,32 @@ export function createActesApi({
   const ok = (status, body, headers) => ({ status, headers: headers || {}, body });
   const err = (status, message, extra, headers) => ({ status, headers: headers || {}, body: { erreur: message, ...(extra || {}) } });
 
+  // ------------------------------------------------- la part publique d'un original
+  // Un original signé a DEUX parts : sa part publique (le document, ses
+  // signatures, son horodatage) et son dossier INTERNE — les données
+  // personnelles du signataire (adresse électronique, compte, moyen
+  // d'authentification) et la trace des courriels qui lui ont été adressés. La
+  // signature « simple », donnée dans l'application, se signale ainsi sans
+  // diffuser les coordonnées de l'agent.
+  //
+  // `sansInterne` retire la part interne et, dans l'identité du signataire, tout
+  // ce qui n'a pas à être publié. C'est cette fonction qui est appliquée à
+  // CHAQUE lecture publique — la seule garantie que rien ne fuit par une route
+  // qu'on aurait oublié de fermer.
+  function sansInterne(v) {
+    if (!v || typeof v !== "object") return v;
+    const { interne, ...reste } = v;
+    if (!Array.isArray(v.signatures)) return reste;
+    return {
+      ...reste,
+      signatures: v.signatures.map((s) => {
+        const sig = { ...((s && s.signataire) || {}) };
+        delete sig.courriel; delete sig.personId; delete sig.compteId; delete sig.compteOutil; delete sig.rapproche;
+        return { ...s, signataire: sig };
+      }),
+    };
+  }
+
   // -------------------------------------------------------------- projections
   function resumeActe(a) {
     return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, sha256: a.sha256, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null };
@@ -118,7 +147,7 @@ export function createActesApi({
     return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
   }
   function resumePublication(p, latest) {
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, transmission: p.transmission || null, versions: p.versions || [] };
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null };
   }
 
   function clePublication(eliUri, dateExpr) {
@@ -192,17 +221,19 @@ export function createActesApi({
           },
           get: { operationId: "lireTransmission", summary: "Lire le certificat de transmission d'un acte", tags: ["Contrôle de légalité"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La transmission et son certificat" }, 404: { description: "Acte inconnu, ou acte non transmis (code `transmission_absente`)" } } },
         },
+        "/v1/actes/{id}/dossier-signature": { get: { operationId: "lireDossierSignature", summary: "Lire le dossier de signature interne", description: "Rend la PART INTERNE de l'original signé : identité nominative du signataire (nom, courriel), compte, moyen d'authentification, et trace des courriels de notification. Ces données ne sont jamais diffusées au public — elles ne sortent que par cette route, sur un acte déposé, donc derrière une session ou un jeton.", security: [{ bearerAuth: [] }], tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Le dossier interne" }, 401: { description: "Jeton absent" }, 404: { description: "Acte inconnu, ou aucun dossier interne (code `dossier_absent`)" } } } },
         "/v1/actes/{id}/publication": {
           post: {
             operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
             description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé" } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé — sa part PUBLIQUE (document, signatures, horodatage). Le dossier interne en est retiré avant conservation." }, originalInterne: { type: "object", description: "La part INTERNE de l'original : coordonnées du signataire, compte, authentification, courriels. Conservée au registre, jamais servie par une route publique (voir /v1/actes/{id}/dossier-signature)." } } } } } },
             responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé" }, 422: { description: "Version en ligne manquante" } },
           },
         },
         "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
         "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
+        "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" } } } },
         "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
       },
       components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } } },
@@ -336,11 +367,15 @@ export function createActesApi({
     const reference = b.reference || ("AR-" + String(recuLe).slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
     const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
     const empreinte = acte.sha256;
-    const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte });
+    // Aucun appel sortant n'est fait ici : l'accusé de réception est fabriqué
+    // localement, et la mention le dit. Une intégration @ctes réelle lèvera ce
+    // marqueur (`demonstration: false`). Voir NC-IV-004 et P-19.
+    const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration: true });
     acte.transmission = {
       reference, recuLe, destinataire, mode: b.mode || CONTROLE_LEGALITE.mode,
       empreinte, auteur: String(b.auteur || "").slice(0, 120), entite: String(b.entite || "").slice(0, 160),
-      api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202 },
+      api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202, simule: true },
+      demonstration: true,
       certificat, transmisLe: nowIso(),
     };
     if (!persist()) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
@@ -366,8 +401,15 @@ export function createActesApi({
       return err(409, "Cet acte doit être transmis au contrôle de légalité avant sa publication.", { code: "transmission_absente", statut: acte.statut, controleLegalite: true });
     }
     const b = ctx.body || {};
+    // PUBLICATION INFORMATIVE : le texte consolidé d'un RÈGLEMENT annexé, publié
+    // pour lui-même à titre d'information (voir SPEC § 2.2.4 ter). Elle
+    // n'appartient pas à l'acte déposé auquel elle est rattachée — elle n'a ni
+    // signature ni original propres, et ne touche donc pas à l'état de cet acte.
+    // C'est la règle MINIMALE qui l'autorise : tout le reste de la mécanique de
+    // publication (clé, ELI, versions, épinglage) est celle des actes.
+    const informative = b.informative === true;
     if (!b.html || !b.akn) return err(422, "La version en ligne (`html`) et le document Akoma Ntoso (`akn`) sont requis pour publier.", { code: "version_en_ligne_absente" });
-    if (!b.original) return err(422, "L'original signé (`original`) est requis : c'est lui qui est conservé et opposable.", { code: "original_absent" });
+    if (!b.original && !informative) return err(422, "L'original signé (`original`) est requis : c'est lui qui est conservé et opposable.", { code: "original_absent" });
     const idem = ctx.headers["idempotency-key"] || ctx.headers["Idempotency-Key"];
     if (idem && db.idem[idem]) {
       const p = lirePublication(db.idem[idem]);
@@ -386,28 +428,52 @@ export function createActesApi({
 
     const rec = {
       cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
-      numero: b.numero || acte.numero, nature: b.nature || acte.nature, objet: b.objet || acte.objet,
+      numero: b.numero || (informative ? "" : acte.numero), nature: b.nature || acte.nature, objet: b.objet || acte.objet,
       themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
       entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
       dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
       opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
       kind: b.kind || "originale", brandName: b.brandName || "",
+      // Une publication INFORMATIVE (le règlement consolidé d'une annexe) et,
+      // pour toute publication, l'acte qui l'adopte s'il y en a un : le recueil
+      // s'en sert pour rattacher le règlement à sa décision d'adoption.
+      informative: informative || undefined,
+      adoption: b.adoption || null,
+      // L'ÉPINGLAGE suit l'ACTE (son identifiant ELI), non la version déposée :
+      // une version publiée plus tard hérite donc du drapeau déjà posé — un
+      // règlement intérieur qu'on modifie reste « à la une ». Voir
+      // hEpinglerPublication.
+      epingle: b.epingle === true || versionsOf(eliUri).some((v) => v.epingle === true),
       sha256: sha256(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
-      original: {
-        format: (b.original && b.original.format) || "application/vnd.actes.original-signe+json",
-        sha256: (b.original && b.original.document && b.original.document.sha256) || "",
-        pageHtml: (b.original && b.original.pageHtml) || "",
-        signatures: (b.original && b.original.signatures) || [],
-        horodatage: (b.original && b.original.horodatage) || null,
-        signaturesUrl: "/v1/eli/" + slug(eliUri.replace(/^eli:\/fr\//, "")) + "/original",
-      },
-      signature: {
-        prestataire: (b.original && b.original.prestataire) || null,
-        niveau: b.niveau || "avancee",
-        signataires: ((b.original && b.original.signatures) || []).map((s) => ({ nom: s.signataire && s.signataire.nom, fonction: s.signataire && s.signataire.fonction })),
-        signeLe: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].signeLe) || "",
-        algorithme: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].algorithme) || "",
-      },
+      // La part PUBLIQUE de l'original : ce que le recueil montre et vérifie. On
+      // lui applique `sansInterne` — un client qui aurait laissé le dossier
+      // interne dans l'original ne le fait pas entrer par cette porte. Une
+      // publication informative n'en a pas : elle n'est pas signée.
+      original: informative || !b.original ? null : (() => {
+        const o = sansInterne(b.original) || {};
+        return {
+          format: o.format || "application/vnd.actes.original-signe+json",
+          sha256: (o.document && o.document.sha256) || "",
+          pageHtml: o.pageHtml || "",
+          signatures: o.signatures || [],
+          horodatage: o.horodatage || null,
+          signaturesUrl: "/v1/eli/" + slug(eliUri.replace(/^eli:\/fr\//, "")) + "/original",
+        };
+      })(),
+      // La part INTERNE, conservée au registre et JAMAIS servie par une route
+      // publique : coordonnées du signataire, compte, authentification, courriels.
+      originalInterne: b.originalInterne || ((b.original && b.original.interne) ? b.original : null) || acte.originalInterne || null,
+      signature: informative || !b.original ? null : (() => {
+        const o = sansInterne(b.original) || {};
+        const sigs = o.signatures || [];
+        return {
+          prestataire: o.prestataire || null,
+          niveau: b.niveau || (o.externe ? "externe" : o.prestataire ? "avancee" : "simple"),
+          signataires: sigs.map((s) => ({ nom: s.signataire && s.signataire.nom, fonction: s.signataire && s.signataire.fonction })),
+          signeLe: (sigs[0] && sigs[0].signeLe) || "",
+          algorithme: (sigs[0] && sigs[0].algorithme) || "",
+        };
+      })(),
       ecarts: acte.ecarts || 0,
       signataireActe: b.auteur || "",
       // Le certificat de transmission au contrôle de légalité accompagne la
@@ -418,8 +484,16 @@ export function createActesApi({
     };
     db.publies[cle] = rec;
     if (idem) db.idem[idem] = cle;
-    acte.statut = "publie";
-    acte.publication = cle;
+    // La publication informative ne fait PAS de l'acte déposé l'acte publié :
+    // c'est elle qui EST le règlement, non l'acte d'adoption (dont le dépôt et
+    // la signature ne sont pas concernés). L'acte garde donc son état.
+    if (!informative) {
+      acte.statut = "publie";
+      acte.publication = cle;
+    }
+    // Le dossier interne garde aussi l'acte : l'agent qui ouvre le dossier de
+    // signature le retrouve sans relire la publication.
+    if (rec.originalInterne) acte.originalInterne = rec.originalInterne;
     evince(db.publies, maxPublies, "publieeLe");
     if (!persist()) { delete db.publies[cle]; return err(507, "Le service n'a plus de place disponible."); }
     const versions = versionsOf(eliUri).map((p) => resumePublication(p, false));
@@ -430,11 +504,44 @@ export function createActesApi({
       dateDocument, datePublication, dateOpposabilite: rec.dateOpposabilite,
       opposabilite: rec.opposabiliteRule,
       recueil: rec.recueil,
+      epingle: rec.epingle === true,
+      informative: rec.informative === true,
+      adoption: rec.adoption || null,
       versions,
       ressource: "/v1/publications/" + encodeURIComponent(cle),
-      original: { format: rec.original.format, sha256: rec.original.sha256, signatures: rec.signature.signataires.length, href: rec.original.signaturesUrl },
-      formats: ["text/html", "application/akn+xml", "application/ld+json", rec.original.format],
+      original: rec.original ? { format: rec.original.format, sha256: rec.original.sha256, signatures: (rec.signature && rec.signature.signataires || []).length, href: rec.original.signaturesUrl } : null,
+      formats: ["text/html", "application/akn+xml", "application/ld+json"].concat(rec.original ? [rec.original.format] : []),
     }, { location: "/v1/publications/" + encodeURIComponent(cle) });
+  }
+
+  // ÉPINGLER un acte au recueil : le mettre en avant sur sa page d'accueil (la
+  // bande « À la une » — la place d'un règlement intérieur, d'une charte). Le
+  // geste ne touche pas au texte publié : il lève ou pose un drapeau, et se
+  // défait aussi simplement qu'il s'est fait.
+  //
+  // Le drapeau suit l'ACTE — son identifiant ELI — et non la version publiée :
+  // on le pose donc sur TOUTES les versions publiées sous cet identifiant, et
+  // une version publiée plus tard l'hérite (voir hPublier). Un acte qu'on
+  // modifie reste ainsi « à la une ». Même contrat que le service de la
+  // plateforme (voir index.html).
+  function hEpinglerPublication(ctx) {
+    const cle = decodeURIComponent(ctx.params.cle);
+    const p = lirePublication(cle);
+    if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+    const epingle = !!(ctx.body && ctx.body.epingle);
+    const auteur = String((ctx.body && ctx.body.auteur) || "").slice(0, 120);
+    const versions = versionsOf(p.eliUri);
+    const avant = versions.map((v) => ({ epingle: v.epingle, epingleLe: v.epingleLe, epinglePar: v.epinglePar }));
+    for (const v of versions) { v.epingle = epingle; v.epingleLe = nowIso(); v.epinglePar = auteur; }
+    if (!persist()) {
+      versions.forEach((v, i) => Object.assign(v, avant[i]));
+      return err(507, "Le service n'a plus de place disponible.");
+    }
+    return ok(200, {
+      ...resumePublication(p, latestOf(p.eliUri) === p),
+      epingle, versions: versions.length,
+      ressource: "/v1/publications/" + encodeURIComponent(cle),
+    });
   }
 
   function hResoudreEli(ctx) {
@@ -528,6 +635,9 @@ export function createActesApi({
       dateOpposabilite: p.dateOpposabilite || "",
       kind: p.kind || "originale",
       enVigueur: latestOf(p.eliUri) === p,
+      // Mis en avant sur l'accueil du recueil (bande « À la une ») : le drapeau
+      // suit l'ACTE — l'identifiant ELI —, non la version déposée.
+      epingle: p.epingle === true,
       sha256: p.sha256 || "",
       formats: {
         html: adresseFormat(base, cle, "html"),
@@ -659,11 +769,51 @@ export function createActesApi({
     };
   }
 
+  // ------------------------------------------- les liens par l'identifiant ELI
+  // Un acte publié cite ses fondements par leur identifiant ELI (« eli:/fr/… ») :
+  // l'identifiant ne change jamais, mais ce n'est pas une adresse — aucun
+  // navigateur ne sait l'ouvrir. Le service, lui, connaît tous ses actes : il
+  // remplace l'identifiant par l'adresse de l'acte visé, DANS l'instance. C'est le
+  // pendant exact de ce que fait le recueil de l'application (voir
+  // src/lib/recueil.js, `resoudreLiensEli`) — la page servie ici se lit donc sans
+  // JavaScript, comme le reste du recueil ouvert.
+  //
+  // L'identifiant désigne l'ACTE : deux versions publiées sous le même
+  // identifiant désignent le même acte, et c'est la version EN VIGUEUR que le
+  // lien doit atteindre. Un identifiant que le recueil ne connaît pas est laissé
+  // en TEXTE : un lien qui ne mène nulle part vaut moins que pas de lien.
+  const cleEli = (v) => String(v || "").trim().toLowerCase().replace(/\s+/g, "").replace(/\/+$/, "");
+  const RE_ANCRE_ELI = /<a\b([^>]*?)href="(eli:\/fr\/[^"]*)"([^>]*)>([\s\S]*?)<\/a>/gi;
+
+  function indexEli() {
+    const index = new Map();
+    for (const k of Object.keys(db.publies)) {
+      const p = db.publies[k];
+      if (!p || !p.eliUri || !p.cle) continue;
+      index.set(cleEli(p.eliUri), latestOf(p.eliUri) || p);
+    }
+    return index;
+  }
+
+  function resoudreLiensEli(html, base) {
+    const brut = String(html || "");
+    if (brut.indexOf("eli:/fr/") < 0) return brut;
+    const index = indexEli();
+    return brut.replace(RE_ANCRE_ELI, (m, avant, eli, apres, texte) => {
+      const p = index.get(cleEli(eli));
+      if (!p) {
+        return `<span class="recueil-lien-eli--hors" title="Acte non publié dans ce recueil — identifiant ELI ${htmlEsc(eli)}">${texte}</span>`;
+      }
+      const attrs = (avant + apres).replace(/\stitle="[^"]*"/gi, "").replace(/\s+/g, " ").trim();
+      return `<a${attrs ? " " + attrs : ""} href="${htmlEsc(adresseActe(base, p.cle))}" data-eli="${htmlEsc(eli)}" title="Acte cité par son identifiant ELI — ${htmlEsc(eli)}">${texte}</a>`;
+    });
+  }
+
   // La page publiée d'un acte, complétée pour les moteurs : description, adresse
   // de référence, formats jumeaux et données structurées (JSON-LD). On n'ajoute
   // que ce qui manque — le titre de la page déposée est conservé, jamais doublé.
   function pageActe(p, base) {
-    const html = String(formatsDe(p).html || "");
+    const html = resoudreLiensEli(formatsDe(p).html, base);
     const cle = p.cle;
     const bloc = [
       `<meta name="description" content="${htmlEsc(resumeLisible(p))}">`,
@@ -709,9 +859,15 @@ export function createActesApi({
     const premier = liste[0] || {};
     const titre = premier.recueil || "Recueil des actes administratifs";
     const collectivite = premier.brandName || "";
+    // Les actes ÉPINGLÉS : ceux que l'administration a mis en avant. Ils ouvrent
+    // la page, dans la bande « À la une » (voir src/lib/recueil.js et la vue
+    // src/ui/views/recueil-public.js : la même règle).
+
+    const epingles = liste.filter((p) => latestOf(p.eliUri) === p && p.epingle === true);
     // Les derniers actes publiés : la version en vigueur de chaque identifiant
-    // ELI, de la plus récente à la plus ancienne.
-    const dernieres = liste.filter((p) => latestOf(p.eliUri) === p).slice(0, 8);
+    // ELI, de la plus récente à la plus ancienne — SANS les actes épinglés, qui
+    // ont déjà leur bande au-dessus : un acte ne se présente qu'une fois.
+    const dernieres = liste.filter((p) => latestOf(p.eliUri) === p && p.epingle !== true).slice(0, 8);
     // Les actes rangés par thème, les thèmes les plus fournis d'abord.
     const groupes = new Map();
     for (const p of liste) {
@@ -724,13 +880,14 @@ export function createActesApi({
     const nomTheme = (t) => t.label || "Autres actes";
     const ancreTheme = (t) => "#theme-" + (t.id || "autres");
 
-    const carte = (p) => `<li class="carte"><span class="carte__theme">${htmlEsc(p.themeLabel || "Sans thème")}</span>`
+    const carte = (p) => `<li class="carte${p.epingle === true ? " carte--une" : ""}">`
+      + `${p.epingle === true ? '<span class="carte__epingle">à la une</span>' : ""}<span class="carte__theme">${htmlEsc(p.themeLabel || "Sans thème")}</span>`
       + `<a class="carte__objet" href="${htmlEsc(adresseActe(base, p.cle))}">${htmlEsc(p.objet || p.numero || "Acte")}</a>`
       + `<span class="carte__meta">${htmlEsc([p.numero, p.entityName].filter(Boolean).join(" · "))}</span>`
       + `<span class="carte__date">${p.datePublication ? "publié le " + htmlEsc(dateLongue(p.datePublication)) : ""}</span></li>`;
 
     const ligne = (p) => `<li class="acte"><a class="acte__objet" href="${htmlEsc(adresseActe(base, p.cle))}">${htmlEsc(p.objet || p.numero || "Acte")}</a>`
-      + `<span class="acte__m">${htmlEsc([p.numero, p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "", latestOf(p.eliUri) === p ? "" : "version antérieure"].filter(Boolean).join(" · "))}</span>`
+      + `<span class="acte__m">${htmlEsc([p.numero, p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "", latestOf(p.eliUri) === p ? "" : "version antérieure", p.epingle === true ? "à la une" : ""].filter(Boolean).join(" · "))}</span>`
       + ` <span class="f">${["json", "md", "txt", "akn"].map((e) => `<a href="${htmlEsc(adresseFormat(base, p.cle, e))}">${e}</a>`).join(" ")}</span></li>`;
 
     const grille = themes.map((t) => `<li class="tuile"><a href="${htmlEsc(ancreTheme(t))}">`
@@ -770,6 +927,9 @@ h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.07em;color:var(--mut
 .piste{list-style:none;display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 12px;margin:0}
 .carte{flex:0 0 min(84vw,300px);scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:6px;padding:14px 15px;display:flex;flex-direction:column;gap:5px}
 .carte__theme{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
+/* La bande « À la une » : les actes mis en avant par l'administration. */
+.carte--une{background:var(--soft);border-top-color:var(--brand)}
+.carte__epingle{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--brand)}
 .carte__objet{font-size:1.02rem;font-weight:600;line-height:1.35;color:var(--ink);text-decoration:none}
 .carte__objet:hover{color:var(--brand)}
 .carte__meta,.carte__date{font-size:.8rem;color:var(--muted)}
@@ -797,7 +957,7 @@ ${liste.length ? `<section class="hero">
 <p>Les actes administratifs publiés${collectivite ? " par " + htmlEsc(collectivite) : ""}, classés par thème : retrouvez les arrêtés, délibérations et décisions qui vous intéressent, et lisez leur texte en ligne.</p>
 <p class="stats">${htmlEsc(stats)}</p>
 </section>
-<h2>Derniers actes administratifs publiés</h2>
+${epingles.length ? `<h2>À la une</h2>\n<ul class="piste piste--une">${epingles.map(carte).join("")}</ul>\n` : ""}<h2>Derniers actes administratifs publiés</h2>
 <ul class="piste">${dernieres.map(carte).join("")}</ul>
 <h2>Parcourir par thème</h2>
 <ul class="tuiles">${grille}</ul>
@@ -864,6 +1024,7 @@ Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>
       for (const p of actes) {
         const d = [p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "",
           p.dateOpposabilite ? "en vigueur le " + dateLongue(p.dateOpposabilite) : "",
+          p.epingle === true ? "à la une" : "",
           latestOf(p.eliUri) === p ? "" : "version antérieure"].filter(Boolean).join(" · ");
         lignes.push(`- [${[p.numero, p.objet].filter(Boolean).join(" — ")}](${adresseActe(base, p.cle)}) : ${d}.${p.themeLabel ? " Thème : " + p.themeLabel + "." : ""} ELI : \`${p.eliUri || "—"}\`. Formats : [JSON](${adresseFormat(base, p.cle, "json")}), [Markdown](${adresseFormat(base, p.cle, "md")}), [texte](${adresseFormat(base, p.cle, "txt")}).`);
       }
@@ -897,6 +1058,22 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     html: (p, base) => [HTML_PUBLIC, pageActe(p, base)],
   };
 
+  // L'IDENTIFIANT ELI COMME ADRESSE : /eli/<code>/<annee>/<numero>/<entite>.
+  // L'identifiant désigne l'acte ; cette adresse est donc l'acte, dans
+  // l'instance — et elle ne change pas quand l'adresse de sa page change. On
+  // redirige vers la page du recueil, où le lecteur trouve le texte, l'original
+  // signé et les autres versions publiées sous le même identifiant.
+  function hEliAdresse(ctx) {
+    const base = origine(ctx.headers);
+    const eliUri = eliKey(ctx.params);
+    const p = latestOf(eliUri);
+    if (!p) {
+      const message = "Le recueil ne connaît pas l'identifiant ELI " + eliUri + ".";
+      return ok(404, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Identifiant ELI inconnu</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}"></head><body><h1>Identifiant ELI inconnu</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p></body></html>`, HTML_PUBLIC);
+    }
+    return ok(302, "", { location: adresseActe(base, p.cle) });
+  }
+
   // /recueil/<clé> et /recueil/<clé>.<ext>
   function hActePublic(ctx) {
     const base = origine(ctx.headers);
@@ -922,29 +1099,57 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
   const ROUTES = [
     { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
     { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
-    { m: "GET", p: /^\/v1\/actes$/, auth: "public", f: () => ok(200, { actes: Object.keys(db.actes).map((k) => resumeActe(db.actes[k])).sort((a, b) => String(b.deposeLe).localeCompare(String(a.deposeLe))) }) },
-    { m: "POST", p: /^\/v1\/actes$/, auth: "jeton", ecrit: true, f: hDeposerActe },
-    { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
-    { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
-    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, auth: "jeton", ecrit: true, f: hEnvoyerEnSignature },
-    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "jeton", ecrit: true, f: hTransmettre },
-    { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
-    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "jeton", ecrit: true, f: hPublier },
-    { m: "GET", p: /^\/v1\/signatures$/, f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => String(b.creeLe).localeCompare(String(a.creeLe))) }) },
-    { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: s.documentSigne }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
-    { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
-    { m: "POST", p: /^\/v1\/webhooks\/signature$/, auth: "public", ecrit: true, f: hWebhookSignature },
+    // Les actes DÉPOSÉS ne sont pas publics : la publication l'est (voir
+    // /v1/publications), le dépôt non — il porte les actes individuels
+    // (sanctions, revalorisations), les circuits en cours et leurs empreintes.
+    // Une clé de LECTURE suffit pour les consulter ; c'était une lecture
+    // anonyme, et c'était un défaut.
+    { m: "GET", p: /^\/v1\/actes$/, role: { min: "lecteur" }, f: () => ok(200, { actes: Object.keys(db.actes).map((k) => resumeActe(db.actes[k])).sort((a, b) => String(b.deposeLe).localeCompare(String(a.deposeLe))) }) },
+    { m: "POST", p: /^\/v1\/actes$/, role: { min: "redacteur" }, ecrit: true, f: hDeposerActe },
+    { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+    { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, role: { min: "redacteur" }, ecrit: true, f: hEnvoyerEnSignature },
+    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, role: { min: "redacteur" }, ecrit: true, f: hTransmettre },
+    { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
+    // Le DOSSIER INTERNE de la signature : la part de l'original qui ne se
+    // diffuse pas. Elle n'est servie que sur un acte déposé — donc derrière une
+    // session (mode « mot de passe ») ou un jeton (mode « demo ») — et jamais par
+    // une route publique du recueil.
+    { m: "GET", p: /^\/v1\/actes\/([^/]+)\/dossier-signature$/, role: { min: "administrateur" }, f: (ctx) => {
+        const a = lireActe(ctx.params.id);
+        if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+        const dossier = a.originalInterne || null;
+        if (!dossier) return err(404, "Aucun dossier de signature interne pour cet acte.", { code: "dossier_absent" });
+        return ok(200, { acteId: a.id, numero: a.numero, dossier });
+      } },
+    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, role: { min: "redacteur" }, ecrit: true, f: hPublier },
+    { m: "GET", p: /^\/v1\/signatures$/, role: { min: "lecteur" }, f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => String(b.creeLe).localeCompare(String(a.creeLe))) }) },
+    // Le document signé est servi SANS sa part interne : c'est une lecture de
+    // l'original, pas du dossier de signature (voir /dossier-signature).
+    { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, role: { min: "lecteur" }, f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: sansInterne(s.documentSigne) }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
+    { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, role: { min: "lecteur" }, f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
+    // La notification du prestataire n'est PAS publique : elle était ouverte, et
+    // un tiers pouvait donc faire signer un acte au nom de qui il voulait (le
+    // seul contrôle était l'empreinte du document — publique). Elle exige une
+    // clé dédiée au PRESTATAIRE (`API_TOKENS="prestataire|prestataire:<hash>"`),
+    // ou la clé d'administration.
+    { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
     { m: "GET", p: /^\/v1\/publications$/, f: () => {
         const all = Object.keys(db.publies).map((k) => db.publies[k]);
         const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
         return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => String(b.publieeLe).localeCompare(String(a.publieeLe))) });
       } },
+    { m: "POST", p: /^\/v1\/publications\/([^/]+)\/epingle$/, role: { min: "editeur" }, ecrit: true, f: hEpinglerPublication },
     { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
         const cle = decodeURIComponent(ctx.params.cle);
         const p = lirePublication(cle);
         if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
         const versions = versionsOf(p.eliUri).map((x) => resumePublication(x, latestOf(x.eliUri) === x));
-        return ok(200, { ...p, latest: latestOf(p.eliUri) === p, versions });
+        // Le dossier interne ne sort JAMAIS par cette route : c'est une lecture
+        // de la publication, côté public comme côté agent, et il n'en fait pas
+        // partie. Il se lit par /v1/actes/{id}/dossier-signature.
+        const { originalInterne, ...pub } = p;
+        return ok(200, { ...pub, latest: latestOf(p.eliUri) === p, versions });
       } },
     { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/original$/, f: (ctx) => {
         const eliUri = eliKey(ctx.params);
@@ -959,6 +1164,9 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     { m: "GET", p: /^\/recueil\.json$/, f: (ctx) => ok(200, JSON.stringify(indexRecueil(origine(ctx.headers)), null, 2), JSON_PUBLIC) },
     { m: "GET", p: /^\/recueil\/?$/, f: (ctx) => ok(200, pageRecueil(origine(ctx.headers)), HTML_PUBLIC) },
     { m: "GET", p: /^\/recueil\/(.+)$/, f: hActePublic },
+    // L'identifiant ELI comme adresse (le lien que porte un acte publié, et
+    // qu'un lecteur peut recopier) : voir `hEliAdresse`.
+    { m: "GET", p: /^\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/?$/, f: hEliAdresse },
   ];
 
   // `ctx` : { authorize(headers) → null | {status, body, code}, rate(req) → bool }
@@ -977,8 +1185,11 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
       // Un moteur commence souvent par HEAD : on répond comme à un GET, sans
       // corps (le serveur HTTP s'en charge).
       if (r.m !== method && !(r.m === "GET" && method === "HEAD")) continue;
-      if (r.auth === "jeton" && typeof ctx.authorize === "function") {
-        const bad = ctx.authorize(headers);
+      // `role` dit le rôle minimal (« lecteur »…« administrateur »), ou une
+      // liste exacte (le prestataire de signature). `auth: "jeton"` reste
+      // accepté pour compatibilité et vaut « au moins rédacteur ».
+      if ((r.auth === "jeton" || r.role) && typeof ctx.authorize === "function") {
+        const bad = ctx.authorize(headers, r.role || { min: "redacteur" });
         if (bad) return bad;
       }
       if (r.ecrit && typeof ctx.rate === "function" && ctx.rate(req)) {

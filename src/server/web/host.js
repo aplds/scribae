@@ -32,6 +32,21 @@
   window.__SCRIBA_API_BASE__ = config.apiBase || "";
   if (config.apiToken) window.__SCRIBA_API_TOKEN__ = config.apiToken;
 
+  // Le mode annoncé par le déploiement, s'il en annonce un (AUTH_MODE dans le
+  // .env). « password » : la porte est une session à mot de passe tenue par le
+  // service — l'application ne lit pas le référentiel avant de s'être identifiée,
+  // et les écritures passent par le cookie de session, non par un jeton. Le mode
+  // du SERVICE (GET /v1/auth/config) reste autoritaire : celui-ci n'est qu'un
+  // présage, posé avant le premier appel réseau.
+  if (config.authMode) {
+    window.__SCRIBA_AUTH__ = {
+      mode: String(config.authMode),
+      // `DEMO_ACCOUNTS` n'a de sens qu'en mode mot de passe : ailleurs, les
+      // comptes de démonstration suivent le référentiel (src/lib/auth.js).
+      demo: !(String(config.demoAccounts).toLowerCase() === "false"),
+    };
+  }
+
   // Les services de la plateforme ont la priorité s'ils existent déjà.
   if (window.root && window.root.kv) return;
 

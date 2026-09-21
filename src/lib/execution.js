@@ -117,18 +117,23 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
   const e = acte?.execution || {};
   const signeLe = iso(acte?.original?.signatures?.[0]?.signeLe || acte?.signeLe || "");
   const publieLe = iso(acte?.publication?.datePublication || "");
+  // Une ANNEXE ne se signe ni ne se publie pour elle-même : elle n'a donc
+  // aucune formalité propre. C'est l'acte qui l'adopte qui les accomplit, et
+  // c'est de sa signature que court le délai de recours — l'annexe n'ayant pas
+  // de vie propre (voir src/lib/annexe-docs.js).
+  const annexe = trame?.nature === "annexe";
   // Dispense déclarée par la trame : « aucune » écarte la formalité, « requise »
   // la rend obligatoire même là où la règle générale ne l'exigerait pas.
   const dispense = (v) => (v === "aucune" ? false : v === "requise" ? true : null);
-  const transmissionRequise = dispense(trame?.transmission) ?? true;
-  const notificationRequise = dispense(trame?.notification) ?? !publiable;
+  const transmissionRequise = annexe ? false : (dispense(trame?.transmission) ?? true);
+  const notificationRequise = annexe ? false : (dispense(trame?.notification) ?? !publiable);
 
   return [
     {
       id: "signature",
       label: "Signature",
       court: "signé",
-      requis: true,
+      requis: !annexe,
       fait: !!(acte?.original || acte?.statut === "signee" || acte?.statut === "publie"),
       at: signeLe,
       ref: (acte?.original?.signatures || []).map((s) => s?.signataire?.nom).filter(Boolean).join(", "),

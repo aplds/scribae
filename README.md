@@ -7,7 +7,9 @@ l'exporte dans des formats
 ouverts et normés : **Akoma Ntoso 3.0**, **Schematron**, **JSON-LD/ELI**, HTML imprimable (format
 A4), Word, Markdown.
 
-![Interface de Scribae](https://user.uploads.dev/file/39e80c075f4725348ce5c5d6df3e4dfb.png)
+![Le recueil public, page d'accueil de Scribae](https://user.uploads.dev/file/06d748c1bac8b420d52e7572cc6d66f0.jpg)
+
+![L'atelier de Scribae](https://user.uploads.dev/file/39e80c075f4725348ce5c5d6df3e4dfb.png)
 
 > **Démonstration.** Le jeu de données livré est **entièrement fictif** : il configure l'outil pour
 > la **mairie de Valmont-sur-Loire** (entités, services et bureaux, personnes, rôles, références
@@ -17,10 +19,12 @@ A4), Word, Markdown.
 
 ## Essayer, sans rien installer
 
-<https://aplds.github.io/scribae>
+<https://perchance.org/scribae>
 
-L'application s'ouvre directement sur la démonstration. Aucune inscription : **onze comptes
-fictifs**, présentés par profil, s'ouvrent d'un clic — **sans mot de passe**.
+L'application s'ouvre sur le **recueil public** — les actes publiés, consultables par tout le monde,
+**sans compte**, avec leur identifiant ELI et leur texte. Pour entrer dans l'atelier, cliquez sur
+**Se connecter** (en haut du recueil) : la démonstration présente **onze comptes fictifs**, par
+profil, qui s'ouvrent d'un clic — **sans mot de passe**.
 
 | Profil | Ce qu'il montre |
 |---|---|
@@ -77,15 +81,15 @@ les collectivités, une variante **inspirée de cette charte sans ses éléments
 | **Actes** | registre : numéro, objet, nature, conformité à la trame, statut, historique des brouillons ; pastille **« abrogé »** / **« abrogation prévue »** ; **corbeille réservée aux brouillons**, les actes signés ou publiés passant par **« Retirer / abroger »** |
 | **Délégations** | **organigramme des délégations de signature**, visible par tous les comptes : les chaînes de signature en arbre (autorité de tête, délégations, sous-délégations) ou en liste ; un clic ouvre la **fiche** d'un acteur (pouvoir, étendue, décision, dates, signature obtenue et visas). Le modifier est réservé aux administrateurs et éditeurs |
 | **Parapheur** *(fonction expérimentale, éteinte par défaut)* | circuit de validation du référentiel (étapes, rôles, ciblage), décisions motivées, empreinte du texte validé — à activer dans *Administration › Expérimentale* |
-| **Signature & publication** | dépôt par API REST, circuit de signature, original signé vérifiable, publication au recueil, identifiant ELI, opposabilité ; onglet **« Ma signature »** pour le signataire — qui signe avec son compte, rapproché du compte de l'outil de signature, et ne voit que les actes de son **champ de compétence** |
+| **Signature & publication** | dépôt par API REST, **trois circuits de signature** — électronique (prestataire branché en API), **simple** (le signataire signe **dans Scribae**, avec son compte, après avoir coché la déclaration), **externe** (papier ou outil tiers) —, original signé vérifiable **partagé en deux parts : publique et interne** (les mentions nominatives et la trace des courriels ne sont jamais diffusées), publication au recueil, identifiant ELI, opposabilité ; onglet **« Ma signature »** pour le signataire — qui signe avec son compte, rapproché du compte de l'outil de signature, et ne voit que les actes de son **champ de compétence** |
 | **Recueil public** | site ouvert à tous, **sans compte** : recherche des actes publiés, liste par année, et chaque acte présenté comme sur Légifrance — titre, version, métadonnées, texte dans la page (pas de feuille à télécharger), pièces et signature vérifiable — l'adresse à communiquer aux administrés. Les actes s'affichent **dans leur version la plus récente**, avec les cases **« Afficher les versions antérieures »** et **« Afficher les articles abrogés »** |
 | **Exécution & délais** | formalités (contrôle de légalité, publication, notification), date d'exécutoire, délai de recours, **recours introduit** (date d'introduction, nature, auteur) qui ferme le délai, alertes ; **pièces du dossier** en PDF : état des formalités (tout acte), attestation de non-recours (acte définitif non contesté) ; **télétransmission au contrôle de légalité** *(+fonction expérimentale, éteinte par défaut)* : l'étape s'intercale entre le retour signé et la publication, l'accusé de réception de la préfecture (certificat « Transmis au contrôle de légalité le … à … ») est déposé sur le document, puis l'acte est publié |
 | **Modifier un acte** | édition en place de l'acte en vigueur : ajout/retrait de **paragraphe**, de **ligne de liste** ou de **ligne de tableau**, **réattribution de numéro** (numéro libre) ou **« tout renuméroter »** ; acte modificatif + version consolidée, mentions « Modifié/Abrogé/Ajouté par » |
 | **Abroger un acte, ou l'un de ses articles** | prévu **dès la rédaction** (y compris un acte non modificatif) : on vise au référentiel un acte — ou tel article d'un acte — à abroger ; la clause s'ajoute au document et l'abrogation prend effet **à l'entrée en vigueur** de l'acte qui la porte, non à sa publication |
-| **Administration** | tout ce qui est configurable : identité, entités, services et bureaux, personnes (accord en genre de la qualité, décision fondant le pouvoir de signer), rôles, références, numérotation (**séquence interne, ou numéro attribué par un service externe**), circuits, **publication** (titre du recueil, publication automatique, opposabilité), **fonctions expérimentales** (le parapheur), annuaire (OIDC), base de données |
+| **Administration** | tout ce qui est configurable : identité, entités, services et bureaux, personnes (accord en genre de la qualité, décision fondant le pouvoir de signer), rôles, références, numérotation (**séquence interne, ou numéro attribué par un service externe**), circuits (**trois circuits de signature**), **courriel** (six notifications activables, expéditeur, adresse de réponse, copie systématique, état du **serveur SMTP** du déploiement et message d'essai), **publication** (titre du recueil, publication automatique, opposabilité), **fonctions expérimentales** (le parapheur), annuaire (OIDC), base de données |
 | **Feuilles de style** | charte graphique des actes : marges, **police** (liste de polices proposées), en-tête, pied, filets, **intitulés encadrés** (côtés au choix), **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; édition directe |
-| **Comptes et rôles** | cinq rôles — dont le **Réviseur** et le **Signataire**, qualités **cumulables** — plus le visiteur, sans accès ; **seize permissions** ; périmètre par service et par bureau ; **personne du référentiel**, rapprochement du compte de l'outil de signature. Retirer un acte du recueil (dépublier) est réservé à l'administrateur, avec un avertissement en grand et un motif technique exigé |
-| **Guide** | wiki intégré (21 chapitres, glossaire, dépannage) + documentation technique lue depuis les fichiers du dépôt |
+| **Comptes et rôles** | cinq rôles — dont le **Réviseur** et le **Signataire**, qualités **cumulables** — plus le visiteur, sans accès ; **dix-sept permissions** ; périmètre par service et par bureau ; **personne du référentiel**, rapprochement du compte de l'outil de signature. Retirer un acte du recueil (dépublier) est réservé à l'administrateur, avec un avertissement en grand et un motif technique exigé ; **épingler** un acte (le mettre à la « une » du recueil public) est ouvert à l'administrateur et à l'éditeur |
+| **Guide** | wiki intégré (24 chapitres, glossaire, dépannage) + documentation technique lue depuis les fichiers du dépôt |
 
 Formats d'export : **Akoma Ntoso 3.0**, **Schematron**, **JSON-LD / ELI**, **HTML** autonome,
 **Word** (`.doc`), **Markdown**, JSON — tous au **format A4** pour l'impression et le PDF.
@@ -144,6 +148,13 @@ Sous cette forme, l'application fonctionne **entièrement dans le navigateur de 
 les documents restent sur leur poste et ne sont **pas partagés** entre collègues. C'est la bonne
 solution pour essayer, pour une démonstration, ou pour un usage individuel.
 
+Les **assistants** (Plume dans l'atelier, Publia au recueil) y fonctionnent **sans moteur de
+langage** : ils ne rédigent pas de réponse, ils **retrouvent** le chapitre du guide ou l'acte
+publié qui répond à la question, et y conduisent par un lien. Pour des réponses rédigées,
+branchez l'API de langage de votre collectivité — un service compatible avec l'API des
+complétions de conversation, ou un simple appel `{ prompt } → { texte }` (*Administration ›
+Assistants*, adresse et clé). Les questions ne sont alors envoyées qu'à ce service-là.
+
 ### Pour travailler à plusieurs postes : votre propre serveur
 
 Pour que trames et actes soient partagés par tout un service, deux voies :
@@ -160,7 +171,11 @@ Ces deux documents s'adressent à votre service informatique.
 
 ## Vos données
 
-- **Aucun compte en ligne n'est nécessaire**, et l'application n'envoie rien à un service tiers.
+- **Aucun compte en ligne n'est nécessaire.** En revanche, deux mécanismes peuvent sortir de la
+  page : les **assistants** (Plume, Publia), qui transmettent la question — et rien du contenu de
+  vos actes — au moteur de langage réglé (le moteur intégré de la plateforme, ou celui que vous
+  branchez) ; et la **notification par courriel**, quand un service SMTP est configuré sur un
+  déploiement auto-hébergé. Tout le reste travaille en local.
 - Par défaut, tout est enregistré **dans le navigateur** : c'est ce qui rend la démonstration
   immédiate, mais aussi ce qui la rend **propre à un poste**.
 - La **signature électronique** est calculée localement et l'original signé est vérifiable par
@@ -177,4 +192,10 @@ version par version, est dans **`src/CHANGELOG.md`** et se lit aussi dans l'appl
 
 ## Licence
 
-GNU General Public License v3.0
+Le **logiciel** (le code de ce dépôt) est distribué sous **GNU General Public License, version 3**
+— voir le fichier `LICENSE`. Toute version modifiée redistribuée reste sous cette licence.
+
+Les **actes publiés** au recueil ne relèvent pas de cette licence : ce sont des documents
+administratifs, et leurs conditions de réutilisation sont affichées **sur le recueil lui-même**
+(mention configurable — par défaut la **Licence Ouverte 2.0**, conformément aux articles
+L. 321-1 et L. 322-6 du CRPA).

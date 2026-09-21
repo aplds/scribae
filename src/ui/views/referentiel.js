@@ -1,6 +1,7 @@
 import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, parapheurActif, regenerateDemoActes } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
-import { download, pickFile, uid, formatDate, todayIso } from "../../lib/util.js";
+import { download, pickFile, uid, formatDate, todayIso, copyText } from "../../lib/util.js";
+import * as cles from "../../lib/cles-service.js";
 import { textField, selectField, choiceField, fontField, confirmDialog, promptDialog, sectionHeader, helpLink } from "../components.js";
 import { clearAll, saveConfig } from "../../lib/store.js";
 import * as db from "../../lib/db/index.js";
@@ -8,11 +9,16 @@ import { seedConfig, seedTrames } from "../../lib/seed.js";
 import { amendVocab } from "../../lib/amend.js";
 import { abrogationVocab } from "../../lib/abrogations.js";
 import { newService, newBureau } from "../../lib/scope.js";
+import { newConseil } from "../../lib/conseils.js";
 import { newCircuit, newStep, STEP_ROLES, STEP_KINDS } from "../../lib/validation.js";
 import { newCompetence, competenceLabel } from "../../lib/revision.js";
 import { DELAIS_DEFAUT } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE } from "../../lib/legalite.js";
 import { publicationSettings } from "../../lib/eli.js";
+import { TYPES_RECUEIL_EXTERNE, newRecueilExterne, RENVOIS_RECOMMANDES, MENTIONS_PUBLIQUES, MENTIONS_DEFAUT, mentionsParDefaut } from "../../lib/recueil.js";
+import { LICENCE_DEFAUT } from "../../lib/recueil.js";
+import { signatureSettings, SIGNATURE_MODES, MODES_TRAME, trameModeLabel, circuitPour, circuitsDisponibles, modeLabel } from "../../lib/externe.js";
+import { EVENEMENTS, courrielSettings, etatService as etatCourriel, envoyerTest, evenementDe } from "../../lib/courriel.js";
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
 import { annuairePanel } from "../oidc.js";
@@ -26,6 +32,7 @@ const TABS = [
   { id: "vocabulaire", label: "Vocabulaire" },
   { id: "numerotation", label: "Numérotation" },
   { id: "entites", label: "Entités" },
+  { id: "assemblees", label: "Assemblées" },
   { id: "services", label: "Services" },
   { id: "personnes", label: "Personnes" },
   { id: "roles", label: "Rôles" },
@@ -35,6 +42,8 @@ const TABS = [
   { id: "acttypes", label: "Types d'actes" },
   { id: "circuits", label: "Circuits de validation" },
   { id: "delais", label: "Exécution & délais" },
+  { id: "signature", label: "Signature" },
+  { id: "courriel", label: "Courriel" },
   { id: "publication", label: "Publication" },
   { id: "assistants", label: "Assistants" },
   { id: "experimental", label: "Expérimentale" },
@@ -245,6 +254,22 @@ export function renderReferentiel(root) {
   if (ui.refTab === "services") {
     body.appendChild(servicesPanel(save, redraw));
   }
+  if (ui.refTab === "assemblees") {
+    body.appendChild(listPanel({
+      title: "Assemblées délibérantes", help: "Les conseils dont émanent les actes d'assemblée — le conseil municipal d'une commune, le conseil d'administration d'un établissement public. La ligne d'autorité d'une délibération est celle de l'assemblée (« Le conseil municipal de … ») ; l'acte est signé par le président de cette assemblée, dont vous choisissez ici la qualité (le maire, le président du conseil d'administration…). Une trame devient un acte d'assemblée par son réglage « Acte d'assemblée », dans l'éditeur de trame.",
+      items: (c.councils = c.councils || []),
+      factory: () => newConseil({ entityId: c.entities[0]?.id || "" }),
+      fields: () => [
+        { key: "code", label: "Code", type: "text", help: "Repère court (CM, CA…)." },
+        { key: "entityId", label: "Entité de rattachement", type: "select", options: c.entities.map((e) => ({ value: e.id, label: e.name })), help: "C'est l'entité de l'acte qui détermine l'assemblée retenue par défaut." },
+        { key: "name", label: "Nom de l'assemblée", type: "text", help: "Ex. « Conseil municipal de Valmont-sur-Loire »." },
+        { key: "authorityFormula", label: "Formule d'autorité (ligne d'en-tête de l'acte)", type: "text", help: "Ex. « Le conseil municipal de Valmont-sur-Loire ». C'est ce que rend le jeton {{autorite}}." },
+        { key: "signerRoleId", label: "Qualité qui signe", type: "select", options: c.roles.map((r) => ({ value: r.id, label: r.label })), placeholder: "—", help: "Le rôle sous lequel l'acte est signé : le maire pour un conseil municipal, le président du conseil d'administration pour un établissement public. Le nom du signataire vient, lui, du champ « Signataire » de la trame." },
+        { key: "actif", label: "En activité", type: "boolean" },
+      ],
+      save,
+    }));
+  }
 
   if (ui.refTab === "personnes") {
     body.appendChild(listPanel({
@@ -358,6 +383,14 @@ export function renderReferentiel(root) {
     body.appendChild(delaisPanel(save, redraw));
   }
 
+  if (ui.refTab === "signature") {
+    body.appendChild(signaturePanel(save, redraw));
+  }
+
+  if (ui.refTab === "courriel") {
+    body.appendChild(courrielPanel(save, redraw));
+  }
+
   if (ui.refTab === "publication") {
     body.appendChild(publicationPanel(save, redraw));
   }
@@ -388,7 +421,7 @@ export function renderReferentiel(root) {
       ),
       h("hr", { class: "fr-sep" }),
       h("p", { class: "fr-small fr-muted", text: "Les comptes et leurs rôles se gèrent dans « Comptes et rôles »." }),
-      h("p", { class: "fr-small fr-muted", text: "Le mode de connexion — comptes de l'application, ou annuaire de la collectivité (OIDC) — se règle dans l'onglet « Annuaire (OIDC) ». Brancher l'annuaire désactive automatiquement les comptes de démonstration." }),
+      h("p", { class: "fr-small fr-muted", text: "Le mode de connexion — comptes de l'application, ou annuaire de la collectivité (OIDC) — se règle dans l'onglet « Annuaire (OIDC) ». Brancher l'annuaire désactive automatiquement les comptes de démonstration. Le mode « comptes locaux » (identifiant et mot de passe) est, lui, un réglage du déploiement (`AUTH_MODE=password` dans le `.env` du service), et prime sur le référentiel." }),
       h("p", { class: "fr-small fr-muted", text: "Le rangement des données — stockage de ce navigateur, service partagé, ou base MySQL / MariaDB de la collectivité — se règle dans l'onglet « Base de données »." }),
       h("div", { class: "fr-row" },
         button("Comptes et rôles", { variant: "secondary", icon: "lock", onClick: () => navigate("comptes") }),
@@ -452,7 +485,101 @@ function databasePanel() {
         onChange: (v) => { d.token = v.trim(); },
       }));
     } else if (d.mode === "service") {
-      fields.appendChild(h("p", { class: "fr-hint", text: "Aucun réglage : ce mode utilise le jeton du service de démonstration, déjà inscrit dans l'application. Rien à installer, et les données sont partagées entre les postes." }));
+      fields.appendChild(textField({
+        label: "Clé d'écriture du service", value: d.token || "", type: "password",
+        help: "Le service ne conserve que l'empreinte SHA-256 de cette clé : elle n'est inscrite ni dans l'application, ni dans le référentiel, ni dans les exports. Sans clé, ce poste lit le recueil public mais n'écrit rien.",
+        onChange: (v) => { d.token = v.trim(); },
+      }));
+      const etat = h("div", { class: "fr-small fr-muted", text: "Vérification de l'état du service…" });
+      const gestes = h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", marginTop: "8px" } });
+      fields.appendChild(etat);
+      fields.appendChild(gestes);
+      const cleEnService = () => d.token || db.getSettings().token || "";
+      const montrerCle = (valeur, titre) => {
+        const contenu = h("div", {},
+          h("p", { class: "fr-small", text: "Conservez cette clé : elle n'est affichée qu'ici — le service n'en connaît que l'empreinte. Si vous la perdez, il faudra réinstaller l'état du service pour la remplacer." }),
+          h("code", { class: "fr-mono", style: { display: "block", wordBreak: "break-all", padding: "10px", background: "var(--background-alt-grey, #eee)" }, text: valeur }),
+        );
+        const dlg = modal({
+          title: titre, body: contenu,
+          actions: (close) => [button("Copier la clé", { variant: "primary", icon: "copy", onClick: async () => { (await copyText(valeur)) ? toast("Clé copiée") : toast("Copie impossible", "warning"); } }), button("Fermer", { onClick: close })],
+        });
+        return dlg;
+      };
+      cles.etatService().then((e) => {
+        if (!e.ok) { etat.textContent = "État du service indisponible : " + e.detail; return; }
+        if (!e.provisionne) {
+          etat.textContent = "Ce service n'a encore aucune clé : il est en LECTURE SEULE (le recueil public reste servi). Le premier dépôt de clé l'ouvre — à faire sans attendre sur une démonstration ouverte.";
+          gestes.appendChild(button("Provisionner le service", {
+            variant: "primary", size: "sm", icon: "lock",
+            onClick: async () => {
+              const res = await cles.provisionnerService({ label: "Administrateur" });
+              if (!res.ok) { toast(res.detail, "error"); return; }
+              d.token = res.cle;
+              await db.setSettings({ token: res.cle }, { silent: true });
+              toast("Service provisionné", "success");
+              montrerCle(res.cle, "Clé d'administration du service");
+              redrawView();
+            },
+          }));
+        } else {
+          etat.textContent = "Service provisionné : chaque clé en circulation porte un rôle (administrateur, editeur, redacteur, lecteur, prestataire) et n'ouvre que les routes de ce rôle.";
+          gestes.appendChild(button("Voir les clés", {
+            variant: "secondary", size: "sm", icon: "list",
+            onClick: async () => {
+              const r = await cles.listerCles(cleEnService());
+              if (!r.ok) { toast(r.detail, "error"); return; }
+              const contenu = h("div", { class: "fr-small" });
+              if (!r.cles.length) contenu.appendChild(h("p", { text: "Aucune clé." }));
+              for (const c of r.cles) {
+                contenu.appendChild(h("div", { class: "fr-row", style: { gap: "8px", alignItems: "center", padding: "4px 0", flexWrap: "wrap" } },
+                  h("code", { class: "fr-mono", text: c.id }),
+                  h("span", { class: "fr-badge fr-badge--info", text: c.role }),
+                  h("span", { text: c.label || "" }),
+                  h("div", { class: "fr-spacer" }),
+                  button("Révoquer", {
+                    variant: "tertiary", size: "sm",
+                    onClick: async () => {
+                      const res = await cles.revoquerCle(c.id, cleEnService());
+                      res.ok ? toast("Clé révoquée", "success") : toast(res.detail, "error");
+                    },
+                  })));
+              }
+              modal({ title: "Clés du service", body: contenu, actions: (close) => [button("Fermer", { onClick: close })] });
+            },
+          }));
+          gestes.appendChild(button("Générer une clé de poste", {
+            variant: "secondary", size: "sm", icon: "plus",
+            onClick: async () => {
+              const r = await cles.creerCle({ role: "editeur", label: "Poste", token: cleEnService() });
+              if (!r.ok) { toast(r.detail, "error"); return; }
+              montrerCle(r.cle, "Clé de poste (rôle éditeur)");
+            },
+          }));
+          gestes.appendChild(button("Journal d'audit du service", {
+            variant: "secondary", size: "sm", icon: "list",
+            onClick: async () => {
+              const r = await cles.journalService({ token: cleEnService() });
+              if (!r.ok) { toast(r.detail, "error"); return; }
+              const contenu = h("div", { class: "fr-small" });
+              contenu.appendChild(h("p", { text: `Chaîne ${r.scelle ? "intègre" : "ROMPUE"} — ${r.total} entrée(s) conservée(s).` }));
+              contenu.appendChild(h("p", { class: "fr-small fr-muted", text: "Journal APPEND-ONLY tenu par le service : chaque ligne scelle la précédente par son empreinte SHA-256. Rétention : les 2 000 dernières entrées (les plus anciennes sortent). Exportez-le régulièrement pour l'archiver hors du service." }));
+              for (const e of r.entrees.slice().reverse()) contenu.appendChild(h("div", { text: `${e.le} · ${e.geste} · ${e.detail}` }));
+              modal({
+                title: "Journal d'audit du service", body: contenu,
+                actions: (close) => [
+                  button("Exporter (JSON)", {
+                    variant: "secondary", icon: "download",
+                    onClick: () => download(`journal-service-${new Date().toISOString().slice(0, 10)}.json`,
+                      JSON.stringify({ service: "journal d'audit", exporteLe: new Date().toISOString(), scelle: r.scelle, total: r.total, entrees: r.entrees }, null, 2)),
+                  }),
+                  button("Fermer", { onClick: close }),
+                ],
+              });
+            },
+          }));
+        }
+      });
     }
   };
 
@@ -467,7 +594,7 @@ function databasePanel() {
   paintFields();
 
   const dirty = d.mode !== active.mode
-    || (d.mode === "external" && ((d.url || "") !== (active.url || "") || (d.token || "") !== (active.token || "")));
+    || (d.mode !== "local" && ((d.url || "") !== (active.url || "") || (d.token || "") !== (active.token || "")));
   wrap.appendChild(h("div", { class: "fr-row", style: { marginTop: "10px" } },
     button("Appliquer et recharger", {
       variant: "primary", icon: "check", disabled: !dirty,
@@ -1145,6 +1272,227 @@ function delaisPanel(save, redraw) {
   return wrap;
 }
 
+// ------------------------------------------------------- circuit de signature
+// Le circuit de signature de la collectivité. Par défaut, ÉLECTRONIQUE : l'acte
+// est déposé auprès du service, puis signé dans l'outil du prestataire, et sa
+// signature est vérifiée par empreinte. L'autre circuit — EXTERNE — n'appelle
+// aucune API : le rédacteur télécharge le document prêt à signer, le fait signer
+// hors de l'application (papier, ou outil tiers), puis dépose la version signée
+// en PDF ; le réviseur certifie la conformité de cette pièce avec la version
+// numérique qui sera publiée. Voir src/lib/externe.js.
+//
+// Une TRAME peut trancher autrement : elle impose le circuit externe, ou
+// l'autorise seulement (le rédacteur choisit, acte par acte). C'est son onglet
+// « Trame » qui le règle.
+function signaturePanel(save, redraw) {
+  const c = state.config;
+  const s = (c.signature = { ...(c.signature || {}) });
+  const d = signatureSettings(c);
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("h2", { class: "fr-card__title", text: "Circuit de signature" }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Comment les actes sont signés. Le circuit vaut pour toute la collectivité ; une trame peut l'écarter, en imposant ou en autorisant la signature hors application." }));
+
+  wrap.appendChild(choiceField({
+    label: "Circuit de signature de la collectivité",
+    value: d.mode,
+    options: SIGNATURE_MODES.map((m) => ({ value: m.id, label: m.label })),
+    help: "Électronique : l'acte est déposé auprès du service puis signé dans l'outil du prestataire, et la signature est vérifiée par empreinte. Simple : le signataire signe dans l'application, avec son compte — aucun prestataire n'est requis, et les mentions nominatives restent dans l'original interne. Externe : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée est déposée en PDF — et sa conformité certifiée par le réviseur avant publication.",
+    onChange: (v) => { s.mode = v; save(); redraw(); },
+  }));
+  const mode = SIGNATURE_MODES.find((m) => m.id === d.mode) || SIGNATURE_MODES[0];
+  wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
+    h("p", { class: "fr-alert__title", text: modeLabel(d.mode) }),
+    h("p", { class: "fr-small", text: mode.hint })));
+
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+  wrap.appendChild(sectionHeader("Les trois circuits"));
+  wrap.appendChild(h("div", { class: "fr-stack" },
+    h("div", { class: "fr-card fr-card--soft" },
+      h("h3", { class: "fr-card__title", text: "Circuit électronique (prestataire)" }),
+      h("p", { class: "fr-small", text: "1. L'acte est déposé auprès du service, qui en calcule l'empreinte." }),
+      h("p", { class: "fr-small", text: "2. Le circuit est ouvert auprès du prestataire ; le signataire signe dans l'outil." }),
+      h("p", { class: "fr-small", text: "3. Le service vérifie que le document signé a la même empreinte que le document déposé — sinon il refuse." }),
+      h("p", { class: "fr-small", text: "4. La publication suit la signature : ELI, dates, original signé." })),
+    h("div", { class: "fr-card fr-card--soft" },
+      h("h3", { class: "fr-card__title", text: "Signature électronique simple (dans l'application)" }),
+      h("p", { class: "fr-small", text: "1. Le signataire désigné ouvre l'acte et vérifie le document ; le service en connaît l'empreinte." }),
+      h("p", { class: "fr-small", text: "2. Il signe avec SON compte : signature ECDSA et horodatage, produits dans l'application." }),
+      h("p", { class: "fr-small", text: "3. Le service vérifie que le document signé a la même empreinte que le document déposé — sinon il refuse." }),
+      h("p", { class: "fr-small", text: "4. Les mentions nominatives (adresse électronique, compte, moyen d'authentification) sont consignées dans l'ORIGINAL INTERNE : elles ne sont jamais diffusées, et le public ne voit que le nom, la fonction et la date." }),
+      h("p", { class: "fr-small fr-muted", text: "Aucun prestataire, aucune API tierce : c'est le circuit d'une collectivité qui n'a pas d'outil de signature, ou qui veut signer sans en dépendre." })),
+    h("div", { class: "fr-card fr-card--soft" },
+      h("h3", { class: "fr-card__title", text: "Circuit externe (sans API)" }),
+      h("p", { class: "fr-small", text: "1. Le rédacteur « envoie à signature » : il TÉLÉCHARGE le document prêt à signer (bordereau de remise compris)." }),
+      h("p", { class: "fr-small", text: "2. Le document est signé HORS de l'application — papier, ou outil tiers que l'application ne pilote pas." }),
+      h("p", { class: "fr-small", text: "3. Le rédacteur RENTRE la version signée : « Ajouter la version signée », un PDF, empreinté en SHA-256." }),
+      h("p", { class: "fr-small", text: "4. Le RÉVISEUR CERTIFIE LA CONFORMITÉ de la pièce signée avec la version numérique qui sera publiée — son contrôle porte sur la pièce signée, non sur le texte avant signature." }),
+      h("p", { class: "fr-small", text: "5. La publication dépose la version en ligne ET le PDF signé ; sur le recueil public, l'« original » montre ce PDF tel qu'il a été mis en ligne." }))));
+
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+  wrap.appendChild(sectionHeader("Par trame"));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" }, text: "Chaque trame peut suivre le réglage ci-dessus, imposer l'un des circuits (électronique, simple, externe), ou en autoriser un au choix du rédacteur. Ce réglage se fait sur la trame, onglet « Trame », rubrique « Signature »." }));
+  const trames = (state.trames || []).slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  if (!trames.length) {
+    wrap.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucune trame." }));
+  } else {
+    const table = h("table", { class: "fr-table" },
+      h("thead", {}, h("tr", {},
+        h("th", { text: "Trame" }), h("th", { text: "Réglage" }), h("th", { text: "Circuit retenu" }), h("th", {}))));
+    const tb = h("tbody");
+    for (const t of trames) {
+      const c2 = circuitPour(c, t);
+      const dispo = circuitsDisponibles(c, t).map((m) => modeLabel(m));
+      tb.appendChild(h("tr", {},
+        h("td", { text: t.name || t.id }),
+        h("td", { class: "fr-small", text: trameModeLabel(t.signature || "") }),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + (c2.mode === "externe" ? "warning" : "info"), text: dispo.join(" ou ") + (c2.choix ? " (au choix)" : "") })),
+        h("td", {}, button("Éditer la trame", { variant: "tertiary", size: "sm", icon: "doc", onClick: () => navigate("trame/" + t.id) }))));
+    }
+    table.appendChild(tb);
+    wrap.appendChild(h("div", { class: "fr-table-wrap" }, table));
+  }
+  return wrap;
+}
+
+// ------------------------------------------------------------------ courriel
+// Les notifications par courriel : l'expéditeur, la copie systématique, et
+// quels événements donnent lieu à un message. La POLITIQUE est ici, dans le
+// référentiel ; le SERVEUR SMTP, lui, se règle dans le `.env` du déploiement
+// (`SMTP_*`, voir src/server/mysql/env.example). L'application n'a jamais accès
+// au serveur SMTP, ni à son mot de passe : cet écran en montre l'ÉTAT, jamais
+// les secrets, et permet d'envoyer un message d'essai pour vérifier la chaîne.
+function courrielPanel(save, redraw) {
+  const c = state.config;
+  const d = courrielSettings(c);
+  const reglages = (c.courriel = { ...(c.courriel || {}) });
+  const evs = (reglages.evenements = { ...d.evenements });
+  const wrap = h("div", { class: "fr-stack", style: { maxWidth: "900px" } });
+
+  const carte = h("div", { class: "fr-card" });
+  carte.appendChild(h("h2", { class: "fr-card__title", text: "Notifications par courriel" }));
+  carte.appendChild(h("p", { class: "fr-card__sub", text: "Ce que Scribae annonce par courriel, et sous quel expéditeur. Le message part par le serveur SMTP de la collectivité : sa configuration (hôte, port, identifiants) est celle du déploiement, pas du référentiel — l'application ne voit jamais le mot de passe." }));
+  carte.appendChild(choiceField({
+    label: "Notifications par courriel",
+    value: d.actif !== false,
+    options: [{ value: true, label: "Activées" }, { value: false, label: "Désactivées" }],
+    help: "Désactivées, aucun courriel n'est adressé : chaque envoi est alors constaté « non envoyé » au journal de l'acte, avec son motif. C'est le réglage d'un déploiement qui n'a pas (ou pas encore) de serveur SMTP.",
+    onChange: (v) => { reglages.actif = v === true; save(); },
+  }));
+  carte.appendChild(textField({
+    label: "Nom affiché de l'expéditeur", value: reglages.expediteurNom ?? d.expediteurNom,
+    help: "Le nom qui apparaît chez le destinataire, devant l'adresse d'expédition du déploiement (SMTP_FROM). Ex. « Recueil des actes — Mairie de Valmont-sur-Loire ».",
+    onChange: (v) => { reglages.expediteurNom = v; save(); },
+  }));
+  carte.appendChild(textField({
+    label: "Adresse de réponse", value: reglages.repondreA ?? d.repondreA,
+    help: "L'adresse où répondre. Laissez vide si les messages ne doivent pas être répondus (l'objet et le pied de page le disent alors).",
+    onChange: (v) => { reglages.repondreA = v; save(); },
+  }));
+  carte.appendChild(textField({
+    label: "Copie systématique", value: reglages.copieService ?? d.copieService,
+    help: "Une adresse mise en copie de TOUS les envois — la boîte du service, par exemple. Facultatif.",
+    onChange: (v) => { reglages.copieService = v; save(); },
+  }));
+
+  carte.appendChild(h("hr", { class: "fr-sep" }));
+  carte.appendChild(sectionHeader("Événements notifiés"));
+  const evBox = h("div", { class: "fr-stack" });
+  for (const ev of EVENEMENTS) {
+    const cb = h("input", { type: "checkbox", checked: evs[ev.id] === true });
+    cb.addEventListener("change", () => { evs[ev.id] = cb.checked; save(); });
+    evBox.appendChild(h("label", { class: "fr-check" }, cb,
+      h("span", {},
+        h("strong", { text: ev.label }),
+        h("span", { class: "fr-small fr-muted", text: " — à " + ev.destinataires }))));
+  }
+  carte.appendChild(evBox);
+  wrap.appendChild(carte);
+
+  // ------------------------------------------------- l'état du service SMTP
+  const carteService = h("div", { class: "fr-card fr-card--soft" });
+  wrap.appendChild(carteService);
+  const carteJournal = h("div", { class: "fr-card fr-card--soft" });
+  wrap.appendChild(carteJournal);
+
+  const rendreEtat = (st) => {
+    clear(carteService);
+    carteService.appendChild(h("h3", { class: "fr-card__title", text: "Serveur SMTP du déploiement" }));
+    if (st.joignable === false) {
+      carteService.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+        h("p", { class: "fr-alert__title", text: "Service injoignable depuis ce poste" }),
+        h("p", { class: "fr-small", text: st.raison || "Le service partagé ne répond pas : l'état réel du serveur SMTP ne peut pas être lu ici." })));
+    } else if (st.disponible) {
+      carteService.appendChild(h("div", { class: "fr-alert fr-alert--success" },
+        h("p", { class: "fr-alert__title", text: "Envoi opérationnel" }),
+        h("p", { class: "fr-small", text: `Les messages partent par ${st.hote}:${st.port} (${libelleChiffrement(st.securise)}), sous l'adresse ${st.expediteur}${st.authentifie ? " (authentifié)" : " (sans authentification)"}.` })));
+    } else {
+      carteService.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+        h("p", { class: "fr-alert__title", text: "Envoi de courriel non configuré" }),
+        h("p", { class: "fr-small", text: st.raison || "Le service n'a pas de serveur SMTP." }),
+        h("p", { class: "fr-small fr-muted", text: "Renseignez SMTP_HOST, SMTP_FROM (et, s'il en faut, SMTP_USER / SMTP_PASS) dans le .env du service, puis redémarrez-le. Voir src/server/mysql/env.example." })));
+    }
+    if (st.hote) {
+      carteService.appendChild(h("div", { class: "sig-cert" },
+        h("h3", { text: "Réglage en service" }),
+        h("p", { class: "fr-small", style: { margin: "2px 0" } }, h("span", { class: "fr-muted", text: "Hôte : " }), h("span", { class: "fr-mono", text: st.hote + ":" + st.port })),
+        h("p", { class: "fr-small", style: { margin: "2px 0" } }, h("span", { class: "fr-muted", text: "Chiffrement : " }), h("span", { text: libelleChiffrement(st.securise) })),
+        h("p", { class: "fr-small", style: { margin: "2px 0" } }, h("span", { class: "fr-muted", text: "Expédition : " }), h("span", { class: "fr-mono", text: st.expediteur || "—" })),
+        h("p", { class: "fr-small", style: { margin: "2px 0" } }, h("span", { class: "fr-muted", text: "Configuration : " }), h("span", { class: "fr-mono", text: "SMTP_* du .env (le mot de passe n'est jamais transmis à l'application)" }))));
+    }
+    // Le message d'essai : à soi-même par défaut.
+    const adresse = h("input", { class: "fr-input", type: "email", value: state.user?.email || "", placeholder: "adresse@commune.fr" });
+    const boutonTest = button("Envoyer un courriel de test", { variant: "secondary", icon: "mail", disabled: !st.disponible });
+    boutonTest.addEventListener("click", async () => {
+      const a = adresse.value.trim();
+      if (!a) { toast("Indiquez une adresse pour le message de test.", "warning"); return; }
+      boutonTest.disabled = true; boutonTest.textContent = "Envoi en cours…";
+      const r = await envoyerTest(c, a);
+      boutonTest.disabled = false; boutonTest.textContent = "Envoyer un courriel de test";
+      if (r.envoye) toast("Message de test accepté par le serveur SMTP.", "success");
+      else toast("Message de test NON envoyé : " + (r.motif || "refus du service."), "error");
+      chargerJournal();
+    });
+    carteService.appendChild(h("hr", { class: "fr-sep" }));
+    carteService.appendChild(h("p", { class: "fr-small", text: "Vérifier la chaîne : un message d'essai part par le même chemin que les notifications." }));
+    carteService.appendChild(h("div", { class: "fr-row" }, adresse, boutonTest));
+  };
+
+  const libelleChiffrement = (m) => m === "ssl" ? "TLS direct (SSL)" : m === "starttls" ? "STARTTLS" : "aucun chiffrement";
+
+  const chargerJournal = async () => {
+    clear(carteJournal);
+    carteJournal.appendChild(h("h3", { class: "fr-card__title", text: "Derniers envois" }));
+    let st = null;
+    try { st = await etatCourriel({ force: true }); } catch (e) { /* déjà signalé */ }
+    const lignes = (st && st.derniers) || [];
+    if (!lignes.length) {
+      carteJournal.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucun envoi enregistré pour l'instant." }));
+      return;
+    }
+    const table = h("table", { class: "fr-table" },
+      h("thead", {}, h("tr", {}, h("th", { text: "Quand" }), h("th", { text: "Événement" }), h("th", { text: "Destinataires" }), h("th", { text: "Objet" }), h("th", { text: "Résultat" }))));
+    const tb = h("tbody");
+    for (const l of lignes) {
+      tb.appendChild(h("tr", {},
+        h("td", { class: "fr-small", text: l.at ? new Date(l.at).toLocaleString("fr-FR") : "" }),
+        h("td", { class: "fr-small", text: (evenementDe(l.evenement)?.label) || l.evenement || "" }),
+        h("td", { class: "fr-small", text: l.destinataires || "—" }),
+        h("td", { class: "fr-small", text: l.sujet || "—" }),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + (l.envoye ? "success" : "error"), text: l.envoye ? "envoyé" : "non envoyé", title: l.motif || "" }))));
+    }
+    table.appendChild(tb);
+    carteJournal.appendChild(h("div", { class: "fr-table-wrap" }, table));
+  };
+
+  etatCourriel({ force: true }).then(rendreEtat).catch((e) => {
+    clear(carteService);
+    carteService.appendChild(h("p", { class: "fr-small", text: "État du service indisponible : " + String((e && e.message) || e) }));
+  });
+  chargerJournal();
+
+  return wrap;
+}
+
 // ------------------------------------------------------- publication au recueil
 // Le recueil des actes administratifs — son titre, la règle d'entrée en
 // vigueur, et surtout L'AUTOMATISME : faut-il publier l'acte dès le retour
@@ -1196,6 +1544,216 @@ function publicationPanel(save, redraw) {
     }));
   }
   wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Le recueil public est le pendant « citoyen » de la publication : il ne demande aucun compte, et ne montre que les actes réellement publiés. Sa présentation suit la charte de la structure (Administration › Identité) et la feuille de style de chaque acte." }));
+  return h("div", { class: "fr-stack" }, wrap, recueilsExternesBloc(save, redraw), mentionsPubliquesBloc(save, redraw));
+}
+
+// ---------------------------------------------- mentions du recueil public
+// Le bas de page de l'espace public porte ses mentions — celles qu'un site
+// public affiche au lecteur : les **mentions légales**, qui rappellent les règles
+// de publication, d'exécution et d'opposabilité des actes, et les **mentions
+// d'accessibilité**. Ce sont des DONNÉES du référentiel
+// (`config.publication.mentions`, voir src/lib/recueil.js, `mentionsPubliques`).
+//
+// Chaque mention se présente de trois façons : un TEXTE écrit ici et déplié en
+// bas de page, un simple LIEN (celui des mentions légales du site principal de
+// la collectivité, par exemple), ou rien du tout. Le bouton « Rétablir le texte
+// livré » ramène une mention à ce que l'application livre — le texte livré n'est
+// jamais perdu, il n'est que recouvert.
+function mentionsPubliquesBloc(save, redraw) {
+  const c = state.config;
+  const p = (c.publication = c.publication || {});
+  const mentions = (p.mentions = p.mentions || mentionsParDefaut());
+
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("h2", { class: "fr-card__title", text: "Mentions du recueil public" }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Ce que le bas de page de l'espace public rappelle au lecteur : les mentions légales (les règles de publication et d'opposabilité des actes administratifs) et les mentions d'accessibilité. Chacune s'affiche comme un texte, se remplace par un lien — celui des mentions du site de la collectivité, par exemple — ou ne s'affiche pas." }));
+
+  const paint = () => { save(); redraw(); };
+  const modeDe = (m) => (m.mode === "lien" || m.mode === "aucune" ? m.mode : "texte");
+
+  MENTIONS_PUBLIQUES.forEach((def) => {
+    const m = (mentions[def.id] = mentions[def.id] || { ...MENTIONS_DEFAUT[def.id] });
+    const box = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+
+    box.appendChild(h("div", { class: "fr-row" },
+      h("strong", { class: "fr-small", text: def.label }),
+      h("div", { class: "fr-spacer" }),
+      button("Rétablir le texte livré", {
+        variant: "tertiary", size: "sm", icon: "refresh",
+        title: "Revenir au texte livré avec l'application",
+        onClick: () => { mentions[def.id] = { ...MENTIONS_DEFAUT[def.id] }; paint(); },
+      }),
+    ));
+    box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 10px" }, text: def.hint }));
+
+    box.appendChild(choiceField({
+      label: "Présentation en bas de page",
+      value: modeDe(m),
+      options: [
+        { value: "texte", label: "Texte affiché dans la page" },
+        { value: "lien", label: "Simple lien vers une autre page" },
+        { value: "aucune", label: "Non affichée" },
+      ],
+      help: "Un texte est écrit ici et se déplie en bas de page du recueil ; un lien n'affiche qu'un renvoi — vers les mentions légales du site principal de la collectivité, par exemple.",
+      onChange: (v) => { m.mode = v; paint(); },
+    }));
+
+    if (modeDe(m) === "texte") {
+      box.appendChild(textField({
+        label: "Titre", value: m.titre || def.label,
+        help: "Le titre sous lequel la mention se déplie, en bas de page.",
+        onChange: (v) => { m.titre = v; save(); },
+      }));
+      box.appendChild(textField({
+        label: "Texte", value: m.texte || "", rows: 10,
+        help: "Une ligne vide sépare deux paragraphes ; une ligne qui commence par « - » devient une puce. Les mentions légales gagnent à rappeler les règles de publication et d'opposabilité des actes, et l'accessibilité à dire l'état de conformité et comment signaler un obstacle.",
+        onChange: (v) => { m.texte = v; save(); },
+      }));
+    } else if (modeDe(m) === "lien") {
+      box.appendChild(textField({
+        label: "Libellé du lien", value: m.lienLabel || "",
+        placeholder: "Accessibilité — la déclaration d'accessibilité du site de la collectivité",
+        help: "Le texte du lien. À défaut, le titre de la mention est employé.",
+        onChange: (v) => { m.lienLabel = v; save(); },
+      }));
+      box.appendChild(textField({
+        label: "Adresse", value: m.lien || "", placeholder: "https://…",
+        help: "Le bas de page ne portera que ce lien ; il s'ouvre dans un nouvel onglet.",
+        onChange: (v) => { m.lien = v; save(); },
+      }));
+      if (!String(m.lien || "").trim()) {
+        box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" }, text: "Sans adresse, la mention ne s'affiche pas : mieux vaut pas de mention qu'un lien qui ne mène nulle part." }));
+      }
+    } else {
+      box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" }, text: "La mention ne figure pas au bas du recueil public." }));
+    }
+
+    wrap.appendChild(box);
+  });
+
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" },
+    text: "Les mentions se lisent en bas de page du recueil public. Sur une installation auto-hébergée, l'espace public rendu par le service ne les porte pas encore — voir TODO.md." }));
+
+  // ------------------------------------------ licence de réutilisation
+  // La publicité des conditions de réutilisation est une OBLIGATION (CRPA art.
+  // L. 322-1) ; la licence est reprise au bas du recueil public et dans le
+  // JSON-LD de chaque acte publié.
+  const lic = (p.licence = p.licence || {});
+  const boxLicence = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+  boxLicence.appendChild(h("div", { class: "fr-row" },
+    h("strong", { class: "fr-small", text: "Licence de réutilisation" }),
+    h("div", { class: "fr-spacer" }),
+    button("Rétablir la Licence Ouverte 2.0", {
+      variant: "tertiary", size: "sm", icon: "refresh",
+      title: "Revenir à la licence des informations publiques recommandée par Etalab",
+      onClick: () => { delete p.licence; paint(); },
+    })));
+  boxLicence.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 10px" }, text: "La licence sous laquelle les informations publiées peuvent être réutilisées. Sa publicité est une obligation (code des relations entre le public et l'administration, art. L. 322-1) : elle est affichée au bas du recueil public, et portée par les données ouvertes de chaque acte publié." }));
+  boxLicence.appendChild(textField({
+    label: "Nom de la licence", value: String(lic.nom || "") || LICENCE_DEFAUT.nom,
+    onChange: (v) => { lic.nom = v.trim(); save(); },
+  }));
+  boxLicence.appendChild(textField({
+    label: "Adresse du texte de la licence", value: String(lic.url || "") || LICENCE_DEFAUT.url,
+    onChange: (v) => { lic.url = v.trim(); save(); },
+  }));
+  boxLicence.appendChild(textField({
+    label: "Mention de source à afficher", value: String(lic.mention || "") || LICENCE_DEFAUT.mention, rows: 3,
+    help: "La phrase rappelée au lecteur au bas du recueil, à côté du nom de la licence.",
+    onChange: (v) => { lic.mention = v; save(); },
+  }));
+  wrap.appendChild(boxLicence);
+  return wrap;
+}
+
+// -------------------------------------------- recueils extérieurs et renvois
+// Le bas de page du recueil public, et la fin de ses résultats de recherche,
+// renvoient vers les recueils que Scribae ne gère pas : un recueil « bis » tenu
+// à part, ou les recueils inactifs qu'un changement de logiciel a laissés
+// derrière lui — parfois plusieurs à la suite. On y ajoute les sites de
+// référence (Légifrance, service-public.gouv.fr) : le public qui ne trouve pas son
+// acte ici doit pouvoir le chercher ailleurs sans quitter le recueil.
+//
+// Ces renvois sont des données du référentiel
+// (`config.publication.recueilsExternes`, voir src/lib/recueil.js) : l'écran les
+// écrit, les ordonne et les retire — rien n'est codé dans la page.
+function recueilsExternesBloc(save, redraw) {
+  const c = state.config;
+  const p = (c.publication = c.publication || {});
+  const items = (p.recueilsExternes = p.recueilsExternes || []);
+
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("div", { class: "fr-row" },
+    h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Recueils extérieurs et renvois" }),
+    button("Ajouter un renvoi", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { items.push(newRecueilExterne()); save(); redraw(); } }),
+  ));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Les recueils que Scribae ne gère pas, et les sites à consulter : ils s'affichent en bas de page du recueil public, et à la fin de ses résultats de recherche, sous le titre « Vous ne trouvez pas ce que vous recherchez ? »." }));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 10px" }, text: "« Recueil bis » : un recueil parallèle tenu hors de l'application. « Recueil inactif » : un recueil qui n'est plus alimenté — précisez la période qu'il couvre, surtout si plusieurs se succèdent. « Site de référence » : Légifrance, service-public.gouv.fr ou tout autre site utile au lecteur." }));
+
+  const listEl = h("div", { class: "fr-stack" });
+  wrap.appendChild(listEl);
+
+  const paint = () => { save(); redraw(); };
+
+  function renderRows() {
+    clear(listEl);
+    if (!items.length) {
+      listEl.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucun renvoi : le recueil public ne renvoie vers rien d'autre. Le bouton ci-dessous rétablit les renvois livrés avec l'application." }));
+      return;
+    }
+    items.forEach((rec, i) => {
+      const box = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+      box.appendChild(h("div", { class: "fr-row" },
+        h("strong", { class: "fr-small", text: String(rec.label || rec.url || ("#" + (i + 1))).slice(0, 80) }),
+        h("div", { class: "fr-spacer" }),
+        button("", { variant: "tertiary", icon: "up", size: "sm", title: "Monter", onClick: () => { if (i > 0) { const [x] = items.splice(i, 1); items.splice(i - 1, 0, x); paint(); } } }),
+        button("", { variant: "tertiary", icon: "down", size: "sm", title: "Descendre", onClick: () => { if (i < items.length - 1) { const [x] = items.splice(i, 1); items.splice(i + 1, 0, x); paint(); } } }),
+        button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Supprimer", onClick: async () => {
+          const ok = await confirmDialog("Supprimer ce renvoi", "Il ne s'affichera plus sur le recueil public.", { confirmLabel: "Supprimer", danger: true });
+          if (ok) { items.splice(i, 1); paint(); }
+        } }),
+      ));
+      box.appendChild(selectField({
+        label: "Nature du renvoi", value: rec.type || "bis",
+        options: TYPES_RECUEIL_EXTERNE.map((t) => ({ value: t.id, label: t.label })),
+        help: (TYPES_RECUEIL_EXTERNE.find((t) => t.id === (rec.type || "bis")) || {}).hint,
+        onChange: (v) => { rec.type = v; paint(); },
+      }));
+      box.appendChild(textField({
+        label: "Libellé", value: rec.label || "",
+        placeholder: rec.type === "ressource" ? "Légifrance — le service public de la diffusion du droit" : "Recueil des actes — système précédent (2019-2023)",
+        onChange: (v) => { rec.label = v; save(); },
+      }));
+      box.appendChild(textField({
+        label: "Adresse", value: rec.url || "", placeholder: "https://…",
+        help: "L'adresse de la page où le recueil se consulte. Le lien s'ouvre dans un nouvel onglet.",
+        onChange: (v) => { rec.url = v; save(); },
+      }));
+      if ((rec.type || "bis") === "inactif") {
+        box.appendChild(h("div", { class: "fr-row" },
+          textField({ label: "Actes publiés à partir du", type: "date", value: rec.du || "", onChange: (v) => { rec.du = v; save(); } }),
+          textField({ label: "…jusqu'au", type: "date", value: rec.au || "", onChange: (v) => { rec.au = v; save(); } }),
+        ));
+        box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" }, text: "Les deux bornes sont facultatives : la période s'affiche sous le lien (« actes publiés du … au … ») et dit au lecteur où s'arrête ce recueil." }));
+      }
+      box.appendChild(textField({
+        label: "Précision (facultative)", value: rec.note || "", rows: 2,
+        help: "Une phrase qui explique au lecteur pourquoi ce recueil existe — ou pourquoi il s'est arrêté.",
+        onChange: (v) => { rec.note = v; save(); },
+      }));
+      listEl.appendChild(box);
+    });
+  }
+  renderRows();
+
+  const manquants = RENVOIS_RECOMMANDES.filter((r) => !items.some((x) => x.type === r.type && x.url === r.url));
+  if (manquants.length) {
+    wrap.appendChild(h("hr", { class: "fr-sep" }));
+    wrap.appendChild(button("Rétablir les renvois livrés (Légifrance, service-public.gouv.fr)", {
+      variant: "tertiary", size: "sm", icon: "refresh",
+      onClick: () => { items.push(...manquants.map((r) => ({ ...r }))); paint(); },
+    }));
+  }
   return wrap;
 }
 
@@ -1355,7 +1913,7 @@ function carteAssistant(qui, save, redraw) {
       { value: "integre", label: "Intégré (Perchance)" },
       { value: "personnalise", label: "Personnalisé (API)" },
     ],
-    help: "Automatique : le moteur intégré quand il est disponible (sur Perchance), l'adresse ci-dessous sinon — c'est le réglage qui fonctionne partout. Intégré : uniquement Perchance. Personnalisé : uniquement l'adresse ci-dessous, ce qui laisse les échanges sur votre réseau.",
+    help: "Automatique : le moteur intégré quand il est disponible (sur Perchance), l'adresse ci-dessous sinon, et à défaut une recherche dans le guide — c'est le réglage qui fonctionne partout. Intégré : uniquement Perchance. Personnalisé : uniquement l'adresse ci-dessous, ce qui laisse les échanges sur votre réseau.",
     onChange: (v) => { ecrire({ moteur: v }); redraw(); },
   }));
 
@@ -1364,6 +1922,14 @@ function carteAssistant(qui, save, redraw) {
     box.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
       h("p", { class: "fr-alert__title", text: "Aucun moteur disponible" }),
       h("p", { class: "fr-small", text: moteur.raison })));
+  } else if (moteur.type === "repli") {
+    // Pas de moteur, et ce n'est pas une erreur : l'assistant répond par
+    // recherche documentaire (voir src/lib/assistant.js). On le dit, et on dit
+    // ce que l'on peut faire pour obtenir des réponses rédigées.
+    box.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: "Réponses sans moteur de langage" }),
+      h("p", { class: "fr-small", text: moteur.raison }),
+      h("p", { class: "fr-small", text: "Pour des réponses rédigées, renseignez ci-dessous l'adresse d'une API (le moteur intégré, lui, n'existe que sur Perchance)." })));
   }
 
   if (s.moteur !== "integre") {
@@ -1388,7 +1954,7 @@ function carteAssistant(qui, save, redraw) {
     box.appendChild(h("div", { class: "fr-grid fr-grid--2" },
       textField({
         label: "Clé d'accès (facultative)", type: "password", value: s.cle, placeholder: "— aucune —",
-        help: "Enregistrée dans le référentiel : elle apparaît dans un export de données. Utilisez une clé dédiée à cet usage, que vous pouvez révoquer.",
+        help: "Conservée sur CE poste uniquement (stockage du navigateur), jamais dans le référentiel ni dans un export de données. Un autre poste doit saisir la sienne. Utilisez une clé dédiée à cet usage, que vous pouvez révoquer.",
         onChange: (v) => ecrire({ cle: v }),
       }),
       selectField({
@@ -1560,6 +2126,8 @@ const JOURNAL_ACTIONS = {
   "signature.refus": ["Signature refusée", "warning"],
   "publication.publie": ["Publication", "success"],
   "publication.depublie": ["Retrait du recueil", "error"],
+  "publication.epingle": ["Mise à la une", "info"],
+  "publication.desepingle": ["Retrait de la une", "warning"],
   "formalite.transmission": ["Transmission au contrôle de légalité", "info"],
   "formalite.publication": ["Publication constatée", "info"],
   "formalite.notification": ["Notification", "info"],
@@ -1575,6 +2143,8 @@ const JOURNAL_ACTIONS = {
   "corbeille": ["Mise à la corbeille", "warning"],
   "restauration": ["Restauration", "success"],
   "suppression": ["Suppression définitive", "error"],
+  "trame.disponible": ["Trame mise à disposition", "success"],
+  "trame.retiree": ["Trame retirée", "warning"],
 };
 
 const actionLabel = (a) => (JOURNAL_ACTIONS[a] ? JOURNAL_ACTIONS[a][0] : (a || "Fait"));

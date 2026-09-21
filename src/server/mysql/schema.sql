@@ -80,6 +80,63 @@ CREATE TABLE IF NOT EXISTS sb_etat (
   PRIMARY KEY (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Mots de passe des comptes locaux (mode « mot de passe » du service).
+--   • jamais de mot de passe en clair, ici ni ailleurs ;
+--   • `hash` porte `scrypt$N$r$p$sel$empreinte` : les paramètres voyagent avec
+--     le dérivé, ce qui permet de durcir le coût sans invalider les comptes ;
+--   • `echecs` / `bloque_jusqua` comptent les tentatives infructueuses : le
+--     compte se bloque progressivement (voir src/server/mysql/comptes.mjs) ;
+--   • `must_change` exige un changement de mot de passe à la première connexion
+--     (remise d'un mot de passe provisoire par un administrateur).
+-- Le compte lui-même (nom, rôles, rattachement) reste dans `sb_record`
+-- (collection `users`) : cette table ne porte que le secret.
+CREATE TABLE IF NOT EXISTS sb_motdepasse (
+  user_id       VARCHAR(191) NOT NULL,
+  hash          VARCHAR(255) NOT NULL,
+  must_change   TINYINT(1)   NOT NULL DEFAULT 0,
+  echecs        INT          NOT NULL DEFAULT 0,
+  bloque_jusqua DATETIME(3)  NULL,
+  updated_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Sessions ouvertes (mode « mot de passe »). La base ne conserve que l'EMPREINTE
+-- SHA-256 du jeton remis au navigateur : la lire ne permet pas de se connecter.
+CREATE TABLE IF NOT EXISTS sb_session (
+  token_hash   CHAR(64)     NOT NULL,
+  user_id      VARCHAR(191) NOT NULL,
+  created_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_seen_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  expires_at   DATETIME(3)  NOT NULL,
+  remote_ip    VARCHAR(64)  NULL,
+  user_agent   VARCHAR(255) NULL,
+  PRIMARY KEY (token_hash),
+  KEY idx_sb_session_user (user_id, expires_at),
+  KEY idx_sb_session_expire (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Journal des courriels : une ligne par envoi tenté — parti, ou refusé (avec son
+-- motif). C'est la piste de l'administrateur : « ce courriel est-il parti, à qui,
+-- quand, et sinon pourquoi ? ». Le corps du message n'y est PAS conservé (les
+-- actes sont au registre ; inutile de dupliquer des données personnelles) : seuls
+-- l'événement, les destinataires et le résultat le sont.
+CREATE TABLE IF NOT EXISTS sb_courriel (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  evenement     VARCHAR(64)   NOT NULL,
+  acte_id       VARCHAR(191)  NULL,
+  cible         VARCHAR(191)  NULL,
+  destinataires TEXT          NULL,
+  sujet         VARCHAR(255)  NULL,
+  envoye        TINYINT(1)    NOT NULL DEFAULT 0,
+  motif         VARCHAR(500)  NULL,
+  acteur        VARCHAR(191)  NULL,
+  remote_ip     VARCHAR(64)   NULL,
+  at            DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_sb_courriel_at (at),
+  KEY idx_sb_courriel_acte (acte_id, at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Vues de lecture : le registre des actes et la liste des trames, en clair.
 CREATE OR REPLACE VIEW v_acte AS
 SELECT r.id AS acte_id,

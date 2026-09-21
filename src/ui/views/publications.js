@@ -20,7 +20,7 @@ import { download, copyText, formatDate } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
 import { lienRecueil } from "../../lib/recueil.js";
 import { publicationSettings } from "../../lib/eli.js";
-import { corpsDeLActe, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
+import { corpsDeLActe, setListePublications, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
 import { ouvrirPage } from "./signature.js";
 
 export function renderPublications(root, params) {
@@ -159,6 +159,10 @@ function renderConsultation(root, params) {
 
   const p = st.rec;
   const onglet = (st.onglet = st.onglet || "texte");
+  // Les actes publiés déjà lus par le registre : ils servent à résoudre, dans le
+  // texte publié, les liens écrits sous forme d'identifiant ELI. À défaut, la
+  // liste est demandée au service (voir views/acte-publie.js).
+  setListePublications(state.pubRegistre?.liste);
   const { notice, texte } = corpsDeLActe(p);
 
   root.appendChild(notice);
@@ -208,6 +212,27 @@ function renderConsultation(root, params) {
             : button("Consulter", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(v.cle)) }))));
     });
     root.appendChild(card);
+  } else if (p.originalExterne && p.originalExterne.url) {
+    // CIRCUIT EXTERNE : l'original est la version signée (un PDF) déposée. On
+    // la montre telle qu'elle est mise en ligne, avec la certification de
+    // conformité du réviseur — il n'y a pas de signature cryptographique à
+    // vérifier.
+    const ext = p.originalExterne;
+    const cert = ext.certification || {};
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h3", { class: "fr-card__title", text: "Original signé — version signée (PDF)" }),
+      h("p", { class: "fr-small fr-muted", text: "Cet acte a été signé hors de l'application (papier ou outil tiers). La pièce signée déposée est l'original : c'est elle qui est conservée et qui fait foi, et c'est elle que le recueil public montre telle qu'elle a été mise en ligne." }),
+      cert.statut === "conforme"
+        ? h("p", { class: "recueil-verif is-ok", text: "✓ Conformité certifiée" + (cert.parNom ? " par " + cert.parNom : "") + (cert.le ? " le " + formatDate(String(cert.le).slice(0, 10)) : "") + " — la pièce signée est conforme à la version numérique publiée." })
+        : h("p", { class: "recueil-verif " + (cert.statut === "non_conforme" ? "is-ko" : ""), text: cert.statut === "non_conforme" ? "✗ Conformité refusée par le réviseur" + (cert.motif ? " : " + cert.motif : "") : "Conformité non certifiée." }),
+      h("div", { class: "fr-row" },
+        h("a", { class: "fr-btn fr-btn--secondary", href: ext.url, target: "_blank", rel: "noopener" }, "Ouvrir le PDF dans un onglet"),
+        button("Télécharger la version signée", { variant: "secondary", icon: "download", onClick: () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); } })),
+      h("dl", { class: "recueil-dl" },
+        h("dt", { text: "Fichier" }), h("dd", { text: ext.nom || "—" }),
+        h("dt", { text: "Empreinte SHA-256" }), h("dd", { class: "fr-mono", text: ext.sha256 || "—" }),
+        ext.deposeLe ? h("dt", { text: "Déposé le" }) : null, ext.deposeLe ? h("dd", { text: new Date(ext.deposeLe).toLocaleString("fr-FR") }) : null)));
+    root.appendChild(docFrame(null, "", ext.url));
   } else {
     root.appendChild(h("div", { class: "fr-card" },
       h("h3", { class: "fr-card__title", text: "Original signé" }),
@@ -315,11 +340,14 @@ async function retirer(p, motif, st) {
   return true;
 }
 
-// L'original signé, lui, reste une page à part : c'est une pièce, pas la
-// publication. On la montre dans un cadre.
-function docFrame(html, vide) {
+// L'original signé du circuit électronique est une page HTML autonome ; la
+// version signée du circuit externe est un PDF servi ailleurs (`url`). Dans les
+// deux cas, la pièce se montre dans un cadre.
+function docFrame(html, vide, url) {
   const wrap = h("div", { class: "pub-frame" });
-  const frame = h("iframe", { class: "pub-frame__el", sandbox: "allow-same-origin", title: "Document publié", srcdoc: html || `<p>${vide || "Version en ligne indisponible."}</p>` });
+  const frame = url
+    ? h("iframe", { class: "pub-frame__el", src: url, title: "Version signée (PDF)" })
+    : h("iframe", { class: "pub-frame__el", sandbox: "allow-same-origin", title: "Document publié", srcdoc: html || `<p>${vide || "Version en ligne indisponible."}</p>` });
   wrap.appendChild(frame);
   const fit = () => {
     try {

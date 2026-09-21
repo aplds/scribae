@@ -11,6 +11,7 @@
 // dans un champ de saisie.
 // ============================================================================
 import { state, navigate, can, visibleActes, visibleTrames } from "./state.js";
+import { trameEstDisponible } from "./mise-a-disposition.js";
 import { h, clear, icon } from "./dom.js";
 import { renderDocument } from "../lib/render.js";
 import { stripTags } from "../lib/util.js";
@@ -49,7 +50,10 @@ export function ouvrirRecherche(requeteDepart = "") {
   const index = construireIndex({
     config: state.config,
     actes: visibleActes(),
-    trames: visibleTrames(),
+    // Un rédacteur ne cherche pas dans les modèles que les services ne voient
+    // pas encore : les trames en brouillon ne sont cherchables que par qui peut
+    // les gérer (un administrateur ou un éditeur).
+    trames: can("trames.gerer") ? visibleTrames() : visibleTrames().filter(trameEstDisponible),
     personnes: state.config?.people || [],
     references: state.config?.refs || [],
     services: state.config?.services || [],

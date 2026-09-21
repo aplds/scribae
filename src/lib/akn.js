@@ -7,8 +7,12 @@
 // Règle : la lecture est TOLÉRANTE. Un acte produit par un autre outil reste
 // importable ; les éléments non reconnus sont ignorés, jamais inventés, et
 // l'application signale ce qu'elle n'a pas su reprendre. Les métadonnées
-// propres à l'application (`<ia:preparation>`, `<ia:modification>`,
-// `<ia:consolidation>`) permettent, elles, un aller-retour sans perte.
+// propres à l'application (`<ia:preparation>` — dont la NATURE du document —,
+// `<ia:modification>`, `<ia:consolidation>`) permettent, elles, un aller-retour
+// sans perte. Seule exception, et elle est DITE : le texte des annexes, qui
+// voyage dans `<attachments>` avec l'acte d'adoption (voir export.js). Une
+// annexe est, dans l'application, un acte à part joint depuis le registre : le
+// lecteur le signale au lieu de rendre un acte amputé en silence.
 // ============================================================================
 import { uid } from "./util.js";
 
@@ -44,10 +48,27 @@ export function parseAkn(text) {
     meta.consolidated.count = trail.reduce((n, t) => n + (t.items || []).length, 0);
   }
   const warnings = [];
-  if (!meta.numero) warnings.push("Numéro de l'acte absent du fichier.");
-  if (!meta.dateSignature) warnings.push("Date de signature absente du fichier.");
-  if (!nodes.some((n) => n.type === "article")) warnings.push("Aucun article n'a été trouvé dans le corps du document.");
+  // Une annexe n'a pas de numéro propre : son absence n'est pas un défaut, et le
+  // message qui l'annoncerait serait faux (voir src/lib/annexes.js).
+  if (!meta.numero && meta.nature !== "annexe") warnings.push("Numéro de l'acte absent du fichier.");
+  if (!meta.dateSignature) {
+    warnings.push(meta.nature === "annexe"
+      ? "Date d'adoption absente du fichier."
+      : "Date de signature absente du fichier.");
+  }
+  if (!contientArticle(nodes)) warnings.push("Aucun article n'a été trouvé dans le corps du document.");
   if (trail.length) warnings.push("Ce fichier est une version consolidée : les modifications déjà intégrées sont reprises dans la chaîne des actes.");
+  // Les documents annexés voyagent dans `<attachments>` : identification ET
+  // texte (voir export.js). Une annexe reste, dans l'application, un acte à
+  // part joint à son acte d'adoption, et son texte vient de ce registre : il
+  // n'est donc pas repris ici. On le DIT, plutôt que de rendre silencieusement
+  // un acte amputé de ses annexes (voir src/lib/annexe-docs.js).
+  const annexes = compteAttachments(act);
+  if (annexes.total) {
+    warnings.push(annexes.avecTexte
+      ? `Ce fichier est suivi du texte de ${annexes.avecTexte} annexe(s) (<attachments>). L'annexe demeure un acte à part : rattachez-la à ${meta.nature === "annexe" ? "l'acte qui l'adopte" : "cet acte"} pour qu'elle suive de nouveau son original.`
+      : `${annexes.total} annexe(s) sont annoncées par l'acte (<attachments>) sans leur texte : rattachez-les au registre pour qu'elles suivent son original.`);
+  }
   return {
     kind: trail.length ? "consolide" : "original",
     imported: "akn",
@@ -86,6 +107,20 @@ function readTrail(act) {
   return out;
 }
 
+// Les documents ANNEXÉS repris dans le fichier : `<attachments>` en porte
+// l'identification, et — quand le fichier est un original d'acte d'adoption —
+// leur TEXTE (`<block name="texteAnnexe">`). On ne fait que les COMPTER : une
+// annexe est, dans l'application, un acte à part que l'acte d'adoption joint
+// depuis le registre (voir src/lib/annexe-docs.js) ; l'import le signale donc
+// au lieu de laisser croire que le texte a été repris.
+function compteAttachments(act) {
+  const box = kid(act, "attachments");
+  if (!box) return { total: 0, avecTexte: 0 };
+  const atts = kids(box, "attachment");
+  const avecTexte = atts.filter((a) => all(a, "block").some((b) => attr(b, "name") === "texteAnnexe")).length;
+  return { total: atts.length, avecTexte };
+}
+
 // ------------------------------------------------------------------- métadonnées
 function readMeta(act) {
   const metaEl = kid(act, "meta");
@@ -112,6 +147,11 @@ function readMeta(act) {
     trameId: attr(tr, "id"),
     trameName: "",
     trameVersion: attr(tr, "version"),
+    // La nature du document, quand le fichier la porte : une annexe ne se
+    // signe pas (voir src/lib/conformite.js). Absente, la nature se déduit de
+    // la trame (voir `natureOfActe`) : on la laisse donc vide plutôt que de la
+    // supposer, pour ne jamais contredire la trame.
+    nature: g("nature"),
     actTypeId: attr(act, "name") || "acte",
     designation: guessDesignation(title),
     entity: {
@@ -125,6 +165,13 @@ function readMeta(act) {
     generatedAt: new Date().toISOString(),
     importedAt: new Date().toISOString(),
   };
+}
+
+// Un article peut être rangé dans une division (Livre, Titre, Chapitre…) : la
+// présence d'articles se cherche donc RÉCURSIVEMENT, pas seulement à la racine
+// du corps — sans quoi un texte structuré serait signalé comme vide.
+function contientArticle(nodes) {
+  return (nodes || []).some((n) => n.type === "article" || contientArticle(n.blocks));
 }
 
 function readTitle(act) {
@@ -175,10 +222,42 @@ function readStructure(act, meta) {
 
   const bodyEl = kid(act, "body");
   let idx = 0;
-  for (const art of kids(bodyEl, "article")) {
-    idx++;
-    nodes.push(readArticle(art, idx));
-  }
+  // Le corps n'est pas fait que d'articles : les divisions (part, title,
+  // chapter, section, hcontainer) sont lues comme telles et gardent, dans
+  // l'import, l'intitulé et le numéro écrits dans le fichier.
+  const DIV_LEVELS = { part: 1, title: 2, chapter: 3, section: 4 };
+  const readBody = (container, level) => {
+    const out = [];
+    for (const c of kids(container)) {
+      const ln = c.localName;
+      if (ln === "article") { idx++; out.push(readArticle(c, idx)); continue; }
+      if (ln in DIV_LEVELS || ln === "hcontainer" || ln === "division" || ln === "subdivision") {
+        const lvl = DIV_LEVELS[ln] || Math.min(6, level + 1);
+        const num = txt(kid(c, "num"));
+        out.push(node("division", {
+          eId: attr(c, "eId"), level: lvl, numMode: "manual", num,
+          numLabel: num, heading: txt(kid(c, "heading")), blocks: readBody(c, lvl),
+        }));
+        continue;
+      }
+      // Un bloc de texte hors article : la rédaction peut en écrire directement
+      // au corps ou dans une division (`<block name="disposition">` à l'export),
+      // et un autre outil peut y poser un paragraphe, une liste ou un tableau.
+      if (ln === "p") { out.push(block("para", { text: txt(c), eId: attr(c, "eId") })); continue; }
+      if (ln === "ul" || ln === "ol") {
+        out.push(block("list", {
+          ordered: ln === "ol",
+          items: kids(c, "li").map((li) => ({ id: uid("it"), text: txt(li), when: "" })),
+          eId: attr(c, "eId"),
+        }));
+        continue;
+      }
+      if (ln === "table") { out.push(block("table", { ...readTable(c), eId: attr(c, "eId") })); continue; }
+      if (["content", "block", "blockList", "paragraph", "subparagraph", "level", "tblock", "wrapUp", "crossHeading", "list", "intro"].includes(ln)) out.push(...readBody(c, level));
+    }
+    return out;
+  };
+  nodes.push(...readBody(bodyEl, 0));
 
   const concl = kid(act, "conclusions");
   if (concl) {
@@ -205,8 +284,12 @@ function readStructure(act, meta) {
 
 function readPlace(act) {
   // « Fait à …, le … » se trouve dans les conclusions ; on le lit une fois pour
-  // alimenter la signature et la ville de l'entité.
-  for (const pEl of all(act, "p")) {
+  // alimenter la signature et la ville de l'entité. On s'en tient aux
+  // CONCLUSIONS, et non à tous les paragraphes de l'acte : le texte des annexes
+  // voyage avec l'acte (`<attachments>`), et il ne dit pas où l'acte a été fait.
+  const concl = kid(act, "conclusions");
+  const paragraphes = concl ? all(concl, "p") : all(act, "p");
+  for (const pEl of paragraphes) {
     const m = txt(pEl).match(/^Fait à (.+?),\s*le (.+)$/i);
     if (m) return { raw: m[1], date: m[2] };
   }
@@ -266,12 +349,17 @@ function readTable(t) {
 function readNotes(act) {
   const out = [];
   for (const n of all(kid(act, "meta"), "note")) {
+    const ps = kids(n, "p");
+    // Le passage cité est la seule balise <p> marquée `data-quote` (elle suit le
+    // texte — voir export.js). Le texte de la note reste la première balise <p>.
+    const quote = ps.find((x) => x.getAttribute("data-quote") === "true");
     out.push({
       id: uid("c"),
       kind: attr(n, "type") || "instruction",
       author: attr(n, "author"),
       date: attr(n, "date"),
-      text: txt(kid(n, "p")) || txt(n),
+      text: quote ? txt(ps.find((x) => x !== quote)) : txt(ps[0]),
+      quote: txt(quote),
       ruleId: "",
       path: attr(n, "data-target"),
     });

@@ -59,9 +59,29 @@ Renseignez ensuite `.env` :
 | `API_BASE` | adresse de l'API vue par le navigateur — **vide** = même origine |
 | `CORS_ORIGINS` | origines autorisées ; `*` convient quand l'API est derrière la même façade |
 
+**Authentification.** Par défaut (`AUTH_MODE=demo`), l'application liste les comptes du référentiel
+et un clic ouvre la session — c'est le mode de démonstration, et le jeton ci-dessus est alors la
+seule barrière des écritures. Pour une installation réelle, activez les **comptes locaux** :
+
+| Variable | Rôle |
+|---|---|
+| `AUTH_MODE` | `password` : identifiant + mot de passe vérifiés par le service, session par cookie |
+| `DEMO_ACCOUNTS` | `true` laisse le raccourci « choisir un compte » ouvert (recette) ; `false` (défaut en mode password) le ferme |
+| `ADMIN_LOGIN`, `ADMIN_PASSWORD` | le compte d'administration, créé **au premier démarrage** (ensuite le mot de passe n'est plus relu) |
+| `ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY` | son nom, son adresse, son entité de rattachement |
+| `SESSION_DAYS`, `MDP_MIN_LONGUEUR`, `SCRYPT_N` | durée de session, longueur minimale, coût du dérivé |
+| `COOKIE_SECURE` | `true` en production ; `false` **seulement** pour un essai en clair |
+
+En mode `password`, les jetons d'API ne sont plus acceptés (`API_TOKENS` / `API_TOKEN` peuvent
+rester vides), le compte d'administration crée les autres dans *Comptes et rôles*, et un
+administrateur enfermé dehors reprend la main avec
+`docker compose exec api node server.mjs --mot-de-passe <identifiant>` (le mot de passe est lu sur
+l'entrée standard). Le détail — ce qui est conservé, le blocage, les sessions, les sauvegardes —
+est dans **`../docs/ADMINISTRATION.md` § 4.3 bis et § 6.1 bis**.
+
 Le jeton en clair n'est **jamais** transmis à la base : le serveur ne connaît que son
 empreinte SHA-256. Il est en revanche servi au navigateur dans `config.js` (l'application est
-publique et sans authentification propre — voir « Sécurité » dans `../docs/ADMINISTRATION.md`).
+publique — voir « Sécurité » dans `../docs/ADMINISTRATION.md`).
 
 ## 3. Démarrer
 
@@ -83,10 +103,14 @@ L'application répond sur `http://<serveur>:${HTTP_PORT}` (par défaut `http://l
 
 ## 4. Première ouverture
 
-1. Ouvrez l'application et connectez-vous avec un compte administrateur de démonstration ;
+1. Ouvrez l'application et connectez-vous :
+   - **`AUTH_MODE=demo`** (défaut) : avec un compte administrateur de démonstration ;
+   - **`AUTH_MODE=password`** : avec `ADMIN_LOGIN` / `ADMIN_PASSWORD` du `.env` — le service a créé
+     ce compte au démarrage (le journal de `api` le dit). Changez ce mot de passe dès la première
+     connexion si le `.env` a circulé, puis créez les autres comptes dans *Comptes et rôles* ;
 2. **Administration › Base de données** : le mode doit déjà être « **Serveur externe — MySQL /
-   MariaDB** », l'adresse **vide** (même origine) et le jeton celui de `.env`. Cliquez
-   *Tester la connexion* ;
+   MariaDB** », l'adresse **vide** (même origine) et le jeton celui de `.env` (en mode `password`,
+   aucun jeton n'est nécessaire — laissez le champ vide) ;
 3. *Envoyer les données à la base* pour y installer le référentiel de départ (la base est
    vide au premier démarrage) ;
 4. **Administration › Identité › Mention de démonstration** : masquez le bandeau orange quand
@@ -188,7 +212,7 @@ service.
 | Le navigateur bloque les appels (`CORS`) | application et API sur des origines différentes | renseigner `CORS_ORIGINS` avec l'origine de l'application |
 | La signature ne fonctionne pas | page servie en `http://` (hors `localhost`) | passer en HTTPS (WebCrypto exige un contexte sécurisé) |
 | Page blanche | modules non chargés | ouvrir la console : vérifier que `/src/ui/app.js` répond 200 et que le montage `APP_DIR` pointe bien sur le dossier contenant `src/` |
-| Un acte publié n'apparaît pas sur `/recueil` | la façade ne route pas le recueil vers l'API | `nginx.conf` intercepte `/robots.txt`, `/llms.txt`, `/sitemap.xml`, `/recueil.json` et `/recueil` **avant** la page de l'application (`location /`) ; vérifier que le conteneur `web` a bien été recréé après modification |
+| Un acte publié n'apparaît pas sur `/recueil` | la façade ne route pas le recueil vers l'API | `nginx.conf` intercepte `/robots.txt`, `/llms.txt`, `/sitemap.xml`, `/recueil.json`, `/recueil` et `/eli` **avant** la page de l'application (`location /`) ; vérifier que le conteneur `web` a bien été recréé après modification |
 
 ## 10. Recueil ouvert : ce que la façade sert sans JavaScript
 
@@ -205,10 +229,25 @@ l'application :
 | `/recueil` | la liste des actes, en HTML rendu côté serveur |
 | `/recueil/<clé>` | la page d'un acte, en HTML rendu côté serveur |
 | `/recueil/<clé>.<ext>` | une représentation : `.json`, `.md`, `.txt`, `.akn` |
+| `/eli/<code>/<année>/<n°>/<entité>` | l'identifiant ELI comme adresse : redirige (302) vers la page de l'acte en vigueur |
 
 Ces réponses portent un `cache-control` public court. Les actes **retirés** du recueil disparaissent
 aussi de ces adresses. Aucun réglage n'est nécessaire côté application : c'est la publication qui
 ouvre l'acte.
+
+Les liens **ELI** que porte un acte publié (« eli:/fr/… », un visa d'adoption par exemple) y sont
+résolus : le service, qui détient les publications, remplace l'identifiant par l'adresse de l'acte
+visé ; un identifiant qu'il ne connaît pas reste une mention, sans lien. La page servie se lit donc
+sans JavaScript, et un lien ELI y mène toujours à un acte de l'instance.
+
+**Les règlements publiés à part.** Un **règlement** annexé (voir `../SPEC.md` § 2.2.4 ter) fait
+l'objet d'une publication **informative**, déposée par `hPublier` avec `informative: true` et **sans
+original** : le service l'accepte, laisse `original` et `signature` nuls, **ne touche pas à l'état de
+l'acte déposé**, et rend `informative` et `adoption` (l'acte qui l'adopte) dans la publication et
+dans `resumePublication`. Son identifiant porte le code `reg` (`eli:/fr/reg/…`) ; les publications
+successives du même règlement partagent cet identifiant et en sont les **versions**, la dernière
+déposée étant celle que le recueil montre. Comme pour un acte, les adresses `/eli/reg/…`,
+`/recueil/<clé>` et les représentations restent valables.
 
 ## 11. Arborescence
 
@@ -226,6 +265,9 @@ src/server/
   mysql/               le service (Node) et le schéma
     server.mjs           HTTP : /v1/db/… (données) et /v1/… (signature/publication)
     actes.mjs            domaine signature/publication (sans dépendance à Node)
+    comptes.mjs          domaine des comptes locaux : mots de passe, sessions (sans
+                         dépendance à Node — le port de crypto lui est injecté)
+    comptes.test.mjs     tests du domaine des comptes (`npm test`)
     state.mjs            état du service en base (table sb_etat)
     schema.sql           schéma MariaDB / MySQL
     Dockerfile  package.json  env.example  README.md

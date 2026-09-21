@@ -17,8 +17,8 @@
 
 $meta
   title = Scribae — trames, rédaction et publication des actes administratifs
-  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. Démonstrateur configuré pour une collectivité fictive (mairie de Valmont-sur-Loire).
-  image = https://user.uploads.dev/file/39e80c075f4725348ce5c5d6df3e4dfb.png
+  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. La page d'accueil est le recueil public des actes publiés — consultable par tous, sans compte, avec leur identifiant ELI et leur texte ; l'atelier s'ouvre par « Se connecter ». Démonstrateur configuré pour une collectivité fictive (mairie de Valmont-sur-Loire).
+  image = https://user.uploads.dev/file/06d748c1bac8b420d52e7572cc6d66f0.jpg
   tags = actes administratifs, akoma ntoso, legalxml, trames, eli, open data, guide
 
 // Persistance : le stockage du navigateur (IndexedDB) sert de pilote « local »
@@ -39,6 +39,12 @@ createServerSocket = {import:server-plugin}
 // ces services directement (CORS), le relais s'en charge. Voir
 // src/lib/numbering.js.
 superFetch = {import:super-fetch-plugin}
+
+// Hébergement de fichiers, utilisé par le circuit de signature externe : quand
+// le rédacteur rentre dans la base la version signée sur papier (ou via un
+// outil tiers), le PDF est déposé ici et l'acte ne conserve que son URL. Voir
+// src/lib/externe.js et src/ui/views/signature.js.
+uploadPlugin = {import:upload-plugin}
 
 // Moteur de langage des deux assistants (Administration › Assistants) : celui
 // de l'atelier, qui explique le mode d'emploi de l'outil, et celui du recueil

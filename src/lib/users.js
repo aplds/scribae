@@ -169,6 +169,7 @@ export const PERMS = [
   // src/ui/app.js, VIEW_PERMS) ; cette permission ne garde que sa modification.
   { key: "delegations.gerer", label: "Gérer l'organigramme des délégations de signature (qui peut signer à la place de qui)", roles: ["administrateur", "editeur"] },
   { key: "publications.depublier", label: "Retirer une publication du recueil (dépublier)", roles: ["administrateur"] },
+  { key: "publications.epingler", label: "Mettre un acte en avant sur le recueil public (épingler, « À la une »)", roles: ["administrateur", "editeur"] },
   { key: "referentiel.gerer", label: "Gérer le référentiel (identité, entités, personnes, rôles, références…)", roles: ["administrateur"] },
   { key: "comptes.gerer", label: "Créer des comptes, changer les rôles, désactiver, supprimer", roles: ["administrateur"] },
   { key: "api.gerer", label: "Connecter des API et consulter le journal des échanges", roles: ["administrateur"] },

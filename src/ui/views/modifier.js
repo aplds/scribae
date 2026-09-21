@@ -14,7 +14,7 @@
 // identifiant ELI que l'acte d'origine et le supplante, sans jamais le faire
 // disparaître : l'acte d'origine reste accessible dans l'historique des versions.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher } from "../state.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, circuitSignatureDe, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
 import { h, clear, button, toast, modal, fitPaper, icon } from "../dom.js";
 import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase } from "../components.js";
 import { openActe } from "./rediger.js";
@@ -26,15 +26,15 @@ import {
   formalites, statutExecution, dateExecutoire, dateLimiteRecours, ecartJours, aujourdhui,
   recoursDe, recoursTypeLabel,
 } from "../../lib/execution.js";
-import { revisionsDe, restaurerRevision } from "../../lib/revisions.js";
+import { revisionsDe, restaurerRevision } from "../../lib/historique-brouillons.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
 import { etatRevision } from "../../lib/revision.js";
 import { rapportConformite } from "../../lib/conformite.js";
 import { carteDossierRevision, carteRapport, carteDecision as carteDecisionRevision } from "../revision-cartes.js";
 import { ouvrirFormulaireFormalite } from "../execution-actions.js";
 import {
-  amendVocab, buildModificatif, buildConsolidated,
-  targetPhrase, defaultConsiderant, planSummary, numericToken,
+  amendVocab, buildModificatif, buildConsolidated, articlesOf,
+  targetPhrase, defaultConsiderant, planSummary, numericToken, designationThe, fillTemplate as fill,
 } from "../../lib/amend.js";
 import {
   cleanDoc, planFromSession, revertArticleByEId, newInserted,
@@ -49,6 +49,8 @@ import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWo
 import { parseDocumentFile } from "../../lib/akn.js";
 import { ecarts, locateAddr } from "../../lib/redaction.js";
 import { estAbroge } from "../../lib/abrogations.js";
+import { natureOfActe, identification, visaAdoption, annexesVocab, libelleAnnexe, appellationAnnexe, appellationAnnexeDefinie, refDecision, numeroAffiche, avecDe } from "../../lib/annexes.js";
+import { annexesJointes, libellePartAnnexe } from "../../lib/annexe-docs.js";
 import { download, uid, pickFile, formatDate, todayIso, debounce } from "../../lib/util.js";
 
 const NATURES = {
@@ -62,14 +64,36 @@ export const natureOf = (a) => NATURES[a?.kind] || NATURES.original;
 // ------------------------------------------------------------ accès aux actes
 // Un acte rédigé à partir d'une trame se compile ; un acte importé, un acte
 // modificatif ou une version consolidée transportent leur document.
+//
+// Le document rendu porte en outre les documents ANNEXÉS (voir
+// src/lib/annexe-docs.js) : l'original de l'acte qui les adopte est suivi de
+// leur texte, partout — à l'écran, à l'impression, dans les exports, dans
+// l'original signé et dans la version en ligne publiée. C'est ici qu'on les
+// résout, parce que c'est ici que le registre est connu.
 export function docOfActe(a) {
   if (!a) return null;
-  if (a.doc) return a.doc;
+  if (a.doc) { ajouterAnnexes(a.doc, a); return a.doc; }
   const trame = state.trames.find((t) => t.id === a.trameId);
   if (!trame) return null;
   const doc = compile(trame, a.values || {}, state.config, { overrides: a.overrides });
   doc.kind = "original";
+  ajouterAnnexes(doc, a);
   return doc;
+}
+
+// Les documents annexés à un acte, attachés à son document. La source est le
+// document lui-même (`meta.annexes`, le cas d'un acte modificatif qui adopte la
+// nouvelle rédaction d'une annexe) ou les valeurs de l'acte (`values.__annexes`,
+// le cas d'une rédaction ordinaire). Un document qui porte DÉJÀ ses annexes
+// (un acte modificatif, dont le texte adopté est bâti avec lui) n'est pas
+// retouché : ce qu'il transporte fait foi.
+function ajouterAnnexes(doc, acte) {
+  if (!doc || (doc.annexeDocs || []).length) return;
+  const source = (doc.meta?.annexes || []).length ? doc.meta.annexes : (acte.values?.__annexes || []);
+  const joints = annexesJointes(source, {
+    actes: state.actes, trames: state.trames, config: state.config, acteId: acte.id,
+  });
+  if (joints.length) doc.annexeDocs = joints;
 }
 
 // Écarts à la trame d'un acte : ce que le rédacteur a réécrit et que les
@@ -104,6 +128,19 @@ function startSession(a) {
   // ses marques de modification : on réécrit le texte tel qu'il est aujourd'hui).
   const doc = cleanDoc(raw);
   const designation = doc.meta?.designation || amendVocab(state.config).designation;
+  // Une ANNEXE (un règlement intérieur adopté par une délibération, un tableau
+  // adopté par une décision) ne se modifie pas comme un acte ordinaire : l'acte
+  // modificatif en ADOPTE la nouvelle rédaction, présentée en suivi des
+  // modifications. C'est le mode par défaut ici — la modification « classique »
+  // (mention expresse article par article) reste possible en le décochant.
+  // Voir src/lib/annexes.js et le module `amend`.
+  const annexe = doc.meta?.nature === "annexe";
+  // L'appellation de l'acte MODIFICATIF. Pour un acte ordinaire, c'est celle de
+  // l'acte qu'il modifie (une délibération se modifie par une délibération).
+  // Pour une ANNEXE, c'est celle de l'acte qui l'adopte — une délibération
+  // adopte le règlement intérieur : l'annexe ne donne pas son nom à l'acte.
+  const adoption = annexe ? (a.values?.__adoption || a.adoptePar || doc.meta?.adoption || null) : null;
+  const desMod = annexe ? (adoption?.designation || amendVocab(state.config).designation) : designation;
   state.modifier = {
     base: {
       acteId: a.id,
@@ -131,10 +168,15 @@ function startSession(a) {
     // trous » — les articles abrogés dont le numéro est repris disparaissent).
     renumerote: {},
     renumeroteTout: false,
-    meta: defaultMeta(doc, designation),
+    meta: defaultMeta(doc, desMod, designation),
     // `showChanges` : le suivi des modifications de la version consolidée est
     // une option d'affichage, décochée par défaut (voir `paintPreview`).
-    ui: { preview: "modificatif", showChanges: false },
+    // Pour une ANNEXE, elle est cochée : la nouvelle rédaction adoptée se lit
+    // avec ses ajouts et ses suppressions apparents.
+    ui: { preview: "modificatif", showChanges: annexe },
+    // L'annexe, et le mode d'adoption (décochable → modification classique).
+    annexe,
+    suivi: annexe,
   };
   return true;
 }
@@ -148,25 +190,40 @@ export function acteLabel(a, doc) {
   const d = doc || docOfActe(a);
   const num = a?.numero || d?.meta?.numero || "";
   const date = a?.dateSignature || d?.meta?.dateSignature || "";
+  // Une annexe n'a pas de numéro : on la nomme par la décision qui l'adopte, et
+  // sous une forme qui se glisse dans une phrase (« Modifier l'annexe à la
+  // délibération n° … », « … les articles de l'annexe à la délibération n° … »).
+  if (!num && d?.meta?.nature === "annexe") return appellationAnnexeDefinie(a, state.config);
   return `${num ? "n° " + num : "(sans numéro)"}${date ? " du " + formatDate(date, "date-long") : ""}`;
 }
 
-function defaultMeta(doc, designation) {
+function defaultMeta(doc, designation, cibleDesignation) {
   const config = state.config;
   const entityId = doc.meta?.entity?.id || config.entities?.[0]?.id || "";
   const entity = (config.entities || []).find((e) => e.id === entityId) || config.entities?.[0];
   const des = designation || amendVocab(config).designation;
+  // La désignation de la CIBLE (« le règlement intérieur n°… du … ») n'est pas
+  // toujours celle de l'acte modificatif : une délibération adopte le règlement
+  // intérieur. Voir `startSession`.
+  const cible = targetPhrase(doc, cibleDesignation || des, config);
+  const objet = doc.meta?.nature === "annexe"
+    ? fill(annexesVocab(config).adoptObjet, {
+      target: cible, targetInSentence: cible, targetDe: avecDe(cible), designation: des,
+      designationThe: designationThe(des),
+      designationLower: des.charAt(0).toLowerCase() + des.slice(1),
+    })
+    : `modification de ${cible}`;
   return {
     numero: entity ? nextNumero(config, entity) : "",
     designation: des,
-    objet: `modification de ${targetPhrase(doc, des, config)}`,
+    objet,
     dateSignature: todayIso(),
     dateEffet: "",
     entityId: entity?.id || "",
     signataireId: doc.meta?.signataire?.id || "",
     signataireFonction: "",
     visas: [],
-    considerants: [defaultConsiderant(doc, des, config)],
+    considerants: [defaultConsiderant(doc, cibleDesignation || des, config)],
     addEntry: true,
     addExecution: true,
   };
@@ -183,8 +240,10 @@ export function renderModifier(root, params) {
     }
     // Un acte non publiable (acte individuel) ne se modifie pas par voie
     // d'acte modificatif : il n'y a pas de texte publié à consolider. On le
-    // corrige directement dans l'éditeur de rédaction.
-    if (!actePubliable(a)) {
+    // corrige directement dans l'éditeur de rédaction. Une ANNEXE fait
+    // exception : elle suit le régime des annexes — son acte modificatif en
+    // ADOPTE la nouvelle rédaction (voir `startSession` et src/lib/annexes.js).
+    if (!actePubliable(a) && natureOfActe(a, state.trames) !== "annexe") {
       root.appendChild(emptyState(
         "Cet acte est un acte individuel : sa trame l'a déclaré non publiable. Il ne fait pas l'objet d'un acte modificatif — corrigez-le directement dans l'éditeur de rédaction.",
         button("Corriger l'acte", { variant: "primary", icon: "note", onClick: () => openActe(a) })));
@@ -236,13 +295,13 @@ function renderChooser(root) {
       const doc = docOfActe(a);
       const n = natureOf(a);
       tb.appendChild(h("tr", {},
-        h("td", { class: "fr-mono", text: a.numero || "—" }),
+        h("td", { class: "fr-mono", text: numeroAffiche(a, state.config, state.trames) || "—" }),
         h("td", { text: a.objet || doc?.meta?.objet || "—" }),
         h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
         h("td", { class: "fr-small", text: statusText(a) }, abrogationBadge(a)),
         h("td", {}, h("div", { class: "fr-row" },
-          actePubliable(a)
-            ? button("Modifier", {
+          (actePubliable(a) || natureOfActe(a, state.trames) === "annexe")
+            ? button(natureOfActe(a, state.trames) === "annexe" ? "Modifier l'annexe" : "Modifier", {
               variant: "primary", size: "sm",
               onClick: () => { if (startSession(a)) navigate("modifier/" + a.id); },
             })
@@ -313,7 +372,9 @@ function renderWorkspace(root) {
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: "Modifier " + base.label }),
-      h("p", { class: "page-head__sub", text: `${natureOf({ kind: base.kind }).label} · ${base.doc.meta?.objet || ""}${base.published ? " · publié" : ""}` }),
+      // Une annexe n'est pas « un acte d'origine » comme un autre : on le dit
+      // pour ce qu'elle est (voir src/lib/annexes.js).
+      h("p", { class: "page-head__sub", text: `${base.doc.meta?.nature === "annexe" ? "Annexe" : natureOf({ kind: base.kind }).label} · ${base.doc.meta?.objet || ""}${base.published ? " · publié" : ""}` }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("modifier", "Aide"),
@@ -384,7 +445,7 @@ function renderWorkspace(root) {
         paintAll();
         break;
       case "abrogateAll":
-        mod.removed = (base.doc.nodes || []).filter((n) => n.type === "article").map((n) => n.eId || n.path || n.id);
+        mod.removed = articlesOf(base.doc).map((n) => n.eId || n.path || n.id);
         paintAll();
         break;
       case "restoreAll":
@@ -444,8 +505,7 @@ function renderWorkspace(root) {
   function numbersUsed(exceptKey) {
     const label = config?.vocab?.articleLabel || "Article";
     const used = new Map();
-    for (const n of base.doc.nodes || []) {
-      if (n.type !== "article") continue;
+    for (const n of articlesOf(base.doc)) {
       const key = n.eId || n.path || n.id;
       if (key === exceptKey) continue;
       const renum = mod.renumerote?.[key];
@@ -487,13 +547,41 @@ function renderWorkspace(root) {
     const plan = planFromSession(base.doc, mod, { designation: mod.meta.designation });
     const changes = plan.filter((a) => a.action !== "keep");
     const renum = { map: mod.renumerote || {}, all: mod.renumeroteTout === true };
-    const docs = changes.length
-      ? {
-        modificatif: buildModificatif(base.doc, plan, mod.meta, config),
-        consolide: buildConsolidated(base.doc, plan, mod.meta, config, { previousTrail: base.previousTrail, showChanges: mod.ui.showChanges, renum }),
-      }
-      : { modificatif: null, consolide: null };
-    return { plan, changes, ...docs };
+    if (!changes.length) return { plan, changes, modificatif: null, consolide: null, suivi: false };
+    // Le mode « adoption » (celui des ANNEXES) : l'acte modificatif en adopte la
+    // nouvelle rédaction, et cette rédaction suit l'acte modificatif signé.
+    // Voir src/lib/annexes.js et `buildModificatif` (amend.js).
+    const suivi = mod.annexe === true && mod.suivi === true;
+    const consolide = buildConsolidated(base.doc, plan, mod.meta, config, { previousTrail: base.previousTrail, showChanges: mod.ui.showChanges, renum });
+    // Ce qui est ANNEXÉ à l'acte modificatif : la nouvelle rédaction de l'annexe,
+    // sous son propre numéro et sa propre adresse de recueil.
+    const annexesSuivi = suivi ? [{
+      acteId: base.acteId || "",
+      numero: base.doc.meta?.numero || "",
+      designation: base.designation,
+      date: mod.meta.dateSignature || base.doc.meta?.dateSignature || "",
+      objet: base.doc.meta?.objet || mod.meta.objet || "",
+      eli: consolide.meta?.eli || base.doc.meta?.eli || "",
+    }] : [];
+    const modificatif = buildModificatif(base.doc, plan, { ...mod.meta, adoption: suivi, adoptionTarget: suivi ? targetPhrase(base.doc, base.designation, config) : "", adoptionAnnexe: suivi ? (base.acteId || null) : null, annexes: annexesSuivi }, config);
+    if (suivi) {
+      // La NOUVELLE RÉDACTION de l'annexe part AVEC l'acte qui l'adopte : son
+      // original en est suivi (voir src/lib/annexe-docs.js). C'est le texte
+      // consolidé qui est annexé — celui qui vient d'être adopté —, et non
+      // l'ancienne rédaction que l'acte remplace.
+      modificatif.annexeDocs = [{
+        ref: annexesSuivi[0],
+        acte: { id: base.acteId || "" },
+        doc: consolide,
+        libelle: libellePartAnnexe(annexesSuivi[0], null, config),
+      }];
+      // La nouvelle rédaction de l'annexe cite l'acte qui vient de l'adopter :
+      // le visa remplace celui de l'adoption précédente, s'il y en avait un.
+      const visa = visaAdoption(identification({ id: "", numero: mod.meta.numero, dateSignature: mod.meta.dateSignature, eli: modificatif.meta.eli }, mod.meta.designation), config);
+      const v = (consolide.nodes || []).find((n) => n.type === "visas");
+      if (v && visa) v.items = [{ id: "visa-adoption", text: visa, lien: modificatif.meta.eli || "" }, ...(v.items || []).filter((it) => it.id !== "visa-adoption")];
+    }
+    return { plan, changes, modificatif, consolide, suivi };
   }
 
   function paintDoc() {
@@ -522,9 +610,23 @@ function renderWorkspace(root) {
   // abrogera alors tous ses articles), et la numérotation du dispositif.
   function paintActions() {
     clear(actionsBox);
-    const arts = (base.doc.nodes || []).filter((n) => n.type === "article");
+    const arts = articlesOf(base.doc);
     const tous = arts.length > 0 && arts.every((n) => mod.removed.includes(n.eId || n.path || n.id));
     actionsBox.appendChild(h("h2", { class: "fr-card__title", text: "L'acte entier" }));
+    // Une ANNEXE ne se modifie pas article par article : l'acte modificatif en
+    // adopte la nouvelle rédaction, présentée en suivi des modifications. Le
+    // mode classique (mention expresse) reste à un clic — c'est ce que demande
+    // parfois une décision qui vise expressément un article.
+    if (mod.annexe) {
+      actionsBox.appendChild(h("p", { class: "fr-small", style: { margin: "0 0 6px" },
+        text: "Ce document est une ANNEXE : par défaut, l'acte modificatif en adopte la nouvelle rédaction (elle lui est annexée, avec le suivi des modifications, et son texte suit l'acte modificatif signé)." }));
+      actionsBox.appendChild(checkbox("Modification par adoption (suivi des modifications)", mod.suivi === true, (v) => { mod.suivi = v; paintSide(); }));
+      if (!mod.suivi) {
+        actionsBox.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" },
+          text: "Décoché : modification classique, article par article (« L'article 3 du règlement intérieur est remplacé par… »)." }));
+      }
+      actionsBox.appendChild(h("hr", { class: "fr-sep" }));
+    }
     actionsBox.appendChild(tous
       ? h("p", { class: "fr-small", style: { margin: "0 0 8px" }, text: "Tous les articles sont abrogés : la version consolidée ne portera plus aucune disposition en vigueur." })
       : h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" }, text: "Abroger l'acte d'un seul geste retire tous ses articles ; chacun reste rétablissable dans le document." }));
@@ -552,7 +654,7 @@ function renderWorkspace(root) {
     if (renum.length) {
       const ul = h("ul", { class: "mod-changes" });
       for (const [key, num] of renum) {
-        const node = (base.doc.nodes || []).find((n) => n.type === "article" && (n.eId || n.path || n.id) === key);
+        const node = articlesOf(base.doc).find((n) => (n.eId || n.path || n.id) === key);
         ul.appendChild(h("li", { class: "mod-change" },
           h("div", { class: "mod-change__head" },
             h("span", { class: "mod-change__article", text: node?.numLabel || "" }),
@@ -829,6 +931,8 @@ function renderWorkspace(root) {
       baseId, baseEli: base.doc.meta?.eli || "", baseNumero: base.doc.meta?.numero || "",
       amendsId: baseId, amendsEli: base.doc.meta?.eli || "", amendsNumero: base.doc.meta?.numero || "",
       amends: b.modificatif.amendments, source: "modification",
+      // L'annexe dont cet acte adopte la nouvelle rédaction (mode « suivi »).
+      adopteAnnexeId: b.suivi ? (baseId || "") : "",
     };
     const consActe = {
       id: uid("acte"), kind: "consolide",
@@ -843,6 +947,8 @@ function renderWorkspace(root) {
       baseId, baseEli: base.doc.meta?.eli || "", modificatifId: modActe.id, modificationIds: [modActe.id],
       consolidatesId: baseId, consolidatesEli: base.doc.meta?.eli || "",
       trail: b.consolide.trail, source: "consolidation", pendingConsolidation: true,
+      // La version consolidée d'une annexe EST l'annexe : sa nature la suit.
+      nature: base.doc.meta?.nature === "annexe" ? "annexe" : "acte",
     };
     modActe.consolideId = consActe.id;
     state.actes.push(modActe, consActe);
@@ -863,6 +969,16 @@ function renderWorkspace(root) {
           enAttente: true,
         };
       }
+      // Une ANNEXE qui vient d'être adoptée en nouvelle rédaction : sa fiche
+      // dit désormais par quel acte, et ses visas le portent (le document
+      // consolidé ci-dessus a reçu le visa ; on met la fiche à jour pour que la
+      // prochaine compilation dise la même chose).
+      if (b.suivi && mod.annexe) {
+        const adoption = identification(modActe, mod.meta.designation);
+        baseActe.values = { ...(baseActe.values || {}), __adoption: adoption };
+        baseActe.adoptePar = adoption;
+        baseActe.nature = "annexe";
+      }
       baseActe.updatedAt = now;
     }
     touch("actes");
@@ -876,7 +992,11 @@ function renderWorkspace(root) {
       title: "Deux actes ont été produits",
       body: h("div", { class: "fr-stack" },
         resultLine("Acte modificatif", modActe, "Il porte la modification : il part en signature, puis est publié."),
-        resultLine("Version consolidée", consActe, `Texte de l'acte n° ${base0.doc.meta?.numero || "—"} à jour. Elle devient la version en vigueur dès que l'acte modificatif est publié.`),
+        // Une annexe n'a pas de numéro : on dit par quelle décision elle tient
+        // son texte (voir src/lib/annexes.js).
+        resultLine("Version consolidée", consActe, base0.doc.meta?.nature === "annexe"
+          ? `Texte de l'annexe à jour (adoptée par ${refDecision(base0.doc.meta?.adoption) || "la décision modificative"}). Elle devient la version en vigueur dès que l'acte modificatif est publié.`
+          : `Texte de l'acte n° ${base0.doc.meta?.numero || "—"} à jour. Elle devient la version en vigueur dès que l'acte modificatif est publié.`),
         h("p", { class: "fr-small fr-muted", text: "L'acte d'origine n'est pas modifié : il reste consultable, et son historique de versions enregistre la consolidation." }),
       ),
       actions: (close) => [
@@ -920,15 +1040,25 @@ export function renderActeDetail(root, params) {
   const n = natureOf(a);
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: `${doc.meta?.designation || "Acte"} n° ${a.numero || doc.meta?.numero || "—"}` }),
-      h("p", { class: "page-head__sub", text: [n.label, a.objet || doc.meta?.objet, doc.meta?.eli].filter(Boolean).join(" · ") }),
+      // Une ANNEXE n'a pas de numéro à montrer : son titre dit ce qu'elle est,
+      // et sa ligne de contexte renvoie à la décision qui l'adopte (voir
+      // src/lib/annexes.js).
+      h("h1", { class: "page-head__title", text: natureOfActe(a, state.trames) === "annexe"
+        ? (doc.meta?.designation || "Annexe")
+        : `${doc.meta?.designation || "Acte"} n° ${a.numero || doc.meta?.numero || "—"}` }),
+      h("p", { class: "page-head__sub", text: (natureOfActe(a, state.trames) === "annexe"
+        ? [appellationAnnexe(a, state.config), a.objet || doc.meta?.objet]
+        : [n.label, a.objet || doc.meta?.objet, doc.meta?.eli]).filter(Boolean).join(" · ") }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("modifier", "Aide"),
       button("Registre", { variant: "secondary", icon: "list", onClick: () => navigate("actes") }),
       can("actes.gerer") && canModify(a)
-        ? (actePubliable(a)
-          ? button("Modifier cet acte", { variant: "secondary", icon: "refresh", onClick: () => modifierFromActe(a) })
+        ? ((actePubliable(a) || natureOfActe(a, state.trames) === "annexe")
+          ? button(natureOfActe(a, state.trames) === "annexe" ? "Modifier l'annexe" : "Modifier cet acte",
+            { variant: "secondary", icon: "refresh",
+              title: natureOfActe(a, state.trames) === "annexe" ? "L'acte modificatif adoptera la nouvelle rédaction de l'annexe (suivi des modifications)" : "",
+              onClick: () => modifierFromActe(a) })
           : button("Corriger cet acte", { variant: "secondary", icon: "note", title: "Acte individuel non publiable : correction directe, sans acte modificatif", onClick: () => openActe(a) }))
         : null,
       a.publication ? button("Version en ligne", { variant: "secondary", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(a.publication.cle)) }) : null,
@@ -959,6 +1089,12 @@ export function renderActeDetail(root, params) {
       text: `Numéro attribué par le service de numérotation${a.numeroSource.ref ? ` — référence ${a.numeroSource.ref}` : ""}${a.numeroSource.at ? `, le ${formatDate(String(a.numeroSource.at).slice(0, 10))}` : ""}.` }));
   }
 
+  // Les annexes : le lien entre un acte et les documents qu'il adopte. C'est un
+  // fait du dossier, comme l'abrogation — il se lit en tête de fiche, parce
+  // qu'il dit d'où le document tire son existence. Voir src/lib/annexes.js.
+  const annexes = annexesCard(a, doc);
+  if (annexes) root.appendChild(annexes);
+
   const history = historyCard(a, doc);
   if (history) root.appendChild(history);
 
@@ -977,7 +1113,15 @@ export function renderActeDetail(root, params) {
   if (revue) root.appendChild(revue);
 
   // signature et publication
-  if (a.original || a.publication || a.statut === "signee" || a.statut === "publie" || a.statut === "en_signature" || a.statut === "en_attente") {
+  // Le circuit EXTERNE (papier ou outil tiers, voir src/lib/externe.js) ne
+  // produit pas d'`a.original` : sa pièce signée est le PDF déposé. On présente
+  // donc les deux cas de la même façon — ce qui compte, c'est qu'un document
+  // signé existe et ce qu'il est advenu de sa conformité.
+  const externe = estCircuitExterne(a);
+  const vs = externe ? versionSigneeDeActe(a) : null;
+  const certif = externe ? certificationDeActeExterne(a) : null;
+  const signee = !!(a.original || vs);
+  if (a.original || vs || a.externe || a.publication || a.statut === "signee" || a.statut === "publie" || a.statut === "en_signature" || a.statut === "en_attente") {
     const p = a.publication || null;
     root.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("h2", { class: "fr-card__title", text: "Signature et publication" }),
@@ -985,7 +1129,16 @@ export function renderActeDetail(root, params) {
         ? h("p", { class: "fr-small" },
           h("strong", { text: "Acte signé. " }),
           `Signé le ${formatDate(String(a.original.signatures?.[0]?.signeLe || "").slice(0, 10))} par ${a.original.signatures?.[0]?.signataire?.nom || "—"} · empreinte SHA-256 ${String(a.original.document?.sha256 || "").slice(0, 24)}…`)
-        : h("p", { class: "fr-small", text: a.statut === "en_signature" ? "Circuit de signature ouvert, en attente de signature." : a.statut === "en_attente" ? "En attente : la version consolidée sera publiée en même temps que l'acte modificatif." : "Acte non signé." }),
+        : vs
+        ? h("p", { class: "fr-small" },
+          h("strong", { text: "Version signée déposée. " }),
+          `Déposée le ${formatDate(String(vs.deposeLe || "").slice(0, 10))} par ${vs.deposeParNom || "—"} · empreinte SHA-256 ${String(vs.sha256 || "").slice(0, 24)}… `,
+          certif && certif.statut === "conforme"
+            ? `Conformité certifiée par ${certif.parNom || "—"} le ${formatDate(String(certif.le || "").slice(0, 10))}.`
+            : certif && certif.statut === "non_conforme"
+            ? `Conformité refusée par ${certif.parNom || "—"}${certif.motif ? " : « " + certif.motif + " »" : "."}`
+            : "Conformité avec la version numérique en attente de certification par le réviseur.")
+        : h("p", { class: "fr-small", text: a.externe && a.externe.statut === "a_signer" ? "Document remis au signataire : la version signée n'a pas encore été déposée." : a.statut === "en_signature" ? "Circuit de signature ouvert, en attente de signature." : a.statut === "en_attente" ? "En attente : la version consolidée sera publiée en même temps que l'acte modificatif." : "Acte non signé." }),
       p ? h("div", {},
         h("p", { class: "fr-small" }, h("strong", { text: "Publié. " }), `ELI ${p.eliUri}`),
         h("p", { class: "fr-small fr-muted", text: `Publié le ${formatDate(p.datePublication)} · entrée en vigueur le ${formatDate(p.dateOpposabilite)} · ${p.recueil || ""}` }),
@@ -1001,11 +1154,12 @@ export function renderActeDetail(root, params) {
         h("p", { class: "fr-small", text: "Acte individuel : sa trame est déclarée non publiable. Signé et conservé au registre, il n'est pas déposé au recueil et ne reçoit pas d'identifiant ELI. Sa correction se fait directement, sans acte modificatif." })) : null,
       h("div", { class: "fr-row" },
         a.original ? button("Voir l'original signé", { variant: "secondary", size: "sm", icon: "lock", onClick: () => import("./signature.js").then((m) => m.voirOriginal(a)) }) : null,
+        !a.original && vs ? button("Voir la version signée", { variant: "secondary", size: "sm", icon: "lock", onClick: () => import("./signature.js").then((m) => m.voirVersionSignee(a)) }) : null,
         p ? button("Consulter la version en ligne", { variant: "primary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(p.cle)) }) : null,
-        (a.original ? (actePubliable(a) ? can("signature.gerer") : can("actes.signer")) : can("actes.signer")) && a.statut !== "publie" && a.kind !== "consolide"
+        (signee ? (actePubliable(a) ? can("signature.gerer") : can("actes.signer")) : can("actes.signer")) && a.statut !== "publie" && a.kind !== "consolide"
           ? button(
-            actePubliable(a) ? (a.original ? "Publication" : "Signer") : (a.original ? "Suivi du circuit" : "Signer"),
-            { variant: "tertiary", size: "sm", icon: "upload", onClick: () => { state.signature = { tab: actePubliable(a) && a.original ? "publication" : "circuit", acteId: a.id }; navigate("signature"); } })
+            actePubliable(a) ? (signee ? "Publication" : "Signer") : (signee ? "Suivi du circuit" : "Signer"),
+            { variant: "tertiary", size: "sm", icon: "upload", onClick: () => { state.signature = { tab: actePubliable(a) && signee ? "publication" : "circuit", acteId: a.id }; navigate("signature"); } })
           : null,
       ),
     ));
@@ -1013,8 +1167,17 @@ export function renderActeDetail(root, params) {
 
   // Le caractère exécutoire : un acte signé n'est pas encore opposable. Il le
   // devient quand la dernière formalité requise est accomplie, et c'est de là
-  // que court le délai de recours.
-  root.appendChild(executionCard(a));
+  // que court le délai de recours. Une ANNEXE n'a rien de tout cela : elle ne
+  // se signe ni ne se publie, et n'a donc pas de formalités propres — c'est
+  // l'acte qui l'adopte qui les accomplit, et c'est de sa signature que le
+  // délai de recours court.
+  if (natureOfActe(a, state.trames) === "annexe") {
+    root.appendChild(h("div", { class: "fr-card" },
+      h("h2", { class: "fr-card__title", text: "Caractère exécutoire" }),
+      h("p", { class: "fr-small fr-muted", text: "Une annexe ne se signe ni ne se publie pour elle-même : elle n'a pas de délai qui coure de son fait. Son texte suit l'acte qui l'adopte, et c'est cet acte — sa signature, sa transmission, sa publication — qui la rend applicable. Le délai de recours contentieux court donc de la publicité de l'acte d'adoption." })));
+  } else {
+    root.appendChild(executionCard(a));
+  }
 
   const ec = ecartsOfActe(a);
   if (ec.count) {
@@ -1322,6 +1485,54 @@ function revisionsCard(a) {
 // Chaîne des modifications subies par un acte : les actes modificatifs publiés
 // et leurs consolidations successives. C'est la mémoire de l'acte : chaque
 // modification y laisse une trace, et l'acte d'origine reste toujours lisible.
+// --------------------------------------------------- annexes et acte d'adoption
+// Un acte peut être une ANNEXE (un règlement intérieur adopté par une
+// délibération, un tableau adopté par une décision), ou porter des annexes. Le
+// lien est un fait du dossier : d'où le document tire son existence, et ce qu'il
+// annexe. Il se lit donc en tête de la fiche. Voir src/lib/annexes.js.
+function annexesCard(a, doc) {
+  const cfg = state.config;
+  const commeAnnexe = natureOfActe(a, state.trames) === "annexe";
+  const adoption = a.adoptePar || doc.meta?.adoption || null;
+  const docs = ((Array.isArray(a.annexes) && a.annexes.length ? a.annexes : (doc.meta?.annexes || [])) || []).filter(Boolean);
+  if (!commeAnnexe && !docs.length) return null;
+
+  // Le renvoi vers un acte du registre : sa fiche est la source vivante. Une
+  // identification figée peut ne correspondre à aucun acte (import, purge) —
+  // on l'imprime alors telle quelle, sans lien.
+  const renvoi = (id, texte) => {
+    const x = id ? state.actes.find((y) => y.id === id) : null;
+    if (!x) return h("span", { text: texte });
+    return h("a", {
+      class: "rx-annexe__lien", href: "#/acte/" + x.id, title: x.objet || "",
+      onClick: (e) => { e.preventDefault(); navigate("acte/" + x.id); },
+      text: texte,
+    });
+  };
+
+  const card = h("div", { class: "fr-card fr-card--soft rx-annexe" });
+  if (commeAnnexe) {
+    card.appendChild(h("h2", { class: "fr-card__title", text: "Annexe" }));
+    card.appendChild(h("p", { class: "fr-small", text: "Ce document est adopté par un autre acte : il ne tient pas son autorité de lui-même. Une annexe ne se signe pas — c'est l'acte qui l'adopte qui est signé, et l'original de cet acte est suivi du texte de l'annexe, dans le même document. Elle n'est donc ni signée ni publiée pour elle-même." }));
+    if (adoption) {
+      card.appendChild(h("p", { class: "fr-small" },
+        h("span", { class: "fr-muted", text: "Acte d'adoption : " }),
+        renvoi(adoption.acteId, `${adoption.designation || "Acte"} n° ${adoption.numero || "—"}${adoption.date ? " du " + formatDate(adoption.date) : ""}${adoption.objet ? " — " + adoption.objet : ""}`)));
+    } else {
+      card.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucun acte d'adoption n'est encore désigné : tant qu'il l'est, rien ne donne à ce document son autorité ni sa place dans le recueil." }));
+    }
+    card.appendChild(h("p", { class: "fr-small fr-muted", text: "Sa modification suit le régime des annexes : l'acte modificatif en adopte la nouvelle rédaction, présentée en suivi des modifications, et cette rédaction suit l'acte modificatif signé. Une modification classique reste possible par mention expresse, article par article." }));
+  }
+  if (docs.length) {
+    card.appendChild(h("h2", { class: "fr-card__title", text: `Documents annexés (${docs.length})` }));
+    card.appendChild(h("p", { class: "fr-small fr-muted", text: "Adoptés par le présent acte : ils sont annoncés à la fin de son dispositif, et leur texte suit l'acte dans l'original signé. Ils ne sont ni signés ni publiés pour eux-mêmes." }));
+    for (const d of docs) {
+      card.appendChild(h("p", { class: "fr-small" }, renvoi(d.acteId, libelleAnnexe(d, cfg))));
+    }
+  }
+  return card;
+}
+
 function historyCard(a, doc) {
   const base = (a.kind === "original" || a.kind === "importe" || !a.baseId)
     ? a

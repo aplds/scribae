@@ -17,11 +17,15 @@ import {
 } from "../../lib/signataires.js";
 import { scopeLabel, coversAllServices, primaryServiceName, membershipFor, bureauxOf, servicesOf, allServicesMemberships } from "../../lib/scope.js";
 import { newCompetence, competenceLabel, estReviseur, competencesDe } from "../../lib/revision.js";
-import { isOidc, demoAccountsDisabled, authConfig, issuerLabel, isTestProvider } from "../../lib/auth.js";
+import { isOidc, isPassword, demoAccountsDisabled, authConfig, issuerLabel, isTestProvider } from "../../lib/auth.js";
+import { dialogueMotDePasseCompte, etatsMotDePasse, libelleEtatMotDePasse } from "../mot-de-passe.js";
 
 export function renderComptes(root) {
   const me = currentUser();
   const oidc = isOidc(state.config);
+  // Mode « comptes locaux (mot de passe) » : les mots de passe sont tenus par le
+  // SERVICE (voir src/server/mysql/comptes.mjs), et l'écran les administre.
+  const mdp = isPassword(state.config);
   const users = state.users.slice().sort((a, b) => {
     const r = ROLE_ORDER.indexOf(primaryRoleId(b)) - ROLE_ORDER.indexOf(primaryRoleId(a));
     return r !== 0 ? r : sortName(a).localeCompare(sortName(b));
@@ -37,10 +41,22 @@ export function renderComptes(root) {
     h("div", { class: "page-head__actions" },
       oidc
         ? button("Réglage de l'annuaire", { variant: "secondary", size: "sm", icon: "lock", onClick: goAnnuaire })
-        : button("Réinstaller les comptes de démonstration", { variant: "tertiary", size: "sm", icon: "refresh", onClick: reinstall }),
+        : mdp
+          ? null
+          : button("Réinstaller les comptes de démonstration", { variant: "tertiary", size: "sm", icon: "refresh", onClick: reinstall }),
       button(oidc ? "Pré-enregistrer un agent" : "Nouveau compte", { variant: "primary", icon: "plus", onClick: () => editUser(null) }),
     ),
   ));
+
+  if (mdp) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "Connexion par mot de passe — les mots de passe sont tenus par le service" }),
+      h("p", { text: "Le service de la collectivité garde les mots de passe (hors de l'application) : il les vérifie à la connexion et ouvre une session. Ici, on crée les comptes, on règle leur rôle, et l'on pose ou retire leur mot de passe. Un compte sans mot de passe ne peut pas se connecter. Le compte d'administration, lui, est créé au premier démarrage à partir du fichier .env du déploiement (ADMIN_LOGIN, ADMIN_PASSWORD) — et il ne le réécrit pas ensuite." }),
+      mdp && demoAccountsDisabled(state.config)
+        ? h("p", { text: "Les comptes de démonstration sont fermés sur ce déploiement (DEMO_ACCOUNTS=false) : ils ne peuvent pas ouvrir de session." })
+        : h("p", { text: "Les comptes de démonstration sont ouverts sur ce déploiement (DEMO_ACCOUNTS=true) : à refermer sur une installation réelle." }),
+    ));
+  }
 
   if (oidc) {
     const auth = authConfig(state.config);
@@ -61,9 +77,12 @@ export function renderComptes(root) {
     return;
   }
 
+  const cellsMdp = mdp ? new Map() : null;
   const table = h("table", { class: "fr-table" },
     h("thead", {}, h("tr", {},
-      h("th", { text: "Nom" }), h("th", { text: "Identifiant" }), h("th", { text: "Rôles et qualités" }),
+      h("th", { text: "Nom" }), h("th", { text: "Identifiant" }),
+      mdp ? h("th", { text: "Mot de passe" }) : null,
+      h("th", { text: "Rôles et qualités" }),
       h("th", { text: "Périmètre (services et bureaux)" }),
       h("th", { text: "Structure" }), h("th", { text: "État" }), h("th", { text: "Dernier accès" }), h("th", {}),
     )),
@@ -85,6 +104,7 @@ export function renderComptes(root) {
           u.id === me?.id ? h("span", { class: "fr-badge fr-badge--success", text: "vous" }) : null,
         )),
       h("td", { class: "fr-mono fr-small", text: u.login }),
+      cellsMdp ? celluleMotDePasse(u, cellsMdp) : null,
       h("td", {},
         h("div", { class: "compte__roles" },
           ...badgesOf(u).map((r) => h("span", { class: "fr-badge fr-badge--" + r.badge, title: r.summary, text: r.label })),
@@ -105,9 +125,17 @@ export function renderComptes(root) {
       h("td", {}, h("div", { class: "fr-row" },
         // En mode annuaire, la session ne s'ouvre que par le fournisseur
         // d'identité : on ne propose donc pas d'ouvrir une session en choisissant
-        // un compte.
-        !oidc && u.active !== false && !demoOff
+        // un compte. En mode mot de passe non plus : c'est le SERVICE qui ouvre
+        // les sessions, et il ne le fait qu'après vérification du mot de passe.
+        !oidc && !mdp && u.active !== false && !demoOff
           ? button("Ouvrir une session", { variant: "tertiary", size: "sm", icon: "lock", title: "Se connecter avec ce compte (démonstration)", onClick: () => switchTo(u) })
+          : null,
+        mdp
+          ? button("Mot de passe", {
+              variant: "tertiary", size: "sm", icon: "lock",
+              title: "Définir, remettre ou retirer le mot de passe de ce compte",
+              onClick: () => dialogueMotDePasseCompte(u, { surFait: () => navigate("comptes") }),
+            })
           : null,
         button("Modifier", { variant: "tertiary", size: "sm", icon: "gear", onClick: () => editUser(u) }),
         demoOff
@@ -121,7 +149,10 @@ export function renderComptes(root) {
   }
   table.appendChild(tb);
   root.appendChild(h("div", { class: "fr-table-wrap" }, table));
-  root.appendChild(h("p", { class: "fr-small fr-muted", text: `${users.length} compte(s) · ${state.users.filter((u) => u.active !== false).length} actif(s) · stockage local (IndexedDB). Les comptes de démonstration sont fictifs.` }));
+  if (cellsMdp) remplirEtatsMotDePasse(cellsMdp);
+  root.appendChild(h("p", { class: "fr-small fr-muted", text: mdp
+    ? `${users.length} compte(s) · ${state.users.filter((u) => u.active !== false).length} actif(s) · référentiel partagé (service de la collectivité). Les mots de passe, eux, ne sont pas dans l'application : ils sont tenus par le service.`
+    : `${users.length} compte(s) · ${state.users.filter((u) => u.active !== false).length} actif(s) · stockage local (IndexedDB). Les comptes de démonstration sont fictifs.` }));
 
   root.appendChild(h("div", { class: "fr-card", style: { marginTop: "16px" } },
     sectionHeader("Ce que permet chaque profil"),
@@ -130,6 +161,36 @@ export function renderComptes(root) {
     h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" }, text: "Le rôle « Réviseur » se cumule avec les autres : un éditeur peut être chargé de contrôler les actes avant leur signature. Sa compétence — les services, familles, types d'actes et entités qu'il révise — se règle sur son compte ; quand la qualité appartient à un service entier (ou à certains de ses bureaux), elle se règle sur le service, dans « Administration › Services »." }),
     h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" }, text: "Un rôle « à venir » (feuilles de style des actes) est annoncé dans la colonne Éditeur : la case est prête, la fonctionnalité viendra s'y brancher." }),
   ));
+}
+
+// ------------------------------------------- état d'un mot de passe (service)
+// La table porte une case par compte, que l'on remplit d'un seul appel : le
+// service rend l'état de TOUS les comptes en une fois. Tant qu'elle n'est pas
+// remplie, la case porte son mouvement — on voit que la demande est en route.
+function celluleMotDePasse(u, cells) {
+  const td = h("td", { class: "fr-small" }, h("span", { class: "spinner", "aria-hidden": "true" }));
+  cells.set(u.id, td);
+  return td;
+}
+
+async function remplirEtatsMotDePasse(cells) {
+  const etats = await etatsMotDePasse();
+  for (const [userId, td] of cells) {
+    if (!td.isConnected) continue;
+    clear(td);
+    if (!etats) {
+      td.appendChild(h("span", { class: "fr-badge fr-badge--warning", title: "Le service des comptes n'a pas répondu", text: "inconnu" }));
+      continue;
+    }
+    const etat = etats[userId];
+    const couleur = !etat || !etat.defini ? "info" : etat.bloque ? "error" : etat.mustChange ? "warning" : "success";
+    const titre = !etat || !etat.defini
+      ? "Aucun mot de passe : ce compte ne peut pas se connecter"
+      : etat.bloque
+        ? "Compte bloqué après plusieurs tentatives manquées"
+        : etat.mustChange ? "Mot de passe provisoire : à changer à la prochaine connexion" : "Mot de passe défini";
+    td.appendChild(h("span", { class: "fr-badge fr-badge--" + couleur, title: titre, text: libelleEtatMotDePasse(etat) }));
+  }
 }
 
 function matrix() {
@@ -409,6 +470,7 @@ function signatureEditor(u) {
 
 function editUser(existing) {
   const oidc = isOidc(state.config);
+  const mdp = isPassword(state.config);
   const u = existing ? { ...existing } : newUser({ entityId: state.config.entities?.[0]?.id || "" });
   let loginTouched = !!existing;
 
@@ -494,6 +556,11 @@ function editUser(existing) {
           await setUsers(next);
           close();
           toast(existing ? "Compte enregistré" : "Compte créé", "success");
+          // Un compte neuf, en mode mot de passe, est inutilisable tant qu'il
+          // n'a pas de mot de passe : on enchaîne sur la remise, sans quitter
+          // l'écran des comptes (le service refuse un compte qu'il ne connaît
+          // pas encore — d'où l'attente du synchro faite par `setUsers`).
+          if (mdp && !existing) await dialogueMotDePasseCompte(u, { surFait: () => navigate("comptes") });
         },
       }),
     ],

@@ -20,6 +20,7 @@ import {
   dateExecutoire, aujourdhui,
   TRANSMISSION_MODES, PUBLICATION_MODES, NOTIFICATION_MODES, RECOURS_TYPES, recoursTypeLabel,
 } from "../lib/execution.js";
+import { envoyerNotification } from "../lib/courriel.js";
 
 const nom = (u) => (u ? [u.firstName, u.lastName].filter(Boolean).join(" ") : "");
 
@@ -30,7 +31,23 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
     ref: e.ref || "",
     mode: e.mode || "",
     destinataires: e.destinataires || "",
+    courriel: e.courriel || "",
   };
+  // Le courriel de notification, quand la formalité le permet : l'agent qui
+  // notifie un acte individuel à l'intéressé le fait ordinairement par courriel.
+  // Le message part par le serveur SMTP du déploiement ; sans serveur configuré,
+  // l'envoi est TRACÉ « non envoyé » (jamais silencieux).
+  const adresseConnue = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
+  const caseMail = f.id === "notification" ? h("input", { type: "checkbox", checked: adresseConnue(data.courriel) }) : null;
+  const courrielInput = f.id === "notification" ? h("input", { class: "fr-input", type: "email", placeholder: "adresse@example.fr", value: data.courriel || (adresseConnue(data.destinataires) ? data.destinataires : "") }) : null;
+  const blocMail = f.id === "notification"
+    ? h("div", { class: "fr-card fr-card--soft" },
+      h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" }, text: "Notifier aussi par courriel. Le message part par le serveur SMTP du déploiement ; s'il n'est pas configuré, l'envoi est constaté « non envoyé » au journal de l'acte." }),
+      h("label", { class: "fr-check" }, caseMail, "Envoyer l'acte à l'intéressé par courriel"),
+      h("div", { class: "fr-field" },
+        h("label", { class: "fr-label", text: "Adresse du destinataire" }),
+        courrielInput))
+    : null;
   const modes = f.id === "transmission" ? TRANSMISSION_MODES : f.id === "notification" ? NOTIFICATION_MODES : PUBLICATION_MODES;
   // Les constantes portent `id` et `label` ; un `<select>` attend `value` et
   // `label`. Sans cette conversion, c'est le LIBELLÉ qui serait enregistré à la
@@ -46,6 +63,7 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
     }),
     selectField({ label: "Modalité", value: data.mode, options: optionsMode, onChange: (v) => { data.mode = v; } }),
     f.id === "notification" ? textField({ label: "Destinataire(s)", value: data.destinataires, help: "La personne ou les personnes à qui l'acte a été notifié.", onChange: (v) => { data.destinataires = v; } }) : null,
+    blocMail,
     f.id === "publication" ? h("p", { class: "fr-hint", text: "Renseignez ce formulaire pour une publication constatée hors de la chaîne ELI (recueil papier, affichage, site internet). Lorsque l'acte est publié depuis l'écran « Signature & publication », la formalité se constate d'elle-même." }) : null,
   );
   modal({
@@ -68,6 +86,7 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
       button("Enregistrer", {
         variant: "primary", icon: "check",
         onClick: async () => {
+          if (f.id === "notification") data.courriel = String(courrielInput.value || "").trim();
           enregistrerFormalite(a, f.id, { ...data, by: state.user?.id, byName: nom(state.user) });
           a.updatedAt = new Date().toISOString();
           const opts = { publiable: actePubliable(a), trame: trameById(a.trameId) };
@@ -78,7 +97,22 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
             detail: `${f.label} : ${data.at}${data.ref ? " (réf. " + data.ref + ")" : ""}${exe ? " — acte exécutoire" : ""}`,
             to: [a.createdBy || "", "role:editeur"],
           });
-          toast(exe ? "Formalité enregistrée : l'acte est exécutoire" : "Formalité enregistrée", "success");
+          // Le courriel de notification : il part APRÈS la constatation, et son
+          // sort est dit à l'agent — un envoi qui ne part pas ne passe pas
+          // inaperçu.
+          if (f.id === "notification" && caseMail.checked && data.courriel) {
+            const trace = await envoyerNotification("notification_interesse", {
+              config: state.config, acte: a, brand: state.config.brand.name,
+              destinataires: [{ nom: data.destinataires || "", courriel: data.courriel }],
+              complement: `L'acte ${a.numero ? "n° " + a.numero : ""} « ${a.objet || ""} » vous est notifié. Il est exécutoire à compter du ${data.at}.`,
+            });
+            toast(trace.envoye
+              ? "Notification envoyée par courriel à " + data.courriel + "."
+              : "Notification non envoyée par courriel : " + (trace.motif || "motif inconnu"),
+              trace.envoye ? "success" : "warning");
+          }
+          if (exe) toast("Formalité enregistrée : l'acte est exécutoire", "success");
+          else if (!(f.id === "notification" && caseMail.checked)) toast("Formalité enregistrée", "success");
           close();
           paint();
         },

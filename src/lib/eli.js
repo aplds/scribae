@@ -19,6 +19,8 @@ import { formatDate } from "./util.js";
 import { styleForDoc } from "./styles.js";
 import { documentCss } from "./export.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
+import { cleService } from "./cle-service.js";
+import { LICENCE_DEFAUT } from "./recueil.js";
 
 const ELI_CODES = {
   decision: "dec",
@@ -37,9 +39,10 @@ export const DEFAULT_PUBLICATION = {
   // au registre : c'est le réglage d'une administration qui publie dans son
   // propre système, et n'attend pas de recueil de cette application.
   auto: true,
-  // Jeton d'API de démonstration. En exploitation, chaque application cliente
-  // reçoit son propre jeton et seule son empreinte est conservée côté service.
-  jetonDemonstration: "ak_demo_19de0ff93719f8484db433a0106aa022e034891defb1fd92",
+  // Clé d'écriture du service : elle n'est JAMAIS inscrite ici (le code est
+  // public). Elle vient du déploiement (`__SCRIBA_API_TOKEN__`) ou du réglage
+  // local de persistance, remis au porteur par src/lib/cle-service.js.
+  jetonDemonstration: "",
   prestataire: {
     nom: "ESUP-Signature (simulation)",
     baseUrl: "https://signature.valmont-sur-loire.fr/api/v1",
@@ -52,10 +55,10 @@ export function publicationSettings(config) {
   return {
     ...DEFAULT_PUBLICATION,
     ...p,
-    // Le déploiement auto-hébergé peut fournir le jeton d'écriture de l'API de
-    // signature (voir src/server/web/host.js) ; sinon celui du référentiel, et
-    // à défaut le jeton de démonstration.
-    jetonDemonstration: globalThis.__SCRIBA_API_TOKEN__ || p.jetonDemonstration || DEFAULT_PUBLICATION.jetonDemonstration,
+    // La clé d'écriture ne se règle ni dans le référentiel (partagé) ni ici :
+    // elle vient du déploiement ou du réglage local du poste (voir
+    // src/lib/cle-service.js). Le champ garde son nom pour les appelants.
+    jetonDemonstration: cleService(),
     opposabilite: { ...DEFAULT_PUBLICATION.opposabilite, ...(p.opposabilite || {}) },
     prestataire: { ...DEFAULT_PUBLICATION.prestataire, ...(p.prestataire || {}) },
   };
@@ -75,8 +78,23 @@ export function eliUri({ config, actTypeId, numero, entityCode, year }) {
   return "eli:/fr/" + parts.join("/");
 }
 
-export function parseEliUri(uri) {
-  const m = String(uri || "").match(/^eli:\/fr\/(.+)$/);
+// L'identifiant ELI et son ADRESSE ne sont pas la même chose, et le nommer sans
+// ambiguïté évite la confusion (NC-IV-003, P-18) :
+//   • l'IDENTIFIANT est la forme « eli:/fr/… » — une clé STABLE, non résoluble
+//     telle quelle ; c'est elle qui sert de repère interne et d'`@id` de travail ;
+//   • l'ADRESSE est l'URI HTTP(S) dérivée sous la base publique — c'est elle qui
+//     se cite, se partage et se résout, et c'est elle que porte le `FRBRuri` du
+//     document Akoma Ntoso (voir src/lib/export.js).
+export const eliIdentifiant = (v) => String(v || "").trim();
+
+export function eliAdresse({ config, eliUri } = {}) {
+  const base = String((config && config.brand && config.brand.baseUri) || "").replace(/\/+$/, "");
+  const id = String(eliUri || "").trim();
+  if (!base || !/^eli:\/fr\//i.test(id)) return "";
+  return base + "/eli/" + id.replace(/^eli:\/fr\//i, "");
+}
+
+export function parseEliUri(uri) {  const m = String(uri || "").match(/^eli:\/fr\/(.+)$/);
   if (!m) return null;
   const [code, year, seq, ...rest] = m[1].split("/");
   return { code, year, seq, entity: rest.join("/") };
@@ -120,9 +138,12 @@ const dlong = (x) => (x ? formatDate(x, "date-long") : "—");
 // l'étape qui s'est intercalée entre la signature et la publication.
 function transmissionBlock(r) {
   const t = r.transmission;
-  if (!t || !t.mention) return "";
-  const ref = t.reference ? `<span class="ref">réf. ${esc(t.reference)}` + (t.sceau ? ` — sceau ${esc(String(t.sceau).slice(0, 24))}…` : "") + `</span>` : "";
-  return `<div class="transmis"><strong>Contrôle de légalité</strong>${esc(t.mention)}${ref ? "<br>" + ref : ""}</div>`;
+  if (!t) return "";
+  const mention = t.mention || (t.certificat && t.certificat.mention) || "";
+  if (!mention) return "";
+  const simule = t.demonstration === true || (t.certificat && t.certificat.demonstration === true);
+  const ref = t.reference ? `<span class="ref">réf. ${esc(t.reference)}` + (t.sceau || (t.certificat && t.certificat.sceau) ? ` — sceau ${esc(String(t.sceau || t.certificat.sceau).slice(0, 24))}…` : "") + `</span>` : "";
+  return `<div class="transmis"><strong>Contrôle de légalité</strong>${simule ? "<span class=\"transmis-simule\">simulation</span>" : ""}${esc(mention)}${ref ? "<br>" + ref : ""}</div>`;
 }
 
 // La page publiée : c'est le document déposé sur le service de publication.
@@ -131,6 +152,20 @@ export function buildWebVersion({ doc, config, record }) {
   const settings = publicationSettings(config);
   const brand = config.brand || {};
   const r = record || {};
+  // Publication INFORMATIVE : le texte consolidé d'un RÈGLEMENT, publié pour
+  // lui-même à titre d'information. Sa page autonome ne se présente donc pas
+  // comme celle d'un acte : pas d'opposabilité, pas de « publié le », pas de
+  // renvoi à un original signé — c'est la décision d'adoption qui fait foi.
+  const info = r.informative === true;
+  // Version CONSOLIDÉE : elle ne remplace pas l'original signé, qui seul fait
+  // foi. Le renvoi à l'original est un lien ELI (« eli:/fr/… ») : l'application
+  // comme le service le traduisent en ADRESSE de l'acte visé (voir
+  // src/lib/recueil.js, `resoudreLiensEli`, et src/server/mysql/actes.mjs). Un
+  // identifiant que le recueil ne connaît pas y reste une simple mention.
+  const versionOrigine = (r.versions || []).find((v) => v && v.kind === "originale" && v.eliUri) || null;
+  const lienOrigine = versionOrigine
+    ? `<a href="${esc(versionOrigine.eliUri)}">${esc([versionOrigine.numero ? "n° " + versionOrigine.numero : "l'acte d'origine", versionOrigine.dateDocument ? "du " + dlong(versionOrigine.dateDocument) : ""].filter(Boolean).join(" "))}</a>`
+    : "l'acte d'origine";
   const style = styleForDoc(config, doc);
   const body = doc ? renderDocument(doc, config, { style, abrogations: true }).outerHTML : (r.bodyHtml || "");
   const formatLinks = [
@@ -169,6 +204,10 @@ a{color:var(--brand)}
 .side dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
 .side dt{color:#5a6472}
 .side dd{margin:0}
+/* La liste des annexes : des intitulés longs (et des ELI) qui doivent se replier
+   plutôt que déborder de la colonne. */
+.side ul{margin:0;padding-left:18px}
+.side li{margin:2px 0;overflow-wrap:anywhere}
 .oppo{border-left:4px solid #0b5a2b;background:#f2f8f4;padding:10px 12px;border-radius:3px;margin:0 0 14px}
 .oppo strong{display:block;font-size:.95rem}
 .formats{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -190,6 +229,11 @@ ${documentCss(config, style)}
 .transmis{margin-top:1.6em;border-left:4px solid var(--brand);background:#f4f6fb;padding:10px 12px;border-radius:3px;font-size:.84rem}
 .transmis strong{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#3a3a3a}
 .transmis .ref{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;color:#5a6472}
+.transmis .transmis-simule{display:inline-block;margin-left:6px;padding:0 6px;border-radius:3px;background:#fdecea;color:#8a1c10;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
+/* Un acte cité par son identifiant ELI : le service résout le lien vers l'acte,
+   quand il est publié au recueil ; sinon la mention reste, soulignée de pointillés
+   et non cliquable (voir src/server/mysql/actes.mjs, resoudreLiensEli). */
+.recueil-lien-eli--hors{border-bottom:1px dotted #c7cfdb;cursor:help;text-decoration:none}
 /* Impression de la version en ligne : seule la page de l'acte est imprimée,
    sur A4 — mêmes marges que le document d'origine, donc mêmes sauts de page. */
 ${A4_BREAK_CSS}
@@ -206,36 +250,56 @@ ${A4_BREAK_CSS}
   <span class="hdr__rep">${esc(r.recueil || settings.recueil)}</span>
   <span class="badge">${esc(r.nature || "Acte")} ${esc(r.numero || "")}</span>
 </div></div>
-<div class="crumb">Accueil &rsaquo; Actes administratifs &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")} &rsaquo; ${esc(r.numero || "")} <span class="eli">(${esc(r.eliUri || "")})</span></div>
+<div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
 <div class="main"><div class="grid">
   <div class="paper"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
   <div class="pub-aside">
     <div class="side">
       <h3>Publication</h3>
       <dl>
-        <dt>Recueil</dt><dd>${esc(r.recueil || settings.recueil)}</dd>
+        ${info ? `<dt>Texte</dt><dd>${esc(r.nature || "Règlement")}</dd>
+        <dt>Adopté par</dt><dd>${esc([r.adoption && r.adoption.designation, r.adoption && r.adoption.numero ? "n° " + r.adoption.numero : "", r.adoption && r.adoption.date ? "du " + dlong(r.adoption.date) : ""].filter(Boolean).join(" ") || "—")}</dd>
+        <dt>Date du texte</dt><dd>${esc(dlong(r.dateDocument))}</dd>` : `<dt>Recueil</dt><dd>${esc(r.recueil || settings.recueil)}</dd>
         <dt>Publié le</dt><dd>${esc(dlong(r.datePublication))}</dd>
         <dt>${r.kind === "consolidee" ? "Texte consolidé au" : "Signé le"}</dt><dd>${esc(dlong(r.dateDocument))}</dd>
-        <dt>Auteur</dt><dd>${esc(r.auteur || "")}</dd>
+        <dt>Auteur</dt><dd>${esc(r.auteur || "")}</dd>`}
         ${r.themeLabel ? `<dt>Thème</dt><dd>${esc(r.themeLabel)}</dd>` : ""}
         <dt>ELI</dt><dd class="eli">${esc(r.eliUri || "")}</dd>
       </dl>
       <div class="formats">${formatLinks.map(([l]) => `<span>${esc(l)}</span>`).join("")}</div>
     </div>
-    <div class="oppo">
-      <strong>Opposabilité</strong>
-      Entrée en vigueur : ${esc(dlong(r.dateOpposabilite))}<br>
-      <span style="font-size:.8rem;color:#3a3a3a">${esc(r.opposabiliteRule || "")}</span>
-    </div>
+    ${info ? `<div class="side"><h3>Texte informatif</h3>
+      <p style="margin:0">Ce texte est publié A TITRE INFORMATIF. Il n'est pas signé et ne se publie pas pour lui-même : il tient son autorité de la décision qui l'adopte, dont l'original signé est suivi de son texte. Seule cette décision fait foi.</p>
+    </div>` : `<div class="oppo">
+      <strong>${r.kind === "consolidee" ? "Version consolidée — ne fait pas foi" : "Opposabilité"}</strong>
+      ${r.kind === "consolidee"
+        ? `Ce texte réunit le texte d'origine et ses modifications publiées : il est diffusé à titre informatif et <strong>ne fait pas foi</strong>. L'opposabilité et la date d'entrée en vigueur sont celles de l'acte d'origine modifié, ${lienOrigine} : c'est son original signé qui peut être opposé.`
+        : `Entrée en vigueur : ${esc(dlong(r.dateOpposabilite))}<br>
+      <span style="font-size:.8rem;color:#3a3a3a">${esc(r.opposabiliteRule || "")}</span>`}
+    </div>`}
+    ${r.adoption ? `<div class="side"><h3>Annexe</h3>
+      <p style="margin:0">Document adopté par <strong>${esc(r.adoption.designation || "un acte")} n° ${esc(r.adoption.numero || "—")}</strong>${r.adoption.date ? ` du ${esc(dlong(r.adoption.date))}` : ""}. Il tient son autorité de cet acte d'adoption, dont l'original signé est suivi de son texte.</p>
+      ${r.adoption.eli ? `<p class="eli" style="margin:6px 0 0">${esc(r.adoption.eli)}</p>` : ""}
+    </div>` : ""}
+    ${(r.annexes || []).length ? `<div class="side"><h3>Annexes</h3>
+      <p style="margin:0 0 6px">Documents adoptés par cet acte : leur texte suit l'acte dans l'original signé.</p>
+      <ul style="margin:0;padding-left:18px">
+        ${r.annexes.map((a) => `<li>${esc(a.designation || "Annexe")} n° ${esc(a.numero || "—")}${a.date ? ` du ${esc(dlong(a.date))}` : ""}${a.objet ? ` — ${esc(a.objet)}` : ""}${a.eli ? ` <span class="eli">${esc(a.eli)}</span>` : ""}</li>`).join("")}
+      </ul>
+    </div>` : ""}
     <div class="side">
-      <h3>${r.kind === "consolidee" ? "Version consolidée" : "Original"}</h3>
-      <p style="margin:0">${r.kind === "consolidee"
-        ? `Texte de l'acte à jour des modifications publiées, diffusé à titre informatif. L'acte d'origine signé reste consultable sous le même identifiant ELI (versions antérieures).`
-        : `L'acte signé est conservé et consultable : <span class="eli">${esc(String(r.originalSha256 || "").slice(0, 24))}…</span>`}</p>
+      <h3>${info ? "Texte informatif" : r.kind === "consolidee" ? "Version consolidée" : (r.originalExterne && r.originalExterne.url ? "Original signé (version signée)" : "Original")}</h3>
+      <p style="margin:0">${info
+        ? `Ce texte n'a pas d'original signé à lui : il tient son autorité de la décision qui l'adopte, dont l'original signé est suivi de son texte. Seule cette décision fait foi.`
+        : r.originalExterne && r.originalExterne.url
+        ? `L'acte a été signé hors de l'application. <a href="${esc(r.originalExterne.url)}" target="_blank" rel="noopener">Ouvrir la version signée (PDF)</a> — c'est elle qui fait foi, telle qu'elle a été mise en ligne.${r.originalExterne.certification && r.originalExterne.certification.statut === "conforme" ? `<br><span style="font-size:.84rem">Conformité certifiée${r.originalExterne.certification.parNom ? " par " + esc(r.originalExterne.certification.parNom) : ""}${r.originalExterne.certification.le ? " le " + esc(dlong(r.originalExterne.certification.le)) : ""}.</span>` : ""}`
+        : r.kind === "consolidee"
+          ? `Texte à jour des modifications publiées, diffusé à titre informatif : <strong>il ne fait pas foi</strong>. La pièce de référence est l'original signé de l'acte d'origine modifié, ${lienOrigine}, conservé sous le même identifiant ELI — c'est lui qui peut être opposé, et les versions antérieures restent consultables.`
+          : `L'acte signé est conservé et consultable : <span class="eli">${esc(String(r.originalSha256 || "").slice(0, 24))}…</span>`}</p>
     </div>
   </div>
 </div></div>
-<div class="foot">Version en ligne générée depuis l'acte signé. Seul l'original signé fait foi ; cette version est diffusée à titre informatif.</div>
+<div class="foot">${info ? "Texte publié à titre informatif. Il n'est pas signé : seule la décision qui l'adopte fait foi, et son original signé est suivi de son texte." : "Version en ligne générée depuis l'acte signé. Seul l'original signé fait foi ; cette version est diffusée à titre informatif."}</div>
 </body></html>`;
 }
 
@@ -243,14 +307,22 @@ ${A4_BREAK_CSS}
 
 export function publicationJsonLd(record) {
   const r = record || {};
+  // Les conditions de réutilisation font partie de la publication : le JSON-LD
+  // les porte dans le vocabulaire Dublin Core, à côté du reste (CRPA art.
+  // L. 322-1). À défaut de licence réglée, la Licence Ouverte 2.0 s'applique.
+  const licence = r.licence || LICENCE_DEFAUT;
   return JSON.stringify({
     "@context": {
       eli: "http://data.europa.eu/eli/ontology#",
       schema: "https://schema.org/",
       dcterms: "http://purl.org/dc/terms/",
+      rdfs: "http://www.w3.org/2000/01/rdf-schema#",
     },
     "@type": "eli:LegalResource",
     "@id": r.eliUri,
+    // L'URI HTTP canonique de la ressource : c'est elle qu'un système tiers
+    // peut suivre (l'ELI « eli:/fr/… » est un identifiant, pas une adresse).
+    "eli:uri": r.url || undefined,
     "eli:title": r.title || "",
     "eli:id_local": r.numero || "",
     "eli:type_document": r.actTypeId || "",
@@ -270,6 +342,7 @@ export function publicationJsonLd(record) {
     "dcterms:description": r.objet || "",
     "dcterms:subject": r.themeLabel ? { "dcterms:title": r.themeLabel } : undefined,
     "dcterms:creator": { "@type": "schema:Organization", "schema:name": r.brandName || "" },
+    "dcterms:license": { "@id": licence.url, "dcterms:title": licence.nom, "rdfs:comment": licence.mention },
     "schema:legislationIdentifier": r.numero || "",
     "eli:signature": r.signature ? {
       "eli:signatory": r.signature.signataires || [],

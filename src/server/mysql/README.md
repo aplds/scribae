@@ -9,7 +9,8 @@ Il expose **deux familles de ressources** :
 | Famille | Ressources | Persistance |
 |---|---|---|
 | **Données** | `GET /v1/db/health`, `GET /v1/db/collections/{collection}`, `POST /v1/db/collections/{collection}/sync` | `sb_record`, `sb_collection`, `sb_journal` |
-| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/publications…`, `/v1/eli/…`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
+| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/actes/{id}/dossier-signature`, `/v1/publications…`, `/v1/eli/…`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
+| **Courriel** | `GET /v1/courriel`, `POST /v1/courriel/envoi`, `POST /v1/courriel/test` | `sb_courriel` (+ `SMTP_*` du `.env`) |
 
 Le contrat de la famille « données » est **le même** que celui du service de
 démonstration : l'application ne voit aucune différence et
@@ -52,6 +53,7 @@ Le service peut aussi créer les tables lui-même (`--migrate`). Les objets cré
 | `sb_record` | **le cœur** : un enregistrement par trame / acte / compte / objet du référentiel |
 | `sb_journal` | registre des modifications : qui a écrit quoi, quand |
 | `sb_etat` | l'état du service de signature et de publication (document JSON unique) |
+| `sb_courriel` | le journal des envois de courriel : quand, quel événement, quels destinataires, quel objet, envoyé ou non et pourquoi |
 | `v_acte`, `v_trame` | vues de lecture en clair (objet, numéro, statut, service…) |
 | `v_collection` | synthèse : nombre d'enregistrements et révision par collection |
 
@@ -97,6 +99,14 @@ que dans l'en-tête `Authorization: Bearer …`, et n'est jamais conservé côt�
 Le **même** jeton sert pour les deux familles de ressources (données et actes) : c'est la
 même autorisation d'écriture.
 
+> **Mode « comptes locaux » (`AUTH_MODE=password`).** Les jetons d'API ne sont alors **plus
+> acceptés** : la porte est la session de l'agent (identifiant + mot de passe, vérifiés par le
+> service), et une écriture sans session est refusée (401). `API_TOKENS` peut rester vide. Le
+> compte d'administration se configure dans le `.env` (`ADMIN_LOGIN`, `ADMIN_PASSWORD`) ; il est
+> créé au premier démarrage, puis gère les autres comptes depuis *Comptes et rôles*. Les tables
+> `sb_motdepasse` et `sb_session` (voir `schema.sql`) portent les dérivés `scrypt` et les
+> sessions, et font partie de la sauvegarde. Détail : `../../docs/ADMINISTRATION.md` § 4.3 bis.
+
 ## 4. Brancher l'application
 
 Dans l'application : **Administration › Base de données** →
@@ -113,12 +123,16 @@ vise la même base. La **session** de connexion, elle, reste locale.
 
 ## 5. Liste de contrôle avant mise en service
 
+- **Mode d'authentification** : `AUTH_MODE=demo` (démonstration, jetons d'API) ou
+  `AUTH_MODE=password` (comptes locaux). En mode `demo`, **ne pas exposer** l'installation :
+  placer l'application derrière un VPN ou un portail, car le jeton d'écriture est public.
 - **TLS obligatoire** : placez le service derrière un reverse-proxy HTTPS (nginx, Caddy,
-  Traefik). Le jeton circule en clair dans l'en-tête sinon.
+  Traefik). Le jeton circule en clair dans l'en-tête sinon — et, en mode `password`, le mot de
+  passe de l'agent aussi.
 - **CORS** : en auto-hébergement, application et API partagent l'origine — `*` convient ;
   sinon, listez les origines exactes dans `CORS_ORIGINS`.
 - **Sauvegardes** : `mariadb-dump scriba | gzip > scriba-$(date +%F).sql.gz`, planifié ; test
-  de restauration annuel.
+  de restauration annuel — le dump doit inclure `sb_motdepasse` et `sb_session`.
 - **Droits** : l'utilisateur SQL n'a besoin que de `SELECT, INSERT, UPDATE, DELETE`.
 - **Journalisation** : conservez `sb_journal` (purge annuelle possible) — c'est la piste
   d'audit des modifications d'actes.
@@ -164,3 +178,36 @@ SELECT acte_id, numero, objet FROM v_acte WHERE service_id = 'svc-regie';
   tout lui est injecté (état, empreinte SHA-256, horloge, persistance). C'est ce qui garantit
   que le service auto-hébergé et celui de démonstration se comportent de la même façon, et
   c'est ce qui le rend testable hors ligne.
+- **Domaine pur côté comptes.** `comptes.mjs` suit la même règle : le port de crypto
+  (`randomBytes`, `scrypt`, `sha256`, comparaison à temps constant) et la persistance lui sont
+  injectés, ce qui permet d'éprouver le blocage après échecs, l'expiration d'une session et
+  l'anti-CSRF **sans base ni attente** (`comptes.test.mjs`, `npm test`). En production, seule
+  la table `sb_motdepasse` connaît les dérivés `scrypt` — jamais un mot de passe.
+- **Moteur SMTP sans dépendance.** `smtp.mjs` implémente lui-même le dialogue SMTP (RFC 5321,
+  2045, 2047) plutôt que d'ajouter une bibliothèque : c'est une centaine de lignes à auditer, et
+  le **transport est injecté** (`lireReponse`, `ecrire`, `demarrerTls`, `fermer`), donc le moteur
+  s'éprouve **sans réseau ni serveur** — c'est ainsi qu'il a été vérifié (réponses multilignes,
+  capacités EHLO, `STARTTLS`, `AUTH LOGIN` et `AUTH PLAIN`, `MAIL FROM`/`RCPT TO`/`DATA`, sujet
+  encodé, corps texte + HTML). Le mot de passe n'apparaît dans aucun journal.
+- **La part interne de l'original est rangée, pas servie.** `hPublier` sépare l'original signé en
+  deux : la part **publique** (`original`) part au recueil et se sert par les routes ouvertes ;
+  la part **interne** (`originalInterne`) — mentions nominatives du signataire et trace des
+  courriels — est conservée avec l'acte et ne se sert que par `GET /v1/actes/{id}/dossier-signature`,
+  protégée par le jeton.
+
+## 8. Le courriel (serveur SMTP)
+
+Le service peut envoyer les **notifications** de Scribae par le serveur de messagerie de la
+collectivité. Il lit sa configuration dans le `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME`, `SMTP_REPLY_TO`, `SMTP_NOTIF_ACTIVE`,
+`SMTP_TLS_INSECURE`, `SMTP_HELO_NAME`, `SMTP_TIMEOUT_MS` — voir `env.example`). **Sans
+`SMTP_HOST`**, la chaîne d'envoi est simplement **indisponible** : `GET /v1/courriel` le dit,
+`/v1/courriel/envoi` et `/v1/courriel/test` répondent `503 courriel_indisponible`, et
+l'application trace chaque notification « non envoyée ». Rien d'autre ne change : c'est le
+réglage normal d'une installation sans messagerie.
+
+L'application — qui n'a **jamais** accès au mot de passe SMTP — demande l'envoi
+(`POST /v1/courriel/envoi`, protégé par le jeton) et le service parle au serveur. Chaque envoi
+est journalisé dans `sb_courriel`, et l'écran « Administration › Courriel » en montre les
+derniers. Le message d'essai (`POST /v1/courriel/test`) ne suit pas la politique de
+notification de l'application : c'est un essai de la chaîne.

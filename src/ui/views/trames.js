@@ -1,13 +1,16 @@
-import { state, touch, navigate, redrawView, can, visibleTrames, tramesCorbeille, mettreALaCorbeille } from "../state.js";
+import { state, touch, navigate, redrawView, can, visibleTrames, tramesCorbeille, mettreALaCorbeille, trameEstDisponible } from "../state.js";
 import { resetDraft } from "./rediger.js";
 import { h, button, toast, clear, icon } from "../dom.js";
 import { newTrame, tramePublishable } from "../../lib/schema.js";
 import { targetLabel, serviceById, servicesInScope, coversAllServices, authorLabel } from "../../lib/scope.js";
-import { download, pickFile } from "../../lib/util.js";
+import { download, pickBinaryFile } from "../../lib/util.js";
 import { exampleTrameFile, readTrameFile } from "../../lib/trame-format.js";
+import { importerTrameDocument } from "../import-trame.js";
+import { boutonDisponibilite } from "../mise-a-disposition.js";
 import { confirmDialog, promptDialog, statusBadge, emptyState, textField, choiceField, orgFields } from "../components.js";
 import { helpLink } from "../components.js";
 import { modal } from "../dom.js";
+import { countNotes } from "../annotations.js";
 
 // Auteur d'une contribution (ici, la trame elle-même) : le service du compte
 // connecté — voir `authorLabel` (src/lib/scope.js).
@@ -28,7 +31,7 @@ export function renderTrames(root) {
     h("div", { class: "page-head__actions" },
       helpLink("ouvrir", "Comment ça marche ?"),
       can("trames.gerer") ? button("Fichier d'exemple", { variant: "secondary", icon: "download", title: "Télécharger un modèle JSON documenté pour préparer vos trames en amont", onClick: downloadExample }) : null,
-      can("trames.gerer") ? button("Importer une trame", { variant: "secondary", icon: "upload", onClick: importTrame }) : null,
+      can("trames.gerer") ? button("Importer une trame", { variant: "secondary", icon: "upload", title: "Depuis un document Word (.docx) ou LibreOffice (.odt) — l'application en propose une trame, que vous relirez avant de l'enregistrer — ou depuis un fichier de trames (.json)", onClick: importTrame }) : null,
       can("trames.gerer") ? button("Nouvelle trame", { variant: "primary", icon: "plus", onClick: () => createTrame() }) : null,
     ),
   ));
@@ -69,7 +72,7 @@ export function renderTrames(root) {
     })(),
     (() => {
       const s = h("select", { class: "fr-select", style: { maxWidth: "180px" }, on: { change: (e) => { ui.status = e.target.value; redraw(); } } });
-      for (const [v, l] of [["", "Tous les statuts"], ["draft", "Brouillon"], ["published", "Publiée"], ["archived", "Archivée"]]) {
+      for (const [v, l] of [["", "Tous les statuts"], ["draft", "Brouillon"], ["published", "Mise à disposition"], ["archived", "Archivée"]]) {
         const o = h("option", { value: v, text: l });
         if (v === ui.status) o.selected = true;
         s.appendChild(o);
@@ -136,12 +139,12 @@ function trameCard(t, redraw) {
   const config = state.config;
   const gerer = can("trames.gerer");
   const family = (config.families || []).find((f) => f.id === t.familyId);
-  const noteCount = (t.body || []).reduce((n, node) => n + (node.notes?.length || 0) + (node.blocks || []).reduce((m, b) => m + (b.notes?.length || 0), 0), 0);
+  const noteCount = countNotes(t.body);
   const scoped = (t.entityIds || []).length
     ? t.entityIds.map((id) => config.entities.find((e) => e.id === id)?.code).filter(Boolean).join(", ")
     : "toutes entités";
 
-  return h("div", { class: "fr-card" },
+  return h("div", { class: "fr-card fr-card--pied" },
     h("div", { class: "fr-row" },
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto" }, text: t.name }),
       statusBadge(t.status),
@@ -159,12 +162,28 @@ function trameCard(t, redraw) {
       h("span", { class: "fr-badge", text: `${(t.rules || []).length} règles` }),
       noteCount ? h("span", { class: "fr-badge fr-badge--info", text: `${noteCount} commentaires` }) : null,
     ),
-    h("div", { class: "fr-row" },
-      gerer ? button("Ouvrir l'éditeur", { variant: "primary", icon: "doc", onClick: () => navigate("trame/" + t.id) }) : null,
-      button("Rédiger", { variant: gerer ? "secondary" : "primary", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
-      gerer ? button("", { variant: "tertiary", icon: "copy", title: "Dupliquer", onClick: () => duplicate(t, redraw) }) : null,
-      gerer ? button("", { variant: "tertiary", icon: "download", title: "Exporter (JSON)", onClick: () => exportTrame(t) }) : null,
-      gerer ? button("", { variant: "tertiary", icon: "trash", title: "Supprimer", onClick: () => remove(t, redraw) }) : null,
+    // Un brouillon ne sort pas de l'atelier : on le dit là où on le voit, plutôt
+    // que de laisser croire qu'un service peut déjà s'en servir.
+    !trameEstDisponible(t)
+      ? h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" }, text: t.status === "archived"
+        ? "Trame archivée : elle n'est proposée à personne. Retirez-la des archives pour la remettre à disposition."
+        : "Brouillon : les services ne la voient pas encore. Mettez-la à disposition quand elle sera prête." })
+      : null,
+    // Les gestes sont rangés en deux groupes : à gauche ce qui part du modèle
+    // (l'ouvrir, rédiger, l'offrir aux services ou le retirer), à droite les
+    // gestes secondaires, réduits à leur icône. Sans cela, cinq boutons sur une
+    // ligne se cassent en trois lignes bancales dans une carte étroite.
+    h("div", { class: "fr-row", style: { justifyContent: "space-between", rowGap: "6px" } },
+      h("div", { class: "fr-row" },
+        gerer ? button("Ouvrir l'éditeur", { variant: "primary", icon: "doc", onClick: () => navigate("trame/" + t.id) }) : null,
+        button("Rédiger", { variant: gerer ? "secondary" : "primary", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
+        gerer ? boutonDisponibilite(t, { size: "sm", variant: "secondary", court: true }) : null,
+      ),
+      h("div", { class: "fr-row" },
+        gerer ? button("", { variant: "tertiary", icon: "copy", title: "Dupliquer", onClick: () => duplicate(t, redraw) }) : null,
+        gerer ? button("", { variant: "tertiary", icon: "download", title: "Exporter (JSON)", onClick: () => exportTrame(t) }) : null,
+        gerer ? button("", { variant: "tertiary", icon: "trash", title: "Supprimer", onClick: () => remove(t, redraw) }) : null,
+      ),
     ),
   );
 }
@@ -262,13 +281,31 @@ function downloadExample() {
   toast("Fichier d'exemple téléchargé — complétez la partie « trame », puis réimportez-le.", "info");
 }
 
-// Import : accepte une trame, plusieurs trames ou le fichier d'exemple. Les
-// identifiants sont régénérés et la trame est complétée avec les valeurs par
-// défaut ; les problèmes bloquants et les points à vérifier sont montrés.
+// Import : un DOCUMENT (Word ou LibreOffice) dont on propose une trame — non
+// enregistrée, à relire dans l'éditeur — ou un FICHIER DE TRAMES (JSON), qui
+// entre directement au registre. Les deux formats ne se lisent pas de la même
+// façon (le premier est binaire), donc on les distingue par l'extension.
+const EST_DOCUMENT = /\.(docx|odt)$/i;
+const EST_FICHIER_TRAMES = /\.(json|txt)$/i;
+
 async function importTrame() {
-  const f = await pickFile(".json,.txt");
+  const f = await pickBinaryFile(".docx,.odt,.json,.txt");
   if (!f) return;
-  const { trames, issues, warnings } = readTrameFile(f.text);
+
+  if (EST_DOCUMENT.test(f.name)) return void (await importerTrameDocument(f));
+
+  if (!EST_FICHIER_TRAMES.test(f.name)) {
+    modal({
+      title: "Format non reconnu",
+      body: h("div", { class: "fr-stack" },
+        h("p", { text: `« ${f.name} » n'est pas dans un format accepté.` }),
+        h("p", { class: "fr-small fr-muted", text: "Importez un document Word (.docx) ou LibreOffice (.odt) : l'application en propose une trame, que vous relirez dans l'éditeur avant de l'enregistrer. Ou un fichier de trames (.json) préparé hors de l'application — le « Fichier d'exemple » montre sa structure." })),
+      actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })],
+    });
+    return;
+  }
+
+  const { trames, issues, warnings } = readTrameFile(await f.text());
   if (issues.length) {
     modal({
       title: "Import impossible",
@@ -289,13 +326,20 @@ async function importTrame() {
   for (const t of trames) state.trames.push(t);
   touch("trames");
   toast(`${trames.length} trame${trames.length > 1 ? "s" : ""} importée${trames.length > 1 ? "s" : ""}`, "success");
-  if (warnings.length) {
+  // Un fichier peut déclarer ses trames « mises à disposition » (c'est le cas
+  // d'un export réimporté). On le dit : ces trames-là sont visibles des
+  // services dès maintenant, sans que personne ait appuyé sur le bouton.
+  const dejaDisponibles = trames.filter(trameEstDisponible).length;
+  if (warnings.length || dejaDisponibles) {
     modal({
       title: "Import terminé — points à vérifier",
       body: h("div", { class: "fr-stack" },
-        h("p", { text: "Les trames ont été importées. Ces points ont été complétés ou corrigés automatiquement :" }),
+        h("p", { text: "Les trames ont été importées." + (warnings.length ? " Ces points ont été complétés ou corrigés automatiquement :" : "") }),
         ...warnings.slice(0, 12).map((m) => h("p", { class: "fr-small", text: "• " + m })),
-        warnings.length > 12 ? h("p", { class: "fr-small fr-muted", text: `… et ${warnings.length - 12} autre(s).` }) : null),
+        warnings.length > 12 ? h("p", { class: "fr-small fr-muted", text: `… et ${warnings.length - 12} autre(s).` }) : null,
+        dejaDisponibles
+          ? h("p", { class: "fr-small fr-muted", text: `${dejaDisponibles} trame(s) arrivent avec le statut « mise à disposition » : elles sont déjà proposées aux services. Les autres restent des brouillons, à vous de les mettre à disposition quand elles seront prêtes.` })
+          : null),
       actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })],
     });
   }

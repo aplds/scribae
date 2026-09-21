@@ -21,6 +21,7 @@
 import { uid, clone, formatDate, esc } from "./util.js";
 import { enrichirSignataire } from "./delegations.js";
 import { numberedLabel, buildContext, interpolate } from "./compile.js";
+import { annexesVocab, clauseAdoption, nodeAnnexes, avecDe } from "./annexes.js";
 
 export const AMEND_ACTIONS = [
   { id: "keep", label: "Conserver", hint: "L'article n'est pas touché.", color: "" },
@@ -36,9 +37,17 @@ export const amendActionLabel = (id) => ACTION_MAP[id]?.label || id;
 
 const DEFAULTS = {
   designation: "Décision",
-  title: "{designation} n°{numero} du {date} portant modification de {targetInSentence}",
+  // La cible est désignée par {targetDe} — la forme contractée de « de » avec son
+  // article (« de la décision », « du règlement », « de l'arrêté »). Écrire
+  // « de {targetInSentence} » produisait « de le règlement » pour toute
+  // appellation masculine non élidée.
+  title: "{designation} n°{numero} du {date} portant modification {targetDe}",
   target: "{designation} n°{numero} du {date}",
   targetInSentence: "{designationThe} n°{numero} du {date}",
+  // La cible quand elle n'a PAS de numéro — une ANNEXE (voir src/lib/annexes.js).
+  // On la désigne alors par la décision qui a fait son texte : {adoptionRef}
+  // porte déjà « la délibération n° 2026-416-VSL du 24 septembre 2026 ».
+  targetAnnexe: "{designationThe} ({adoptionRef})",
   replace: "L'{article} de {target} est remplacé par les dispositions suivantes :",
   abrogate: "L'{article} de {target} est abrogé.",
   insertAfter: "Après l'{article} de {target}, il est inséré un {newArticle} ainsi rédigé :",
@@ -113,7 +122,19 @@ export const newAmend = (patch = {}) => ({
 });
 
 // ------------------------------------------------------------------ articles
-export const articlesOf = (doc) => (doc?.nodes || []).filter((n) => n.type === "article");
+// Les NŒUDS du corps dans l'ORDRE IMPRIMÉ, divisions comprises (parcours en
+// profondeur) : c'est l'ordre auquel se réfèrent les adresses d'édition
+// (`n3`), le plan des modifications, et la numérotation continue des articles.
+// Pour un document sans division, cet ordre est exactement celui des nœuds du
+// corps — l'échelle des adresses ne change donc pas.
+export function flatNodes(doc) {
+  const out = [];
+  const walk = (list) => (list || []).forEach((n) => { out.push(n); if (n.type === "division") walk(n.blocks); });
+  walk(doc?.nodes);
+  return out;
+}
+
+export const articlesOf = (doc) => flatNodes(doc).filter((n) => n.type === "article");
 export const articleKey = (a) => a?.eId || a?.path || a?.id || "";
 
 const NUM_RE = /(\d+(?:-\d+)*)\s*$/;
@@ -295,15 +316,29 @@ export function buildModificatif(base, plan, m, config) {
     numero: base.meta?.numero || "à compléter",
     date: longDate(base.meta?.dateSignature),
   };
-  const targetStandalone = fill(V.target, baseVars);
-  const targetSentence = fill(V.targetInSentence, baseVars);
+  // Le texte qu'on modifie est désigné ici comme partout ailleurs. Une ANNEXE
+  // n'a pas de numéro : `targetPhrase` la désigne alors par la décision qui a
+  // fait son texte (voir src/lib/annexes.js), et les deux tournures — celle du
+  // visa, celle du dispositif — disent la même chose.
+  const sansNumero = !base.meta?.numero;
+  const cibleBase = targetPhrase(base, base.meta?.designation, config);
+  const targetStandalone = sansNumero ? cibleBase : fill(V.target, baseVars);
+  const targetSentence = sansNumero ? cibleBase : fill(V.targetInSentence, baseVars);
+  // Un acte qui MODIFIE UNE ANNEXE ne la modifie pas article par article : il en
+  // ADOPTE la nouvelle rédaction, et cette rédaction lui est annexée — publiée à
+  // part, sous son propre identifiant. L'intitulé et la clause changent donc,
+  // pas la mécanique de la modification. Voir src/lib/annexes.js.
+  const adopte = m.adoption === true;
+  const cibleAnnexe = m.adoptionTarget || targetSentence;
+  const adoptVars = { ...baseVars, numero: m.numero || "à compléter", date: longDate(m.dateSignature), target: cibleAnnexe, targetInSentence: cibleAnnexe, targetDe: avecDe(cibleAnnexe) };
   nodes.push(id("title", {
-    text: fill(V.title, {
+    text: adopte ? fill(annexesVocab(config).adoptTitle, adoptVars) : fill(V.title, {
       ...baseVars,
       numero: m.numero || "à compléter",
       date: longDate(m.dateSignature),
       target: targetStandalone,
       targetInSentence: targetSentence,
+      targetDe: avecDe(targetSentence),
     }),
   }));
   nodes.push(id("authority", { text: ctx.entity?.authorityFormula || entity.authorityFormula || "" }));
@@ -316,9 +351,19 @@ export function buildModificatif(base, plan, m, config) {
   if (considerants.length) nodes.push(id("considerants", { items: considerants.map((t) => ({ id: uid("it"), text: t, when: "" })) }));
   nodes.push(id("enact", { text: config.vocab?.enact || "DÉCIDE" }));
 
+  // L'adoption de la nouvelle rédaction ouvre le dispositif : c'est elle qui
+  // donne au texte annexé sa valeur juridique.
+  const decal = adopte ? 1 : 0;
+  if (adopte) {
+    nodes.push(id("article", {
+      eId: "art_1", numMode: "fixed", num: "1", numLabel: numberedLabel(config, 1), heading: "",
+      blocks: [{ id: uid("n"), type: "para", text: clauseAdoption(cibleAnnexe, { designation: m.designation, numero: m.numero, date: m.dateSignature }, config), eId: "art_1__p_1", when: "", notes: [] }],
+    }));
+  }
+
   // article par article : un article de l'acte modificatif par modification
   changes.forEach((a, i) => {
-    const eId = `art_${i + 1}`;
+    const eId = `art_${i + 1 + decal}`;
     const blocks = [{ id: uid("n"), type: "para", text: leadSentence(a, config), eId: `${eId}__p_1`, when: "", notes: [] }];
     if (a.action !== "abrogate") {
       (a.blocks || []).forEach((b, j) => {
@@ -328,8 +373,8 @@ export function buildModificatif(base, plan, m, config) {
     nodes.push(id("article", {
       eId,
       numMode: "fixed",
-      num: String(i + 1),
-      numLabel: numberedLabel(config, i + 1),
+      num: String(i + 1 + decal),
+      numLabel: numberedLabel(config, i + 1 + decal),
       heading: a.heading || "",
       blocks,
       amendment: { target: a.target ? articleKey(a.target) : "", targetLabel: a.target?.numLabel || "", action: a.action, newNum: a.newNum || "" },
@@ -337,7 +382,7 @@ export function buildModificatif(base, plan, m, config) {
   });
 
   // dispositions finales (facultatives)
-  let extra = changes.length + 1;
+  let extra = changes.length + 1 + decal;
   if (m.addEntry !== false) {
     const desM = m.designation || V.designation;
     const text = m.dateEffet
@@ -359,6 +404,10 @@ export function buildModificatif(base, plan, m, config) {
   }
 
   // signature et mentions
+  // Les documents ANNEXÉS à l'acte (la nouvelle rédaction de l'annexe, publiée à
+  // part) : ils s'annoncent à la fin du dispositif, juste avant la signature.
+  const annexesNode = nodeAnnexes(m.annexes, config);
+  if (annexesNode) nodes.push(annexesNode);
   nodes.push(id("signature", {
     place: entity.seatCity || base.meta?.entity?.seatCity || "",
     date: longDate(m.dateSignature),
@@ -385,6 +434,10 @@ export function buildModificatif(base, plan, m, config) {
       trameName: "Modification d'acte",
       trameVersion: "",
       actTypeId: base.meta?.actTypeId || "acte",
+      nature: "acte",
+      // L'annexe dont cet acte adopte la nouvelle rédaction (s'il y en a une).
+      adopteAnnexe: adopte ? (m.adoptionAnnexe || null) : undefined,
+      annexes: (m.annexes || []).length ? m.annexes : undefined,
       entity, org: base.meta?.org || entity, signataire: enrichPerson(config, m.signataireId, entity.id),
       generatedAt: new Date().toISOString(),
       amends: {
@@ -444,26 +497,38 @@ export function applyRenumbering(nodes, renum, config) {
   const map = ren.map || {};
   const label = (num) => numberedLabel(config, num);
   const list = nodes || [];
+  // Les articles, dans l'ordre imprimé, divisions comprises : c'est l'ordre du
+  // dispositif, donc celui d'une renumérotation continue.
+  const arts = [];
+  const collect = (ns) => (ns || []).forEach((n) => { if (n.type === "article") arts.push(n); else if (n.type === "division") collect(n.blocks); });
+  collect(list);
   if (ren.all) {
     let i = 0;
     const pris = new Set();
-    for (const n of list) {
-      if (n.type !== "article" || abbreviated(n)) continue;
+    for (const n of arts) {
+      if (abbreviated(n)) continue;
       i += 1;
       pris.add(String(i));
       n.num = String(i);
       n.numLabel = label(i);
     }
-    return list.filter((n) => !(abbreviated(n) && pris.has(numericToken(n.numLabel))));
+    return purgeAbroges(list, pris);
   }
-  for (const n of list) {
-    if (n.type !== "article") continue;
+  for (const n of arts) {
     const num = map[articleKey(n)];
     if (!num) continue;
     n.num = String(num);
     n.numLabel = label(num);
   }
   return list;
+}
+
+// Retire de l'arbre les articles abrogés dont le numéro est repris par un
+// article en vigueur (la renumérotation continue les rend inutiles).
+function purgeAbroges(list, pris) {
+  return (list || [])
+    .filter((n) => !(abbreviated(n) && pris.has(numericToken(n.numLabel))))
+    .map((n) => (n.type === "division" ? { ...n, blocks: purgeAbroges(n.blocks, pris) } : n));
 }
 
 export function buildConsolidated(base, plan, m, config, opts = {}) {
@@ -476,38 +541,60 @@ export function buildConsolidated(base, plan, m, config, opts = {}) {
     byTarget.get(a.targetEId).push(a);
   }
   const mark = { by: m.numero || "", designation: m.designation || "", date: m.dateSignature || "", eli: m.eli || "", base: base.meta?.numero || "" };
-  const nodes = [];
 
-  for (const node of base.nodes || []) {
-    if (node.type !== "article") { nodes.push(clone(node)); continue; }
-    const list = byTarget.get(articleKey(node)) || [];
-    for (const a of list.filter((x) => x.action === "insert-before")) nodes.push(insertedArticle(a, m, config, base));
-    const rep = list.find((x) => x.action === "replace");
-    const abr = list.find((x) => x.action === "abrogate");
-    if (rep) {
-      const art = clone(node);
-      art.blocks = [
-        ...(node.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "del", ...mark } })),
-        ...(rep.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "ins", ...mark } })),
-      ];
-      art.change = { kind: "mod", ...mark, action: "replace" };
-      nodes.push(art);
-    } else if (abr) {
-      const art = clone(node);
-      art.blocks = (node.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "del", ...mark } }));
-      art.change = { kind: "del", ...mark, action: "abrogate" };
-      nodes.push(art);
-    } else {
-      nodes.push(clone(node));
+  // La modification s'applique RÉCURSIVEMENT : les articles d'un texte rangé en
+  // Livres / Titres / Chapitres sont atteints comme ceux du corps, et un article
+  // inséré « après » un article de division prend place dans CETTE division.
+  const applyList = (list) => {
+    const out = [];
+    for (const node of list || []) {
+      if (node.type === "division") {
+        out.push({ ...clone(node), blocks: applyList(node.blocks || []) });
+        continue;
+      }
+      if (node.type !== "article") { out.push(clone(node)); continue; }
+      const list2 = byTarget.get(articleKey(node)) || [];
+      for (const a of list2.filter((x) => x.action === "insert-before")) out.push(insertedArticle(a, m, config, base));
+      const rep = list2.find((x) => x.action === "replace");
+      const abr = list2.find((x) => x.action === "abrogate");
+      if (rep) {
+        const art = clone(node);
+        art.blocks = [
+          ...(node.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "del", ...mark } })),
+          ...(rep.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "ins", ...mark } })),
+        ];
+        art.change = { kind: "mod", ...mark, action: "replace" };
+        out.push(art);
+      } else if (abr) {
+        const art = clone(node);
+        art.blocks = (node.blocks || []).map((b) => ({ ...clone(b), id: uid("n"), change: { kind: "del", ...mark } }));
+        art.change = { kind: "del", ...mark, action: "abrogate" };
+        out.push(art);
+      } else {
+        out.push(clone(node));
+      }
+      for (const a of list2.filter((x) => x.action === "insert-after")) out.push(insertedArticle(a, m, config, base));
     }
-    for (const a of list.filter((x) => x.action === "insert-after")) nodes.push(insertedArticle(a, m, config, base));
-  }
+    return out;
+  };
+  const nodes = applyList(base.nodes || []);
 
   const appends = changes.filter((a) => a.action === "append");
   if (appends.length) {
-    const at = nodes.findIndex((n) => n.type === "signature" || n.type === "mention");
-    const insertAt = at < 0 ? nodes.length : at;
-    nodes.splice(insertAt, 0, ...appends.map((a) => insertedArticle(a, m, config, base)));
+    const arts = appends.map((a) => insertedArticle(a, m, config, base));
+    // « Fin de dispositif » : la fin du DERNIER ensemble de dispositions. Si le
+    // texte se termine par une division, l'article ajouté entre dans cette
+    // division (et dans la dernière des divisions imbriquées) ; sinon il prend
+    // place avant la signature, comme auparavant.
+    let list = nodes;
+    let idx = (() => { const i = list.findIndex((n) => n.type === "signature" || n.type === "mention"); return i < 0 ? list.length : i; })();
+    while (idx > 0 && list[idx - 1] && list[idx - 1].type === "division") {
+      const div = list[idx - 1];
+      div.blocks = div.blocks || [];
+      list = div.blocks;
+      idx = list.length;
+    }
+    list.splice(idx, 0, ...arts);
   }
 
   // Renumérotation (réattribution d'un numéro, ou numérotation continue) : elle
@@ -518,7 +605,7 @@ export function buildConsolidated(base, plan, m, config, opts = {}) {
   // L'acte est-il abrogé DANS SON ENSEMBLE ? Toutes ses dispositions sont alors
   // retirées : la version consolidée le dit, au lieu de laisser croire à une
   // suite d'abrogations d'articles sans lien.
-  const arts = (base.nodes || []).filter((n) => n.type === "article");
+  const arts = articlesOf(base);
   const abroge = arts.length > 0 && arts.every((n) => changes.some((a) => a.action === "abrogate" && a.target && articleKey(a.target) === articleKey(n)));
 
   const entry = {
@@ -591,11 +678,28 @@ export function firstTitleOf(doc) {
 export function targetPhrase(base, designation, config) {
   const V = amendVocab(config);
   const des = designation || base?.meta?.designation || V.designation;
+  const numero = base?.meta?.numero || "";
+  const adoption = base?.meta?.adoption || null;
+  // Une ANNEXE n'a pas de numéro : on la désigne par la décision qui a fait son
+  // texte — celle qui l'adopte, ou celle qui en a adopté la nouvelle rédaction
+  // (voir src/lib/annexes.js). Sans référence connue, on retombe sur la date.
+  if (!numero && adoption) {
+    return fill(V.targetAnnexe, {
+      designation: des,
+      designationLower: lcFirst(des),
+      designationThe: designationThe(des),
+      adoptionRef: [
+        designationThe(adoption.designation || "acte"),
+        adoption.numero ? "n° " + adoption.numero : "",
+        adoption.date ? "du " + longDate(adoption.date) : "",
+      ].filter(Boolean).join(" "),
+    });
+  }
   return fill(V.targetInSentence, {
     designation: des,
     designationLower: lcFirst(des),
     designationThe: designationThe(des),
-    numero: base?.meta?.numero || "à compléter",
+    numero: numero || "à compléter",
     date: longDate(base?.meta?.dateSignature),
   });
 }

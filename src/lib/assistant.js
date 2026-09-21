@@ -23,9 +23,19 @@
 //   • « personnalisé » — l'API de la collectivité (adresse, clé, modèle), ce
 //                      qui permet de fonctionner hors de Perchance, ou de faire
 //                      tourner un modèle souverain sur son propre réseau ;
-//   • « automatique » — le moteur intégré quand il est là, l'adresse sinon.
-// L'application s'en passe proprement quand il n'y en a aucun : le module ne
-// lève jamais au chargement, et l'interface montre un état, pas une erreur.
+//   • « automatique » — le moteur intégré quand il est là, l'adresse sinon, et
+//                      le repli documentaire quand il n'y a ni l'un ni l'autre ;
+//   • « repli »      — dernier recours, et il n'y a rien à configurer : faute de
+//                      moteur de langage, l'assistant répond par RECHERCHE dans
+//                      ce qu'il sait (le guide, ou les actes publiés), sans le
+//                      moindre appel réseau. C'est ce qui donne un assistant
+//                      utile à une page servie en statique (GitHub Pages) ou à un
+//                      déploiement sans API — sans clé, sans service, et sans
+//                      envoyer un mot à qui que ce soit. Les réponses sont des
+//                      extraits, pas des phrases rédigées : l'écran le dit, et
+//                      une réponse qui ne trouve rien dit pourquoi.
+// L'application ne lève jamais au chargement, et l'interface montre un état,
+// pas une erreur.
 //
 // Le NOM et L'ICÔNE se règlent aussi (Administration › Assistants) : une
 // collectivité qui préfère « Ariane » ou une autre vignette les change ici, et
@@ -42,7 +52,7 @@
 // fabrique jamais une adresse : il recopie celles qu'on lui donne, libellées.
 // ============================================================================
 
-import { GUIDE, chapitresPertinents, chapitreEnTexte, guideSommaire, lienChapitre } from "../wiki.js";
+import { GUIDE, chapitresPertinents, chapitreEnTexte, guideSommaire, lienChapitre, motsCles, contientMot, sansAccents } from "../wiki.js";
 import { hostGenerateText, hostSuperFetch } from "./hosts.js";
 import { hrefActe } from "./recueil.js";
 import { uid, formatDate } from "./util.js";
@@ -115,6 +125,8 @@ RENVOYER À UN ACTE :
 
 const PROMPTS_ATELIER = [
   { id: "pa-rediger", label: "Comment rédiger un acte ?", texte: "Comment est-ce que je rédige un acte à partir d'une trame ?" },
+  { id: "pa-modifier-bloc", label: "Ajouter ou retirer un paragraphe", texte: "Comment est-ce que j'ajoute ou je supprime un paragraphe, un visa ou un considérant dans le document ?" },
+  { id: "pa-variable", label: "Insérer une variable", texte: "Comment est-ce que j'insère une variable (un champ) dans le texte du document ?" },
   { id: "pa-retrouver", label: "Retrouver un acte", texte: "Où est-ce que je retrouve un acte que j'ai déjà enregistré ?" },
   { id: "pa-signer", label: "Envoyer en signature", texte: "Quelles sont les étapes pour envoyer un acte en signature ?" },
   { id: "pa-message", label: "Un message rouge", texte: "Que veut dire un message de contrôle affiché en rouge sous un champ ?" },
@@ -162,6 +174,10 @@ export const estAssistant = (qui) => ASSISTANT_IDS.includes(qui);
 export function assistantSettings(config, qui) {
   const d = assistantDefaut(qui);
   const c = (config && config.assistant && config.assistant[qui]) || {};
+  // MIGRATION : une clé de moteur héritée du référentiel est reprise dans le
+  // stockage du poste, puis retirée de la configuration (voir plus bas). Le
+  // référentiel est partagé et exporté : un secret n'y a pas sa place.
+  if (c.cle) { reglerCleMoteur(qui, c.cle); delete c.cle; }
   return {
     ...d,
     ...c,
@@ -171,6 +187,8 @@ export function assistantSettings(config, qui) {
     nom: String(c.nom || "").trim() || d.nom,
     avatar: String(c.avatar || "").trim() || d.avatar,
     prompts: Array.isArray(c.prompts) ? c.prompts : d.prompts,
+    // La clé ne se lit PAS dans le référentiel : elle vient du poste.
+    cle: cleMoteur(qui),
   };
 }
 
@@ -209,10 +227,32 @@ export function reglerPrefAssistant(qui, userId, allume) {
 export const assistantVisible = (config, user, qui) =>
   assistantActif(config, qui) && assistantPref(qui, user && user.id);
 
+// ------------------------------------------- clé d'accès du moteur (SECRET)
+// La clé d'accès d'un moteur de langage est un SECRET : le référentiel est
+// partagé entre les postes, il est exporté avec les données et il est servi par
+// une route de service. La clé vit donc dans le stockage du NAVIGATEUR, comme
+// les préférences de poste — et le référentiel n'en garde rien. Un export de
+// données ne peut donc plus l'emporter.
+const CLE_MOTEUR_KEY = (qui) => "scribae.moteur.cle." + String(qui || "");
+
+export function cleMoteur(qui) {
+  try { return String(localStorage.getItem(CLE_MOTEUR_KEY(qui)) || ""); } catch (e) { return ""; }
+}
+
+export function reglerCleMoteur(qui, valeur) {
+  const v = String(valeur == null ? "" : valeur);
+  try { v ? localStorage.setItem(CLE_MOTEUR_KEY(qui), v) : localStorage.removeItem(CLE_MOTEUR_KEY(qui)); } catch (e) { /* poste sans stockage */ }
+  return v;
+}
+
 // Écriture d'un réglage : on n'inscrit dans le référentiel que la clé touchée.
 export function reglerAssistant(config, qui, patch) {
+  const p = { ...(patch || {}) };
+  // La clé d'accès ne part JAMAIS dans le référentiel : elle va au poste.
+  if ("cle" in p) { reglerCleMoteur(qui, p.cle); delete p.cle; }
   config.assistant = config.assistant || {};
-  config.assistant[qui] = { ...(config.assistant[qui] || {}), ...patch };
+  config.assistant[qui] = { ...(config.assistant[qui] || {}), ...p };
+  delete config.assistant[qui].cle;
   return config.assistant[qui];
 }
 
@@ -220,9 +260,19 @@ export function reglerAssistant(config, qui, patch) {
 // reprennent la main (et suivront les prochaines livraisons).
 export function reinitialiserAssistant(config, qui) {
   if (config.assistant) delete config.assistant[qui];
+  reglerCleMoteur(qui, "");
 }
 
 // --------------------------------------------------------------- le moteur
+// Ce que l'on dit quand il n'y a aucun moteur de langage : ce n'est pas une
+// panne, c'est un mode de fonctionnement — l'assistant répond par recherche
+// documentaire. Le texte est MONTRÉ tel quel, alors il explique le mode au lieu
+// de le déplorer.
+const REPLI_RAISON = {
+  atelier: "Aucun moteur de langage n'est configuré ici : l'assistant ne rédige pas de réponse, il retrouve le chapitre du guide qui traite de votre question et vous y conduit. Un administrateur peut brancher un moteur (Administration › Assistants).",
+  public: "Aucun moteur de langage n'est configuré ici : l'assistante ne rédige pas de réponse, elle retrouve les actes publiés qui correspondent à votre question, avec leurs dates et leur lien. Un administrateur peut brancher un moteur (Administration › Assistants).",
+};
+
 // Quel moteur répond, et pourquoi il n'y en a pas. `raison` est rédigée pour
 // être MONTRÉE telle quelle à l'utilisateur.
 export function moteurDe(config, qui) {
@@ -238,7 +288,11 @@ export function moteurDe(config, qui) {
   }
   if (integre) return { type: "integre" };
   if (s.url) return { type: "personnalise" };
-  return { type: "aucun", raison: "Aucun moteur de langage n'est disponible dans cette installation. Un administrateur peut en brancher un (Administration › Assistants)." };
+  // Ni moteur intégré, ni adresse : le repli documentaire prend la main. C'est
+  // le cas d'une page servie en statique, et d'un déploiement sans API — là où
+  // l'application n'a aucun moteur et n'en aura jamais sans qu'on lui en donne
+  // un. Rien à configurer : voir « repli documentaire » plus bas.
+  return { type: "repli", raison: REPLI_RAISON[qui] || REPLI_RAISON.atelier };
 }
 
 export const assistantDisponible = (config, qui) => assistantActif(config, qui) && moteurDe(config, qui).type !== "aucun";
@@ -265,18 +319,18 @@ function budget() {
 // Le nom des chapitres utiles à chaque écran. C'est ce qui donne à l'assistant
 // une réponse utile dès la première question, sans lui envoyer tout le guide.
 const CHAPITRES_ECRAN = {
-  trames: ["administrateurs", "chartes"],
-  trame: ["administrateurs", "chartes"],
-  rediger: ["rediger", "messages", "export"],
+  trames: ["administrateurs", "chartes", "annexes"],
+  trame: ["administrateurs", "chartes", "annexes"],
+  rediger: ["rediger", "messages", "export", "annexes"],
   actes: ["retrouver", "export"],
-  acte: ["retrouver", "signature", "execution"],
-  modifier: ["modifier"],
+  acte: ["retrouver", "signature", "execution", "annexes"],
+  modifier: ["modifier", "annexes"],
   delegations: ["ouvrir", "administrateurs", "signature"],
-  signature: ["signature", "parapheur"],
+  signature: ["signature", "signature-externe", "parapheur"],
   publications: ["publication"],
   publication: ["publication"],
   execution: ["execution"],
-  revision: ["revision"],
+  revision: ["revision", "signature-externe"],
   parapheur: ["parapheur"],
   referentiel: ["administrateurs", "comptes", "annuaire"],
   styles: ["chartes"],
@@ -469,6 +523,143 @@ function fichePublique(acte, config, { complet = false, texteMax = 800, versions
   return l.join("\n");
 }
 
+// ==================================================== repli documentaire
+// Faute de moteur de langage, l'assistant répond quand même — par RECHERCHE
+// documentaire dans ce qu'il sait. Aucun appel réseau, aucun texte inventé :
+// des extraits, leur source, et le lien pour aller plus loin. C'est le mode
+// d'une page servie en statique (GitHub Pages) et d'un déploiement sans API :
+// l'assistant y reste utile, et rien de ce que l'agent demande ne sort du
+// navigateur.
+//
+// Les deux assistants cherchent dans la MÊME matière que celle dont un moteur
+// recevrait la connaissance : Plume dans le classement des chapitres du guide
+// (`chapitresPertinents`), Publia dans les actes publiés que le recueil affiche
+// déjà. Il n'y a donc rien de plus à tenir à jour ici.
+const EXTRAIT_MAX = 1400;
+
+// `chapitreEnTexte` écrit pour un MODÈLE : les notes y sont étiquetées
+// (« [attention] ») et les illustrations annoncées (« (illustration du guide :
+// …) »). Un lecteur, lui, n'a que faire de ces repères : on les traduit, ou on
+// les retire, avant de lui montrer l'extrait.
+function pourLecture(ligne) {
+  const t = String(ligne || "").trim();
+  if (!t) return "";
+  if (/^\(illustration du guide/.test(t)) return "";
+  return t
+    .replace(/^\[attention\]\s*/, "**Attention.** ")
+    .replace(/^\[à retenir\]\s*/, "**À retenir.** ")
+    .replace(/^\[info\]\s*/, "**À noter.** ");
+}
+
+// Un chapitre mis à plat, dont on garde la tête (titre — résumé) et un corps
+// tronqué sur une fin de ligne : le lien du chapitre reste ainsi entier, donc
+// recopiable.
+function extraitChapitre(c, max = EXTRAIT_MAX) {
+  const lignes = chapitreEnTexte(c).split("\n");
+  const titre = (lignes.shift() || "").replace(/^#+\s*/, "");
+  const corps = lignes.map(pourLecture).filter(Boolean).join("\n").trim();
+  const coupe = suiteTronquee(corps, max);
+  // Le texte s'arrête sur une fin de ligne, et le lecteur doit pouvoir aller au
+  // bout : la dernière ligne est un renvoi, pas une phrase coupée.
+  return { titre, corps: coupe + (coupe.length < corps.length ? "\n\n… la suite est dans le guide : " + lienChapitre(c) : "") };
+}
+
+function reponseRepliAtelier({ question, ecran }) {
+  const chapitres = chapitresPertinents(question, 3);
+  if (!chapitres.length) {
+    // Rien ne répond dans le guide : on le dit, et on donne le chemin le plus
+    // court vers ce que l'on a — le chapitre de l'écran courant, à défaut le
+    // sommaire.
+    const ici = (CHAPITRES_ECRAN[ecran] || [])[0];
+    const chapitre = ici ? GUIDE.chapters.find((c) => c.id === ici) : null;
+    return "Je n'ai pas trouvé de chapitre du guide qui réponde à cette question.\n\n"
+      + (chapitre ? "Le guide en dit peut-être quelque chose ici : " + lienChapitre(chapitre) + "\n\n" : "")
+      + "Le sommaire complet et la recherche sont dans [le guide d'utilisation](#/aide).";
+  }
+  const principal = chapitres[0];
+  // Plusieurs chapitres ? On les montre TOUS, par leur titre et leur résumé. Une
+  // question est souvent ambiguë — « envoyer un acte » : l'envoyer par courriel,
+  // l'envoyer en signature, l'envoyer à la révision —, et un titre bien choisi dit
+  // mieux ce que contient un chapitre que le classement le plus savant. Le
+  // lecteur reconnaît le sien, et l'extrait qui suit porte sur le premier.
+  const e = extraitChapitre(principal, chapitres.length > 1 ? 900 : EXTRAIT_MAX);
+  const l = [];
+  if (chapitres.length > 1) {
+    l.push("Le guide en parle dans plusieurs chapitres :", "");
+    for (const c of chapitres) l.push("- " + lienChapitre(c) + (c.short ? " — " + c.short : ""));
+    l.push("", "Celui qui répond le plus directement :", "");
+  }
+  l.push("**" + e.titre + "**", "", e.corps);
+  if (chapitres.length === 1) l.push("", "Le chapitre entier : " + lienChapitre(principal));
+  return l.join("\n");
+}
+
+// Un acte publié, présenté à un LECTEUR (et non à un modèle) : ce que le
+// recueil en montre déjà, dans l'ordre où on le lit.
+function ficheLisible(p, config) {
+  const l = ["**" + designation(p, config) + "**"];
+  if (p.entityName) l.push("- autorité : " + p.entityName);
+  if (p.themeLabel || p.themeId) l.push("- matière : " + (p.themeLabel || p.themeId));
+  l.push("- " + resumeDates(p));
+  if (p.eliUri) l.push("- identifiant ELI : " + p.eliUri);
+  l.push("- " + (p.kind === "consolidee" ? "version consolidée" : p.kind === "modificative" ? "version modificative" : "version initiale")
+    + (p.latest === false ? " (supplantée par une version plus récente)" : " (version en vigueur)"));
+  const texte = String((p.formats && p.formats.texte) || "").replace(/\s+/g, " ").trim();
+  if (texte) l.push("- début du texte : " + texte.slice(0, 360) + (texte.length > 360 ? " […]" : ""));
+  if (p.cle) { l.push(""); l.push("Consulter l'acte : " + lienPublic(p, config)); }
+  return l.join("\n");
+}
+
+// Ce qui rapproche un acte d'une question : ses métadonnées d'abord — c'est là
+// que sont le numéro, l'objet, l'autorité —, son texte ensuite.
+function scoreActe(p, mots, config) {
+  if (!mots.length) return 0;
+  const tete = sansAccents([designation(p, config), p.objet, p.numero, p.entityName, p.themeLabel, p.themeId].filter(Boolean).join(" "));
+  const texte = sansAccents(String((p.formats && p.formats.texte) || "").slice(0, 6000));
+  let score = 0;
+  for (const w of mots) {
+    if (contientMot(tete, w)) score += 3;
+    else if (contientMot(texte, w)) score += 1;
+  }
+  return score;
+}
+
+function reponseRepliPublic({ question, publications = [], acteCourant = null, config }) {
+  const mots = motsCles(question);
+  const tous = (publications || []).filter((p) => p && p.latest !== false);
+  let choix = null;
+  let meilleur = 0;
+  for (const p of tous) {
+    const score = scoreActe(p, mots, config);
+    if (score > meilleur) { meilleur = score; choix = p; }
+  }
+  // Un acte ne se montre que si la question le DÉSIGNE vraiment (trois points :
+  // un mot de ses métadonnées, ou trois de son texte) : annoncer « d'après le
+  // recueil » un acte que rien ne relie à la question serait pire que de dire
+  // qu'on n'a rien trouvé.
+  if (meilleur < 3) { choix = null; }
+  // L'acte que le visiteur consulte passe devant quand il tient la question —
+  // c'est de lui que l'on parle — et reste le sujet quand aucun mot n'en
+  // désigne un autre.
+  if (acteCourant) {
+    const score = scoreActe(acteCourant, mots, config);
+    if (!choix || score >= meilleur) { choix = acteCourant; meilleur = score; }
+  }
+  if (choix) return "D'après le recueil :\n\n" + ficheLisible(choix, config);
+
+  const derniers = tous.slice(0, 5)
+    .map((p) => "- " + designation(p, config) + (p.datePublication ? " (" + formatDate(p.datePublication) + ")" : ""))
+    .join("\n");
+  // On dit ce que l'on sait faire, plutôt que « je n'ai rien trouvé » : sans
+  // moteur de langage, l'assistante ne peut que RETROUVER un acte — et c'est ce
+  // qu'il faut demander au visiteur de préciser.
+  return "Je ne sais pas répondre à cette question : aucun moteur de langage n'est configuré"
+    + " sur cette installation, et je ne sais faire que retrouver un acte publié. Indiquez-moi"
+    + " un numéro, un objet, ou un mot de son texte, et je vous y conduis."
+    + (derniers ? "\n\nLes derniers actes publiés :\n" + derniers : "")
+    + "\n\nConsulter le recueil : [les actes publiés](#/recueil).";
+}
+
 // ---------------------------------------------------------------- l'invite
 function composerInvite({ qui, instruction, connaissances, historique }) {
   const nom = ASSISTANTS[qui]?.nom || "Assistant";
@@ -511,18 +702,36 @@ export class AssistantIndisponible extends Error {
 export async function repondre({ config, qui, question = "", historique = [], ecran = "", ecranLabel = "", publications = null, acteCourant = null, onChunk = null, signal = null } = {}) {
   if (!estAssistant(qui)) throw new AssistantIndisponible("Assistant inconnu.");
   const s = assistantSettings(config, qui);
+  const hist = [...historique];
+  if (question) hist.push({ role: "user", texte: question });
+
+  const moteur = moteurDe(config, qui);
+  if (moteur.type === "aucun") throw new AssistantIndisponible(moteur.raison);
+  // Repli documentaire : aucun moteur, donc rien à composer ni à envoyer — on
+  // cherche dans ce que l'assistant sait, ici, dans le navigateur.
+  if (moteur.type === "repli") return viaRepli({ qui, historique: hist, ecran, publications, acteCourant, config, onChunk });
+
   const instruction = String(s.instruction || "").trim() || assistantDefaut(qui).instruction;
   const connaissances = qui === "public"
     ? contextePublic({ publications: publications || [], config, acte: acteCourant })
     : contexteAtelier({ ecran, ecranLabel, question });
-  const hist = [...historique];
-  if (question) hist.push({ role: "user", texte: question });
   const invite = composerInvite({ qui, instruction, connaissances, historique: hist });
 
-  const moteur = moteurDe(config, qui);
-  if (moteur.type === "aucun") throw new AssistantIndisponible(moteur.raison);
   if (moteur.type === "integre") return viaMoteurIntegre(hostGenerateText(), { invite, onChunk, signal });
   return viaMoteurPersonnalise(s, { instruction, connaissances, historique: hist, invite, onChunk, signal });
+}
+
+// Le repli : la dernière question posée est celle qui compte — l'historique la
+// porte quand l'appel ne la donne pas. La réponse est produite d'un coup (il n'y
+// a rien à attendre), et il n'y a donc rien à interrompre.
+function viaRepli({ qui, historique, ecran, publications, acteCourant, config, onChunk }) {
+  const derniere = [...(historique || [])].reverse().find((m) => m && m.role === "user");
+  const question = String((derniere && derniere.texte) || "").trim();
+  const texte = qui === "public"
+    ? reponseRepliPublic({ question, publications: publications || [], acteCourant, config })
+    : reponseRepliAtelier({ question, ecran });
+  if (onChunk && texte) onChunk(texte, texte);
+  return texte;
 }
 
 async function viaMoteurIntegre(gt, { invite, onChunk, signal }) {

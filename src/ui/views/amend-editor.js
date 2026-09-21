@@ -21,7 +21,7 @@ import { h, button } from "../dom.js";
 import { renderNode } from "../../lib/render.js";
 import { normalizeSpace } from "../../lib/util.js";
 import {
-  ADDR, editedText, blocksWithSlots, layoutOf, insertedFor, isRemoved,
+  ADDR, editedText, blocksWithSlots, layoutOf, insertedFor, isRemoved, flatNodes,
 } from "../../lib/amend-edit.js";
 
 const norm = (s) => normalizeSpace(s).replace(/\s+/g, " ");
@@ -80,6 +80,10 @@ function blockBar(...kids) {
 // --------------------------------------------------------------- l'éditeur
 export function buildEditableDocument(doc, config, session) {
   const art = h("article", { class: "doc doc--amend" });
+  // Le rang d'un nœud dans le corps, divisions comprises : c'est l'échelle des
+  // adresses de saisie (`n3`), celle que lit `deriveAmendments`. Les deux
+  // parcours doivent donc désigner les nœuds de la même façon.
+  const rang = new Map(flatNodes(doc).map((n, i) => [n, i]));
   let flushedEnd = false;
   const flushEnd = () => {
     if (flushedEnd) return;
@@ -88,16 +92,39 @@ export function buildEditableDocument(doc, config, session) {
     art.appendChild(appendBar(session));
   };
 
-  doc.nodes.forEach((node, i) => {
-    if (node.type === "article") {
-      for (const ins of insertedFor(session, node.eId, "before")) art.appendChild(insertedArticle(ins, session));
-      art.appendChild(article(node, i, session, config));
-      for (const ins of insertedFor(session, node.eId, "after")) art.appendChild(insertedArticle(ins, session));
-      return;
+  // Une DIVISION (Livre, Titre, Chapitre…) : son intitulé, puis son contenu.
+  // Ses articles sont éditables comme ceux du corps — sans quoi un règlement
+  // rangé en Titres et Chapitres ne serait pas modifiable article par article.
+  const divisionBlock = (node) => {
+    const niveau = Math.max(1, Number(node.level) || 1);
+    const sec = h("section", { class: `doc-division doc-division--n${niveau} amend-division`, "data-eid": node.eId || "" });
+    const tag = ["h2", "h3", "h4", "h5"][Math.min(niveau, 4) - 1];
+    const head = h(tag, { class: "doc-division-head" });
+    head.appendChild(h("span", { class: "doc-division-num", text: node.numLabel || node.levelLabel || "" }));
+    if (node.heading) {
+      head.appendChild(h("span", { class: "doc-division-heading", text: (node.numLabel || node.levelLabel ? " – " : "") + node.heading }));
     }
-    if (node.type === "signature" || node.type === "mention") flushEnd();
-    art.appendChild(renderNode(node, config, {}));
-  });
+    sec.appendChild(head);
+    rendre(node.blocks || [], sec);
+    return sec;
+  };
+
+  const rendre = (nodes, container) => {
+    (nodes || []).forEach((node) => {
+      const i = rang.get(node);
+      if (node.type === "article" && i !== undefined) {
+        for (const ins of insertedFor(session, node.eId, "before")) container.appendChild(insertedArticle(ins, session));
+        container.appendChild(article(node, i, session, config));
+        for (const ins of insertedFor(session, node.eId, "after")) container.appendChild(insertedArticle(ins, session));
+        return;
+      }
+      if (node.type === "division") { container.appendChild(divisionBlock(node)); return; }
+      if (node.type === "signature" || node.type === "mention") flushEnd();
+      container.appendChild(renderNode(node, config, {}));
+    });
+  };
+
+  rendre(doc.nodes, art);
   flushEnd();
   return art;
 }

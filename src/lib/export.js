@@ -15,6 +15,12 @@ const wordMargin = (style) => {
 
 const AKN_NS = "http://docs.oasis-open.org/legaldocml/ns/akn/3.0";
 
+// La marque d'une liste à puces en Markdown, quand le bloc a choisi la sienne
+// (voir `paramsBloc`, lib/schema.js). Markdown ne connaît qu'une puce ; on
+// prend celle du bloc quand elle a un équivalent visuel, la puce ordinaire
+// sinon.
+const MARQUE_MD = { disc: "-", circle: "-", square: "-", dash: "–", none: "" };
+
 // Échappement d'une valeur d'attribut (le contenu HTML a `esc` ; une adresse
 // posée dans `href` doit aussi voir ses guillemets et ses esperluettes échappés).
 const escAttr = (s) => String(s == null ? "" : s)
@@ -33,13 +39,24 @@ export function exportAkn(doc, config, trame) {
 
   const genDate = String(m.generatedAt || new Date().toISOString()).slice(0, 10);
   const eliWork = m.eli || "";
+  // FRBRthis et FRBRuri ne disent pas la même chose : FRBRthis porte
+  // l'IDENTIFIANT (l'ELI sous sa forme « eli:/fr/… »), FRBRuri doit porter une
+  // URI HTTP CANONIQUE, résoluble par n'importe qui. Les confondre — c'était le
+  // cas — rendait la ressource non résoluble à l'extérieur : un système tiers
+  // qui suit le FRBRuri tombait sur une chaîne « eli:/fr/… », pas sur une
+  // adresse. On dérive donc l'URI HTTP de l'ELI et de la base publique.
+  const baseEli = String((config.brand && config.brand.baseUri) || "").replace(/\/+$/, "");
+  const eliHttp = baseEli && /^eli:\/fr\//i.test(eliWork)
+    ? baseEli + "/eli/" + eliWork.replace(/^eli:\/fr\//i, "")
+    : eliWork;
   // Une version consolidée n'est pas un nouvel acte : c'est une autre
   // expression du même « work ». L'URI d'expression porte donc la date de
   // consolidation, pas la date de signature d'origine.
   const exprDate = kind === "consolide"
     ? String((m.consolidated && m.consolidated.at) || m.dateSignature || "").slice(0, 10)
     : (m.dateSignature || "sans-date");
-  const eliExpr = `${eliWork}/fra@${exprDate}`;
+  const eliExprId = `${eliWork}/fra@${exprDate}`;
+  const eliExpr = `${eliHttp}/fra@${exprDate}`;
   const eliMan = `${eliExpr}/main.xml`;
   const contains = kind === "consolide" ? "consolidatedVersion" : "originalVersion";
 
@@ -50,7 +67,7 @@ export function exportAkn(doc, config, trame) {
   p('      <identification source="#eli">');
   p("        <FRBRWork>");
   p(`          <FRBRthis value="${esc(eliWork)}"/>`);
-  p(`          <FRBRuri value="${esc(eliWork)}"/>`);
+  p(`          <FRBRuri value="${esc(eliHttp)}"/>`);
   p(`          <FRBRdate date="${esc(m.dateSignature)}" name="document"/>`);
   p(`          <FRBRauthor href="#${esc(org.id || "org")}"/>`);
   p('          <FRBRcountry value="fr"/>');
@@ -58,7 +75,7 @@ export function exportAkn(doc, config, trame) {
   p(`          <FRBRtitle value="${esc(firstTitle(doc) + (kind === "consolide" ? " (version consolidée)" : ""))}"/>`);
   p("        </FRBRWork>");
   p("        <FRBRExpression>");
-  p(`          <FRBRthis value="${esc(eliExpr)}"/>`);
+  p(`          <FRBRthis value="${esc(eliExprId)}"/>`);
   p(`          <FRBRuri value="${esc(eliExpr)}"/>`);
   p(`          <FRBRdate date="${esc(m.dateSignature)}" name="signature"/>`);
   p(`          <FRBRauthor href="#${esc(org.id || "org")}"/>`);
@@ -100,7 +117,9 @@ export function exportAkn(doc, config, trame) {
     doc.notes.forEach((n, i) => {
       p(`        <note eId="note_${i + 1}" author="${esc(n.author || "")}" date="${esc(n.date || "")}" type="${esc(n.kind)}" data-target="${esc(n.path)}">`);
       p(`          <p>${esc(n.text)}</p>`);
-      p("        </note>");
+      // Le passage cité vient APRÈS le texte : la première balise <p> d'une note
+      // reste son texte, ce que lit la relecture d'Akoma Ntoso (voir akn.js).
+      if (n.quote) p(`          <p data-quote="true">${esc(n.quote)}</p>`);      p("        </note>");
     });
     p("      </notes>");
   }
@@ -122,6 +141,10 @@ export function exportAkn(doc, config, trame) {
   p("        <ia:preparation>");
   p(`          <ia:numero>${esc(m.numero)}</ia:numero>`);
   p(`          <ia:objet>${esc(m.objet)}</ia:objet>`);
+  // La NATURE (« acte » ou « annexe ») suit le document : elle commande la
+  // signature — une annexe ne se signe pas. Elle permet donc à un fichier
+  // relu de savoir ce qu'il a entre les mains, même hors du registre.
+  p(`          <ia:nature>${esc(m.nature || "acte")}</ia:nature>`);
   p(`          <ia:dateSignature>${esc(m.dateSignature)}</ia:dateSignature>`);
   p(`          <ia:dateEffet>${esc(m.dateEffet)}</ia:dateEffet>`);
   p(`          <ia:entite code="${esc(org.code || "")}">${esc(org.name || "")}</ia:entite>`);
@@ -216,13 +239,39 @@ export function exportAkn(doc, config, trame) {
   // corps
   p("    <body>");
   let artIdx = 0;
-  doc.nodes.forEach((node) => {
+  // Les divisions du texte (Livre, Titre, Chapitre, Section) deviennent les
+  // conteneurs d'Akoma Ntoso correspondants ; l'échelon au-delà du quatrième se
+  // range dans un `hcontainer` nommé, faute d'élément normalisé.
+  const DIV_TAGS = { 1: "part", 2: "title", 3: "chapter", 4: "section" };
+  // Les blocs de texte écrits HORS article (ajoutés au corps ou à une division
+  // par la rédaction — voir lib/structure.js) : Akoma Ntoso les range dans un
+  // `block` générique, que la lecture (src/lib/akn.js) reprend à l'import.
+  const TEXT_BLOCKS = new Set(["para", "raw", "list", "table"]);
+  const emitNode = (node, pad) => {
+    if (TEXT_BLOCKS.has(node.type)) {
+      const eId = node.eId ? ` eId="${esc(node.eId)}"` : "";
+      p(`${pad}<block name="disposition"${eId}>`);
+      p(indentXml(blockToXml(node, config), pad.length + 2));
+      p(`${pad}</block>`);
+      return;
+    }
+    if (node.type === "division") {
+      const niveau = Math.min(4, Math.max(1, Number(node.level) || 1));
+      const tag = DIV_TAGS[niveau] || "hcontainer";
+      const name = DIV_TAGS[niveau] ? "" : ` name="${esc(node.levelLabel || "division")}"`;
+      p(`${pad}<${tag}${name} eId="${esc(node.eId || "")}">`);
+      p(`${pad}  <num>${esc(node.numLabel || "")}</num>`);
+      if (node.heading) p(`${pad}  <heading>${esc(node.heading)}</heading>`);
+      for (const b of node.blocks || []) emitNode(b, pad + "  ");
+      p(`${pad}</${tag}>`);
+      return;
+    }
     if (node.type !== "article") return;
     artIdx++;
     const artEId = node.eId || `art_${artIdx}`;
-    p(`      <article eId="${esc(artEId)}">`);
-    p(`        <num>${esc(node.numLabel)}</num>`);
-    if (node.heading) p(`        <heading>${esc(node.heading)}</heading>`);
+    p(`${pad}<article eId="${esc(artEId)}">`);
+    p(`${pad}  <num>${esc(node.numLabel)}</num>`);
+    if (node.heading) p(`${pad}  <heading>${esc(node.heading)}</heading>`);
     const blocks = node.blocks || [];
     let i = 0;
     while (i < blocks.length) {
@@ -230,23 +279,55 @@ export function exportAkn(doc, config, trame) {
       // dans un bloc nommé : la formule d'amendement et le texte qu'elle
       // introduit restent ainsi distincts à la relecture.
       if (blocks[i].quoted) {
-        p('        <block name="nouvelleRedaction">');
+        p(`${pad}  <block name="nouvelleRedaction">`);
         while (i < blocks.length && blocks[i].quoted) {
-          p(indentXml(blockToXml(blocks[i], config), 10));
+          p(indentXml(blockToXml(blocks[i], config), pad.length + 4));
           i++;
         }
-        p("        </block>");
+        p(`${pad}  </block>`);
         continue;
       }
-      p(`        <paragraph eId="${esc(blocks[i].eId || `${artEId}__p_${i + 1}`)}">`);
-      p("          <content>");
-      p(indentXml(blockToXml(blocks[i], config), 12));
-      p("          </content>");
-      p("        </paragraph>");
+      p(`${pad}  <paragraph eId="${esc(blocks[i].eId || `${artEId}__p_${i + 1}`)}">`);
+      p(`${pad}    <content>`);
+      p(indentXml(blockToXml(blocks[i], config), pad.length + 6));
+      p(`${pad}    </content>`);
+      p(`${pad}  </paragraph>`);
       i++;
     }
-    p("      </article>");
-  });
+    p(`${pad}</article>`);
+  };
+  // Un nœud du document ANNEXÉ, écrit pour l'Akoma Ntoso. Ses articles et ses
+  // divisions passent par le MÊME chemin que ceux de l'acte (`emitNode` : son
+  // texte est capturé ici plutôt qu'écrit) ; les morceaux qui n'existent qu'à la
+  // racine d'un acte — intitulé, visas, considérants, formule d'édiction,
+  // mentions — sont écrits à plat dans l'attachement, puisque c'est là que le
+  // texte de l'annexe est joint. Voir src/lib/annexe-docs.js.
+  const annexeNodeXml = (node) => {
+    if (node.type === "article" || node.type === "division") {
+      const mark = w.length;
+      emitNode(node, "");
+      const xml = w.slice(mark).join("\n");
+      w.length = mark;
+      return xml;
+    }
+    switch (node.type) {
+      case "title": return `<heading>${esc(node.text)}</heading>`;
+      case "authority": return `<p>${esc(node.text)}</p>`;
+      case "enact": return `<p>${esc(node.text)}</p>`;
+      case "mention": return `<p>${esc(node.text)}</p>`;
+      case "visas":
+        return (node.items || []).map((it) => `<p>${esc([config?.vocab?.visasLabel || "Vu", it.text].join(" "))}</p>`).join("\n");
+      case "considerants":
+        return (node.items || []).map((it) => `<p>${esc(it.text)}</p>`).join("\n");
+      // L'annexe ne porte ni signature ni liste d'annexes.
+      case "annexes":
+      case "signature":
+        return "";
+      default:
+        return blockToXml(node, config);
+    }
+  };
+  doc.nodes.forEach((node) => emitNode(node, "      "));
   p("    </body>");
 
   // conclusions : signature + mentions
@@ -266,6 +347,48 @@ export function exportAkn(doc, config, trame) {
   }
   for (const mn of mentions) p(`      <p>${esc(mn.text)}</p>`);
   p("    </conclusions>");
+
+  // Les documents ANNEXÉS : l'acte qui en adopte un les annonce à la fin de son
+  // dispositif (nœud « annexes », rendu en HTML et en Markdown), et son
+  // ORIGINAL est suivi de leur TEXTE — une annexe ne se signe pas : c'est l'acte
+  // qui l'adopte qui est signé, et sa signature lui donne son autorité (voir
+  // src/lib/annexe-docs.js). En Akoma Ntoso, ces documents sont exactement ce
+  // que porte `<attachments>` : ils restent ainsi attachés à l'acte à travers
+  // l'archivage et l'échange — identification ET texte.
+  const annexesNode = doc.nodes.find((n) => n.type === "annexes");
+  const joints = doc.annexeDocs || [];
+  if (annexesNode?.items?.length || joints.length) {
+    p("    <attachments>");
+    joints.forEach((joint, i) => {
+      const it = (annexesNode?.items || []).find((x) => x.acteId && x.acteId === joint.acte?.id) || {};
+      p(`      <attachment eId="annexe_${i + 1}">`);
+      p(`        <heading>${esc(joint.libelle || it.texte || it.designation || "Annexe")}</heading>`);
+      // L'intitulé porte déjà l'objet quand l'identification est complète ; ce
+      // paragraphe n'est là que pour une identification qui n'aurait rien dit
+      // d'autre que l'objet (voir src/lib/annexes.js).
+      if (it.objet && !it.texte) p(`        <p>${esc(it.objet)}</p>`);
+      if (it.lien) p(`        <ref href="${escAttr(it.lien)}">${esc(it.lien)}</ref>`);
+      // Le TEXTE de l'annexe, tel qu'il s'imprime à la suite de l'acte : son
+      // intitulé, ses visas, ses articles et divisions, ses mentions — sans
+      // signature (elle n'en a pas).
+      p('        <block name="texteAnnexe">');
+      if (joint.doc) for (const n of joint.doc.nodes || []) p(indentXml(annexeNodeXml(n, config), 10));
+      p("        </block>");
+      p("      </attachment>");
+    });
+    // Les annexes annoncées mais absentes du registre (elles n'ont pas pu être
+    // résolues) : leur identification seule est conservée, plutôt que rien.
+    const connus = new Set(joints.map((j) => j.acte?.id));
+    for (const it of annexesNode?.items || []) {
+      if (connus.has(it.acteId)) continue;
+      p(`      <attachment eId="annexe_${connus.size + 1}">`);
+      p(`        <heading>${esc(it.texte || it.designation || "Annexe")}</heading>`);
+      if (it.objet && !it.texte) p(`        <p>${esc(it.objet)}</p>`);
+      if (it.lien) p(`        <ref href="${escAttr(it.lien)}">${esc(it.lien)}</ref>`);
+      p("      </attachment>");
+    }
+    p("    </attachments>");
+  }
 
   p("  </act>");
   p("</akomaNtoso>");
@@ -290,15 +413,27 @@ function blockToXml(b, config) {
 function rawBlockToXml(b, config) {
   switch (b.type) {
     case "para":
-      return `<p>${esc(b.text)}</p>`;
+      // L'encadré d'un paragraphe se dit en Akoma Ntoso par le conteneur
+      // `block name="box"` — l'alignement et le retrait, eux, sont de la mise
+      // en page : le format ne les porte pas, et on ne les invente pas.
+      return b.boxed
+        ? `<block name="box">\n<p>${esc(b.text)}</p>\n</block>`
+        : `<p>${esc(b.text)}</p>`;
     case "list": {
       const tag = b.ordered ? "ol" : "ul";
+      const start = b.ordered && Number(b.start) > 1 ? ` start="${Number(b.start)}"` : "";
       const items = (b.items || []).map((it) => `<li><p>${esc(it.text)}</p></li>`).join("\n");
-      return `<${tag}>\n${items}\n</${tag}>`;
+      return `<${tag}${start}>\n${items}\n</${tag}>`;
     }
     case "table": {
       const head = `<tr>${(b.columns || []).map((c) => `<th><p>${esc(c)}</p></th>`).join("")}</tr>`;
       const rows = (b.rows || []).map((r) => `<tr>${(b.columns || []).map((_, i) => `<td><p>${esc(r[i] ?? "")}</p></td>`).join("")}</tr>`).join("\n");
+      // Sans ligne d'en-tête, les intitulés de colonnes sont la première ligne
+      // de données : le tableau n'a plus de `thead`, et la relecture le sait.
+      if (b.head === false) {
+        const premiere = `<tr>${(b.columns || []).map((c) => `<td><p>${esc(c)}</p></td>`).join("")}</tr>`;
+        return `<table>\n<tbody>\n${premiere}\n${rows}\n</tbody>\n</table>`;
+      }
       return `<table>\n<thead>${head}</thead>\n<tbody>\n${rows}\n</tbody>\n</table>`;
     }
     default:
@@ -327,6 +462,10 @@ function collectUsedRefs(doc, config) {
 
 export function exportSchematron(doc, config, trame) {
   const rules = trame.rules || [];
+  // Une ANNEXE ne porte pas de signature : elle tient son autorité de l'acte qui
+  // l'adopte, dont l'original est suivi de son texte. Le schéma ne réclame donc
+  // pas de bloc de signature pour elle (voir src/lib/annexe-docs.js).
+  const estAnnexe = doc?.meta?.nature === "annexe";
   const translated = [];
   const untranslated = [];
   for (const r of rules) {
@@ -346,13 +485,19 @@ export function exportSchematron(doc, config, trame) {
   p('  <pattern id="structure">');
   p('    <rule context="/akn:akomaNtoso/akn:act">');
   p('      <assert test="akn:preface/akn:p" id="s-title">L\'intitulé de l\'acte est absent (preface/p).</assert>');
-  p('      <assert test="akn:meta/akn:proprietary/ia:preparation/ia:numero != \'\'" id="s-numero">Le numéro de l\'acte est absent.</assert>');
-  p('      <assert test="akn:meta/akn:proprietary/ia:preparation/ia:dateSignature != \'\'" id="s-date">La date de signature est absente.</assert>');
-  p('      <assert test="count(akn:body/akn:article) &gt;= 1" id="s-articles">L\'acte ne comporte aucun article.</assert>');
+  // Une annexe n'a pas de numéro propre : le schéma ne le réclame pas pour
+  // elle (voir src/lib/annexes.js).
+  if (!estAnnexe) p('      <assert test="akn:meta/akn:proprietary/ia:preparation/ia:numero != \'\'" id="s-numero">Le numéro de l\'acte est absent.</assert>');
+  p(`      <assert test="akn:meta/akn:proprietary/ia:preparation/ia:dateSignature != ''" id="s-date">${estAnnexe ? "La date d'adoption est absente." : "La date de signature est absente."}</assert>`);
+  p('      <assert test="count(akn:body//akn:article) &gt;= 1" id="s-articles">L\'acte ne comporte aucun article.</assert>');
   p('      <assert test="akn:preamble/akn:formula[@name=\'enacting\']" id="s-enacting">La formule d\'édiction est absente.</assert>');
-  p('      <assert test="akn:conclusions/akn:block[@name=\'signature\']" id="s-signature">Le bloc de signature est absent.</assert>');
+  if (estAnnexe) {
+    p('      <!-- Annexe : pas de bloc de signature — c\'est l\'acte qui l\'adopte qui est signé. -->');
+  } else {
+    p('      <assert test="akn:conclusions/akn:block[@name=\'signature\']" id="s-signature">Le bloc de signature est absent.</assert>');
+  }
   p('    </rule>');
-  p('    <rule context="/akn:akomaNtoso/akn:act/akn:body/akn:article">');
+  p('    <rule context="/akn:akomaNtoso/akn:act/akn:body//akn:article">');
   p('      <assert test="akn:num != \'\'" id="s-art-num">Article sans numéro.</assert>');
   p('      <assert test="akn:paragraph/akn:content/*" id="s-art-content">Article sans contenu.</assert>');
   p('    </rule>');
@@ -476,17 +621,64 @@ export function exportMarkdown(doc, config, opts = {}) {
   // aussi de représentation PUBLIÉE (voir `src/ui/views/signature.js`).
   const tracking = doc.meta?.consolidated?.showChanges === true;
   const mentions = tracking ? null : amendmentMentions(doc, config);
+  // Un document rendu comme ANNEXE d'un autre ne porte pas de signature : c'est
+  // l'acte qui l'adopte qui est signé (voir src/lib/annexe-docs.js).
+  const sansSignature = opts.sansSignature === true;
   const lines = [];
   if (doc.kind === "consolide" && doc.consolidationNotice) lines.push("> " + doc.consolidationNotice, "");
-  for (const n of doc.nodes) {
+  // Un bloc de texte (paragraphe, liste, tableau) : la rédaction en écrit dans
+  // les articles, et peut en ajouter directement au corps de l'acte ou dans une
+  // division (voir lib/structure.js). Les deux se lisent de la même façon, d'où
+  // ce seul chemin d'écriture.
+  const emitBloc = (b) => {
+    if (!tracking && b.change?.kind === "del") return;
+    if (b.type === "list") {
+      // Liste numérotée ou à puces : la marque du bloc, quand elle a un sens en
+      // Markdown (« • », « – »), sinon la puce ordinaire.
+      const puce = b.ordered ? "1." : (MARQUE_MD[b.marker] || "-");
+      lines.push(...(b.items || []).map((i) => puce + " " + mdWrap(b.change, i.text)), "");
+    } else if (b.type === "table") {
+      const legende = b.caption && b.captionPos === "bottom" ? "Tableau : " + b.caption : "";
+      if (b.caption && b.captionPos !== "bottom") lines.push("**" + b.caption + "**", "");
+      lines.push("| " + (b.columns || []).join(" | ") + " |");
+      // Sans ligne d'en-tête, le tableau n'a pas de rangée de séparation : la
+      // première ligne est une ligne de données comme les autres.
+      if (b.head !== false) lines.push("| " + (b.columns || []).map(() => "---").join(" | ") + " |");
+      for (const r of b.rows || []) lines.push("| " + (b.columns || []).map((_, i) => r[i] ?? "").join(" | ") + " |");
+      if (legende) lines.push("", "*" + legende + "*");
+      lines.push("");
+    } else if (b.type === "para" && b.boxed) lines.push("> " + mdWrap(b.change, b.text), "");
+    else lines.push(mdWrap(b.change, b.text), "");
+  };
+  // Les divisions s'écrivent en titres de niveau décroissant ; leur contenu
+  // (articles, listes, tableaux) suit, récursivement.
+  const emit = (n, depth = 0) => {
     switch (n.type) {
       case "title": lines.push("# " + n.text, ""); break;
       case "authority": lines.push("*" + n.text + "*", ""); break;
       case "visas": lines.push(...n.items.map((i) => "- " + [config.vocab.visasLabel, i.lien ? "[" + i.text + "](" + i.lien + ")" : i.text].join(" ")), ""); break;
-      case "considerants": lines.push(...n.items.map((i) => "> " + i.text), ""); break;
+      case "considerants":
+        // Les considérants d'un bloc « en un seul alinéa » forment un seul
+        // paragraphe de citation, comme au rendu.
+        if (n.inline && n.items.length) lines.push("> " + n.items.map((i) => i.text).join(" "), "");
+        else lines.push(...n.items.map((i) => "> " + i.text), "");
+        break;
       case "enact": lines.push("**" + n.text + "**", ""); break;
+      case "division": {
+        lines.push("#".repeat(Math.min(6, 2 + depth)) + " " + [n.numLabel, n.heading].filter(Boolean).join(" – "), "");
+        for (const b of n.blocks || []) emit(b, depth + 1);
+        break;
+      }
+      case "annexes": {
+        lines.push("#".repeat(Math.min(6, 2 + depth)) + " " + (config?.vocab?.annexe?.sectionTitle || "Annexes"), "");
+        // `texte` porte déjà l'intitulé complet (« Annexe — … ») ; l'objet n'est
+        // là qu'en repli (voir src/lib/annexes.js).
+        for (const it of n.items || []) lines.push("- " + (it.texte || it.objet || "Annexe") + (it.lien ? " (" + it.lien + ")" : ""));
+        lines.push("");
+        break;
+      }
       case "article": {
-        lines.push("## " + n.numLabel + (n.heading ? " – " + n.heading : ""), "");
+        lines.push("#".repeat(Math.min(6, 2 + depth)) + " " + n.numLabel + (n.heading ? " – " + n.heading : ""), "");
         if (!tracking) {
           const mention = amendmentMention(n, mentions, config);
           if (mention) lines.push("*" + mention + "*", "");
@@ -494,22 +686,35 @@ export function exportMarkdown(doc, config, opts = {}) {
         } else if (n.change) {
           lines.push(mdChangeNote(n.change), "");
         }
-        for (const b of n.blocks || []) {
-          if (!tracking && b.change?.kind === "del") continue;
-          if (b.type === "para") lines.push(mdWrap(b.change, b.text), "");
-          else if (b.type === "list") lines.push(...b.items.map((i) => "- " + mdWrap(b.change, i.text)), "");
-          else if (b.type === "table") {
-            lines.push("| " + (b.columns || []).join(" | ") + " |");
-            lines.push("| " + (b.columns || []).map(() => "---").join(" | ") + " |");
-            for (const r of b.rows || []) lines.push("| " + (b.columns || []).map((_, i) => r[i] ?? "").join(" | ") + " |");
-            lines.push("");
-          }
-        }
+        for (const b of n.blocks || []) emitBloc(b);
         break;
       }
-      case "signature": lines.push(`Fait à ${n.place}, le ${n.date}`, "", ...personRoleLines(n.signataire, config), personSignatureName(n.signataire), ""); break;
+      // Un bloc de texte écrit hors de tout article — la rédaction peut en
+      // ajouter un directement au corps de l'acte, ou dans une division.
+      case "para":
+      case "raw":
+      case "list":
+      case "table":
+        emitBloc(n);
+        break;
+      case "signature":
+        if (sansSignature) break;
+        lines.push(`Fait à ${n.place}, le ${n.date}`, "", ...personRoleLines(n.signataire, config), personSignatureName(n.signataire), "");
+        break;
       case "mention": lines.push("> " + n.text, ""); break;
       default: break;
+    }
+  };
+  for (const n of doc.nodes) emit(n);
+  // Les documents ANNEXÉS : l'original de l'acte d'adoption est SUIVI de leur
+  // texte — une annexe ne se signe pas, c'est l'acte qui l'adopte qui est signé
+  // et qui lui donne son autorité (voir src/lib/annexe-docs.js). Ils se lisent
+  // donc ici, à la suite de l'acte, avant les notes de préparation (qui, elles,
+  // n'appartiennent qu'à l'atelier).
+  for (const joint of doc.annexeDocs || []) {
+    lines.push("---", "", "**" + (joint.libelle || "Annexe") + "**", "");
+    if (joint.doc) {
+      lines.push(...exportMarkdown(joint.doc, config, { ...opts, notes: false, sansSignature: true }).split("\n"), "");
     }
   }
   // Les notes de préparation accompagnent les exports internes (c'est le
@@ -518,7 +723,7 @@ export function exportMarkdown(doc, config, opts = {}) {
   // l'acte. Voir `src/ui/views/signature.js`.
   if (opts.notes !== false && doc.notes?.length) {
     lines.push("---", "", "## Notes de préparation", "");
-    for (const n of doc.notes) lines.push(`- **[${n.kind}]** ${n.text}${n.author ? " — " + n.author : ""}`);
+    for (const n of doc.notes) lines.push(`- **[${n.kind}]**${n.quote ? " « " + n.quote + " »" : ""} ${n.text}${n.author ? " — " + n.author : ""}`);
   }
   if (tracking && doc.trail?.length) {
     lines.push("---", "", "## " + (doc.trailTitle || (config.vocab?.amendment?.trailTitle) || "Tableau des modifications"), "");
@@ -608,6 +813,30 @@ export function documentCss(config, style) {
 .doc-trail__title{font-size:.95em;margin:0 0 8px}
 .doc-trail__entry{margin:.7em 0 .3em;font-weight:700;font-size:.9em}
 .doc-trail__table{font-size:.8em}
+/* Les réglages propres aux blocs (retrait et encadré d'un paragraphe, filets
+   d'un tableau, légende au-dessous… — voir paramsBloc, src/lib/schema.js).
+   Un réglage de BLOC est un choix explicite : il l'emporte sur la feuille de
+   style. Les mêmes règles vivent dans l'aperçu (src/css/app.css) — les deux
+   doivent rester d'accord. */
+.doc .doc-p--boxed{border:1px solid var(--doc-rule,#8993A5);padding:.5em .7em}
+.doc .doc-p--indent-first{text-indent:1.5em}
+.doc .doc-p--indent-none{text-indent:0}
+.doc .doc-p--indent-all{margin-left:1.5em}
+.doc .doc-recitals--inline p{margin:0}
+.doc .doc-table--rows th,.doc .doc-table--rows td{border:0;border-bottom:1px solid var(--doc-grid,#8993A5)}
+.doc .doc-table--rows th{background:transparent;border-bottom:2px solid var(--doc-rule,#8993A5)}
+.doc .doc-table--zebra tbody tr:nth-child(even){background:var(--doc-neutral,#f0f0f0)}
+.doc .doc-table--center th,.doc .doc-table--center td{text-align:center}
+.doc .doc-table--right th,.doc .doc-table--right td{text-align:right}
+.doc-table-wrap > .doc-table + .doc-table-caption{margin:.3em 0 0}
+/* La partie ANNEXÉE : l'annexe imprimée à la suite de l'acte qui l'adopte (voir
+   src/lib/annexe-docs.js). Elle commence sur une PAGE neuve : l'acte se signe,
+   puis les documents qu'il adopte suivent — sans signature à eux, puisque
+   c'est celle de l'acte qui leur donne leur autorité. */
+.doc-annexe-part{break-before:page;page-break-before:always;margin-top:18px}
+.doc-annexe-part__head{border-top:1px solid #8993A5;padding-top:8px;margin:0 0 .9em}
+.doc-annexe-part__label{font-size:.72em;text-transform:uppercase;letter-spacing:.08em;color:#555;margin:0}
+.doc-annexe-part__title{font-weight:700;margin:.12em 0 0}
 ${style ? styleCss(style, config) : ""}
 `;
 }
@@ -669,6 +898,11 @@ body{margin:0;color:#111;font-family:${docFont};font-size:11pt;line-height:1.5}
 .doc-consolidation{border:solid #d9c98b 1pt;background:#fffdf3}
 .doc-ins{background:#e8f6ec}.doc-del{background:#fbeceb}
 .doc-title{page-break-after:avoid}
+/* L'annexe commence sur une page neuve, comme à l'impression (voir documentCss). */
+.doc-annexe-part{page-break-before:always}
+.doc-annexe-part__head{border-top:solid #8993A5 .75pt;padding-top:6px;margin:0 0 .8em}
+.doc-annexe-part__label{font-size:.72em;text-transform:uppercase;letter-spacing:.08em;color:#555;margin:0}
+.doc-annexe-part__title{font-weight:700;margin:.1em 0 0}
 .doc-sheet-header{border:0;padding-bottom:6px}
 .doc-sheet-header img{height:${style.logoHeight || "42"}px}
 `;

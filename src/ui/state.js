@@ -1,15 +1,19 @@
 import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, initStorage } from "../lib/store.js";
+import { seedConfig } from "../lib/seed.js";
 import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
-import { demoAccountsDisabled, isOidc, authConfig } from "../lib/auth.js";
+import { demoAccountsDisabled, isOidc, isPassword, authConfig, setDeploiementAuth, deploiementAuth } from "../lib/auth.js";
+import * as motdepasse from "../lib/motdepasse.js";
 import { applyOidcUser } from "../lib/oidc.js";
 import { inScope } from "../lib/scope.js";
-import { tramePublishable } from "../lib/schema.js";
+import { tramePublishable, trameDisponible } from "../lib/schema.js";
+import { natureOfActe } from "../lib/annexes.js";
 import { styleRuntimeCss, generalPageCss } from "../lib/styles.js";
 import { isDark, brandColors, lighten } from "../lib/theme.js";
 import { debounce } from "../lib/util.js";
 import * as collab from "../lib/collab.js";
 import { seedActes } from "../lib/demo-actes.js";
 import { circuitFor, etapePour, validationAJour, validationPourSignature, parapheurActif as parapheurActifConfig } from "../lib/validation.js";
+import { circuitPour, modeSignature, certificationDe as certificationDeActe, certificationRequise as certificationRequiseActe, publicationExternePossible, versionSignee as versionSigneeDe } from "../lib/externe.js";
 import {
   etatRevision, revisionRequise, reviseursPour, peutReviser, peutTrancherRevision, revisionPourSignature,
   REVISION_STATUTS,
@@ -25,11 +29,22 @@ export const state = {
   actes: [],
   users: [],
   user: null,
-  route: { view: "trames", params: {} },
+  // La PAGE D'ACCUEIL du site est le RECUEIL PUBLIC, et non l'atelier : c'est la
+  // route par défaut, celle qu'on obtient sans ancre et sans paramètre. Un
+  // visiteur qui ouvre l'adresse tombe sur les actes publiés ; l'atelier est
+  // derrière la porte « Se connecter » du recueil (voir `parseRoute`).
+  route: { view: "recueil", params: {} },
   ready: false,
   firstRun: false,
   storageOk: true,
   draft: {},
+  // Le mode annoncé par le DÉPLOIEMENT (`GET /v1/auth/config`), quand il y en a
+  // un : `{ mode, demo, motDePasseMin, marque }`. Null hors service des comptes
+  // (édition en ligne, page statique). Voir src/lib/motdepasse.js.
+  deploiement: null,
+  // Faut-il demander à l'agent de changer son mot de passe (mot de passe
+  // provisoire remis par un administrateur) ? Renseigné à la connexion.
+  motDePasseAChanger: false,
 };
 
 const listeners = new Set();
@@ -68,8 +83,45 @@ export function touch(what = "config", { rerender = true } = {}) {
   if (rerender) emit();
 }
 
-export async function init() {
-  await initStorage();
+// ------------------------------------------------------- mode du déploiement
+// Interroge le service des comptes, s'il y en a un, et applique le mode qu'il
+// annonce. Silencieux quand il n'y a pas de service (édition en ligne, page
+// statique) : le mode est alors celui du référentiel.
+export async function chargerModeDeploiement() {
+  const r = await motdepasse.modeService();
+  if (!r.ok || !r.body || !r.body.auth) return null;
+  const dep = setDeploiementAuth({
+    mode: r.body.auth,
+    demo: r.body.demo,
+    motDePasseMin: r.body.motDePasseMin,
+    marque: r.body.marque || null,
+    comptes: r.body.demoComptes || [],
+    serveur: true,
+  });
+  state.deploiement = dep;
+  return dep;
+}
+
+// La marque de la collectivité avant toute session : le service la rend dans
+// `GET /v1/auth/config` (nom, sous-titre, logo), parce que le référentiel — qui
+// la porte vraiment — n'est lisible qu'une fois connecté. C'est ce qui permet à
+// l'écran de connexion, et au recueil public, de porter les couleurs de la
+// collectivité au lieu de celles de la démonstration.
+function appliquerMarqueDeploiement(config) {
+  const m = state.deploiement && state.deploiement.marque;
+  if (!m || !config || !config.brand) return config;
+  config.brand = {
+    ...config.brand,
+    ...(m.name ? { name: m.name } : {}),
+    ...(m.tagline ? { tagline: m.tagline } : {}),
+    ...(m.logoUrl ? { logoUrl: m.logoUrl } : {}),
+    demo: false,
+  };
+  return config;
+}
+
+// Charge les données du registre et rouvre la session enregistrée sur ce poste.
+async function chargeDonnees() {
   const { config, trames, actes, users, session, firstRun } = await bootstrap();
   state.config = config;
   state.trames = trames;
@@ -83,11 +135,46 @@ export async function init() {
   state.ready = true;
   applyBrand();
   emit();
-  // Présence et journal : démarrés seulement quand une session est ouverte (le
-  // battement de cœur porte l'identité du compte connecté). Un visiteur, lui,
-  // n'entre pas dans l'atelier : il ne se signale pas aux postes de travail.
-  // Voir src/lib/collab.js.
-  if (state.user && !estVisiteur(state.user)) collab.demarrer(state.user).catch((e) => console.warn("Collaboration indisponible :", e));
+  demarrerPresence();
+}
+
+// Présence et journal : démarrés seulement quand une session est ouverte (le
+// battement de cœur porte l'identité du compte connecté). Un visiteur, lui,
+// n'entre pas dans l'atelier : il ne se signale pas aux postes de travail.
+// Voir src/lib/collab.js.
+function demarrerPresence() {
+  if (state.user && !estVisiteur(state.user)) {
+    collab.demarrer(state.user).catch((e) => console.warn("Collaboration indisponible :", e));
+  }
+}
+
+export async function init() {
+  await initStorage();
+  // Le service des comptes, s'il existe, dit le mode AVANT tout chargement : en
+  // mode « mot de passe », les données ne sont servies qu'à une session ouverte,
+  // et l'application ne doit donc rien demander avant de s'être identifiée.
+  const dep = await chargerModeDeploiement();
+  if (dep && dep.mode === "password") {
+    // On se donne la marque par défaut (le vrai référentiel est protégé) : c'est
+    // assez pour dessiner l'écran de connexion, et le service en fournit le nom.
+    state.config = appliquerMarqueDeploiement(seedConfig());
+    const s = await motdepasse.sessionCourante();
+    if (s.ok && s.body && s.body.utilisateur) {
+      await chargeDonnees();
+      const u = state.users.find((x) => x.id === s.body.utilisateur.id) || s.body.utilisateur;
+      state.user = accountUsable(state.config, u) ? u : null;
+      state.motDePasseAChanger = !!s.body.mustChange;
+      emit();
+      demarrerPresence();
+      return;
+    }
+    state.user = null;
+    state.ready = true;
+    applyBrand();
+    emit();
+    return;
+  }
+  await chargeDonnees();
 }
 
 // ------------------------------------------------------------------ comptes
@@ -114,6 +201,53 @@ export async function login(userId) {
   return true;
 }
 
+// -------------------------------------------------- connexion par mot de passe
+// Le mot de passe ne fait que passer : le SERVICE le vérifie et rend une session
+// (cookie `HttpOnly`). Une fois la session ouverte, les données deviennent
+// lisibles — c'est seulement alors qu'on charge le registre.
+async function ouvrirSessionLocale(utilisateurServeur, { mustChange = false } = {}) {
+  await chargeDonnees();
+  const u = state.users.find((x) => x.id === utilisateurServeur.id) || utilisateurServeur;
+  state.user = accountUsable(state.config, u) ? u : null;
+  state.motDePasseAChanger = !!mustChange;
+  if (state.user) {
+    state.user.lastLogin = new Date().toISOString();
+    await saveSession({ userId: state.user.id, at: state.user.lastLogin, via: "motdepasse" });
+  }
+  emit();
+  demarrerPresence();
+  return state.user;
+}
+
+export async function loginWithPassword(identifiant, motDePasse) {
+  const r = await motdepasse.connexion(identifiant, motDePasse);
+  if (!r.ok) {
+    return { ok: false, code: (r.body && r.body.code) || "connexion_refusee", message: motdepasse.messageErreur(r) };
+  }
+  const u = await ouvrirSessionLocale(r.body.utilisateur || {}, { mustChange: r.body.mustChange });
+  if (!u) return { ok: false, code: "compte_desactive", message: "Ce compte n'est pas utilisable dans l'application." };
+  return { ok: true, user: u, mustChange: !!r.body.mustChange };
+}
+
+// Le raccourci de démonstration, quand le service l'a laissé ouvert
+// (`DEMO_ACCOUNTS=true` avec `AUTH_MODE=password`) : on choisit un compte de
+// démonstration, sans mot de passe, et le service ouvre la session.
+export async function loginDemoService(userId) {
+  const r = await motdepasse.connexionDemo(userId);
+  if (!r.ok) return { ok: false, code: (r.body && r.body.code) || "demonstration_refusee", message: motdepasse.messageErreur(r) };
+  const u = await ouvrirSessionLocale(r.body.utilisateur || {}, { mustChange: false });
+  if (!u) return { ok: false, code: "compte_desactive", message: "Ce compte n'est pas utilisable dans l'application." };
+  return { ok: true, user: u };
+}
+
+export async function changerMonMotDePasse(ancien, nouveau) {
+  const r = await motdepasse.changerMotDePasse(ancien, nouveau);
+  if (!r.ok) return { ok: false, message: motdepasse.messageErreur(r) };
+  state.motDePasseAChanger = false;
+  emit();
+  return { ok: true };
+}
+
 // Ouverture de session après authentification par l'annuaire (voir
 // src/lib/oidc.js) : le compte est créé ou repris à partir des revendications,
 // puis la session est ouverte. Rend `{ok, user, created, linked}` ou
@@ -136,9 +270,14 @@ export async function loginWithClaims(claims) {
 
 export async function logout() {
   // On quitte proprement : notre présence est retirée (les autres postes ne nous
-  // attendent pas 70 secondes), et le verrou de rédaction tombe avec elle.
+  // attendent pas 70 secondes), le verrou de rédaction tombe avec elle, et — en
+  // mode mot de passe — la SESSION est fermée côté service (le cookie HttpOnly
+  // ne peut pas être effacé par le JavaScript de la page : c'est le service qui
+  // le fait, et qui invalide le jeton en base).
   await collab.arreter().catch(() => {});
+  if (isPassword(state.config)) await motdepasse.deconnexion().catch(() => {});
   state.user = null;
+  state.motDePasseAChanger = false;
   await saveSession(null);
   emit();
 }
@@ -205,11 +344,18 @@ export function visibleActes() {
     // la compétence (un service des affaires juridiques contrôle les actes des
     // autres services). Un acte qui n'est pas soumis ne leur est pas ouvert.
     const parRevision = !!a.revision && peutReviser(state.config, me, { trame: trameById(a.trameId), acte: a });
+    // Le pendant de la révision dans le CIRCUIT EXTERNE : un acte dont la
+    // version signée attend (ou a reçu) la certification de conformité est
+    // ouvert aux réviseurs compétents, même hors de leur périmètre — sans quoi
+    // la certification ne pourrait jamais se faire depuis leur écran. Le
+    // contrôle porte sur la pièce signée, mais il faut pouvoir l'atteindre.
+    const parCertification = !!(versionSigneeDe(a) && a.statut !== "publie")
+      && peutReviser(state.config, me, { trame: trameById(a.trameId), acte: a });
     // Un acte dont MA signature relève m'est ouvert de la même façon : ma
     // personne figure dans sa chaîne de signature.
     const parSignature = !tous && !!a.values?.signataire && competenceDeSignature(a).ok;
-    if (!tous && a.createdBy && a.createdBy !== me?.id && !parRevision && !parSignature) return false;
-    if (parRevision || parSignature) return true;
+    if (!tous && a.createdBy && a.createdBy !== me?.id && !parRevision && !parSignature && !parCertification) return false;
+    if (parRevision || parSignature || parCertification) return true;
     return inScope(state.config, me, a);
   });
 }
@@ -290,6 +436,45 @@ export async function supprimerDefinitivement(type, obj) {
 
 const libelleObjet = (type, obj) =>
   type === "acte" ? (obj.numero || obj.objet || obj.id) : (obj.name || obj.id);
+
+// ------------------------------------------------- mise à disposition d'une trame
+// Une trame se prépare à l'abri : tant qu'un éditeur ne l'a pas MISE À
+// DISPOSITION, elle n'existe que pour l'atelier, et aucun service ne peut
+// rédiger à partir d'elle. C'est le statut « published » de la trame, mais le
+// geste mérite son nom : c'est celui qui engage les services qui s'en serviront.
+// Le retour est possible (« retirer ») — un modèle se corrige, et une trame
+// retirée redevient un brouillon, invisible des services, sans rien perdre.
+export const trameEstDisponible = (trame) => trameDisponible(trame);
+
+export async function mettreTrameADisposition(trame) {
+  if (!trame) return false;
+  const etaitArchivee = trame.status === "archived";
+  trame.status = "published";
+  trame.publishedAt = new Date().toISOString();
+  trame.publishedBy = state.user?.id || "";
+  await journaliser({
+    action: "trame.disponible", cible: "trame", cibleLabel: libelleObjet("trame", trame),
+    detail: etaitArchivee
+      ? "sortie des archives et mise à disposition des services"
+      : "mise à disposition des services",
+    to: [],
+  });
+  touch("trames");
+  return true;
+}
+
+export async function retirerTrame(trame) {
+  if (!trame) return false;
+  trame.status = "draft";
+  delete trame.publishedAt;
+  await journaliser({
+    action: "trame.retiree", cible: "trame", cibleLabel: libelleObjet("trame", trame),
+    detail: "retirée : de nouveau en brouillon, invisible des services",
+    to: [],
+  });
+  touch("trames");
+  return true;
+}
 
 // --------------------------------------------------------------- journal
 // Une seule fonction pour écrire dans le registre des faits : elle complète
@@ -429,6 +614,46 @@ export function pretPourSignature(acte) {
   return revisionPour(acte);
 }
 
+// ------------------------------------------------------ signature externe
+// Le circuit de signature peut être ÉLECTRONIQUE (l'API du prestataire — le
+// comportement historique) ou EXTERNE (papier ou outil tiers : le document est
+// téléchargé, signé hors de l'application, puis déposé en PDF). Le réglage est
+// général (Administration › Signature) et la trame peut trancher — imposer ou
+// autoriser le circuit externe. Voir src/lib/externe.js.
+export const circuitSignatureDe = (acte) => circuitPour(state.config, trameById(acte?.trameId));
+export const modeSignatureDe = (acte) => modeSignature(state.config, trameById(acte?.trameId), acte);
+export const estCircuitExterne = (acte) => modeSignatureDe(acte) === "externe";
+
+// Le dossier de signature externe de l'acte : la version signée déposée, la
+// certification du réviseur, et l'état de la publication du point de vue de ce
+// circuit.
+export const versionSigneeDeActe = (acte) => versionSigneeDe(acte);
+export const certificationDeActeExterne = (acte) => certificationDeActe(acte);
+export const certificationRequisePour = (acte) => certificationRequiseActe(acte);
+export const publicationExterneDe = (acte) => publicationExternePossible(acte);
+
+// La certification de conformité est le geste du RÉVISEUR : elle suit la même
+// compétence que la révision. Un administrateur reste le recours.
+export const peutCertifier = (acte) => peutTrancher(acte);
+
+// La file du réviseur pour le circuit externe : les versions signées déposées
+// qui attendent une certification de conformité.
+export function fileCertification() {
+  const tous = visibleActes();
+  const aCertifier = [], attente = [], certifies = [];
+  for (const a of tous) {
+    if (!estCircuitExterne(a)) continue;
+    if (!versionSigneeDe(a)) continue;
+    if (!certificationRequisePour(a)) continue;
+    const statut = (certificationDeActe(a) || {}).statut;
+    if (statut === "conforme") certifies.push(a);
+    else if (peutCertifier(a)) aCertifier.push(a);
+    else attente.push(a);
+  }
+  const tri = (l) => l.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return { aCertifier: tri(aCertifier), attente: tri(attente), certifies: tri(certifies) };
+}
+
 // -------------------------------------------------------------- exécution
 export const executionDe = (acte) => statutExecution(acte, state.config, { publiable: actePubliable(acte), trame: trameById(acte?.trameId) });
 export const alertesDe = (acte) => alertesExecution(acte, state.config, { publiable: actePubliable(acte), trame: trameById(acte?.trameId) });
@@ -496,8 +721,11 @@ export function applySheets() {
 const ROUTE_WITH_ID = ["trame", "rediger", "acte", "aide", "modifier", "publication", "docs", "recueil"];
 
 // Les clés que l'URL porte pour le recueil public : par elles, un acte publié a
-// une adresse citable (« ?acte=… »), que les moteurs peuvent suivre.
-const CLES_PUBLIQUES = ["acte", "format", "recueil"];
+// une adresse citable (« ?acte=… », « ?eli=… »), que les moteurs peuvent suivre.
+// L'identifiant ELI est lui-même une adresse de l'instance (voir
+// src/lib/recueil.js, `adresseEli`) : elle désigne l'acte — et sa version en
+// vigueur — sans rien dire des adresses internes du recueil.
+const CLES_PUBLIQUES = ["acte", "format", "recueil", "eli"];
 
 // L'URL suit la page du recueil — jamais l'inverse : c'est ce qui donne à un
 // acte publié une adresse que l'on partage. Les paramètres de la plateforme
@@ -527,19 +755,29 @@ export function navigate(path, extra = {}) {
   // dans la barre du navigateur porte, elle, une seule couche d'encodage.
   const id = ROUTE_WITH_ID.includes(view) && rest[0] ? rest[0] : "";
   if (id) params.id = id;
-  state.route = { view: view || "trames", params };
+  // Sans destination nommée, on va là où mène le site : la page d'accueil, le
+  // recueil public (voir `state.route`).
+  state.route = { view: view || "recueil", params };
   majUrlRecherche(view === "recueil"
-    ? (id ? { acte: decoder(id), format: params.format } : { recueil: "1" })
+    ? (id ? { acte: decoder(id), format: params.format }
+      : params.eli ? { eli: params.eli }
+        : { recueil: "1" })
     : {});
   emit();
 }
 
 // Compatibilité : accepte un lien profond #/… sans jamais écrire dans le hash
 // (l'environnement d'édition utilise le hash pour ses propres besoins).
+//
+// Sans ancre ni paramètre, la route reste celle qui est en place — et, au
+// chargement, c'est la route PAR DÉFAUT : le recueil public, la page d'accueil
+// du site. On ne force donc rien ici : c'est `state.route` qui porte l'accueil,
+// et cette fonction ne fait que reconnaître les adresses que l'on connaît.
 export function parseRoute() {
   // Le recueil public d'abord : c'est par la requête qu'un acte publié a son
-  // adresse (« ?acte=<clé> », « ?recueil=1 »), et un visiteur qui suit ce lien
-  // ne doit voir ni l'écran de connexion, ni le recueil vide.
+  // adresse (« ?acte=<clé> », « ?recueil=1 », « ?eli=<identifiant> »), et un
+  // visiteur qui suit ce lien ne doit voir ni l'écran de connexion, ni le
+  // recueil vide.
   const qs = new URLSearchParams(location.search || "");
   const acte = qs.get("acte");
   if (acte) {
@@ -549,17 +787,28 @@ export function parseRoute() {
     emit();
     return;
   }
+  // L'identifiant ELI comme adresse : le recueil le traduit en acte (voir
+  // src/ui/views/recueil-public.js).
+  const eli = qs.get("eli");
+  if (eli) {
+    state.route = { view: "recueil", params: { eli } };
+    emit();
+    return;
+  }
   if (qs.has("recueil")) {
     state.route = { view: "recueil", params: {} };
     emit();
     return;
   }
-  const raw = (location.hash || "").replace(/^#\/?/, "");
-  if (!raw || !location.hash.startsWith("#/")) return;
+  const ancre = location.hash || "";
+  // Ni ancre, ni ancre étrangère : rien à faire (voir le commentaire ci-dessus).
+  if (!ancre.startsWith("#/")) return;
+  const raw = ancre.replace(/^#\/?/, "");
   const [view, ...rest] = raw.split("/");
   const params = {};
   if (ROUTE_WITH_ID.includes(view) && rest[0]) params.id = rest[0];
-  state.route = { view: view || "trames", params };
+  // Une ancre vide (« #/ ») est l'accueil du site : le recueil public.
+  state.route = { view: view || "recueil", params };
   emit();
 }
 
@@ -570,8 +819,13 @@ export const trameById = (id) => state.trames.find((t) => t.id === id);
 // publiables : ils ne relèvent pas d'un acte individuel. La question se pose au
 // moment de la publication, donc on la lit à la trame COURANTE : déclarer une
 // trame non publiable vaut aussi pour les actes déjà rédigés à partir d'elle.
+//
+// Une ANNEXE, elle, n'est jamais publiée pour elle-même : elle ne se signe pas,
+// et c'est l'acte qui l'adopte qui est publié — son original étant suivi du
+// texte de l'annexe (voir src/lib/annexe-docs.js).
 export function actePubliable(a) {
   if (!a) return true;
+  if (natureOfActe(a, state.trames) === "annexe") return false;
   const t = a.trameId ? state.trames.find((x) => x.id === a.trameId) : null;
   if (t) return tramePublishable(t);
   return a.publishable !== false;

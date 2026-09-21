@@ -36,22 +36,27 @@ export function renderApiTab(root, ctx) {
   root.appendChild(grid);
 
   // -------------------------------------------------------------- entête
-  const tokenBox = h("code", { class: "fr-mono api-token", text: ui.revele ? settings.jetonDemonstration : mask(settings.jetonDemonstration) });
+  const aCle = !!settings.jetonDemonstration;
+  const tokenBox = h("code", {
+    class: "fr-mono api-token",
+    text: aCle ? (ui.revele ? settings.jetonDemonstration : mask(settings.jetonDemonstration)) : "(aucune clé sur ce poste)",
+  });
   left.appendChild(h("div", { class: "fr-card" },
     h("h2", { class: "fr-card__title", text: "API REST du service" }),
-    h("p", { class: "fr-small fr-muted", text: "Les lectures sont publiques. Les écritures (dépôt, signature, publication) exigent un jeton d'API transmis dans l'en-tête Authorization." }),
+    h("p", { class: "fr-small fr-muted", text: "Le recueil public et la résolution des identifiants ELI sont ouverts à tous. Tout le reste — référentiel, actes déposés, comptes, journal — exige une clé d'API, et chaque clé porte un rôle qui commande les routes qu'elle peut appeler." }),
     h("div", { class: "api-base" },
       h("span", { class: "fr-small fr-muted", text: "URL de base" }),
       h("code", { class: "fr-mono", text: BASE }),
       h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: async () => { (await copyText(BASE)) ? toast("URL copiée") : toast("Copie impossible", "warning"); } }, icon("copy", 13), h("span", { text: "Copier" }))),
     h("div", { class: "api-base" },
-      h("span", { class: "fr-small fr-muted", text: "Jeton" }),
+      h("span", { class: "fr-small fr-muted", text: "Clé du poste" }),
       tokenBox,
-      h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: () => { ui.revele = !ui.revele; ctx.paint(); } }, icon("lock", 13), h("span", { text: ui.revele ? "Masquer" : "Révéler" })),
-      h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: async () => { (await copyText(settings.jetonDemonstration)) ? toast("Jeton copié") : toast("Copie impossible", "warning"); } }, icon("copy", 13), h("span", { text: "Copier" }))),
+      aCle ? h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: () => { ui.revele = !ui.revele; ctx.paint(); } }, icon("lock", 13), h("span", { text: ui.revele ? "Masquer" : "Révéler" })) : null,
+      aCle ? h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", onClick: async () => { (await copyText(settings.jetonDemonstration)) ? toast("Clé copiée") : toast("Copie impossible", "warning"); } }, icon("copy", 13), h("span", { text: "Copier" })) : null),
+    !aCle ? h("p", { class: "fr-small fr-muted", text: "Ce poste ne détient aucune clé : les routes protégées répondent 401/403. La clé se règle dans Administration › Base de données (provisionnement du service ou jeton du serveur externe)." }) : null,
     h("label", { class: "fr-check", style: { marginTop: "8px" } },
       h("input", { type: "checkbox", checked: ui.sansJeton, onChange: (e) => { ui.sansJeton = e.target.checked; ctx.paint(); } }),
-      "Simuler un client sans jeton (les écritures répondent alors 401)"),
+      "Simuler un client sans clé (les routes protégées répondent alors 401)"),
   ));
 
   // ------------------------------------------------------- description API

@@ -12,10 +12,11 @@
 
 import { seedConfig, seedTrames } from "./seed.js";
 import { emptyConfig } from "./schema.js";
+import { mentionsParDefaut } from "./recueil.js";
 import { seedActes } from "./demo-actes.js";
 import { seedUsers, isDemoUsers, isDemoUser, hasRole, rolesOf, setRoles, syncDemoAccounts, DEMO_USER_IDS } from "./users.js";
 import { ROLE_SIGNATAIRE, situationDeSignature } from "./signataires.js";
-import { emptyAuth } from "./auth.js";
+import { emptyAuth, demoAccountsDisabled } from "./auth.js";
 import * as db from "./db/index.js";
 
 // La mise en page A4 des documents (`src/lib/paper.js`), l'export Word, et
@@ -86,7 +87,67 @@ import * as db from "./db/index.js";
 // src/ui/signer-picker.js). Le champ « signataire » des trames devient de type
 // `signataire` ; les trames existantes sont converties (voir
 // `migrateSignatureFields`).
-export const SEED_VERSION = 36;
+// La 40 change le régime des ANNEXES : une annexe ne se signe ni ne se publie
+// pour elle-même. C'est l'acte qui l'adopte qui est signé, et l'original de cet
+// acte est suivi du texte de l'annexe (voir src/lib/annexe-docs.js). Le couple
+// délibération / règlement de la démonstration en tient compte : le règlement
+// n'est plus signé à part.
+// La 41 en tire le COROLLAIRE : une annexe n'a pas de numéro propre. Le
+// règlement de la démonstration en est dépouillé, et l'identification des
+// annexes passe partout par la décision qui les adopte (voir src/lib/annexes.js).
+// La 42 complète la même reprise : la trame du règlement perd le champ
+// « Numéro de l'acte », que l'atelier ne propose donc plus.
+//
+// La 44 ÉLARGIT LE JEU DE DÉMONSTRATION : la collectivité fictive devient celle
+// d'une ville d'une certaine importance, avec ses services (école et
+// restauration, fêtes et vie associative, environnement, police municipale,
+// finances), ses adjoints et leurs délégations de domaine, leurs codes et leurs
+// délibérations de référence. Le registre passe de dix-sept à cinquante-neuf
+// actes, d'une grande variété de documents : arrêtés de police, manifestations,
+// conventions, avenants, engagements de dépense, occupations du domaine public,
+// concessions funéraires, délibérations, règlements et tableaux tarifaires — et
+// quatre ANNEXES, dont le règlement d'accès à la restauration scolaire, adopté
+// par une délibération. Les documents mis en avant par la fiction (épinglés à la
+// une du recueil) sont le règlement des cantines, la sécurité des abords des
+// écoles et la fête du village.
+//
+// La 45 ACHÈVE CET ÉLARGISSEMENT, en mettant en avant ce qu'une collectivité
+// montre d'abord : les ANNEXES et les ÉVÉNEMENTS À VENIR. Le registre passe de
+// soixante et un à SOIXANTE-SIX actes, et les annexes de cinq à sept : la
+// **grille tarifaire des services municipaux** (le prix du repas de cantine, de
+// l'accueil du matin et du soir), adoptée par la délibération qui fixe les
+// tarifs, et le **plan de stationnement et déroulé de la cérémonie du
+// 11 novembre**, joint à l'arrêté qui l'organise. La fiction gagne la cérémonie
+// commémorative du 11 novembre et l'engagement de la dépense des illuminations
+// de fin d'année. Les actes mis à la une sont désormais le règlement de la
+// restauration scolaire, la grille tarifaire, la fête du village et le marché
+// de Noël : deux annexes, deux événements.
+//
+// La 46 ne change qu'un réglage de l'amorçage du recueil : il publie QUINZE
+// actes choisis, au lieu de tous ceux que la fiction déclare publiés. L'amorçage
+// dépose et publie chaque acte sur le service, un par un ; quinze suffisent à
+// montrer toute la variété — les six annexes, les trois événements, et un
+// document de chacune des autres familles — et la démonstration s'ouvre bien
+// plus vite.
+//
+// La 47 redessine l'**emblème de la commune** (`LOGO_SVG`, src/lib/seed.js) :
+// même écu, mais un dessin mis au point (rais du soleil courts et proches du
+// disque, cimes enneigées et bandes d'eau liserées de leur propre couleur pour
+// effacer les filets d'anticrénelage, galon unique). Le logo étant embarqué dans
+// le référentiel, il faut un nouveau jeu pour le voir.
+//
+// La 48 corrige la FORMULE des considérants élidés : un considérant déjà écrit
+// « Considérant qu'il est nécessaire… » recevait un « Considérant que » de plus
+// à l'impression, faute de reconnaître l'élision (« Considérant que » + « il »).
+// Deux actes du jeu portaient la faute dans leur document signé ; la correction
+// est dans le moteur d'assemblage (src/lib/schema.js, `appliquerFormule`), et un
+// nouveau jeu régénère les originaux déjà déposés.
+// La 49 introduit les ASSEMBLÉES DÉLIBÉRANTES (src/lib/conseils.js) : le
+// conseil municipal de la commune et le conseil d'administration de l'office
+// public de l'habitat, et la trame « Délibération du conseil d'administration ».
+// Les délibérations émanent désormais de l'assemblée — ligne d'autorité « Le
+// conseil municipal de … » — et sont signées par le président de celle-ci.
+export const SEED_VERSION = 49;
 
 // Migration du vocabulaire de modification. Les gabarits par défaut d'origine
 // accordaient mal le nom de l'acte (« la présente arrêté », « confiée à le
@@ -102,6 +163,11 @@ const AMEND_VOCAB_MIGRATIONS = [
     "Les dispositions de {designationThe} entrent en vigueur au lendemain de sa publication."],
   ["L'exécution de la présente {designationLower} est confiée à {authority}.",
     "L'exécution de {designationThe} est confiée {authorityTo}."],
+  // L'intitulé de l'acte modificatif écrivait « de {targetInSentence} », ce qui
+  // produisait « de le règlement » pour toute appellation masculine non élidée.
+  // Il passe par la forme contractée {targetDe} (voir lib/amend.js).
+  ["{designation} n°{numero} du {date} portant modification de {targetInSentence}",
+    "{designation} n°{numero} du {date} portant modification {targetDe}"],
 ];
 
 function migrateAmendmentVocab(config) {
@@ -244,6 +310,36 @@ function migrateAssistants(config) {
   return changed;
 }
 
+// Recueils extérieurs et renvois du recueil public : réglage introduit après
+// coup (Administration › Publication). Un référentiel antérieur n'a pas ce
+// bloc : on pose une LISTE VIDE sur un référentiel réel — le bas de page du
+// recueil ne renvoie alors vers rien d'autre —, et les renvois livrés avec
+// l'application sur le jeu de démonstration, pour que l'écran ne soit pas vide.
+// Purement additif, et idempotent.
+function migrateRecueilsExternes(config) {
+  if (!config) return false;
+  const p = (config.publication = config.publication || {});
+  if (Array.isArray(p.recueilsExternes)) return false;
+  p.recueilsExternes = config.brand?.demo === false ? [] : seedConfig().publication.recueilsExternes.map((r) => ({ ...r }));
+  return true;
+}
+
+// Mentions du pied de page du recueil public : réglage introduit après coup
+// (Administration › Publication › « Mentions du recueil public »). Un référentiel
+// antérieur n'a pas ce bloc : on pose les mentions LIVRÉES, et on les pose
+// ACTIVES — elles rappellent les règles de publication et d'opposabilité des
+// actes, et l'accessibilité du service ; c'est à l'administration de les adapter,
+// de les remplacer par un lien ou de les éteindre si sa situation le demande.
+// Le jeu de démonstration reçoit les textes de la fiction, comme pour les renvois
+// du recueil. Purement additif, et idempotent.
+function migrateMentionsPubliques(config) {
+  if (!config) return false;
+  const p = (config.publication = config.publication || {});
+  if (p.mentions && typeof p.mentions === "object") return false;
+  p.mentions = config.brand?.demo === false ? mentionsParDefaut() : seedConfig().publication.mentions;
+  return true;
+}
+
 function migrateDemoStyleOptions(config) {
   if (!config || config.brand?.demo === false) return false;
   if (!Array.isArray(config.styles)) return false;
@@ -359,7 +455,22 @@ export const initStorage = () => db.init();
 export const storageAvailable = () => !db.isLocalMode() || db.localDriver.available();
 
 export const loadConfig = () => db.read("config");
-export const saveConfig = (c) => db.write("config", c);
+// Garde-fou : la clé d'accès d'un moteur de langage est un SECRET de poste (voir
+// src/lib/assistant.js) ; elle ne doit jamais repartir dans le référentiel, qui
+// est partagé et exporté. On la retire ici, quelle que soit la provenance de
+// l'objet enregistré.
+function sansSecrets(c) {
+  const assistant = c && c.assistant;
+  if (!assistant || typeof assistant !== "object") return c;
+  for (const qui of Object.keys(assistant)) {
+    if (assistant[qui] && typeof assistant[qui] === "object" && "cle" in assistant[qui]) {
+      assistant[qui] = { ...assistant[qui] };
+      delete assistant[qui].cle;
+    }
+  }
+  return c;
+}
+export const saveConfig = (c) => db.write("config", sansSecrets(c));
 export const loadTrames = () => db.read("trames");
 export const saveTrames = (t) => db.write("trames", t);
 export const loadActes = () => db.read("actes");
@@ -442,7 +553,8 @@ export async function bootstrap() {
   // tenter — chacune est idempotente.
   const migrated = migrateAmendmentVocab(config) | migrateDemoNonPublishable(config) | migrateDemoStyles(config)
     | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
-    | migrateDemoServiceRevision(config) | migrateFamilyDescriptions(config) | migrateAssistants(config);
+    | migrateDemoServiceRevision(config) | migrateFamilyDescriptions(config) | migrateAssistants(config)
+    | migrateRecueilsExternes(config) | migrateMentionsPubliques(config);
   if (migrated || configTouched) await saveConfig(config);
 
   // Actes de démonstration : posés (ou remis à niveau) à la version de jeu
@@ -452,6 +564,15 @@ export async function bootstrap() {
   const demoRegistry = (trames || []).length && trames.every((t) => String(t.id).startsWith("tpl-"));
   if (meta.seedVersion !== SEED_VERSION && demoRegistry && demoActes && config.brand?.demo !== false) {
     try {
+      // L'emblème de la commune fait partie du jeu de démonstration : la version
+      // 47 l'a redessiné. Sur une installation de démonstration, l'identité suit
+      // donc le jeu livré — de la même façon que les trames et les actes qu'on
+      // régénère ici (la mention de démonstration, elle, est déjà un réglage du
+      // référentiel : `brand.demo`).
+      const embleme = seedConfig().brand.logoUrl;
+      if (config.brand?.logoUrl !== embleme) {
+        config.brand = { ...(config.brand || {}), logoUrl: embleme };
+      }
       actes = await seedActes(config, trames);
       await saveActes(actes);
       await saveConfig(config);
@@ -469,7 +590,17 @@ export async function bootstrap() {
   // Rattrapage des données créées avant l'introduction des services et bureaux :
   // déjà traité ci-dessus, avant la génération des actes de démonstration.
 
-  if (!users || !Array.isArray(users) || !users.length) { users = seedUsers(config); await saveUsers(users); }  // Comptes de démonstration créés avant les services : on leur redonne le
+  if (!users || !Array.isArray(users) || !users.length) {
+    // Un référentiel neuf reçoit le jeu de comptes de démonstration — SAUF quand
+    // le déploiement ferme ces comptes (mode mot de passe sans `DEMO_ACCOUNTS`,
+    // ou annuaire branché) : les semer remplirait « Comptes et rôles » de
+    // comptes fictifs incapables de se connecter. Sur une installation réelle,
+    // le référentiel n'est d'ailleurs pas vide : le service y a créé le compte
+    // d'administration du `.env` (voir src/server/mysql/server.mjs).
+    users = demoAccountsDisabled(config) ? [] : seedUsers(config);
+    await saveUsers(users);
+  }
+  // Comptes de démonstration créés avant les services : on leur redonne le
   // rattachement de démonstration (services et bureaux).
   else if (isDemoUsers(users) && (config.services || []).length
     && (users.every((u) => u.memberships === undefined) || DEMO_USER_IDS.some((id) => !users.some((u) => u.id === id)))) {

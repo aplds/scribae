@@ -181,6 +181,26 @@ n'y a pas de texte publié à consolider : ces actes se corrigent directement (p
 modificatif). L'état est relu à la trame courante, donc déclarer une trame non publiable vaut
 aussi pour les actes déjà rédigés à partir d'elle ; les actes sans trame restent publiables.
 
+### 3.5 Mise à disposition des trames (brouillon → services)
+
+Le champ `status` d'une trame vaut `draft`, `published` ou `archived`. **`published` veut dire,
+pour une trame, « mise à disposition des services »** : c'est le seul objet qui porte cet état,
+et c'est ce que lit `trameDisponible(trame)` (`src/lib/schema.js`). La règle est simple : **une
+trame reste en brouillon tant qu'un éditeur ne l'a pas mise à disposition**, et un brouillon
+n'est visible que de l'atelier — l'écran « Rédiger un acte » ne propose que les trames mises à
+disposition, et l'ouverture directe d'un brouillon est refusée (deux exceptions : un éditeur, et
+une rédaction déjà commencée, qui doit pouvoir se terminer).
+
+Les gestes (`mettreTrameADisposition` / `retirerTrame`, `src/ui/state.js`) écrivent le statut,
+horodatent la mise à disposition (`publishedAt`, `publishedBy`) et **journalisent**
+(`trame.disponible` / `trame.retiree` — visibles dans Administration › Journal d'audit).
+`retirerTrame` ne touche **jamais** les actes déjà produits : chacun porte sa propre copie du
+texte compilé et des valeurs saisies. Une trame **créée, dupliquée ou importée** arrive toujours
+en `draft` ; le jeu de démonstration livre les siennes en `published`, et un fichier JSON qui les
+déclare `published` les met à disposition à l'import (l'interface le signale). L'état `archived`
+n'est, lui, proposé à personne — ni aux services, ni comme modèle à qui que ce soit — et se
+quitte par la même mise à disposition.
+
 ---
 
 ## 4. Comptes, rôles et périmètre
@@ -196,9 +216,9 @@ aussi pour les actes déjà rédigés à partir d'elle ; les actes sans trame re
 | **Signataire** | **qualité cumulable** (elle ne remplace pas un profil) : la **qualité de signer**. Elle **découle d'une désignation** — dès qu'une personne est désignée dans l'organigramme des **Délégations** (comme délégant ou délégataire), le compte rattaché à cette personne la reçoit, même si la désignation est faite par un éditeur. Elle ouvre l'onglet **« Ma signature »** et restreint la vue de l'atelier au **champ de compétence** du signataire (les actes dont sa signature relève). Un signataire **signe avec son compte**, rapproché du compte que l'outil de signature lui connaît (voir § 4.5) |
 | **Visiteur** | aucun accès : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public** (le recueil). C'est l'état d'un compte authentifié dont aucun rôle d'application n'est reconnu (voir § 4.4) |
 
-Les seize permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes.rediger`,
+Les dix-sept permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes.rediger`,
 `actes.valider`, `actes.gerer`, `actes.tous`, `actes.reviser`, `actes.signer`, `signature.gerer`,
-`delegations.gerer`, `publications.depublier`,
+`delegations.gerer`, `publications.depublier`, `publications.epingler`,
 `referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`) sont la **source unique** du
 contrôle d'accès et de la matrice affichée dans l'écran « Comptes et rôles ».
 
@@ -224,21 +244,102 @@ l'administrateur échappe au périmètre.
 
 ### 4.3 Authentification
 
-Deux modes, réglés dans le **référentiel** (`config.auth`, onglet **Annuaire (OIDC)**) — donc
-exportés et importés avec lui :
+Trois modes. Deux se règlent dans le **référentiel** (`config.auth`, onglet **Annuaire (OIDC)**),
+donc exportés et importés avec lui ; le troisième se règle dans le **`.env` du déploiement** (§ 4.3
+bis), parce qu'il engage le service lui-même :
 
-| Mode | Ce qui se passe |
-|---|---|
-| **Comptes de l'application** (défaut) | L'écran de connexion liste les comptes et un clic ouvre la session, **sans mot de passe** (simulation d'annuaire). C'est le mode de démonstration. |
-| **Annuaire de la collectivité (OIDC)** | La session s'ouvre chez le fournisseur d'identité ; le rôle et le périmètre viennent des groupes de l'agent. Les comptes de démonstration sont **désactivés automatiquement**. |
+| Mode | Où il se règle | Ce qui se passe |
+|---|---|---|
+| **Comptes de l'application** (défaut) | référentiel | L'écran de connexion liste les comptes et un clic ouvre la session, **sans mot de passe** (simulation d'annuaire). C'est le mode de démonstration. |
+| **Annuaire de la collectivité (OIDC)** | référentiel | La session s'ouvre chez le fournisseur d'identité ; le rôle et le périmètre viennent des groupes de l'agent. Les comptes de démonstration sont **désactivés automatiquement**. |
+| **Comptes locaux (mot de passe)** | `.env` (`AUTH_MODE=password`) | De **vrais comptes** : identifiant + mot de passe, vérifiés par le service, session dans un cookie. Le compte d'administration est créé au premier démarrage depuis le `.env`. C'est le mode d'une installation auto-hébergée **sans annuaire**. |
 
 **Le mode « comptes de l'application » n'est pas de la sécurité.** En service, il faut :
 
-1. **Ne pas exposer l'application sur Internet.** La placer derrière le réseau de la
-   collectivité, un VPN, ou un portail d'authentification — c'est le contrôle d'accès réel ;
-2. brancher l'**annuaire** (§ 4.4) — c'est ce qui donne une identité vérifiée à chaque agent ;
-3. considérer le **jeton d'API** comme la barrière du service de données (voir § 6) : tant
-   qu'il est public, « qui atteint l'application peut écrire en base ».
+1. soit **brancher l'annuaire** (§ 4.4) — c'est ce qui donne une identité vérifiée à chaque agent ;
+2. soit activer les **comptes locaux** (§ 4.3 bis) — une vraie vérification de mot de passe, tenue
+   par le service, hors du navigateur ;
+3. et, dans tous les cas, **ne pas exposer l'application n'importe où** : la placer derrière le
+   réseau de la collectivité, un VPN ou un portail d'authentification reste la première barrière.
+
+### 4.3 bis Comptes locaux (mot de passe) — sans annuaire
+
+C'est le mode des collectivités qui n'ont pas d'annuaire à brancher, ou qui n'en veulent pas : une
+**vraie** authentification, avec un mot de passe que le service de la collectivité vérifie lui-même.
+
+```
+navigateur ──(identifiant + mot de passe)──► service ──► dérivé scrypt, en base
+         ◄──(cookie de session HttpOnly)────
+```
+
+**Ce que le service garde.** Jamais un mot de passe : un **dérivé `scrypt`** (`scrypt$N$r$p$sel$empreinte`),
+sel et paramètres compris dans la chaîne scellée — la même empreinte ne se rejoue donc pas d'une
+installation à l'autre, et deux agents ayant choisi le même mot de passe n'ont pas le même dérivé.
+Ce qui protège : le coût du calcul (`SCRYPT_N`), le **blocage après 5 échecs** (croissant, jusqu'à
+15 minutes), la **comparaison à temps constant**, et le **même message** quand l'identifiant est
+inconnu (on n'énumère pas les comptes).
+
+**Ce que le navigateur garde.** Un **jeton de session** dans un cookie `HttpOnly` (invisible du
+JavaScript de la page : elle ne peut pas le lire, donc pas le voler par une injection), et un
+jeton **anti-CSRF** dans un second cookie lisible, que la page renvoie en en-tête à chaque
+écriture — un autre site ne peut pas le lire, ni poser d'en-tête personnalisé, donc ne peut pas
+agir à la place de l'agent. La session expire au bout de `SESSION_DAYS` jours, et chaque connexion
+renouvelle son jeton.
+
+**Mise en service :**
+
+```bash
+cd src/server
+cp env.example .env
+#   AUTH_MODE=password
+#   ADMIN_LOGIN=admin
+#   ADMIN_PASSWORD=<long, unique — la clé de l'installation>
+#   DEMO_ACCOUNTS=false
+#   COOKIE_SECURE=true          # false seulement pour un essai en clair (http://…)
+docker compose up -d --build
+docker compose logs -f api      # « Compte administrateur créé depuis .env »
+```
+
+Le compte d'administration est créé **au premier démarrage** : le service l'inscrit au référentiel
+et lui pose le mot de passe de `ADMIN_PASSWORD`. Ensuite ce mot de passe **n'est plus relu** — le
+service ne réécrit jamais un mot de passe existant : on le change depuis *Comptes et rôles*
+(menu du compte › *Changer mon mot de passe*), ou en ligne de commande, pour un administrateur qui
+se serait enfermé dehors :
+
+```bash
+docker compose exec api node server.mjs --mot-de-passe admin   # demande le mot de passe (entrée masquée : stdin)
+```
+
+C'est aussi ainsi qu'on **remet un accès** à un agent : *Comptes et rôles* › bouton **Mot de passe**
+d'une ligne. Le service **engendre** alors un mot de passe provisoire (groupes de 4 caractères, sans
+caractères confondables), le **montre une seule fois** — notez-le, il n'est pas conservé — et exige
+qu'il soit changé à la première connexion. Un compte **sans mot de passe** ne peut pas se connecter :
+c'est le geste de fermeture d'un compte dont l'agent est parti (son compte reste au référentiel, avec
+ses actes).
+
+**Créer les comptes.** Le compte d'administration se connecte, puis crée les autres dans
+*Comptes et rôles* — nom, identifiant, rôle, périmètre, puis mot de passe. Le référentiel (qui porte
+les rôles et les périmètres) reste dans l'application ; **seuls les mots de passe** vivent dans les
+tables `sb_motdepasse` et `sb_session`, à côté.
+
+**Le mode démonstration** se ferme par `DEMO_ACCOUNTS=false` (le défaut en mode mot de passe). À
+`true`, l'écran de connexion garde le raccourci « choisir un compte » (la liste vient du service,
+et ces comptes entrent sans mot de passe) : pratique pour une recette, **à ne pas laisser en
+service**. Le bandeau « Démonstration » de l'application se coupe, lui, dans *Administration ›
+Identité*.
+
+**Ce qu'il faut savoir avant de s'engager :**
+
+- le mot de passe circule du navigateur au service : **TLS obligatoire** en production (cookie
+  `Secure`) — voir § 6.2 ;
+- les tables `sb_motdepasse` et `sb_session` **font partie de la sauvegarde** (§ 8) : sans elles,
+  plus personne ne se connecte ;
+- une session vit dans la **base** : restaurer une sauvegarde ancienne peut donc rouvrir une
+  session qui avait été fermée, et rend un mot de passe changé depuis. C'est un point à regarder
+  si l'on restaure pour autre chose qu'un incident ;
+- `--mot-de-passe` **ferme les sessions** du compte (le changement de mot de passe les invalide) ;
+- il n'y a **ni second facteur, ni réinitialisation par courriel** : la remise passe par
+  l'administrateur, à la voix ou par un canal sûr. Pour aller au-delà, brancher l'annuaire (§ 4.4).
 
 ### 4.4 Brancher l'annuaire (OpenID Connect)
 
@@ -284,9 +385,9 @@ première connexion, utilisez *Pré-enregistrer un agent* avec son adresse exact
 de démonstration désactivés par l'annuaire (les autres restent désactivés). Les comptes créés
 ou repris par l'annuaire, eux, restent dans la liste : ils portent le badge **Annuaire**.
 
-**Quand il n'y a pas d'annuaire.** Le mode « comptes de l'application » reste utilisable en
-production — c'est alors la protection réseau (§ 4.3) qui tient lieu de contrôle d'accès, et
-les comptes se créent à la main dans *Comptes et rôles*.
+**Quand il n'y a pas d'annuaire.** Utilisez les **comptes locaux (mot de passe)** (§ 4.3 bis) :
+c'est une vraie authentification, tenue par le service, sans rien à installer de plus. Le mode
+« comptes de l'application » ne reste, lui, qu'un mode de démonstration.
 
 ### 4.5 Compétence de révision, et qualité de signataire
 
@@ -368,9 +469,30 @@ Les plus importantes :
 | `MAX_DOC` | `400000` | taille d'un acte déposé |
 | `RATE_MAX_WRITES` / `RATE_WINDOW_MS` | `600` / `60000` | limitation de débit des écritures, par IP |
 | `AUTO_MIGRATE` | `false` | appliquer `schema.sql` au démarrage |
+| `AUTH_MODE` | `demo` | `demo` (comptes de l'application + jetons) ou `password` (comptes locaux : mot de passe + session) — § 4.3 bis |
+| `DEMO_ACCOUNTS` | `false` en mode password | laisse le raccourci « choisir un compte » ouvert (recette) |
+| `ADMIN_LOGIN` / `ADMIN_PASSWORD` | `admin` / — | compte d'administration créé au **premier** démarrage |
+| `ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY` | — | son nom, son adresse, son entité de rattachement |
+| `SESSION_DAYS` | `12` | durée d'une session |
+| `MDP_MIN_LONGUEUR` | `12` | longueur minimale d'un mot de passe |
+| `SCRYPT_N` | `65536` | coût du calcul du dérivé (durcir ralentit les tentatives) |
+| `COOKIE_SECURE` | `true` | `Secure` sur les cookies de session — `false` **seulement** pour un essai en clair |
+| `RATE_MAX_CONNEXIONS` | `30` | tentatives de connexion par IP et par fenêtre |
+| `SMTP_HOST` | — | serveur de messagerie de la collectivité. **Vide = pas d'envoi** : les notifications sont alors tracées « non envoyées », et l'application reste entièrement utilisable — § 5.5 quinquies |
+| `SMTP_PORT` | `587` (`465` si `SMTP_SECURE=ssl`) | port du serveur |
+| `SMTP_SECURE` | déduit du port | `ssl` (TLS direct), `starttls` (négocié après EHLO), ou `aucune` (à éviter : identifiants en clair) |
+| `SMTP_USER` / `SMTP_PASS` | — | identifiants, si le serveur en exige. **Le mot de passe ne quitte jamais le service** : l'application ne le voit jamais |
+| `SMTP_FROM` | — | adresse d'expédition (doit être autorisée par le serveur) |
+| `SMTP_FROM_NAME` | — | nom affiché de l'expéditeur, si le référentiel n'en pose pas |
+| `SMTP_REPLY_TO` | — | adresse de réponse, si elle diffère de l'expéditeur |
+| `SMTP_NOTIF_ACTIVE` | `true` | coupe-circuit général : `false` désactive tout envoi sans toucher au référentiel |
+| `SMTP_TLS_INSECURE` | `false` | `true` accepte un certificat non vérifié (dépannage seulement) |
+| `SMTP_HELO_NAME` / `SMTP_TIMEOUT_MS` | — / `15000` | nom annoncé en EHLO, délai d'un dialogue SMTP |
 
 Variables du conteneur `web` : `HTTP_PORT`, `APP_DIR`, `API_BASE`, `API_TOKEN`,
-`CORS_ORIGINS`.
+`CORS_ORIGINS` — plus `AUTH_MODE` et `DEMO_ACCOUNTS`, qui servent seulement à annoncer le mode au
+navigateur avant le premier appel (`web/config.js.template`) : le mode du **service** reste
+autoritaire.
 
 ### 5.3 Apparence : clair ou sombre (par poste)
 
@@ -431,6 +553,13 @@ modifie pas le paquet signé, dont l'empreinte reste celle qui a été signée.
 
 ### 5.5 Recueil public et publication automatique
 
+**La page d'accueil de l'installation, c'est le recueil public.** Ouvrir l'adresse du logiciel
+— `https://actes.votre-collectivite.fr/`, sans ancre ni paramètre — mène au recueil des actes
+publiés, et non à l'atelier : c'est la page que le public peut lire, et celle que vous pouvez
+communiquer ou afficher. L'atelier s'ouvre par le bouton **Se connecter** de l'en-tête du recueil
+(ou par l'adresse suivie de `#/trames`). Un agent qui recharge la page en travaillant revient donc
+au recueil, et repart d'un clic : c'est le prix de l'accueil public.
+
 Les réglages de publication vivent dans **Administration › Publication** (ils suivent l'export du
 référentiel, comme le reste) :
 
@@ -445,6 +574,28 @@ référentiel, comme le reste) :
   place. Le fait est inscrit au journal (`publication.automatique_eteinte`). Le réglage coupe le
   geste **automatique**, pas la publication : un acte signé reste publiable à la main.
 - **Règle d'opposabilité** — le lendemain de la publication, ou après *n* jours.
+- **Recueils extérieurs et renvois** — les **autres recueils** que Scribae ne gère pas : un recueil
+  **« bis »** (tenu à part, par exemple pour une entité autonome), un recueil **inactif** — qui
+  n'est plus alimenté — avec la **période** qu'il couvre (plusieurs peuvent se succéder après des
+  changements de logiciel), et les **sites de référence** (Légifrance, service-public.gouv.fr). On les
+  ajoute, les ordonne et les retire ; un bouton **« Rétablir les renvois livrés »** fait revenir
+  Légifrance et service-public.gouv.fr. Ils s'affichent **en bas de page** du recueil public et **à la
+  fin des résultats de recherche**, sous le titre « Vous ne trouvez pas ce que vous recherchez ? ».
+  Selon la plateforme, ce bloc n'apparaît que dans la vue servie par l'application (démonstration) :
+  le service auto-hébergé, qui rend `/recueil`, ne connaît pas encore ce réglage (voir `TODO.md`).
+- **Mentions du recueil public** — les deux mentions que tout site public porte en bas de page. Les
+  **mentions légales** rappellent à quelles conditions un acte est **exécutoire et opposable**
+  (publication et transmission au représentant de l'État, article L. 2131-1 du CGCT) et le **délai de
+  recours de deux mois** (article R. 421-1 du CJA) ; les **mentions d'accessibilité** rappellent les
+  obligations d'accessibilité d'un service en ligne (article 47 de la loi du 11 février 2005, RGAA),
+  la **déclaration d'accessibilité** et la façon de **signaler un obstacle**. Chacune se règle
+  **indépendamment**, avec trois **présentations** : un **texte** (écrit ici, replié sous son titre en
+  bas de page du recueil), un **lien** (le pied de page ne porte qu'un renvoi — vers les mentions
+  légales du site principal de la collectivité, par exemple) ou **rien**. Dans le texte, une **ligne
+  vide** sépare deux paragraphes et une ligne commençant par **« - »** devient une puce. Un bouton
+  **« Rétablir le texte livré »** ramène la mention livrée avec l'application — elle n'est donc jamais
+  perdue. Comme les renvois, ces mentions ne sont pour l'instant portées que par la vue servie par
+  l'application (voir `TODO.md`).
 
 **Le recueil public** est le site sans compte que les administrés consultent : `…/?recueil=1` (un
 acte : `…/?acte=<clé>`). Il
@@ -468,6 +619,15 @@ abrogations (bascule de l'acte visé en *abrogé*, consolidation de l'article) a
 l'entrée en vigueur** de l'acte abrogeant, non à sa publication : elle est **idempotente** et
 rejouée au démarrage comme après chaque publication, si bien qu'une date d'effet future est
 honorée sans autre intervention.
+
+**Mettre un acte à la une.** Les administrateurs et les éditeurs peuvent **épingler** un acte
+depuis l'onglet **Actes** (bouton punaise, permission `publications.epingler`,
+`POST /v1/publications/{cle}/epingle`) : il entre alors dans la bande **« À la une »** de la page
+d'accueil du recueil public, au-dessus du carrousel des derniers actes — la place d'un
+**règlement intérieur** ou d'une charte, c'est-à-dire d'un document qu'on vient chercher. La
+bande s'efface dès qu'une recherche ou un filtre est posé. Le drapeau suit l'**acte** (son
+identifiant ELI) : un acte **modifié ou consolidé reste à la une**, et le geste se défait d'un
+second clic.
 
 ### 5.5 bis Le recueil ouvert : moteurs de recherche et agents
 
@@ -568,9 +728,35 @@ acte, **toutes ses versions publiées** et son texte, et l'instruction lui deman
 que se pose le lecteur, même s'il ne la formule pas. Ce comportement ne se règle pas : il tient à
 ce que l'assistant **sait**, et non à un réglage.
 
-**Vie privée de la clé d'API.** Elle est rangée dans le **référentiel** : elle apparaît donc dans
-un export de données (fichier « Exporter tout (JSON) », sauvegarde de la base). Utilisez une clé
-**dédiée à cet usage**, que vous pouvez révoquer, plutôt qu'une clé d'administration générale.
+**La clé d'API du moteur.** C'est un **secret**, et il est traité comme tel : la clé **n'est pas
+rangée dans le référentiel** — elle ne figure donc ni dans l'export de données (« Exporter tout
+(JSON) »), ni dans une sauvegarde de la base, ni dans un export de référentiel vers un autre
+poste. Elle est conservée **par poste**, dans le stockage local du navigateur qui la saisit
+(réglage local, comme l'apparence claire ou sombre) ; un déploiement auto-hébergé peut aussi la
+remettre par l'environnement. Utilisez une clé **dédiée à cet usage** et **révocable** plutôt
+qu'une clé d'administration générale, et saisissez-la sur les seuls postes qui doivent interroger
+le moteur.
+
+**Ce que le transfert implique (RGPD, art. 13 et 28).** Le point à instruire avant d'allumer un
+assistant, noir sur blanc :
+
+| Question | Réponse |
+|---|---|
+| Qui reçoit la question ? | le **moteur réglé** : le moteur intégré de la plateforme Perchance quand il existe, sinon l'**API** que vous renseignez (votre fournisseur, ou votre propre service) |
+| Pour quelle finalité ? | répondre à la question posée dans l'interface — rien d'autre |
+| Quelles données partent ? | la **question écrite par l'utilisateur** ; pour Publia, des **extraits d'actes publiés** (donc publics par nature). Aucun contenu d'acte non publié, aucune donnée de compte, aucune donnée de brouillon |
+| Où sont-elles traitées ? | là où est le moteur — **hors Union européenne** pour le moteur intégré de la plateforme ; selon votre contrat pour une API souveraine |
+| Combien de temps ? | selon la politique du moteur ; Scribae n'en conserve **rien** |
+
+Une **analyse d'impact** n'est requise qu'en cas de traitement à grande échelle ou de données
+sensibles : ici, la question posée par un agent à un assistant de mode d'emploi n'entre pas, par
+elle-même, dans ce champ — mais c'est à la collectivité de le constater et de l'écrire dans son
+registre.
+
+**Et si l'on ne veut aucun transfert ?** **Éteignez les deux assistants** : plus aucune question ne
+part. Le recueil et l'atelier ne sont pas pour autant muets — hors moteur, les assistants
+répondent par **recherche documentaire locale** (le chapitre du guide, ou les actes publiés) et
+l'écran le dit dans une note discrète : rien ne sort du navigateur.
 
 **Éteindre un assistant.** Le réglage *Éteint* le fait disparaître complètement de son interface
 — pas de pastille, pas de panneau — et plus aucune question n'est transmise. Les deux s'éteignent
@@ -619,6 +805,80 @@ Personnes).
 **Créer une délégation n'écrit rien avant confirmation** : la fiche d'une délégation neuve
 travaille sur un brouillon, et le référentiel n'est touché qu'au moment de « Créer la
 délégation ».
+
+### 5.5 quater bis Les assemblées délibérantes (les conseils)
+
+Beaucoup d'actes n'émanent pas d'une **personne** mais d'une **assemblée** : le **conseil
+municipal**, le **conseil d'administration** d'un établissement public. C'est le cas des
+**délibérations**, dont la ligne d'autorité est celle du conseil — « Le conseil municipal de
+Valmont-sur-Loire » — alors que l'acte est **signé par le président de cette assemblée** : le
+**maire** pour un conseil municipal, le **président du conseil d'administration** pour un
+établissement public. L'autorité de l'acte et le signataire ne se confondent plus.
+
+L'onglet **Administration › Assemblées** tient la liste des conseils de l'installation. Chaque
+conseil se décrit par son **entité de rattachement** (le conseil municipal est celui de la
+commune ; le conseil d'administration, celui de l'établissement), sa **formule d'autorité** (la
+ligne d'en-tête de l'acte, telle qu'elle s'imprime) et la **qualité qui signe** : la **fonction**
+du référentiel sous laquelle l'assemblée fait signer ses actes (« Maire », « Président /
+Présidente du conseil d'administration »…). Ce dernier réglage est ce qui rend le dispositif
+**configurable conseil par conseil** : chaque assemblée a la sienne, sans toucher au code.
+
+**Ce qui compte pour l'exploitant.** Une trame produit un **acte d'assemblée** par sa case « Acte
+d'assemblée — délibération » (éditeur de trame) : la ligne d'autorité de ses actes devient alors
+celle de l'assemblée de l'entité, tandis que le signataire reste **une personne** — le
+président du conseil, choisi dans la trame — dont la chaîne de délégations continue de
+s'appliquer. Une trame de délibération est fournie dans le jeu de démonstration (conseil municipal
+et conseil d'administration), et la conformité signale un acte dont le signataire ne **porte pas**
+la qualité appelée par son assemblée : la signature n'aurait alors pas la qualité annoncée.
+
+### 5.5 quinquies Le courriel : notifications et serveur SMTP
+
+Scribae **n'envoie pas** de courriel lui-même. L'application **demande** au service de le faire
+(`POST /v1/courriel/envoi`), et c'est le **service** qui parle au serveur de messagerie de la
+collectivité. La séparation est nette, et c'est une règle de sécurité : **le mot de passe SMTP
+ne quitte jamais le service**. L'application ne le voit pas, ne le transporte pas, ne le range
+pas ; l'écran d'administration ne montre que l'**état** de la chaîne (`GET /v1/courriel` :
+hôte, port, chiffrement, adresse d'expédition, authentifié ou non).
+
+**Ce qui se règle où.**
+
+| Niveau | Où | Ce qu'on y règle |
+|---|---|---|
+| **Le serveur** | `.env` du service (`SMTP_*`, § 5.2) | hôte, port, chiffrement, identifiants, adresse d'expédition — ce que le service doit savoir pour **parler** au serveur |
+| **La politique** | Administration › **Courriel** (`config.courriel`, dans le référentiel) | notifications activées ou non, **nom affiché** de l'expéditeur, **adresse de réponse**, **copie systématique**, et les **six événements** notifiés |
+
+Le partage est délibéré : la **politique** suit le référentiel (elle s'exporte, s'importe, se
+sauvegarde avec lui) et se règle **sans toucher au serveur** ; la **connexion** reste au `.env`,
+parce qu'elle porte un secret. Les `SMTP_*` sont documentées dans `../server/mysql/env.example`
+(et `../server/env.example`), et le tableau du § 5.2 en résume les valeurs et les défauts.
+
+**Les six événements.** Chacun s'active indépendamment : *acte à signer* (au signataire désigné),
+*acte signé* et *acte publié* (au rédacteur et aux éditeurs), *acte à valider* (à l'agent dont
+c'est l'étape du parapheur), *acte à réviser* (aux réviseurs compétents), et *notification à
+l'intéressé* (aux destinataires désignés par l'agent, depuis l'écran « Exécution & délais »).
+Les destinataires sont résolus **par compte et par rôle**, les adresses invalides écartées, les
+doublons supprimés, et un même acte n'est pas notifié deux fois pour le même événement.
+
+**Quand rien ne part.** Le service répond `disponible: false` — parce que `SMTP_HOST` est vide,
+parce que `SMTP_NOTIF_ACTIVE=false`, ou parce que l'installation n'a pas de service (démo). Dans
+ce cas, **chaque** notification est **tracée « non envoyée »**, avec son motif, au **journal**
+et sur l'**acte** (`acte.courriels`, donc dans son dossier interne) : rien n'échoue en silence,
+et l'application reste entièrement utilisable. C'est le réglage normal d'une installation qui n'a
+pas encore de serveur de messagerie.
+
+**Vérifier la chaîne.** Administration › Courriel montre l'état du serveur (hôte, port,
+chiffrement, adresse d'expédition), permet d'envoyer un **message d'essai** (bouton inactif tant
+que l'envoi n'est pas configuré), et liste les **derniers envois** depuis la table `sb_courriel`
+(quand, quel événement, quels destinataires, quel objet, envoyé ou non, avec le motif en cas
+d'échec). Un envoi de test ne passe pas par la politique de notification : c'est un essai, pas un
+événement.
+
+**Le moteur SMTP** (`src/server/mysql/smtp.mjs`) est écrit pour l'occasion et **sans
+dépendance** : EHLO et capacités annoncées, `STARTTLS`, `AUTH LOGIN` et `AUTH PLAIN`, `MAIL
+FROM` / `RCPT TO` / `DATA` avec le doublement des points, sujet encodé (RFC 2047), corps en texte
+**et** en HTML (multipart/alternative, base64 par lignes de 76). Il reçoit un **transport
+injecté** (`lireReponse`, `ecrire`, `demarrerTls`, `fermer`), ce qui permet de le tester sans
+réseau — et c'est ainsi qu'il a été vérifié. Le mot de passe n'apparaît dans aucun journal.
 
 ### 5.6 Numérotation : séquence interne, ou service externe
 
@@ -669,6 +929,33 @@ direct, soit attendre un relais côté service (voir `src/TODO.md`).
   `sb_journal.actor`, ce qui permet de savoir **quel client** a écrit.
 - **Prévoyez un jeton par usage** (l'application, un script de reprise, une supervision) :
   révoquer un jeton, c'est retirer une ligne de `API_TOKENS`.
+
+> En mode **comptes locaux** (`AUTH_MODE=password`), les jetons d'API ne sont **plus acceptés** :
+> c'est la session de l'agent qui porte l'autorisation, et une écriture sans session est refusée
+> (401). Un jeton écrit dans la page est public ; il ne peut pas protéger une donnée. `API_TOKENS`
+> peut donc rester vide dans ce mode.
+
+### 6.1 bis Mots de passe et sessions
+
+- **Ce qui est conservé** : un dérivé `scrypt` (sel et paramètres compris), jamais le mot de passe.
+  Le coût se règle par `SCRYPT_N` — le durcir ralentit les tentatives d'un attaquant qui aurait
+  volé la base, au prix de quelques centaines de millisecondes à la connexion.
+- **Blocage progressif** : cinq échecs ferment le compte quelques secondes, puis de plus en plus
+  longtemps (plafond : 15 minutes). La tentative est comptée sur le **compte**, pas sur l'IP — un
+  attaquant réparti sur plusieurs machines n'y échappe donc pas, et le message ne dit jamais si
+  l'identifiant existe.
+- **Sessions** : seul le **SHA-256 du jeton** est en base (`sb_session`) ; le jeton lui-même n'existe
+  que dans le cookie `HttpOnly` du navigateur. Une session ne se « récupère » donc pas depuis un
+  dump de la base.
+- **Anti-CSRF** : toute écriture exige l'en-tête `x-csrf-token`, égal au cookie `scribae_csrf` (que
+  seul le JavaScript de l'origine peut relire). Sans lui : 403. La lecture, elle, passe avec le seul
+  cookie de session.
+- **Fermer l'accès d'un agent** : *Comptes et rôles* › **Mot de passe** › *Retirer* — ses sessions
+  sont fermées dans le même geste. Désactiver le compte (bouton *Désactiver*) produit le même effet
+  immédiat, sans toucher au mot de passe.
+- **Ce qui reste hors de portée** : pas de second facteur, pas de réinitialisation par courriel, pas
+  de détection d'usurpation. Un poste de travail compromis (ou un mot de passe partagé) n'est pas
+  vu par le service. Pour cela : annuaire (§ 4.4).
 
 ### 6.2 Transport
 
@@ -733,6 +1020,17 @@ auto-hébergé, le service expose `/robots.txt`, `/llms.txt`, `/sitemap.xml` et 
 acte, sans JavaScript. Tout ce qui est publié est donc **indexable** — ce qui est le but d'un
 recueil, mais qui doit être su avant de publier un acte dont la publicité est restreinte.
 
+**Ce qui n'est jamais public : la part interne de l'original signé.** Publier un acte ne veut pas
+dire tout publier de sa signature. L'original signé se partage en deux (voir § 6.6) : la part
+**publique** — nom, fonction, date du signataire, empreinte et certificat — part au recueil et
+par toutes les routes ouvertes ; la part **interne** — adresse électronique du signataire,
+compte de l'application et compte de signature, moyen d'authentification, poste, adresse réseau,
+horodatage détaillé, et la **trace des courriels** adressés au titre de l'acte — est rangée au
+registre avec la publication, et **n'est servie par aucune route publique**. Elle se lit par la
+route **protégée** `GET /v1/actes/{id}/dossier-signature` (jeton) et, dans l'application, par le
+bouton « Dossier de signature (interne)… ». Autrement dit : un visiteur du recueil ne peut pas
+déduire l'adresse électronique d'un signataire de la seule lecture des publications.
+
 ### 6.6 Signature électronique
 
 La signature de la démonstration est **réelle cryptographiquement** (ECDSA P-256 + SHA-256,
@@ -742,6 +1040,28 @@ Le service recalcule l'empreinte SHA-256 du document signé et la compare à cel
 déposé, donc on ne peut pas publier autre chose que ce qui a été signé. Pour une signature
 **qualifiée**, il faut brancher le prestataire de la collectivité (point d'extension :
 `src/lib/signature.js` côté application, et le domaine `actes.mjs` côté service).
+
+**Trois circuits**, réglés globalement (Administration › **Signature**) ou par trame
+(`trame.signature`) : `electronique` (défaut — l'acte part au prestataire et revient signé),
+`simple` (le signataire signe **dans l'application**, avec son compte), `externe` (le document est
+téléchargé, signé hors de l'application, et le PDF signé est déposé après certification du
+réviseur). Un acte **engagé** dans un circuit y reste : changer un réglage ne déplace pas un acte
+en cours.
+
+**La signature simple est la plus nominative** — c'est dans la nature du procédé —, et c'est
+pourquoi elle est celle dont l'original est le plus strictement partitionné. `partiePublique(pack)`
+(`src/lib/signature.js`) retire du paquet la clé `interne` et, dans chaque signature, l'adresse
+électronique, `personId`, `compteId`, `compteOutil` et l'état de rapprochement. Cette fonction
+s'applique **aussi** au circuit électronique : de son paquet signé ne sortent, pour le public,
+que le nom, la fonction et la date. `dossierInterne(pack)` / `originalInterneDe(acte)` composent
+la part conservée, déposée avec la publication et servie par la seule route protégée
+(§ 6.5).
+
+**Ce que `src/` ne doit jamais contenir**, ici comme ailleurs : un mot de passe SMTP, un jeton de
+production, une clé privée. Le script serveur de `index.html` est **public** — tout ce qu'on y
+met est lisible par quiconque ouvre la page ou télécharge la source. Les `SMTP_*` vivent donc
+dans le `.env` du service, et le script serveur embarqué (démonstration) n'en a aucun : il répond
+`courriel_indisponible`, ce qui est le comportement attendu.
 
 ---
 
@@ -847,6 +1167,31 @@ connaître : 40 publications conservées et 80 circuits de signature (les plus a
 évincés) — ajustables par `MAX_PUBLIES` / `MAX_SIGNATURES` / `MAX_ACTES` ; 8 Mio par requête
 (`MAX_BODY`) ; 400 000 caractères par acte déposé (`MAX_DOC`).
 
+> **Ce service n'est pas, non plus, un service d'archivage** : les bornes ci-dessus sont des
+> **bornes d'exploitation courante**, pas des durées de conservation. Ce que la collectivité
+> doit conserver au titre de l'archivage (et sous quel format d'archivage — paquet
+> d'archivage, NF Z42-013) relève de sa politique d'archivage et se traite **en dehors** de
+> Scribae : d'où l'export permanent des actes, de leurs originaux signés et du journal.
+
+### 7.6 La plateforme de démonstration n'est pas un service
+
+L'édition en ligne (`perchance.org/scribae`, la même que l'atelier d'édition) est une
+**démonstration**. Trois choses, en particulier, y diffèrent d'un service :
+
+1. **Ce qui y est déposé est partagé** et lisible par les autres visiteurs — le recueil
+   public de la démonstration est commun. On n'y dépose **aucune donnée réelle** ;
+2. **ce qui y est conservé peut disparaître** : l'état durable de ce service a une capacité
+   bornée, et le plus ancien est **évincé** à mesure (`MAX_ACTES`, `MAX_PUBLIES`,
+   `MAX_SIGNATURES` dans `index.html`). Une publication peut donc quitter le recueil par
+   simple pression, sans intervention. **Ce n'est pas un mode de conservation**, et il n'y
+   existe **ni sauvegarde ni restauration** (elles existent, elles, ci-dessus, § 8) ;
+3. **il n'y a pas d'accès SMTP** : les notifications par courriel y sont constatées « non
+   envoyées », avec leur motif.
+
+Une collectivité qui produit des actes **réels** installe le service (§ 1) ou branche sa
+propre base (§ 5). La démonstration sert à essayer, à montrer et à former — jamais à
+conserver.
+
 ---
 
 ## 8. Sauvegardes et restauration
@@ -854,7 +1199,9 @@ connaître : 40 publications conservées et 80 circuits de signature (les plus a
 Trois choses à sauvegarder, et une à tester :
 
 1. **La base** (référentiel, trames, actes, comptes, journal, état du service) — c'est
-   l'essentiel. Dump logique :
+   l'essentiel. En mode **comptes locaux**, les tables `sb_motdepasse` (les dérivés) et
+   `sb_session` (les sessions ouvertes) en font partie : un dump sans elles rendrait
+   l'installation inaccessible. Dump logique :
 
    ```bash
    docker compose exec -T db mariadb-dump -u root -p"$DB_ROOT_PASSWORD" \
@@ -944,10 +1291,12 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
 
 ## 12. Limites connues et feuille de route
 
-- **Authentification** — deux modes : comptes de l'application (simulation, pour la
-  démonstration) ou annuaire de la collectivité en OpenID Connect (§ 4.4). En mode simulé,
-  l'installation doit être protégée par le réseau ; en mode annuaire, le jeton d'API du
-  service de données reste à rendre non public.
+- **Authentification** — trois modes : comptes de l'application (simulation, pour la
+  démonstration), comptes locaux à mot de passe (§ 4.3 bis, réglé par le `.env` du service), ou
+  annuaire de la collectivité en OpenID Connect (§ 4.4). En mode simulé, l'installation doit être
+  protégée par le réseau ; en mode annuaire, le jeton d'API du service de données reste à rendre
+  non public. Il reste à faire : réinitialisation du mot de passe par l'agent, second facteur
+  (TOTP), journal des connexions, et purge planifiée des sessions.
 - **Signature non qualifiée** — prestataire simulé (§ 6.6).
 - **PDF/A certifié** — le PDF s'obtient par impression du HTML ; la chaîne PDF/A reste à
   valider (veraPDF).

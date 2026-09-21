@@ -17,7 +17,7 @@
 // « recueil ouvert » : Markdown, texte brut, JSON. Voir plus bas, et
 // `src/server/mysql/actes.mjs` pour le service qui les sert en production.
 // ============================================================================
-import { formatDate } from "./util.js";
+import { formatDate, uid } from "./util.js";
 
 // ------------------------------------------------ extraction de la version publiée
 
@@ -207,6 +207,21 @@ export function dernieresPublications(liste, n = 6) {
     .slice(0, n);
 }
 
+// Les actes ÉPINGLÉS — ceux que l'administration a mis en avant d'un geste,
+// depuis l'onglet « Actes ». Le recueil les présente dans sa bande « À la
+// une », avant les derniers actes publiés : c'est la place d'un règlement
+// intérieur, d'une charte, d'un document qu'on vient chercher. Comme le
+// carrousel, la bande ne montre que les versions EN VIGUEUR — un acte ne se
+// présente qu'une fois, même épinglé.
+export const estEpinglee = (p) => !!p && p.epingle === true;
+
+export function publicationsEpinglees(liste) {
+  return publicationsEnVigueur(liste)
+    .filter(estEpinglee)
+    .sort((a, b) => String(b.datePublication || "").localeCompare(String(a.datePublication || ""))
+      || String(b.publieeLe || "").localeCompare(String(a.publieeLe || "")));
+}
+
 // Le libellé et la présentation d'un thème, lus au référentiel. Le libellé est
 // éditable (Administration › Familles) : le recueil suit ce que l'administration a
 // écrit.
@@ -255,6 +270,260 @@ export function parAnnee(liste) {
       annee,
       items: [...items].sort((a, b) => String(b.datePublication || "").localeCompare(String(a.datePublication || ""))),
     }));
+}
+
+// ------------------------------------------------ recueils extérieurs et renvois
+// Un recueil n'est jamais seul. Une collectivité peut avoir tenu, avant de
+// passer à Scribae, d'AUTRES recueils : un recueil « bis » monté à part pour
+// une raison technique (une entité autonome, un périmètre séparé), ou des
+// recueils **inactifs** — plus alimentés — que des changements de logiciel ont
+// laissés derrière eux, parfois plusieurs à la suite. Le public, lui, cherche
+// un acte, pas l'histoire des prestataires : le recueil lui dit donc OÙ
+// chercher ailleurs, et où toute question de droit trouve sa réponse.
+//
+// Ces renvois sont des DONNÉES du référentiel
+// (`config.publication.recueilsExternes`) : l'administration les écrit, les
+// ordonne et les retire sans toucher au code. Trois natures, parce que les
+// trois ne se lisent pas de la même façon :
+//
+//   • « bis »        un recueil parallèle, tenu hors de Scribae ;
+//   • « inactif »    un recueil qui n'est plus alimenté, avec la période qu'il
+//                    couvre (« actes publiés du … au … ») : c'est ce qui
+//                    distingue deux recueils successifs, et dit au lecteur où
+//                    s'arrête l'un, où commence l'autre ;
+//   • « ressource »  un site de référence (Légifrance, service-public.gouv.fr…),
+//                    qui ne contient pas les actes de la collectivité mais les
+//                    textes et les démarches qui les entourent.
+export const TYPES_RECUEIL_EXTERNE = [
+  { id: "bis", label: "Recueil « bis »", hint: "Un recueil parallèle, tenu hors de Scribae." },
+  { id: "inactif", label: "Recueil inactif", hint: "Un recueil qui n'est plus alimenté — précisez la période couverte." },
+  { id: "ressource", label: "Site de référence", hint: "Un site à consulter (Légifrance, service-public.gouv.fr…)." },
+];
+
+export const recueilExterneTypeLabel = (id) =>
+  (TYPES_RECUEIL_EXTERNE.find((t) => t.id === id) || {}).label || "Recueil";
+
+// Les renvois livrés avec l'application : ils ne sont pas codés « en dur » dans
+// la page — ce sont des entrées ordinaires de la liste, que l'administration
+// peut modifier ou retirer. Le bouton « Rétablir » de l'écran de réglage les
+// fait revenir d'un clic quand on les a supprimés par mégarde.
+export const RENVOIS_RECOMMANDES = [
+  {
+    id: "rex-legifrance", type: "ressource",
+    label: "Légifrance — le service public de la diffusion du droit",
+    url: "https://www.legifrance.gouv.fr/",
+    note: "Les textes officiels : codes, lois, décrets et arrêtés.",
+  },
+  {
+    id: "rex-service-public", type: "ressource",
+    label: "service-public.gouv.fr — le site officiel de l'administration française",
+    url: "https://www.service-public.gouv.fr/",
+    note: "Les démarches et les droits des usagers.",
+  },
+];
+
+export function newRecueilExterne(patch = {}) {
+  return { id: uid("rex"), label: "", url: "", type: "bis", du: "", au: "", note: "", ...patch };
+}
+
+// Les renvois EFFECTIFS : ceux qui portent une adresse. Une entrée à moitié
+// remplie — un libellé sans adresse — ne s'imprime pas : mieux vaut un renvoi
+// absent qu'un lien qui ne mène nulle part.
+export function recueilsExternes(config) {
+  const list = (config && config.publication && config.publication.recueilsExternes) || [];
+  return list.filter((r) => r && String(r.url || "").trim());
+}
+
+// L'adresse d'un renvoi, complétée d'un schéma si l'administration a saisi
+// « www.exemple.fr » : un lien sans schéma serait relatif, et mènerait à une
+// page du recueil qui n'existe pas.
+export function urlRecueilExterne(r) {
+  return urlAvecSchema(r && r.url);
+}
+
+// La période COUVERTE par un recueil inactif : « actes publiés du … au … ».
+// Chacune des deux bornes est facultative — un recueil dont on ne connaît que
+// l'année de fin reste utile — et rien ne s'affiche si aucune n'est renseignée.
+export function periodeRecueil(r) {
+  if (!r) return "";
+  const du = r.du ? formatDate(r.du, "date-long") : "";
+  const au = r.au ? formatDate(r.au, "date-long") : "";
+  if (du && au) return `actes publiés du ${du} au ${au}`;
+  if (du) return `actes publiés depuis le ${du}`;
+  if (au) return `actes publiés jusqu'au ${au}`;
+  return "";
+}
+
+// ---------------------------------------------------- mentions du pied de page
+//
+// Un espace public se termine par ses mentions : celles que la loi fait figurer
+// au pied d'un site public, et qu'une collectivité veut pouvoir adapter à sa
+// situation. DEUX mentions sont prévues, parce que ce sont les deux qu'un
+// administré vient chercher en bas de page :
+//
+//   • « légales »        qui édite le recueil, et à quelles conditions les actes
+//                        qu'il diffuse sont publiés, exécutoires et opposables ;
+//   • « accessibilite »  ce que la collectivité doit à l'accessibilité de son
+//                        service en ligne, et la voie ouverte à qui rencontre un
+//                        obstacle.
+//
+// Chacune se présente de TROIS façons (`mode`) :
+//
+//   • « texte »   le texte est écrit dans le référentiel et s'affiche en bas de
+//                 page, déplié à la demande du lecteur ;
+//   • « lien »    le pied de page ne porte qu'un lien — celui des mentions
+//                 légales du site principal de la collectivité, par exemple ;
+//   • « aucune »  la mention ne s'affiche pas.
+//
+// Rien n'est codé dans la page : tout vient du référentiel
+// (`config.publication.mentions`), que l'administration écrit, remplace par un
+// lien ou éteint (Administration › Publication › « Mentions du recueil public »).
+export const MENTIONS_PUBLIQUES = [
+  {
+    id: "legales",
+    label: "Mentions légales",
+    hint: "Qui édite le recueil, et les règles de publication, d'exécution et d'opposabilité des actes.",
+  },
+  {
+    id: "reutilisation",
+    label: "Conditions de réutilisation",
+    hint: "La licence sous laquelle les informations publiées ici peuvent être réutilisées (obligation de publicité des conditions de réutilisation, CRPA art. L. 322-1).",
+  },
+  {
+    id: "accessibilite",
+    label: "Mentions d'accessibilité",
+    hint: "L'accessibilité du service en ligne, et la voie ouverte à qui rencontre un obstacle.",
+  },
+];
+
+// Les textes LIVRÉS. Ils sont écrits pour être vrais d'une collectivité
+// quelconque : ils ne nomment personne, et rappellent les règles applicables
+// plutôt que la situation d'une commune en particulier. L'administration les
+// adapte (identité de l'éditeur, coordonnées, état de conformité) — et le jeu de
+// démonstration les remplace par ceux de la fiction (voir src/lib/seed.js).
+export const MENTIONS_DEFAUT = {
+  legales: {
+    mode: "texte",
+    titre: "Mentions légales",
+    lien: "",
+    lienLabel: "",
+    texte: [
+      "Ce recueil est édité par la collectivité, qui publie ici les actes administratifs qu'elle prend. Les règles qui s'attachent à cette publication sont rappelées ci-dessous.",
+      "Publication et opposabilité. Les actes pris par les autorités communales sont exécutoires de plein droit dès qu'il a été procédé à leur publication ou à leur affichage, ainsi qu'à leur transmission au représentant de l'État (article L. 2131-1 du code général des collectivités territoriales). Une fois cette double formalité accomplie, ils sont opposables aux tiers. La date à laquelle chaque acte devient exécutoire est indiquée sur la page qui le diffuse.",
+      "Voies et délais de recours. Un acte administratif peut faire l'objet d'un recours gracieux ou, à défaut, d'un recours contentieux devant le tribunal administratif compétent, dans un délai de deux mois à compter de sa publication (article R. 421-1 du code de justice administrative). Le recours gracieux formé dans ce délai l'interrompt : un nouveau délai court à compter de la réponse de la collectivité.",
+      "Conservation des originaux. Les actes signés sont conservés par la collectivité et peuvent être consultés sur demande auprès du service compétent ; la version diffusée dans ce recueil ne se substitue pas au document signé.",
+    ].join("\n\n"),
+  },
+  // La publicité des conditions de réutilisation est une OBLIGATION : les
+  // informations publiques mises en ligne doivent pouvoir être réutilisées, et
+  // les conditions de cette réutilisation doivent être rendues publiques
+  // (articles L. 321-1 et L. 322-1 du code des relations entre le public et
+  // l'administration). Le texte livré nomme la licence par défaut et renvoie à
+  // son texte ; l'administration le remplace par celui de sa propre licence.
+  reutilisation: {
+    mode: "texte",
+    titre: "Réutilisation des informations",
+    lien: "",
+    lienLabel: "",
+    texte: [
+      "Les informations publiées dans ce recueil sont des informations publiques : elles peuvent être réutilisées à d'autres fins que celles pour lesquelles elles ont été produites, y compris à des fins commerciales, sous réserve du respect de la licence indiquée ci-dessous.",
+      "Licence. Sauf mention contraire portée sur un document, ces informations sont mises à disposition sous la Licence Ouverte / Open Licence 2.0 (Etalab), qui autorise la reproduction, la diffusion et la réutilisation, y compris commerciale, à condition de mentionner la source et la date de dernière mise à jour, et de ne pas altérer le sens des documents. Le texte de cette licence est publié par la collectivité et accompagne le présent recueil.",
+      "Documents non réutilisables. Ne peuvent pas être réutilisés, et sont exclus de cette licence : les logos, les marques et les signes distinctifs de la collectivité ; les documents dont la communication ne relève pas d'une obligation, ou qui contiennent des données à caractère personnel (un acte individuel est conservé et communicable sur demande, mais n'est pas publié ici) ; les œuvres protégées par un droit d'auteur dont la collectivité ne détient pas les droits.",
+      "Garantie. La collectivité s'attache à la qualité des informations publiées, mais ne peut garantir qu'elles sont exemptes d'erreur ni qu'elles demeurent à jour : le texte de référence est l'original signé, et seul celui-ci fait foi. Il appartient à toute personne réutilisant ces informations de vérifier le texte signé avant tout usage.",
+    ].join("\n\n"),
+  },
+  accessibilite: {
+    mode: "texte",
+    titre: "Accessibilité",
+    lien: "",
+    lienLabel: "",
+    texte: [
+      "Ce service de communication publique en ligne relève des obligations d'accessibilité prévues par l'article 47 de la loi n° 2005-102 du 11 février 2005. La collectivité s'attache à le rendre accessible conformément au référentiel général d'amélioration de l'accessibilité (RGAA).",
+      "Déclaration d'accessibilité. L'état de conformité du service, les contenus qui ne sont pas accessibles et les mesures de correction retenues sont décrits dans la déclaration d'accessibilité publiée par la collectivité, accompagnée de son schéma pluriannuel de mise en accessibilité et du plan d'actions de l'année en cours.",
+      "Signaler un obstacle. Si vous n'arrivez pas à accéder à un contenu ou à une fonctionnalité, signalez-le à la collectivité : écrivez au service dont les coordonnées figurent en bas de page, ou utilisez le formulaire de contact du site de la collectivité. Vous pouvez également saisir le Défenseur des droits, compétent en matière d'accessibilité des services de communication publique en ligne.",
+    ].join("\n\n"),
+  },
+};
+
+// Les mentions livrées, en COPIE : un référentiel neuf les reçoit, et il les
+// modifie ensuite sans jamais toucher au texte livré — que le bouton « Rétablir
+// le texte livré » de l'écran de réglage fait revenir d'un clic.
+export function mentionsParDefaut() {
+  return Object.fromEntries(MENTIONS_PUBLIQUES.map((m) => [m.id, { ...MENTIONS_DEFAUT[m.id] }]));
+}
+
+// L'adresse d'un lien écrit par l'administration, complétée d'un schéma si elle
+// a saisi « www.exemple.fr » : un lien sans schéma serait relatif, et mènerait à
+// une page du recueil qui n'existe pas.
+export function urlAvecSchema(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? u : "https://" + u;
+}
+
+// La mention telle qu'elle s'affiche, ou `null` quand il n'y a rien à montrer :
+// une mention éteinte, un lien sans adresse ou un texte vide ne s'impriment
+// pas — mieux vaut une mention absente qu'une rubrique vide en bas de page.
+export function mentionPublique(config, id) {
+  const def = MENTIONS_DEFAUT[id] || {};
+  const brut = (((config && config.publication && config.publication.mentions) || {})[id]) || {};
+  const m = { ...def, ...brut };
+  const mode = m.mode === "lien" || m.mode === "aucune" ? m.mode : "texte";
+  const titre = String(m.titre || "").trim() || (MENTIONS_PUBLIQUES.find((x) => x.id === id) || {}).label || "";
+  if (mode === "aucune") return null;
+  if (mode === "lien") {
+    const url = urlAvecSchema(m.lien);
+    if (!url) return null;
+    return { id, mode, titre, url, lienLabel: String(m.lienLabel || "").trim() || titre };
+  }
+  const texte = String(m.texte || "").trim();
+  if (!texte) return null;
+  return { id, mode: "texte", titre, texte };
+}
+
+export function mentionsPubliques(config) {
+  return MENTIONS_PUBLIQUES.map((m) => mentionPublique(config, m.id)).filter(Boolean);
+}
+
+// ---------------------------------------------------- licence de réutilisation
+// La licence sous laquelle les informations du recueil sont réutilisables. Elle
+// se règle dans le référentiel (`config.publication.licence`), et elle est
+// reprise dans la page (pied du recueil) comme dans le JSON-LD publié — de
+// sorte que les conditions de réutilisation soient publiques ET lisibles par
+// une machine. La Licence Ouverte 2.0 est le défaut : c'est la licence des
+// informations publiques en France, et c'est celle que recommande Etalab.
+export const LICENCE_DEFAUT = {
+  nom: "Licence Ouverte / Open Licence 2.0",
+  url: "https://www.etalab.gouv.fr/wp-content/uploads/2017/04/ETALAB-Licence-Ouverte-v2.0.pdf",
+  mention: "Source des données et documents : la collectivité. Réutilisation autorisée sous Licence Ouverte 2.0.",
+};
+
+export function licenceReutilisation(config) {
+  const l = (config && config.publication && config.publication.licence) || {};
+  const nom = String(l.nom || "").trim() || LICENCE_DEFAUT.nom;
+  const url = String(l.url || "").trim() || LICENCE_DEFAUT.url;
+  const mention = String(l.mention || "").trim() || LICENCE_DEFAUT.mention;
+  return { nom, url, mention };
+}
+
+// Le découpage d'un texte de mention en BLOCS, pour l'impression. L'administration
+// écrit au plus simple : une ligne vide sépare deux paragraphes, et une ligne qui
+// commence par « - » ou « • » devient une puce. Pas de balisage à apprendre, et
+// rien d'autre à retenir — le texte reste un texte.
+export function blocsMention(texte) {
+  const blocs = [];
+  for (const morceau of String(texte || "").split(/\n\s*\n/)) {
+    const t = morceau.trim();
+    if (!t) continue;
+    const lignes = t.split("\n").map((l) => l.trim()).filter(Boolean);
+    const puces = lignes.filter((l) => /^([-•*]|\d+[.)])\s+/.test(l));
+    if (puces.length === lignes.length && lignes.length) {
+      blocs.push({ type: "ul", items: lignes.map((l) => l.replace(/^([-•*]|\d+[.)])\s+/, "")) });
+    } else {
+      blocs.push({ type: "p", texte: lignes.join(" ") });
+    }
+  }
+  return blocs;
 }
 
 // ------------------------------------------------------------------ liens
@@ -343,6 +612,122 @@ export const FICHIERS_OUVERTS = [
   { nom: "robots.txt", label: "robots.txt", hint: "Ce qui peut être parcouru, et où trouver le plan." },
 ];
 
+// ------------------------------------------------------ liens par l'identifiant ELI
+//
+// Un acte en cite un autre PAR SON IDENTIFIANT ELI (« eli:/fr/arr/2026/0464/vsl ») :
+// c'est cet identifiant qui est écrit dans le document publié — il ne change
+// jamais, même si l'adresse du site change. Mais un identifiant n'est pas une
+// adresse : aucun navigateur ne sait l'ouvrir. C'est donc à l'INSTANCE de le
+// traduire, et elle seule le peut — elle connaît ses actes publiés.
+//
+// D'où deux usages, et une seule table de correspondance. L'identifiant ELI
+// désigne l'ACTE (et non une version) : deux versions publiées sous le même
+// identifiant désignent le même acte, et c'est la version EN VIGUEUR que le
+// recueil présente — donc celle que le lien doit atteindre.
+//
+//   • les liens portés par un document publié (un visa d'adoption, une annexe) :
+//     `resoudreLiensEli` remplace, dans la page, l'identifiant par l'adresse de
+//     l'acte visé — le lecteur reste dans l'instance ;
+//   • l'identifiant comme ADRESSE (« ?eli=… » dans la page, « /eli/… » sur un
+//     déploiement auto-hébergé) : un lecteur qui a un ELI sous les yeux ouvre
+//     l'acte sans rien connaître des adresses internes du recueil.
+
+export const ELI_PREFIXE = "eli:/fr/";
+
+export const estEliUri = (v) => /^eli:\/fr\//i.test(String(v || "").trim());
+
+// La clé de comparaison de deux écritures du même identifiant (la casse et les
+// espaces d'un identifiant recopié à la main ne doivent pas le rendre inconnu).
+export const cleEli = (v) => String(v || "").trim().toLowerCase().replace(/\s+/g, "").replace(/\/+$/, "");
+
+// L'index des actes publiés par identifiant ELI. La liste arrive de la plus
+// récente à la plus ancienne (voir /v1/publications) : la première version
+// rencontrée sous un identifiant est retenue, sauf si elle n'est plus en vigueur.
+export function indexEli(publications) {
+  const index = new Map();
+  for (const p of publications || []) {
+    if (!p || !p.eliUri || !p.cle) continue;
+    const k = cleEli(p.eliUri);
+    const deja = index.get(k);
+    if (!deja || (deja.latest === false && p.latest !== false)) index.set(k, p);
+  }
+  return index;
+}
+
+// L'acte publié que désigne un identifiant ELI (null s'il n'est pas au recueil).
+export function publicationParEli(liste, eli) {
+  return estEliUri(eli) ? indexEli(liste).get(cleEli(eli)) || null : null;
+}
+
+// Le chemin d'un identifiant dans l'espace public : un segment par élément de
+// l'identifiant (« eli:/fr/arr/2026/0464/vsl » → « arr/2026/0464/vsl »).
+const segmentsEli = (eli) => String(eli || "").replace(/^eli:\/fr\//i, "").split("/").filter(Boolean);
+
+// L'adresse de l'identifiant — celle qu'on cite et qu'on partage. Auto-hébergé,
+// c'est une adresse du site (« /eli/arr/2026/0464/vsl »), que le service sait
+// résoudre lui-même ; ailleurs, elle passe par la page (« ?eli=… »).
+export const adresseEli = (eli) => {
+  if (!estEliUri(eli)) return "";
+  return autoHeberge()
+    ? basePublique() + "/eli/" + segmentsEli(eli).map(encodeURIComponent).join("/")
+    : basePublique() + "?eli=" + encodeURIComponent(String(eli).trim());
+};
+
+// La même, à SUIVRE depuis la page : relative, elle ne quitte jamais le cadre.
+export const hrefEli = (eli) => {
+  if (!estEliUri(eli)) return "";
+  return autoHeberge()
+    ? "/eli/" + segmentsEli(eli).map(encodeURIComponent).join("/")
+    : location.pathname + "?eli=" + encodeURIComponent(String(eli).trim());
+};
+
+// Les liens ELI d'un document publié, RÉSOLUS dans l'instance. `liste` est la
+// liste des publications du recueil (voir /v1/publications) : sans elle, on ne
+// décide rien — les liens sont seulement annotés (`data-eli`), et l'appelant
+// repasse quand la liste est là (l'acte cité est peut-être publié).
+//
+// Un lien résolu garde la mention écrite — l'intitulé de l'acte cité — et prend
+// l'adresse de l'acte visé. Un identifiant que le recueil ne connaît pas est
+// laissé en TEXTE : un lien qui ne mène nulle part vaut moins que pas de lien.
+export function resoudreLiensEli(racine, { liste, href } = {}) {
+  if (!racine) return { resolus: 0, inconnus: 0, differe: 0 };
+  const liens = [...racine.querySelectorAll("a[href], a[data-eli]")].filter((a) =>
+    estEliUri(a.getAttribute("href")) || estEliUri(a.getAttribute("data-eli")));
+  if (!liens.length) return { resolus: 0, inconnus: 0, differe: 0 };
+  if (!Array.isArray(liste)) {
+    for (const a of liens) if (!a.getAttribute("data-eli")) a.setAttribute("data-eli", a.getAttribute("href") || "");
+    return { resolus: 0, inconnus: 0, differe: liens.length };
+  }
+  const index = indexEli(liste);
+  let resolus = 0;
+  let inconnus = 0;
+  for (const a of liens) {
+    const eli = String(a.getAttribute("data-eli") || a.getAttribute("href") || "").trim();
+    const p = index.get(cleEli(eli));
+    if (p) {
+      a.setAttribute("href", (href || hrefActe)(p.cle));
+      a.setAttribute("data-eli", eli);
+      a.classList.add("recueil-lien-eli");
+      a.setAttribute("title", "Acte cité par son identifiant ELI — " + eli);
+      // Un lien interne ne s'ouvre pas dans un onglet : il se suit dans la page,
+      // comme tous les liens du recueil (un nouvel onglet ouvrirait l'adresse
+      // interne du cadre, qui n'est pas faite pour être visitée directement).
+      a.removeAttribute("target");
+      a.removeAttribute("rel");
+      resolus++;
+    } else {
+      const span = document.createElement("span");
+      span.className = "recueil-lien-eli recueil-lien-eli--hors";
+      span.setAttribute("data-eli", eli);
+      span.setAttribute("title", "Acte non publié dans ce recueil — identifiant ELI " + eli);
+      span.textContent = a.textContent;
+      a.replaceWith(span);
+      inconnus++;
+    }
+  }
+  return { resolus, inconnus, differe: 0 };
+}
+
 // Le texte d'un acte publié, en clair : le texte déposé à la publication, ou,
 // à défaut, celui du document publié.
 export function texteDePublication(rec) {
@@ -400,6 +785,9 @@ export function jsonDePublication(rec, config) {
     opposabiliteRule: r.opposabiliteRule || "",
     kind: r.kind || "originale",
     enVigueur: r.latest !== false,
+    // Mis en avant sur la page d'accueil du recueil (bande « À la une ») : le
+    // drapeau suit l'ACTE — l'identifiant ELI — et non la version déposée.
+    epingle: r.epingle === true,
     auteur: r.auteur || "",
     sha256: r.sha256 || "",
     transmission: r.transmission || null,
@@ -512,8 +900,14 @@ function enteteMarkdown(rec) {
 
 
 // Le certificat de transmission au contrôle de légalité, déposé sur le
-// document : le recueil le porte sous l'acte, comme la version en ligne.
+// document : le recueil le porte sous l'acte, comme la version en ligne. Une
+// transmission SIMULÉE (aucun appel sortant) porte sa mention qualifiée — voir
+// src/lib/legalite.js et NC-IV-004 / P-19.
 export function mentionDeTransmission(t) {
-  if (!t || !t.mention) return "";
-  return t.reference ? `${t.mention} — réf. ${t.reference}` : t.mention;
+  if (!t) return "";
+  const mention = t.mention || (t.certificat && t.certificat.mention) || "";
+  if (!mention) return "";
+  const simule = t.demonstration === true || (t.certificat && t.certificat.demonstration === true);
+  const qualifie = simule && !/démonstration/i.test(mention) ? mention + " (transmission simulée, sans appel sortant)" : mention;
+  return qualifie + (t.reference ? ` — réf. ${t.reference}` : "");
 }

@@ -1,9 +1,13 @@
 // ============================================================================
 // Écran de connexion (« Qui se connecte ? »).
 //
-// Deux cas, selon le mode d'authentification du référentiel (src/lib/auth.js) :
+// Trois cas, selon le mode d'authentification (src/lib/auth.js) :
 //   - comptes de l'application : on choisit un compte dans la liste, sans mot
 //     de passe (démonstration) ;
+//   - comptes locaux (mot de passe) : un identifiant et un mot de passe, que le
+//     SERVICE de la collectivité vérifie (src/ui/mot-de-passe.js). C'est le mode
+//     d'une installation auto-hébergée sans annuaire ; le référentiel n'est pas
+//     lisible avant la session, donc la liste des comptes vient du service.
 //   - annuaire de la collectivité (OIDC) : les comptes de démonstration sont
 //     automatiquement désactivés, et l'écran ne propose plus que l'annuaire —
 //     le bouton ouvre le fournisseur d'identité, et l'application attribue le
@@ -12,19 +16,26 @@
 // Les comptes sont présentés par profil, avec ce que le profil permet de faire :
 // c'est aussi la façon la plus rapide de montrer les rôles en démonstration.
 // ============================================================================
-import { state, login } from "../state.js";
+import { state, login, navigate } from "../state.js";
 import { h, icon } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
-import { ROLES, ROLE_ORDER, fullName, initialsOf, sortName, primaryRoleId, badgesOf } from "../../lib/users.js";
-import { primaryServiceName } from "../../lib/scope.js";
-import { isOidc } from "../../lib/auth.js";
+import { isOidc, isPassword, demoAccountsDisabled } from "../../lib/auth.js";
 import { loginPanel } from "../oidc.js";
+import { comptesGroupes } from "../comptes-liste.js";
+import { panneauMotDePasse } from "../mot-de-passe.js";
 
 export function renderConnexion(root) {
   const oidc = isOidc(state.config);
+  const mdp = isPassword(state.config);
   const users = state.users.filter((u) => u.active !== false);
+  // En mode mot de passe, le référentiel est protégé : les comptes de
+  // démonstration — quand le déploiement les laisse ouverts — sont ceux que le
+  // SERVICE annonce dans `GET /v1/auth/config` (voir src/lib/motdepasse.js).
+  const demoUsers = mdp ? (state.deploiement?.comptes || []) : [];
+  const demoOuverts = !demoAccountsDisabled(state.config);
+
   const box = h("div", { class: "connexion" },
     demoNotice(),
     // L'apparence (clair / sombre) se règle aussi avant de se connecter : c'est
@@ -39,58 +50,33 @@ export function renderConnexion(root) {
             h("p", { class: "connexion__tag", text: APP_TAGLINE }),
           ),
         ),
-        h("h1", { class: "connexion__title", text: oidc ? "Connexion à l'annuaire" : "Qui se connecte ?" }),
+        h("h1", { class: "connexion__title", text: oidc ? "Connexion à l'annuaire" : mdp ? "Connexion" : "Qui se connecte ?" }),
         h("p", { class: "connexion__sub", text: oidc
           ? "L'application ouvre la session par l'annuaire de la collectivité. Votre rôle et votre périmètre (services et bureaux) sont ceux de vos groupes."
-          : "Choisissez un compte pour entrer. Les écrans, les actions et les trames accessibles dépendent du rôle et du périmètre (services et bureaux) du compte." }),
-        oidc ? loginPanel() : groups(users, root),
+          : mdp
+            ? "Identifiez-vous avec le compte que l'administrateur vous a remis. Votre rôle et votre périmètre (services et bureaux) décident de ce que vous verrez."
+            : "Choisissez un compte pour entrer. Les écrans, les actions et les trames accessibles dépendent du rôle et du périmètre (services et bureaux) du compte." }),
+        // La page d'accueil du site est le recueil public (voir src/ui/app.js) :
+        // l'écran de connexion ne doit donc pas être un cul-de-sac. La porte est
+        // ici, sous le sous-titre — visible sans faire défiler la liste des
+        // comptes, et dans les trois modes d'authentification.
+        h("p", { class: "connexion__retour" },
+          h("a", {
+            class: "connexion__retour-lien", href: "#/recueil",
+            on: { click: (e) => { e.preventDefault(); navigate("recueil"); } },
+          }, icon("globe", 15), h("span", { text: "Consulter le recueil public" }))),
+        oidc
+          ? loginPanel()
+          : mdp
+            ? panneauMotDePasse({ demoUsers: demoOuverts ? demoUsers : [] })
+            : comptesGroupes(users, (u) => login(u.id)),
         h("p", { class: "connexion__note", text: oidc
           ? "Les comptes de démonstration sont désactivés tant que l'annuaire est branché : aucune session ne peut être ouverte sans passer par lui. C'est un réglage du référentiel (Administration › Annuaire)."
-          : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Administration › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),
+          : mdp
+            ? "Le mot de passe est vérifié par le service de la collectivité, qui garde la session dans un cookie — l'application ne conserve aucun mot de passe. Le mode et le compte d'administration se règlent dans le fichier .env du déploiement (AUTH_MODE=password)."
+            : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Administration › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),
       ),
     ),
   );
   root.appendChild(box);
-}
-
-// Les comptes sont rangés par PROFIL PRINCIPAL. Un compte à rôles cumulés —
-// un éditeur chargé de la révision, par exemple — figure dans son profil
-// principal, et ses qualités cumulées s'affichent sur sa ligne.
-function groups(users, root) {
-  const out = [];
-  for (const roleId of ROLE_ORDER) {
-    const role = ROLES[roleId];
-    const members = users.filter((u) => primaryRoleId(u) === roleId).sort((a, b) => sortName(a).localeCompare(sortName(b)));
-    if (!members.length) continue;
-    out.push(h("div", { class: "connexion__group" },
-      h("div", { class: "connexion__grouphead" },
-        h("span", { class: "fr-badge fr-badge--" + role.badge, text: role.label }),
-        h("span", { class: "connexion__groupsum", text: role.summary }),
-      ),
-      ...members.map((u) => accountRow(u, root)),
-    ));
-  }
-  return out;
-}
-
-function accountRow(u, root) {
-  const entity = (state.config.entities || []).find((e) => e.id === u.entityId);
-  const entLogo = u.entityId === state.config.entities?.[0]?.id ? state.config.brand?.logoUrl : "";
-  const cumul = badgesOf(u).slice(1);
-  return h("button", {
-    class: "connexion__user", type: "button",
-    title: "Se connecter en tant que " + fullName(u),
-    onClick: async () => { if (!(await login(u.id))) return; },
-  },
-    entLogo
-      ? h("img", { class: "connexion__logo", src: entLogo, alt: "" })
-      : h("span", { class: "connexion__initials", text: initialsOf(u) }),
-    h("span", { class: "connexion__who" },
-      h("span", { class: "connexion__fullname", text: fullName(u) }),
-      h("span", { class: "connexion__meta", text: [primaryServiceName(state.config, u), entity?.name].filter(Boolean).join(" · ") || u.email || "" }),
-      cumul.length ? h("span", { class: "connexion__qualites" }, ...cumul.map((r) => h("span", { class: "fr-badge fr-badge--" + r.badge, title: r.summary, text: r.label }))) : null,
-    ),
-    h("span", { class: "connexion__id fr-mono", text: u.login }),
-    h("span", { class: "connexion__go", title: "Se connecter" }, icon("check", 16), h("span", { text: "Entrer" })),
-  );
 }

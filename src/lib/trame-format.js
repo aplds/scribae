@@ -38,21 +38,27 @@ const AIDE = {
     serviceId: "Identifiant d'un service du référentiel, ou \"\" pour une trame générale (tous les services).",
     bureauId: "Identifiant d'un bureau du service, ou \"\".",
     entityIds: "Tableau d'identifiants d'entités concernées ; [] = toutes les entités.",
+    nature: "\"acte\" (défaut) ou \"annexe\". Une trame d'ANNEXE produit un document adopté par un autre (un règlement intérieur adopté par une délibération) : il ne se signe pas — c'est l'acte qui l'adopte qui est signé, et l'original de cet acte est suivi du texte de l'annexe. adoptionVisa (true par défaut) fait rappeler l'acte d'adoption dans les visas de l'annexe.",
+    reglement: "true ou false (défaut : false). N'a de sens que sur une ANNEXE : déclare le document comme un RÈGLEMENT — un texte NORMATIF, que le recueil publie AUSSI pour lui-même, à titre informatif, sous son propre identifiant. Un règlement se consulte comme un code : son texte en vigueur est accessible directement, et les actes qui l'adoptent ou le modifient en publient les versions successives. Une annexe ordinaire (un tableau, une grille) ne le reçoit pas.",
+    signature: "\"\" (défaut : suit le réglage général, Administration › Signature), \"externe_impose\" (le circuit externe — papier ou outil tiers, sans API — est obligatoire pour cette trame), \"externe_autorise\" (il est possible, au choix du rédacteur, acte par acte), ou \"electronique\" (le circuit électronique est imposé). Dans le circuit externe : le rédacteur télécharge le document prêt à signer, le fait signer hors de l'application, dépose la version signée en PDF, et le réviseur certifie sa conformité avec la version numérique avant publication.",
+    divisions: "L'échelle des divisions de CETTE trame : [ { level (entier croissant, 1 = le plus haut), label (mot imprimé, libre — « Livre », « Titre », « Partie », « Chapitre », « Section »…), num (\"roman\" | \"decimal\" | \"letter\" | \"aucun\") } ]. Vide = l'échelle livrée (Livre, Titre, Chapitre, Section).",
     fields: "Tableau de champs du formulaire de rédaction (voir « champ »).",
     rules: "Tableau de règles de contrôle (voir « règle »).",
     body: "Tableau ORDONNÉ de blocs qui composent le document (voir « bloc »).",
   },
   bloc: {
     "commun à tous les blocs": "id, type (obligatoire), when (condition d'affichage facultative, ex. \"exists(dateEffet)\"), notes (tableau de commentaires).",
-    "text — bloc à texte": "Types title, authority, enact, para, raw : propriété « text ».",
-    "blocs à liste": "Types visas et considerants : « items » = [ { id, refId, text, refKind, refScope, chaine, when } ] (refId = référence du référentiel ; laisser \"\" et remplir text pour un texte libre ; chaine: true = les décisions fondant la signature, étage par étage de la chaîne de délégations (la nomination puis la délégation), résolues depuis le référentiel).",
+    "text — bloc à texte": "Types title, authority, enact, para, raw : propriété « text ». Un PARAGRAPHE porte en plus sa mise en forme : align (\"\" | \"justify\" | \"left\" | \"center\" | \"right\"), indent (\"\" | \"none\" | \"first\" = alinéa | \"all\" = paragraphe entier en retrait) et boxed (booléen, encadré). La valeur \"\" signifie « comme la feuille de style ».",
+    "blocs à liste": "Types visas et considerants : « items » = [ { id, refId, text, refKind, refScope, chaine, when } ] (refId = référence du référentiel ; laisser \"\" et remplir text pour un texte libre ; chaine: true = les décisions fondant la signature, étage par étage de la chaîne de délégations (la nomination puis la délégation), résolues depuis le référentiel). Les CONSIDÉRANTS portent en plus leur formule (formule, placée devant chaque considérant sauf s'il la commence déjà — elle n'est donc jamais répétée), leur ponctuation finale (fin : \"\" | \";\" | \".\" | \",\" — ajoutée seulement si le considérant ne la porte pas) et le choix de les lire d'un seul alinéa (inline, booléen).",
+    division: "level (numéro d'échelon : 1 = le plus haut), heading (intitulé), numMode (\"auto\" | \"manual\"), num (si manual), blocks (blocs imbriqués : articles, paragraphes, listes, tableaux, autres divisions). Une division n'ajoute pas seulement un titre : elle ORDONNE le document. Son échelon renvoie à l'échelle « divisions » de la trame, qui donne le mot imprimé (« Livre », « Titre », « Chapitre », « Section » — libres) et la numérotation.",
     article: "numMode (\"auto\" | \"manual\"), num (numéro si manual), heading (intitulé facultatif), blocks (blocs imbriqués : para, list, table), when.",
-    list: "ordered (booléen), items = [ { id, text, when } ].",
-    table: "caption (légende), columns = [\"Colonne 1\", …], rows = [[\"cellule\", …], …].",
+    list: "ordered (booléen : numérotée ou à puces), items = [ { id, text, when } ], et sa marque : marker (liste à puces : \"\" | \"disc\" | \"circle\" | \"square\" | \"dash\" | \"none\"), numbering (liste numérotée : \"\" | \"decimal\" | \"degree\" (1°) | \"parenth\" (1)) | \"lalpha\" (a)) | \"ualpha\" (A)) | \"lroman\" | \"uroman\" | \"none\"), start (numéro de départ, entier).",
+    table: "caption (légende), columns = [\"Colonne 1\", …], rows = [[\"cellule\", …], …], et sa présentation : captionPos (\"top\" | \"bottom\"), head (booléen : ligne d'en-tête ; false fait de la première ligne une ligne de données), layout (\"\" | \"grid\" = quadrillage | \"rows\" = lignes horizontales seules | \"zebra\" = lignes alternées), align (\"\" | \"left\" | \"center\" | \"right\").",
     signature: "place (lieu), showFunction (booléen).",
     mention: "mentionId (identifiant d'une mention du référentiel) et/ou textOverride (texte direct). Si les deux sont vides, le bloc n'affiche rien.",
   },
-  "types de blocs (body[].type)": list(NODE_TYPES),
+  "mise en forme des blocs": "Chaque bloc de texte porte ses propres réglages — ajustables bloc par bloc dans l'éditeur de trame (onglet « Ce bloc ») comme par la rédaction (panneau « Mise en forme », où ils sont signalés comme des écarts). Une valeur VIDE signifie « comme la feuille de style » : c'est la charte de la collectivité qui décide pour tous les blocs qui ne demandent rien de particulier. Un bloc hérité d'une version antérieure de la trame ne porte pas encore ces clés : il se comporte exactement comme avant, jusqu'à ce qu'on lui règle quelque chose.",
+    "types de blocs (body[].type)": list(NODE_TYPES),
   "types de champs (fields[].type)": list(FIELD_TYPES),
   champ: {
     propriétés: "id, label, type, group (regroupement à l'écran), required (booléen), help, placeholder, options (pour choice/multichoice), refKind (pour ref/reflist), qualite (pour signataire), appliesWhen (condition d'affichage).",
@@ -73,7 +79,7 @@ const AIDE = {
     ],
   },
   "natures de commentaire (notes[].kind)": list(NOTE_KINDS),
-  commentaire: "id, kind, author, date, text, ruleId. Les commentaires accompagnent la préparation : ils ne sont pas publiés.",
+  commentaire: "id, kind, author, date, text, quote, ruleId. Les commentaires accompagnent la préparation : ils ne sont pas publiés. « quote » est le passage du document que le commentaire vise (la phrase sélectionnée dans la page) ; il s'affiche au-dessus du commentaire, sous le bloc concerné.",
   "jetons de texte {{…}}": "Dans tout texte (title, para, heading, items…), {{chemin}} est remplacé à la compilation : {{objet}}, {{beneficiaire.lastName}}, {{entity.nameWithArt}}, {{dateSignature|date-long}}. Filtres : |upper, |lower, |capitalize, |date-long, |date-short, |money. Conditions : {{dateEffet ? \"le \" + dateEffet : \"au lendemain de la publication\"}}.",
 };
 
@@ -165,6 +171,10 @@ function normalizeNote(raw, warnings) {
   if (!raw || typeof raw !== "object") return null;
   const n = { ...newNote(), ...raw };
   n.id = asString(raw.id) || n.id;
+  n.text = asString(raw.text);
+  // Le passage cité : la phrase que l'éditeur avait sélectionnée dans la page
+  // au moment d'écrire le commentaire (voir src/ui/annotations.js).
+  n.quote = asString(raw.quote);
   if (!NOTE_KINDS.some((k) => k.id === n.kind)) {
     warnings.push(`Nature de commentaire inconnue « ${raw.kind} » remplacée par « instruction »`);
     n.kind = "instruction";
@@ -221,7 +231,7 @@ function normalizeNode(raw, warnings, where) {
   n.id = asString(raw.id) || n.id;
   n.when = asString(raw.when);
   n.notes = Array.isArray(raw.notes) ? raw.notes.map((x) => normalizeNote(x, warnings)).filter(Boolean) : [];
-  if (type === "article") {
+  if (type === "article" || type === "division") {
     n.blocks = Array.isArray(raw.blocks) ? raw.blocks.map((b, i) => normalizeNode(b, warnings, `${where}.blocks[${i}]`)).filter(Boolean) : [];
   } else if (type === "visas" || type === "considerants" || type === "list") {
     n.items = Array.isArray(raw.items) ? raw.items.map((it) => normalizeItem(it, warnings)).filter(Boolean) : [];
@@ -255,6 +265,20 @@ export function normalizeTrame(raw) {
   t.serviceId = asString(raw.serviceId);
   t.bureauId = asString(raw.bureauId);
   t.entityIds = Array.isArray(raw.entityIds) ? raw.entityIds.slice() : [];
+  t.nature = raw.nature === "annexe" ? "annexe" : "acte";
+  t.adoptionVisa = raw.adoptionVisa !== false;
+  t.reglement = t.nature === "annexe" && raw.reglement === true;
+  t.signature = ["externe_impose", "externe_autorise", "electronique"].includes(raw.signature) ? raw.signature : "";
+  t.divisions = Array.isArray(raw.divisions)
+    ? raw.divisions
+      .filter((d) => d && typeof d === "object")
+      .slice(0, 8)
+      .map((d, i) => ({
+        level: i + 1,
+        label: asString(d.label) || "Division",
+        num: ["roman", "decimal", "letter", "aucun"].includes(d.num) ? d.num : "decimal",
+      }))
+    : [];
   t.fields = Array.isArray(raw.fields)
     ? raw.fields.map((f, i) => normalizeField(f, warnings, `fields[${i}]`)).filter(Boolean)
     : [];

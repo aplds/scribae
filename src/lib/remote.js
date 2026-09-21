@@ -11,6 +11,8 @@
 // ============================================================================
 
 import { hostSocketFactory } from "./hosts.js";
+import { modeDeploiement } from "./auth.js";
+import { enteteCsrf } from "./motdepasse.js";
 
 const MAX_PAYLOAD = 900000;   // marge sous la limite de 1 Mio d'un message (transport socket)
 const MAX_HTTP_PAYLOAD = 8000000; // corps accepté par le service HTTP (MAX_BODY du serveur)
@@ -136,6 +138,14 @@ function ready() {
     }
     s.addEventListener("open", ok);
     s.addEventListener("close", ko);
+    // Le canal a pu s'ouvrir entre le contrôle ci-dessus et l'abonnement : le
+    // service embarqué (édition statique, `src/pages/host.js`) ouvre le sien dans
+    // une microtâche, et l'événement `open` est alors passé avant qu'on s'y
+    // abonne — l'appel attendait ensuite vingt secondes pour rien. On relit donc
+    // l'état une fois les écouteurs posés : c'est ce que fait un vrai client
+    // WebSocket (`readyState` fait foi, l'événement n'est qu'un signal).
+    if (s.readyState === 1) ok();
+    else if (s.readyState === 3) ko({ code: 1000 });
   });
 }
 
@@ -147,9 +157,19 @@ function ready() {
 // c'est exactement ce que renvoie le canal du service, donc l'appelant ne sait
 // pas quel transport a été utilisé.
 async function httpRequest(request) {
+  // Mode « comptes locaux (mot de passe) » : la porte n'est pas un jeton mais la
+  // SESSION du service, dans un cookie `HttpOnly` — il faut donc la demander
+  // (`credentials: "include"`), et joindre le jeton anti-CSRF que le service a
+  // posé dans un cookie lisible (double envoi). Voir src/lib/motdepasse.js.
+  const parSession = modeDeploiement() === "password";
   const res = await fetch(apiBase() + request.path, {
     method: request.method,
-    headers: { ...(request.body === undefined ? {} : { "content-type": "application/json" }), ...request.headers },
+    credentials: parSession ? "include" : "same-origin",
+    headers: {
+      ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+      ...request.headers,
+      ...(parSession && request.method !== "GET" ? enteteCsrf() : {}),
+    },
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
   });
   let body = null;

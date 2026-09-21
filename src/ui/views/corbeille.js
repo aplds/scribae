@@ -12,6 +12,7 @@ import {
 } from "../state.js";
 import { h, button, toast } from "../dom.js";
 import { confirmDialog, emptyState, helpLink } from "../components.js";
+import { natureOfActe, appellationAnnexe } from "../../lib/annexes.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 
@@ -43,7 +44,9 @@ export function renderCorbeille(root) {
       "Actes",
       "Un acte à la corbeille ne figure plus dans le registre : il ne compte ni dans les relances, ni dans l'échéancier.",
       actes.map((a) => ligne({
-        titre: (a.numero || "acte sans numéro") + " — " + (a.objet || ""),
+        // Une annexe n'a pas de numéro : elle se nomme par la décision qui
+        // l'adopte (voir src/lib/annexes.js).
+        titre: (natureOfActe(a, state.trames) === "annexe" ? appellationAnnexe(a, state.config) : (a.numero || "acte sans numéro")) + " — " + (a.objet || ""),
         sous: [a.serviceId ? targetLabel(state.config, a.serviceId, a.bureauId) : "acte général", a.statut || ""].filter(Boolean).join(" · "),
         deletedAt: a.deletedAt, deletedByName: a.deletedByName,
         onRestaurer: () => restaurer("acte", a).then(() => { toast("Acte restauré", "success"); paint(); }),

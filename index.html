@@ -29,9 +29,14 @@ if (!document.documentElement.lang) document.documentElement.lang = "fr";
 //
 // Ce script est le code du SERVICE (il s'exécute côté serveur, de façon
 // autoritaire). Il est public : tout le monde peut le lire, donc il ne contient
-// aucun secret — seulement l'empreinte SHA-256 du jeton de démonstration.
-// (Cette empreinte et le jeton lui-même sont visibles côté client : c'est une
-// clé de démonstration, pas une clé de production.)
+// AUCUN secret. Les clés d'écriture n'y sont pas inscrites : elles sont
+// remises par un administrateur, seule leur empreinte SHA-256 est conservée
+// dans l'état durable du service (privé), et chaque clé porte un RÔLE qui
+// commande les routes qu'elle peut appeler. Tant qu'aucune clé n'a été
+// déposée, toutes les écritures sont refusées et seules les ressources
+// PUBLIQUES (recueil, publications, résolution ELI) sont servies : c'est la
+// posture d'une démonstration, et elle ne peut pas être franchie par un tiers
+// anonyme.
 //
 // Ressources exposées :
 //   /v1/actes                 dépôt des actes finalisés
@@ -63,7 +68,11 @@ const MAX_DOC = 400000;      // taille maximale d'un document accepté par l'API
 const MAX_PUBLIES = 40;      // au-delà, la plus ancienne publication est retirée
 const MAX_SIGNATURES = 80;
 const MAX_ACTES = 80;
-const CLE_JETON = "a9a67cd97d873aafe3503d00e99db4c29cb7c92683dfc1c8aeb1578a9f1625ee"; // SHA-256 du jeton
+// Rôles et portée des clés d'écriture. Les quatre premiers forment une
+// hiérarchie (administrateur > editeur > redacteur > lecteur) ; `prestataire`
+// est hors hiérarchie : il ne donne accès qu'à la notification de signature.
+const RANG = { administrateur: 4, editeur: 3, redacteur: 2, lecteur: 1 };
+const ROLES = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire"];
 
 // ------------------------------------------------------------------- stockage
 // En-tête (unités UTF-16) : [0] version, [1] poids faible de la longueur,
@@ -73,13 +82,20 @@ const U16 = new Uint16Array(state.buffer, U16_OFFSET, Math.floor((state.length -
 const HEADER = 4;
 
 function dbVide() {
-  return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {} };
+  return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {}, cles: {}, journal: [] };
 }
 
 function loadDb() {
   if (U16[0] !== STATE_VERSION) return dbVide();
   const n = longueur();   // 32 bits, en unités UTF-16
-  if (!n || n > U16.length - HEADER) return dbVide();
+  if (!n || n > MAX_CHARS || n > U16.length - HEADER) return dbVide();
+  // Contrôle d'en-tête, AVANT toute lecture de masse : un document d'état
+  // commence toujours par « {"v" » et finit toujours par « } ». Un état à demi
+  // écrit (un instantané pris au milieu de `saveDb`, voir plus bas) porte une
+  // longueur qui ne correspond à rien ; le reconnaître ici coûte deux unités,
+  // là où le relire coûterait de construire une chaîne de plusieurs mégaoctets
+  // — de quoi dépasser le budget de calcul d'un gestionnaire.
+  if (U16[HEADER] !== 0x7b || U16[HEADER + 1] !== 0x22 || U16[HEADER + n - 1] !== 0x7d) return dbVide();
   let s = "";
   const CH = 8192;
   for (let i = 0; i < n; i += CH) {
@@ -93,6 +109,8 @@ function loadDb() {
     db.publies = db.publies || {};
     db.idem = db.idem || {};
     db.collections = db.collections || {};
+    db.cles = db.cles || {};
+    db.journal = db.journal || [];
     return db;
   } catch (e) {
     console.log("État illisible, réinitialisation :", String(e));
@@ -107,12 +125,47 @@ function setLongueur(n) {
   U16[2] = (n - U16[1]) / 65536;
 }
 
+// L'état durable traverse la couche de persistance de l'environnement
+// d'exécution, qui n'est pas garantie binaire : une unité UTF-16 au-delà de 127
+// (tous nos accents, nos guillemets français, nos tirets) peut y être altérée —
+// le document revient alors tronqué ou farci de caractères de contrôle, et
+// `loadDb` repart de zéro au démarrage suivant. On n'écrit donc QUE de l'ASCII :
+// tout caractère non ASCII est remplacé par son échappement « \uXXXX », que
+// `JSON.parse` relit à l'identique. Le coût (l'état grossit d'environ un tiers)
+// est le prix de la fiabilité.
+//
+// L'écriture se fait par PLAGES : la boucle avance tant que le caractère est
+// ASCII, et ne paie le coût d'une concaténation que sur un caractère accentué.
+// Une expression régulière avec fonction de remplacement serait plus lente d'un
+// ordre de grandeur — et cette fonction s'exécute à CHAQUE écriture de l'état,
+// dans le budget de calcul d'un gestionnaire de requête (voir `saveDb`).
+function asciiSeul(s) {
+  const n = s.length;
+  let out = "", i = 0, debut = 0;
+  for (; i < n; i++) {
+    if (s.charCodeAt(i) < 128) continue;
+    out += s.slice(debut, i) + "\\u" + s.charCodeAt(i).toString(16).padStart(4, "0");
+    debut = i + 1;
+  }
+  return debut ? out + s.slice(debut) : s;
+}
+
 function saveDb(db) {
-  const s = JSON.stringify(db);
+  const s = asciiSeul(JSON.stringify(db));
   if (s.length > MAX_CHARS || s.length > U16.length - HEADER) {
     console.log("État plein : écriture refusée (" + s.length + " unités)");
     return false;
   }
+  // Écriture EN DEUX TEMPS. La couche de persistance de l'environnement peut
+  // prélever un instantané de `state` à tout moment — y compris au milieu de
+  // cette boucle. Un instantané pris là porterait la longueur NOUVELLE et un
+  // mélange d'anciens et de nouveaux caractères : un document illisible, qu'on
+  // ne pouvait jusqu'ici reconnaître qu'après l'avoir relu en entier. La
+  // version est donc effacée AVANT la première écriture et rétablie EN DERNIER
+  // geste : un instantané pris au milieu se reconnaît à sa version, sans rien
+  // relire (voir `loadDb`). Le lecteur suivant repart alors d'un état vide, au
+  // lieu de payer la relecture d'un document tronqué.
+  U16[0] = 0;
   setLongueur(s.length);
   for (let i = 0; i < s.length; i++) U16[HEADER + i] = s.charCodeAt(i);
   U16[0] = STATE_VERSION;
@@ -258,11 +311,58 @@ function slug(s) {
 const ok = (status, body, headers) => ({ status, headers: headers || {}, body });
 const err = (status, message, extra, headers) => ({ status, headers: headers || {}, body: { erreur: message, ...(extra || {}) } });
 
-function authFail(headers) {
+// ---------------------------------------------------------------- autorisation
+// Le service n'a pas de porte unique : chaque clé porte un rôle, et chaque
+// route dit le rôle qu'elle exige. La comparaison des empreintes est à TEMPS
+// CONSTANT — une comparaison `!==` sortirait au premier caractère différent et
+// laisserait mesurer l'empreinte attendue, octet par octet.
+
+function egalConstant(a, b) {
+  const x = String(a == null ? "" : a), y = String(b == null ? "" : b);
+  if (x.length !== y.length) return false;
+  let d = 0;
+  for (let i = 0; i < x.length; i++) d |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return d === 0;
+}
+
+function jetonPresente(headers) {
   const raw = String((headers && (headers.authorization || headers.Authorization)) || "").trim();
   const m = /^Bearer\s+(.+)$/.exec(raw);
-  if (!m) return err(401, "Jeton d'API absent. Ajoutez l'en-tête « Authorization: Bearer <jeton> ».", { code: "jeton_absent" });
-  if (sha256Hex(m[1]) !== CLE_JETON) return err(403, "Jeton d'API invalide.", { code: "jeton_invalide" });
+  return m ? m[1] : "";
+}
+
+// Identité portée par la clé présentée : { id, role, label } ou null.
+function identiteDe(headers) {
+  const jeton = jetonPresente(headers);
+  if (!jeton) return null;
+  const h = sha256Hex(jeton);
+  const cles = db.cles || {};
+  for (const id of Object.keys(cles)) {
+    const c = cles[id];
+    if (c && egalConstant(c.hash, h)) return { id, role: c.role, label: c.label || "" };
+  }
+  return null;
+}
+
+const MOTIF_CLE_ABSENTE = "Clé d'API absente. Ajoutez l'en-tête « Authorization: Bearer <clé> ».";
+
+// `regle` : { min: "redacteur" } (hiérarchie), { exact: [...] }, ou rien.
+function authFail(headers, regle) {
+  const cles = db.cles || {};
+  if (!Object.keys(cles).length) {
+    return err(403, "Ce service n'est pas encore provisionné : aucune clé d'écriture n'a été déposée. Un administrateur doit créer la clé du service (Administration › Base de données).", { code: "service_non_provisionne" });
+  }
+  if (!jetonPresente(headers)) return err(401, MOTIF_CLE_ABSENTE, { code: "jeton_absent" });
+  const id = identiteDe(headers);
+  if (!id) return err(403, "Clé d'API invalide.", { code: "jeton_invalide" });
+  if (regle) {
+    if (regle.exact && regle.exact.indexOf(id.role) < 0) {
+      return err(403, "Cette clé (rôle « " + id.role + " ») n'a pas le rôle requis : " + regle.exact.join(", ") + ".", { code: "role_insuffisant", role: id.role });
+    }
+    if (regle.min && (RANG[id.role] || 0) < RANG[regle.min]) {
+      return err(403, "Cette clé (rôle « " + id.role + " ») n'a pas le rôle requis : au moins « " + regle.min + " ».", { code: "role_insuffisant", role: id.role });
+    }
+  }
   return null;
 }
 
@@ -279,13 +379,40 @@ function allowWrite(conn, limit = 90) {
 // ---------------------------------------------------------------- projections
 // Les listes ne renvoient jamais les documents : seulement les métadonnées.
 function resumeActe(a) {
-  return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null, revision: a.revision || null };
+  return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null, revision: a.revision || null, signatureMode: a.signatureMode || "electronique", certificationRequise: a.certificationRequise === true, originalExterne: resumeOriginalExterne(a) || null, certification: a.certification || null };
+}
+// La version signée d'un acte du circuit externe, en abrégé (les listes ne
+// renvoient jamais le document : ici, une adresse et une empreinte).
+function resumeOriginalExterne(a) {
+  const s = a && a.originalExterne;
+  if (!s || !s.url) return null;
+  return { url: s.url, sha256: s.sha256, nom: s.nom, taille: s.taille, type: s.type, deposeLe: s.deposeLe, deposePar: s.deposePar, deposeParNom: s.deposeParNom, certification: a.certification || null };
 }
 function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, transmission: p.transmission || null, versions: p.versions || [] };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+}
+
+// La part PUBLIQUE d'un original signé : sans son dossier interne (adresse du
+// signataire, compte, moyen d'authentification, courriels) et sans les mentions
+// nominatives du signataire. C'est la SEULE forme sous laquelle un original
+// sort par une route publique — même règle que le service auto-hébergé
+// (src/server/mysql/actes.mjs). La part interne se lit sur une route protégée
+// (`/v1/actes/{id}/dossier-signature`).
+function sansInterne(v) {
+  if (!v || typeof v !== "object") return v;
+  const { interne, ...reste } = v;
+  if (!Array.isArray(v.signatures)) return reste;
+  return {
+    ...reste,
+    signatures: v.signatures.map((s) => {
+      const sig = { ...((s && s.signataire) || {}) };
+      delete sig.courriel; delete sig.personId; delete sig.compteId; delete sig.compteOutil; delete sig.rapproche;
+      return { ...s, signataire: sig };
+    }),
+  };
 }
 
 function clePublication(eliUri, dateExpr) {
@@ -306,16 +433,24 @@ function latestOf(eliUri) {
 function openapi() {
   const paths = {
     "/v1/health": { get: { operationId: "sante", summary: "État du service", description: "Vérifie que le service répond et donne le nombre d'objets conservés.", tags: ["Service"], responses: { 200: { description: "Service disponible" } } } },
+    "/v1/auth/etat": { get: { operationId: "etatAutorisation", summary: "État de l'autorisation du service", description: "Route PUBLIQUE : dit si le service a été provisionné (au moins une clé existe) et quels rôles existent. Le client l'appelle avant toute écriture pour savoir s'il doit se provisionner. Un service NON provisionné est en LECTURE SEULE : il ne sert que les ressources publiques.", tags: ["Autorisation"], responses: { 200: { description: "État de l'autorisation" } } } },
+    "/v1/auth/bootstrap": { post: { operationId: "provisionnerService", summary: "Provisionner le service (dépôt de la première clé)", description: "Geste d'installation : dépose la PREMIÈRE clé d'administration. La valeur de la clé est tirée par le client (crypto.getRandomValues) et n'est jamais choisie par le service : celui-ci n'en conserve que l'empreinte SHA-256. Un service déjà provisionné refuse ce geste (409 `service_deja_provisionne`).", tags: ["Autorisation"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["cle"], properties: { cle: { type: "string", minLength: 32, description: "La clé tirée au hasard (32 caractères au moins)" }, role: { type: "string", default: "administrateur", enum: ["administrateur"] }, label: { type: "string", description: "Libellé de la clé (pour la retrouver dans la liste)" } } } } } }, responses: { 201: { description: "Service provisionné" }, 409: { description: "Service déjà provisionné (code `service_deja_provisionne`)" }, 422: { description: "Clé trop courte (code `cle_trop_courte`)" } } } },
+    "/v1/auth/cles": {
+      get: { operationId: "listerCles", summary: "Lister les clés d'API", description: "Rend les clés connues du service — identifiant, libellé, rôle, date de création —, jamais leur valeur ni leur empreinte. Route d'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les clés connues" }, 403: { description: "Rôle administrateur requis" } } },
+      post: { operationId: "creerCle", summary: "Créer une clé d'API", description: "Crée une clé rattachée à un rôle (`lecteur`, `redacteur`, `editeur`, `administrateur`, ou `prestataire` pour la seule notification de signature). C'est le client qui tire la valeur et n'en transmet que l'empreinte. Route d'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["cle", "role"], properties: { cle: { type: "string", minLength: 32 }, role: { type: "string", enum: ["lecteur", "redacteur", "editeur", "administrateur", "prestataire"] }, label: { type: "string" } } } } } }, responses: { 201: { description: "Clé créée" }, 403: { description: "Rôle administrateur requis" }, 422: { description: "Clé trop courte (code `cle_trop_courte`)" } } },
+    },
+    "/v1/auth/cles/{id}/revoquer": { post: { operationId: "revoquerCle", summary: "Révoquer une clé d'API", description: "Retire une clé. Le service refuse de révoquer la DERNIÈRE clé d'administration (409 `derniere_cle_admin`) : il ne peut pas se retrouver sans moyen d'être administré.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Clé révoquée" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Clé inconnue (code `cle_inconnue`)" }, 409: { description: "Dernière clé d'administration (code `derniere_cle_admin`)" } } } },
+    "/v1/journal": { get: { operationId: "lireJournal", summary: "Lire le journal d'audit du service", description: "Journal APPEND-ONLY tenu par le service (et non par le poste client) : chaque geste sensible — dépôt, ouverture de signature, notification, transmission, publication, retrait, épinglage, provisionnement et gestion des clés — y laisse une ligne. Chaque ligne scelle la précédente par son empreinte SHA-256 : modifier une ligne rompt la chaîne, ce que le champ `scelle` révèle. Route d'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les dernières entrées, et l'état du scellement" }, 403: { description: "Rôle administrateur requis" } } } },
     "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
     "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "users", "meta", "journal", "presence"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
-    "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: "Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé.", security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, ord: { type: "integer" }, rev: { type: "integer", nullable: true }, payload: {} } } }, deletes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, rev: { type: "integer", nullable: true } } } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données par un administrateur)." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
+    "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: "Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé.", security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, ord: { type: "integer" }, rev: { type: "integer", nullable: true }, payload: {} } } }, deletes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, rev: { type: "integer", nullable: true } } } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données). Réservé au rôle `administrateur` : toute autre clé reçoit 403 `force_reserve_admin`. Chaque appel est journalisé." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide, ou `force` demandé sans le rôle administrateur (code `force_reserve_admin`)" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
     "/v1/actes": {
       get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
       post: {
         operationId: "deposerActe", summary: "Déposer un acte finalisé", tags: ["Actes"],
         description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable` (true par défaut) indique si l'acte pourra être publié au recueil : mis à false pour un acte individuel (acte issu d'une trame déclarée non publiable), il rend la publication impossible même après signature. Le champ `controleLegalite` (false par défaut) déclare que l'acte doit être transmis au contrôle de légalité avant sa publication : le service refusera alors de le publier tant que la transmission n'a pas été enregistrée (409, code `transmission_absente`).",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, themeId: { type: "string", description: "Famille de la trame dont l'acte est issu : le THÈME sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème au moment du dépôt (le recueil public l'affiche tel quel)." }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, controleLegalite: { type: "boolean", default: false, description: "true si l'acte doit être transmis au contrôle de légalité avant publication" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt (statut, libellé du circuit, empreinte du texte validé, sort de chaque étape). Un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409).", properties: { statut: { type: "string" }, circuitLabel: { type: "string" }, empreinte: { type: "string" }, closLe: { type: "string" }, etapes: { type: "array", items: { type: "string" } } } }, revision: { type: "object", nullable: true, description: "État de la révision au dépôt (statut, empreinte du texte révisé, date, corrections). Un acte dont la révision n'est pas au statut « valide » ne pourra pas être envoyé en signature (409, code `revision_incomplete`).", properties: { statut: { type: "string" }, empreinte: { type: "string" }, valideLe: { type: "string" }, corrige: { type: "boolean" }, par: { type: "string" } } } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, signatureMode: { type: "string", enum: ["electronique", "externe"], default: "electronique", description: "Circuit qui mène l'acte : électronique (prestataire, API), ou externe (papier ou outil tiers — le client déclarera la version signée par /v1/actes/{id}/signature-externe)." }, certificationRequise: { type: "boolean", default: false, description: "Circuit externe : true si un réviseur compétent doit certifier la conformité de la pièce signée avant publication (409 `conformite_non_certifiee`)." }, themeId: { type: "string", description: "Famille de la trame dont l'acte est issu : le THÈME sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème au moment du dépôt (le recueil public l'affiche tel quel)." }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, controleLegalite: { type: "boolean", default: false, description: "true si l'acte doit être transmis au contrôle de légalité avant publication" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt (statut, libellé du circuit, empreinte du texte validé, sort de chaque étape). Un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409).", properties: { statut: { type: "string" }, circuitLabel: { type: "string" }, empreinte: { type: "string" }, closLe: { type: "string" }, etapes: { type: "array", items: { type: "string" } } } }, revision: { type: "object", nullable: true, description: "État de la révision au dépôt (statut, empreinte du texte révisé, date, corrections). Un acte dont la révision n'est pas au statut « valide » ne pourra pas être envoyé en signature (409, code `revision_incomplete`).", properties: { statut: { type: "string" }, empreinte: { type: "string" }, valideLe: { type: "string" }, corrige: { type: "boolean" }, par: { type: "string" } } } } } } } },
         responses: { 201: { description: "Acte déposé" }, 200: { description: "Acte déjà déposé (idempotent)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Document trop volumineux" } },
       },
     },
@@ -351,26 +486,49 @@ function openapi() {
       },
       get: { operationId: "lireTransmission", summary: "Lire le certificat de transmission d'un acte", tags: ["Contrôle de légalité"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La transmission et son certificat" }, 404: { description: "Acte inconnu, ou acte non transmis (code `transmission_absente`)" } } },
     },
+    "/v1/actes/{id}/signature-externe": {
+      post: {
+        operationId: "declarerVersionSignee", summary: "Déclarer la version signée (circuit externe)", tags: ["Signature"],
+        description: "Circuit externe (papier ou outil tiers, sans API) : l'acte a été signé hors de l'application ; le client dépose ici le PDF signé et son empreinte SHA-256. Le service n'a pas de signature cryptographique à vérifier — il enregistre la pièce et fait passer l'acte au statut « signée ». Une nouvelle version signée annule la certification de conformité précédente. La publication reste refusée (409 `conformite_non_certifiee`) tant que la conformité n'est pas certifiée, quand le client l'a déclarée requise au dépôt.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["signe"], properties: { signe: { type: "object", description: "La version signée déposée", properties: { url: { type: "string" }, sha256: { type: "string" }, nom: { type: "string" }, taille: { type: "integer" }, deposeLe: { type: "string" }, deposePar: { type: "string" }, deposeParNom: { type: "string" } } }, certificationRequise: { type: "boolean", description: "true si un réviseur compétent doit certifier la conformité avant publication" } } } } } },
+        responses: { 201: { description: "Version signée enregistrée" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà publié, ou circuit non externe (code `circuit_non_externe`)" }, 422: { description: "Version signée absente (code `version_signee_absente`)" }, 401: { description: "Jeton absent" } },
+      },
+    },
+    "/v1/actes/{id}/conformite": {
+      post: {
+        operationId: "certifierConformite", summary: "Certifier la conformité de la version signée (circuit externe)", tags: ["Signature"],
+        description: "Le contrôle du réviseur dans le circuit externe : il atteste que la pièce signée déposée est conforme à la version numérique qui sera publiée. La certification porte sur l'empreinte de la version signée : une empreinte différente de celle déposée est refusée (409 `certification_incoherente`). Une conformité refusée (`non_conforme`) replace l'acte au statut « déposé » : il attend une nouvelle version signée.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["certification"], properties: { certification: { type: "object", properties: { statut: { type: "string", enum: ["conforme", "non_conforme"] }, par: { type: "string" }, parNom: { type: "string" }, le: { type: "string" }, empreinte: { type: "string", description: "Empreinte du texte de la version numérique" }, sha256Signe: { type: "string", description: "Empreinte de la version signée certifiée" }, points: { type: "array", items: { type: "string" } }, remarque: { type: "string" }, motif: { type: "string", description: "Motif du refus (statut non_conforme)" } } } } } } } },
+        responses: { 201: { description: "Certification enregistrée" }, 404: { description: "Acte inconnu" }, 409: { description: "Aucune version signée déposée, ou certification incohérente" }, 422: { description: "Certification invalide" }, 401: { description: "Jeton absent" } },
+      },
+    },
     "/v1/actes/{id}/publication": {
       post: {
         operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
         description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé" } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé (paquet du circuit électronique, ou — circuit externe — un original de substitution décrit par `originalExterne`)" }, originalExterne: { type: "object", nullable: true, description: "Circuit externe : la version signée déposée (PDF) et la certification de conformité du réviseur. Requise (409 `version_signee_absente`) ; la certification doit être « conforme » (409 `conformite_non_certifiee`) quand l'acte a été déclaré avec `certificationRequise`.", properties: { url: { type: "string" }, sha256: { type: "string" }, nom: { type: "string" }, taille: { type: "integer" }, deposeLe: { type: "string" }, deposePar: { type: "string" }, deposeParNom: { type: "string" }, certification: { type: "object", nullable: true } } } } } } } },
         responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, acte déclaré non publiable, ou acte non transmis au contrôle de légalité" }, 422: { description: "Version en ligne manquante" } },
       },
     },
     "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
     "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
     "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
+    "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" }, 401: { description: "Jeton absent" } } } },
     "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
+    "/v1/actes/{id}/dossier-signature": { get: { operationId: "lireDossierSignature", summary: "Lire le dossier de signature interne", description: "Rend la PART INTERNE de l'original signé : mentions nominatives du signataire (nom, courriel, compte) et trace des courriels de notification. Ces données ne sont jamais diffusées : elles ne sortent que par cette route, protégée par un jeton.", security: [{ bearerAuth: [] }], tags: ["Signature"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Le dossier interne" }, 401: { description: "Jeton absent" }, 404: { description: "Acte inconnu, ou aucun dossier interne (code `dossier_absent`)" } } } },
+    "/v1/courriel": { get: { operationId: "etatCourriel", summary: "État du service de courriel", description: "Rend la configuration d'envoi du déploiement. Sur la plateforme de démonstration, l'envoi est indiqué INDISPONIBLE : elle n'a pas d'accès à un serveur SMTP. Le service auto-hébergé, lui, répond `disponible: true` quand SMTP_* est renseigné.", tags: ["Courriel"], responses: { 200: { description: "État du service de courriel" } } } },
+    "/v1/courriel/envoi": { post: { operationId: "envoyerCourriel", summary: "Envoyer un courriel de notification", description: "Sur la plateforme de démonstration, cette route répond 503 (aucun accès SMTP) : l'application constate alors l'envoi « non envoyé », avec le motif. Le service auto-hébergé l'exécute réellement.", security: [{ bearerAuth: [] }], tags: ["Courriel"], responses: { 200: { description: "Message remis au serveur SMTP (service auto-hébergé)" }, 503: { description: "Aucun serveur SMTP sur ce service (code `courriel_indisponible`)" } } } },
+    "/v1/courriel/test": { post: { operationId: "testerCourriel", summary: "Envoyer un courriel de test", description: "Comme `/v1/courriel/envoi` : indisponible sur la plateforme de démonstration, actif sur le service auto-hébergé.", security: [{ bearerAuth: [] }], tags: ["Courriel"], responses: { 200: { description: "Message d'essai remis au serveur SMTP" }, 503: { description: "Aucun serveur SMTP sur ce service" } } } },
   };
   return {
     openapi: "3.1.0",
     info: {
       title: SERVICE,
       version: SERVICE_VERSION,
-      description: "API de dépôt, de signature électronique et de publication des actes administratifs. Les lectures sont publiques ; les écritures exigent un jeton d'API (Authorization: Bearer).",
+      description: "API de dépôt, de signature électronique et de publication des actes administratifs. Sont PUBLICS : la santé du service, le registre du recueil (`/v1/publications`) et la résolution des identifiants ELI. Tout le reste exige une clé (`Authorization: Bearer`), et chaque clé porte un rôle — `lecteur`, `redacteur`, `editeur`, `administrateur` (hiérarchie) ou `prestataire` (notification de signature uniquement) — qui commande les routes qu'elle peut appeler. Aucune clé n'est inscrite dans le code : un service neuf n'accepte qu'un dépôt de clé initial (`/v1/auth/bootstrap`) et reste en lecture seule tant qu'il n'a pas été provisionné.",
     },
     servers: [{ url: "https://api.valmont-sur-loire.fr", description: "Production" }, { url: "https://api.recette.valmont-sur-loire.fr", description: "Recette" }],
     security: [],
@@ -388,6 +546,127 @@ function hSante() {
   return ok(200, {
     statut: "ok", service: SERVICE, version: SERVICE_VERSION, maintenant: nowIso(),
     objets: { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publications: Object.keys(db.publies).length },
+    // Capacité utile de la mémoire durable, en unités UTF-16 (l'en-tête déduit).
+    // Sert à savoir de combien de place on dispose encore.
+    capacite: U16.length - HEADER,
+    // Place RÉELLEMENT occupée par l'état, en unités UTF-16 (en-tête compris) :
+    // c'est ce que l'écriture de l'état a à recopier à chaque geste, et donc ce
+    // qui commande le coût d'un gestionnaire. Un état qui grossit sans fin finit
+    // par coûter plus que le budget d'une requête : cette mesure est là pour le
+    // voir venir (voir `saveDb`, et MAX_CHARS).
+    utilise: (U16[0] === STATE_VERSION ? longueur() : 0) + HEADER,
+  });
+}
+
+// ------------------------------------------------------------------ clés d'API
+// ÉTAT PUBLIC de l'autorisation : le client apprend s'il doit se provisionner,
+// sans rien apprendre des clés elles-mêmes.
+function hEtatAuth() {
+  return ok(200, {
+    provisionne: Object.keys(db.cles || {}).length > 0,
+    roles: ROLES,
+    // Une démonstration n'est pas un service de production : le client s'en
+    // sert pour afficher son avertissement (voir src/lib/service.js).
+    mode: "demonstration",
+  });
+}
+
+// PROVISIONNEMENT : le tout premier dépôt de clé. Il n'est possible que tant
+// qu'AUCUNE clé n'existe — c'est le geste d'installation. La clé est tirée par
+// le client (crypto.getRandomValues) : le service n'en voit jamais la valeur,
+// seulement son empreinte. La fenêtre de provisionnement est donc le seul
+// moment où un tiers pourrait s'emparer du service : réinstallez l'état avant
+// de provisionner si un doute existe.
+function hBootstrap(ctx) {
+  db.cles = db.cles || {};
+  if (Object.keys(db.cles).length) {
+    return err(409, "Ce service est déjà provisionné : le provisionnement initial ne s'exécute qu'une fois. Pour repartir de zéro, réinstallez l'état du service.", { code: "service_deja_provisionne" });
+  }
+  const b = ctx.body || {};
+  const jeton = String(b.cle || b.token || "");
+  if (jeton.length < 32) return err(422, "La clé doit compter au moins 32 caractères (tirez-la au hasard).", { code: "cle_trop_courte" });
+  const role = b.role && RANG[b.role] ? b.role : "administrateur";
+  const id = nouvelleCleId();
+  db.cles[id] = { hash: sha256Hex(jeton), role, label: String(b.label || "Administrateur").slice(0, 80), creeLe: nowIso() };
+  journaliser("provisionnement", "Service provisionné (clé « " + db.cles[id].label + " », rôle " + role + ").");
+  if (!saveDb(db)) { delete db.cles[id]; return err(507, "Le service n'a plus de place disponible."); }
+  return ok(201, { id, role, label: db.cles[id].label, creeLe: db.cles[id].creeLe });
+}
+
+function nouvelleCleId() {
+  return "CLE-" + String(Date.now()).slice(-6) + "-" + String(Math.floor(Math.random() * 46656)).padStart(3, "0");
+}
+
+// Liste des clés — jamais leur empreinte, jamais leur valeur.
+function hListeCles() {
+  const cles = db.cles || {};
+  return ok(200, {
+    provisionne: Object.keys(cles).length > 0,
+    cles: Object.keys(cles).map((id) => ({ id, role: cles[id].role, label: cles[id].label || "", creeLe: cles[id].creeLe })),
+  });
+}
+
+// Créer une clé supplémentaire (un poste, le prestataire de signature…).
+function hCreerCle(ctx) {
+  db.cles = db.cles || {};
+  const b = ctx.body || {};
+  const jeton = String(b.cle || b.token || "");
+  if (jeton.length < 32) return err(422, "La clé doit compter au moins 32 caractères.", { code: "cle_trop_courte" });
+  const role = b.role === "prestataire" ? "prestataire" : (b.role && RANG[b.role] ? b.role : "lecteur");
+  const id = nouvelleCleId();
+  db.cles[id] = { hash: sha256Hex(jeton), role, label: String(b.label || "").slice(0, 80), creeLe: nowIso() };
+  journaliser("cle_creee", "Clé « " + (db.cles[id].label || id) + " » créée (rôle " + role + ").");
+  if (!saveDb(db)) { delete db.cles[id]; return err(507, "Le service n'a plus de place disponible."); }
+  return ok(201, { id, role, label: db.cles[id].label, creeLe: db.cles[id].creeLe });
+}
+
+function hRevoquerCle(id) {
+  if (!db.cles || !db.cles[id]) return err(404, "Clé inconnue : " + id, { code: "cle_inconnue" });
+  // On ne révoque pas la dernière clé d'administration : ce serait se
+  // verrouiller hors de son propre service.
+  const admins = Object.keys(db.cles).filter((k) => db.cles[k].role === "administrateur");
+  if (db.cles[id].role === "administrateur" && admins.length <= 1) {
+    return err(409, "Impossible de révoquer la dernière clé d'administration : le service se retrouverait sans administrateur.", { code: "derniere_cle_admin" });
+  }
+  const label = db.cles[id].label || id;
+  delete db.cles[id];
+  journaliser("cle_revoquee", "Clé « " + label + " » révoquée.");
+  saveDb(db);
+  return ok(200, { id, revoquee: true });
+}
+
+// JOURNAL D'AUDIT tenu par le SERVICE (et non par le client) : chaque geste qui
+// change l'état y laisse une ligne, chaînée par empreinte — la ligne n scelle
+// la ligne n-1 et son contenu. Modifier une ligne rompt la chaîne, ce que
+// `scelle` détecte à la relecture. C'est la piste d'audit opposable : elle ne
+// dépend pas du bon vouloir du poste qui a fait le geste.
+function journaliser(geste, detail) {
+  db.journal = db.journal || [];
+  const precedent = db.journal.length ? db.journal[db.journal.length - 1].sceau : "";
+  const entree = { n: db.journal.length + 1, le: nowIso(), geste: String(geste || ""), detail: String(detail || "").slice(0, 400) };
+  entree.sceau = sha256Hex(precedent + "|" + entree.n + "|" + entree.le + "|" + entree.geste + "|" + entree.detail);
+  db.journal.push(entree);
+  if (db.journal.length > 2000) db.journal.splice(0, db.journal.length - 2000);
+  return entree;
+}
+
+function journalScelle(journal) {
+  let precedent = "";
+  for (const e of journal) {
+    if (e.sceau !== sha256Hex(precedent + "|" + e.n + "|" + e.le + "|" + e.geste + "|" + e.detail)) return false;
+    precedent = e.sceau;
+  }
+  return true;
+}
+
+function hJournal(ctx) {
+  const journal = (db.journal || []).slice();
+  const limite = Math.max(1, Math.min(2000, Number(ctx.params && ctx.params.id) || 200));
+  return ok(200, {
+    entrees: journal.slice(-limite),
+    total: journal.length,
+    scelle: journalScelle(journal),
+    algorithme: "SHA-256 (chaîne)",
   });
 }
 
@@ -419,6 +698,47 @@ function normaliserRevision(v) {
     valideLe: String(v.valideLe || "").slice(0, 40),
     corrige: v.corrige === true,
     par: String(v.par || "").slice(0, 80),
+  };
+}
+
+// La version signée d'un acte mené par le CIRCUIT EXTERNE (papier ou outil
+// tiers, sans API) : le PDF déposé et son empreinte. Le service ne vérifie pas
+// la signature — il n'y a pas de certificat à vérifier —, mais il conserve la
+// pièce : c'est elle « l'original » que le recueil publie.
+function normaliserVersionSignee(v) {
+  if (!v || typeof v !== "object") return null;
+  const url = String(v.url || "").slice(0, 2000);
+  if (!url) return null;
+  return {
+    url,
+    sha256: String(v.sha256 || "").slice(0, 128),
+    nom: String(v.nom || "").slice(0, 240),
+    taille: Number(v.taille) || 0,
+    type: String(v.type || "application/pdf").slice(0, 80),
+    deposeLe: String(v.deposeLe || "").slice(0, 40),
+    deposePar: String(v.deposePar || "").slice(0, 80),
+    deposeParNom: String(v.deposeParNom || "").slice(0, 120),
+  };
+}
+
+// La certification de conformité du réviseur : l'attestation que la pièce
+// signée est conforme à la version numérique publiée. Le service l'exige, quand
+// le client l'a déclarée requise au dépôt, avant de publier.
+function normaliserCertification(v) {
+  if (!v || typeof v !== "object") return null;
+  const statut = String(v.statut || "").slice(0, 24);
+  if (statut !== "conforme" && statut !== "non_conforme") return null;
+  const points = Array.isArray(v.points) ? v.points.slice(0, 20).map((x) => String(x || "").slice(0, 60)) : [];
+  return {
+    statut,
+    par: String(v.par || "").slice(0, 80),
+    parNom: String(v.parNom || "").slice(0, 120),
+    le: String(v.le || "").slice(0, 40),
+    empreinte: String(v.empreinte || "").slice(0, 128),
+    sha256Signe: String(v.sha256Signe || "").slice(0, 128),
+    points,
+    remarque: String(v.remarque || "").slice(0, 2000),
+    motif: String(v.motif || "").slice(0, 2000),
   };
 }
 
@@ -463,10 +783,19 @@ function hDeposerActe(ctx) {
     // révision, il refuse seulement d'ouvrir une signature sur un acte que le
     // réviseur n'a pas validé (voir hEnvoyerEnSignature).
     revision: normaliserRevision(b.revision),
+    // Le CIRCUIT EXTERNE (papier ou outil tiers, sans API) : le client dit au
+    // dépôt quel circuit mène l'acte, et si la conformité de la pièce signée
+    // devra être certifiée par un réviseur. Un acte mené ainsi ne s'ouvre pas
+    // comme un circuit électronique : sa version signée est DÉCLARÉE (voir
+    // hSignatureExterne), et sa conformité CERTIFIÉE (voir hConformite) avant
+    // publication.
+    signatureMode: b.signatureMode === "externe" ? "externe" : "electronique",
+    certificationRequise: b.certificationRequise === true,
     statut: "depose", deposeLe: nowIso(),
   };
   db.actes[id] = acte;
   evince(db.actes, MAX_ACTES, "deposeLe");
+  journaliser("acte_depose", id + " — " + (acte.numero || acte.objet || "sans numéro") + " (" + (acte.entityName || "") + ")");
   if (!saveDb(db)) { delete db.actes[id]; return err(507, "Le service n'a plus de place disponible."); }
   return ok(201, { id, href: "/v1/actes/" + id, sha256: sha, statut: acte.statut, deposeLe: acte.deposeLe }, { location: "/v1/actes/" + id });
 }
@@ -501,6 +830,7 @@ function hEnvoyerEnSignature(ctx) {
   acte.statut = "en_signature";
   acte.signatureId = id;
   evince(db.signatures, MAX_SIGNATURES, "creeLe");
+  journaliser("signature_ouverte", id + " — acte " + acte.id + " — " + signataires.map((s) => s.nom || "?").join(", "));
   if (!saveDb(db)) { delete db.signatures[id]; acte.statut = "depose"; return err(507, "Le service n'a plus de place disponible."); }
   const base = "https://signature.valmont-sur-loire.fr/api/v1";
   return ok(202, {
@@ -523,7 +853,7 @@ function hWebhookSignature(ctx) {
   const b = ctx.body || {};
   const sig = lireSignature(b.signatureId);
   if (!sig) return err(404, "Circuit de signature inconnu : " + (b.signatureId || "(absent)"));
-  if (b.statut === "refusee") { sig.statut = "refusee"; sig.motif = b.motif || "Signature refusée par le signataire"; saveDb(db); return ok(200, { recu: true, signatureId: sig.id, statut: sig.statut }); }
+  if (b.statut === "refusee") { sig.statut = "refusee"; sig.motif = b.motif || "Signature refusée par le signataire"; journaliser("signature_refusee", sig.id + " — " + sig.motif); saveDb(db); return ok(200, { recu: true, signatureId: sig.id, statut: sig.statut }); }
   const pack = b.documentSigne;
   if (!pack || !pack.document || typeof pack.document.akn !== "string") return err(400, "Notification invalide : `documentSigne.document.akn` est attendu.", { code: "document_absent" });
   const acte = lireActe(sig.acteId);
@@ -534,6 +864,7 @@ function hWebhookSignature(ctx) {
   if (sha !== acte.sha256) {
     sig.statut = "rejetee";
     sig.motif = "Empreinte du document signé différente de celle du document déposé";
+    journaliser("signature_rejetee", sig.id + " — empreinte divergente");
     saveDb(db);
     return err(409, "Signature refusée : le document signé ne correspond pas au document déposé.", {
       code: "empreinte_divergente",
@@ -546,6 +877,7 @@ function hWebhookSignature(ctx) {
   sig.signeLe = (pack.signatures && pack.signatures[0] && pack.signatures[0].signeLe) || nowIso();
   acte.statut = "signee";
   acte.signeLe = sig.signeLe;
+  journaliser("acte_signe", acte.id + " — circuit " + sig.id + " — empreinte " + sha.slice(0, 16));
   if (!saveDb(db)) return err(507, "Le service n'a plus de place disponible.");
   return ok(200, { recu: true, signatureId: sig.id, acteId: acte.id, statut: "signee", signeLe: sig.signeLe, empreinte: sha });
 }
@@ -568,13 +900,19 @@ function hTransmettre(ctx) {
   const reference = b.reference || ("AR-" + recuLe.slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
   const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
   const empreinte = acte.sha256;
-  const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte });
+  // Le service de démonstration ne fait AUCUN appel sortant : l'accusé de
+  // réception est fabriqué localement. Il est donc marqué comme une simulation,
+  // et la mention portée sur le document le dit. Un service réel (auto-hébergé,
+  // muni d'identifiants @ctes) lèvera ce marqueur. Voir NC-IV-004 et P-19.
+  const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration: true });
   acte.transmission = {
     reference, recuLe, destinataire, mode: b.mode || CONTROLE_LEGALITE.mode,
     empreinte, auteur: String(b.auteur || "").slice(0, 120), entite: String(b.entite || "").slice(0, 160),
-    api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202 },
+    api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202, simule: true },
+    demonstration: true,
     certificat, transmisLe: nowIso(),
   };
+  journaliser("transmission_controle_legalite", acte.id + " — référence " + reference);
   if (!saveDb(db)) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
   return ok(201, {
     acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire,
@@ -585,9 +923,88 @@ function hTransmettre(ctx) {
   }, { location: "/v1/actes/" + acte.id + "/transmission" });
 }
 
+// LA VERSION SIGNÉE d'un acte mené par le CIRCUIT EXTERNE. L'acte a été signé
+// hors de l'application (papier, ou outil tiers que l'application ne pilote
+// pas) ; le client dépose ici le PDF signé, avec son empreinte. Le service n'a
+// aucune signature cryptographique à vérifier : il enregistre la pièce, et fait
+// passer l'acte au statut « signée » — la publication devient possible, sous
+// réserve de la certification de conformité quand le client l'a déclarée
+// requise.
+function hSignatureExterne(ctx) {
+  const acte = lireActe(ctx.params.id);
+  if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  if (acte.signatureMode !== "externe") {
+    return err(409, "Cet acte ne suit pas le circuit de signature externe : sa signature est ouverte auprès du prestataire.", { code: "circuit_non_externe", signatureMode: acte.signatureMode || "electronique" });
+  }
+  if (acte.statut === "publie") return err(409, "Cet acte est déjà publié : sa version signée ne se remplace pas.", { code: "deja_publie", statut: acte.statut });
+  const signe = normaliserVersionSignee(ctx.body && ctx.body.signe);
+  if (!signe) return err(422, "La version signée est requise (`signe.url`) : c'est la pièce qui sera conservée et publiée.", { code: "version_signee_absente" });
+  if (ctx.body && ctx.body.certificationRequise !== undefined) acte.certificationRequise = ctx.body.certificationRequise === true;
+  acte.originalExterne = signe;
+  // Une nouvelle version signée remet la certification à zéro : elle portait
+  // sur l'ancienne pièce.
+  acte.certification = null;
+  acte.statut = "signee";
+  acte.signeLe = signe.deposeLe || nowIso();
+  acte.misAJourLe = nowIso();
+  if (!saveDb(db)) return err(507, "Le service n'a plus de place disponible.");
+  return ok(201, {
+    acteId: acte.id, statut: acte.statut, href: "/v1/actes/" + acte.id,
+    originalExterne: resumeOriginalExterne(acte),
+    certificationRequise: acte.certificationRequise === true,
+  }, { location: "/v1/actes/" + acte.id + "/signature-externe" });
+}
+
+// LA CERTIFICATION DE CONFORMITÉ. Dans le circuit externe, le contrôle du
+// réviseur ne porte pas sur le texte avant signature, mais sur la PIÈCE
+// signée : il atteste qu'elle est conforme à la version numérique qui sera
+// publiée. Le service conserve cette attestation, et refuse de publier tant
+// qu'elle manque — quand le client a déclaré la certification requise.
+function hConformite(ctx) {
+  const acte = lireActe(ctx.params.id);
+  if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  if (acte.signatureMode !== "externe") {
+    return err(409, "Cet acte ne suit pas le circuit de signature externe.", { code: "circuit_non_externe", signatureMode: acte.signatureMode || "electronique" });
+  }
+  if (!acte.originalExterne || !acte.originalExterne.url) {
+    return err(409, "Aucune version signée n'a été déposée pour cet acte : la conformité ne peut pas être certifiée.", { code: "version_signee_absente", statut: acte.statut });
+  }
+  const certification = normaliserCertification(ctx.body && ctx.body.certification);
+  if (!certification) {
+    return err(422, "La certification est requise, avec un statut « conforme » ou « non_conforme ».", { code: "certification_invalide" });
+  }
+  // Une certification qui ne porte pas sur la pièce déposée n'atteste rien : on
+  // refuse une empreinte différente de celle de la version signée.
+  if (certification.sha256Signe && acte.originalExterne.sha256 && certification.sha256Signe !== acte.originalExterne.sha256) {
+    return err(409, "La certification ne porte pas sur la version signée déposée (empreintes différentes).", { code: "certification_incoherente", empreinteSignee: acte.originalExterne.sha256 });
+  }
+  acte.certification = certification;
+  // Une conformité refusée rend l'acte non publiable : il attend une nouvelle
+  // version signée. Le service l'applique lui-même, plutôt que de s'en remettre
+  // au client.
+  if (certification.statut !== "conforme") acte.statut = "depose";
+  acte.misAJourLe = nowIso();
+  if (!saveDb(db)) return err(507, "Le service n'a plus de place disponible.");
+  return ok(201, { acteId: acte.id, statut: acte.statut, certification, href: "/v1/actes/" + acte.id });
+}
+
 function hPublier(ctx) {
   const acte = lireActe(ctx.params.id);
   if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+  // CIRCUIT EXTERNE : la version signée doit être déposée, et sa conformité
+  // certifiée quand le client l'a déclarée requise. C'est le service qui tient
+  // l'ordre « version signée → conformité certifiée → publié ». Ces deux règles
+  // passent AVANT la règle générale « signé ? » : un acte qui attend encore sa
+  // version signée est « déposé », non « signé », et le client mérite le motif
+  // exact plutôt que le motif générique.
+  if (acte.signatureMode === "externe") {
+    if (!acte.originalExterne || !acte.originalExterne.url) {
+      return err(409, "Cet acte suit le circuit de signature externe : sa version signée doit être déposée avant sa publication.", { code: "version_signee_absente", statut: acte.statut });
+    }
+    if (acte.certificationRequise === true && (!acte.certification || acte.certification.statut !== "conforme")) {
+      return err(409, "La conformité de la version signée doit être certifiée par le réviseur avant la publication.", { code: "conformite_non_certifiee", statut: acte.statut, certification: acte.certification || null });
+    }
+  }
   if (acte.statut !== "signee" && acte.statut !== "publie") {
     return err(409, "Un acte ne peut être publié qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
   }
@@ -605,8 +1022,14 @@ function hPublier(ctx) {
     return err(409, "Cet acte doit être transmis au contrôle de légalité avant sa publication.", { code: "transmission_absente", statut: acte.statut, controleLegalite: true });
   }
   const b = ctx.body || {};
+  // PUBLICATION INFORMATIVE : le texte consolidé d'un RÈGLEMENT annexé, publié
+  // pour lui-même à titre d'information (voir SPEC § 2.2.4 ter). Elle n'est ni
+  // signée ni opposable : elle n'a pas d'original, et ne touche pas à l'état de
+  // l'acte déposé auquel elle est rattachée. C'est la règle MINIMALE qui
+  // l'autorise ; clé, ELI, versions et épinglage restent ceux des actes.
+  const informative = b.informative === true;
   if (!b.html || !b.akn) return err(422, "La version en ligne (`html`) et le document Akoma Ntoso (`akn`) sont requis pour publier.", { code: "version_en_ligne_absente" });
-  if (!b.original) return err(422, "L'original signé (`original`) est requis : c'est lui qui est conservé et opposable.", { code: "original_absent" });
+  if (!b.original && !informative) return err(422, "L'original signé (`original`) est requis : c'est lui qui est conservé et opposable.", { code: "original_absent" });
   const idem = ctx.headers["idempotency-key"] || ctx.headers["Idempotency-Key"];
   if (idem && db.idem[idem]) {
     const p = lirePublication(db.idem[idem]);
@@ -623,33 +1046,66 @@ function hPublier(ctx) {
   const cle = clePublication(eliUri, dateExpr + "-" + (b.kind || "originale"));
   if (db.publies[cle]) return ok(200, { ...resumePublication(db.publies[cle], true), idempotent: true });
 
+  // La version signée d'un acte du circuit externe : le PDF déposé, avec la
+  // certification de conformité du réviseur. C'est elle « l'original » de cet
+  // acte — le recueil public la montre telle qu'elle a été mise en ligne.
+  const origExt = acte.signatureMode === "externe" && acte.originalExterne
+    ? { ...acte.originalExterne, certification: acte.certification || null }
+    : null;
+
   const rec = {
     cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
     // L'acte déposé dont cette publication est la version en ligne : c'est lui
     // qu'un retrait doit rendre de nouveau publiable (voir hRetirerPublication).
     acteId: acte.id,
-    numero: b.numero || acte.numero, nature: b.nature || acte.nature, objet: b.objet || acte.objet,
+    numero: b.numero || (informative ? "" : acte.numero), nature: b.nature || acte.nature, objet: b.objet || acte.objet,
     themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
     entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
     dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
     opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
     kind: b.kind || "originale", brandName: b.brandName || "",
+    // Une publication INFORMATIVE (le règlement consolidé d'une annexe) et, pour
+    // toute publication, l'acte qui l'adopte s'il y en a un : le recueil s'en
+    // sert pour rattacher le règlement à sa décision d'adoption.
+    informative: informative || undefined,
+    adoption: b.adoption || null,
+    // L'ÉPINGLAGE suit l'ACTE (son identifiant ELI), non la version déposée :
+    // une version publiée plus tard hérite donc du drapeau déjà posé — un
+    // règlement intérieur qu'on modifie reste « à la une ». Voir hEpinglerPublication.
+    epingle: b.epingle === true || versionsOf(eliUri).some((v) => v.epingle === true),
     sha256: sha256Hex(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
-    original: {
-      format: (b.original && b.original.format) || "application/vnd.actes.original-signe+json",
-      sha256: (b.original && b.original.document && b.original.document.sha256) || "",
-      pageHtml: (b.original && b.original.pageHtml) || "",
-      signatures: (b.original && b.original.signatures) || [],
-      horodatage: (b.original && b.original.horodatage) || null,
-      signaturesUrl: "/v1/eli/" + slug(eliUri.replace(/^eli:\/fr\//, "")) + "/original",
-    },
-    signature: {
-      prestataire: (b.original && b.original.prestataire) || null,
-      niveau: b.niveau || "avancee",
-      signataires: ((b.original && b.original.signatures) || []).map((s) => ({ nom: s.signataire && s.signataire.nom, fonction: s.signataire && s.signataire.fonction })),
-      signeLe: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].signeLe) || "",
-      algorithme: (b.original && b.original.signatures && b.original.signatures[0] && b.original.signatures[0].algorithme) || "",
-    },
+    // La part PUBLIQUE de l'original : `sansInterne` la débarrasse du dossier
+    // interne, même si un client le lui avait laissé dans le paquet. Une
+    // publication informative n'en a pas : elle n'est pas signée.
+    original: informative || !b.original ? null : (() => {
+      const o = sansInterne(b.original) || {};
+      return {
+        format: o.format || "application/vnd.actes.original-signe+json",
+        sha256: (o.document && o.document.sha256) || "",
+        pageHtml: o.pageHtml || "",
+        signatures: o.signatures || [],
+        horodatage: o.horodatage || null,
+        signaturesUrl: "/v1/eli/" + slug(eliUri.replace(/^eli:\/fr\//, "")) + "/original",
+      };
+    })(),
+    // Circuit externe : la pièce signée déposée (un PDF) et la certification du
+    // réviseur. Absent pour un acte du circuit électronique, et pour une
+    // publication informative (la pièce signée est celle de l'acte d'adoption).
+    originalExterne: informative ? null : origExt,
+    // La part INTERNE de l'original : mentions nominatives du signataire et
+    // trace des courriels. Conservée au registre, jamais servie publiquement.
+    originalInterne: b.originalInterne || ((b.original && b.original.interne) ? b.original : null) || acte.originalInterne || null,
+    signature: informative || !b.original ? null : (() => {
+      const o = sansInterne(b.original) || {};
+      const sigs = o.signatures || [];
+      return {
+        prestataire: o.prestataire || null,
+        niveau: b.niveau || (o.externe ? "externe" : o.prestataire ? "avancee" : "simple"),
+        signataires: sigs.map((s) => ({ nom: s.signataire && s.signataire.nom, fonction: s.signataire && s.signataire.fonction })),
+        signeLe: (sigs[0] && sigs[0].signeLe) || "",
+        algorithme: (sigs[0] && sigs[0].algorithme) || "",
+      };
+    })(),
     ecarts: acte.ecarts || 0,
     signataireActe: b.auteur || "",
     // Le certificat de transmission au contrôle de légalité accompagne la
@@ -660,9 +1116,16 @@ function hPublier(ctx) {
   };
   db.publies[cle] = rec;
   if (idem) db.idem[idem] = cle;
-  acte.statut = "publie";
-  acte.publication = cle;
+  // La publication informative ne fait PAS de l'acte déposé l'acte publié :
+  // c'est elle qui EST le règlement, non l'acte d'adoption (dont le dépôt et la
+  // signature ne sont pas concernés). L'acte garde donc son état.
+  if (!informative) {
+    acte.statut = "publie";
+    acte.publication = cle;
+  }
+  if (rec.originalInterne) acte.originalInterne = rec.originalInterne;
   evince(db.publies, MAX_PUBLIES, "publieeLe");
+  journaliser("publication", cle + " — ELI " + eliUri + (informative ? " (informative)" : ""));
   if (!saveDb(db)) { delete db.publies[cle]; return err(507, "Le service n'a plus de place disponible."); }
   const versions = versionsOf(eliUri).map((p) => resumePublication(p, false));
   return ok(201, {
@@ -672,10 +1135,17 @@ function hPublier(ctx) {
     dateDocument, datePublication, dateOpposabilite: rec.dateOpposabilite,
     opposabilite: rec.opposabiliteRule,
     recueil: rec.recueil,
+    epingle: rec.epingle === true,
+    informative: rec.informative === true,
+    adoption: rec.adoption || null,
     versions,
     ressource: "/v1/publications/" + encodeURIComponent(cle),
-    original: { format: rec.original.format, sha256: rec.original.sha256, signatures: rec.signature.signataires.length, href: rec.original.signaturesUrl },
-    formats: ["text/html", "application/akn+xml", "application/ld+json", rec.original.format],
+    original: rec.original ? { format: rec.original.format, sha256: rec.original.sha256, signatures: (rec.signature && rec.signature.signataires || []).length, href: rec.original.signaturesUrl } : null,
+    // Circuit externe : la version signée (PDF) et la certification du réviseur,
+    // renvoyées dès la publication — le client les affiche sans relire le
+    // registre. Absent d'un acte du circuit électronique.
+    originalExterne: rec.originalExterne || null,
+    formats: ["text/html", "application/akn+xml", "application/ld+json"].concat(rec.original ? [rec.original.format] : []),
   }, { location: "/v1/publications/" + encodeURIComponent(cle) });
 }
 
@@ -709,6 +1179,7 @@ function hRetirerPublication(ctx) {
     acte.publication = null;
     if (acte.statut === "publie") acte.statut = "signee";
   }
+  journaliser("publication_retiree", cle + " — motif : " + motif.slice(0, 200));
   if (!saveDb(db)) {
     // Rien n'a été écrit : on remet la mémoire dans l'état d'avant.
     db.publies[cle] = p;
@@ -721,6 +1192,37 @@ function hRetirerPublication(ctx) {
     retraits: acte ? acte.retraits.length : 0,
     ressource: "/v1/actes/" + (acte ? acte.id : ""),
     journal: "Retrait de la publication du recueil — motif technique : " + motif.slice(0, 200),
+  });
+}
+
+// ÉPINGLER un acte au recueil : le mettre en avant sur sa page d'accueil (la
+// bande « À la une » — la place d'un règlement intérieur, d'une charte). Le
+// geste ne touche pas au texte déposé : il ne fait que lever ou poser un
+// drapeau, et se défait aussi simplement qu'il s'est fait.
+//
+// Le drapeau suit l'ACTE — son identifiant ELI — et non la version publiée :
+// on le pose donc sur TOUTES les versions publiées sous cet identifiant, et
+// une version publiée plus tard l'hérite (voir hPublier). Un acte qu'on
+// modifie reste ainsi « à la une ».
+function hEpinglerPublication(ctx) {
+  const cle = decodeURIComponent(ctx.params.cle);
+  const p = lirePublication(cle);
+  if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+  const epingle = !!(ctx.body && ctx.body.epingle);
+  const auteur = String((ctx.body && ctx.body.auteur) || "").slice(0, 120);
+  const versions = versionsOf(p.eliUri);
+  const avant = versions.map((v) => ({ epingle: v.epingle, epingleLe: v.epingleLe, epinglePar: v.epinglePar }));
+  for (const v of versions) { v.epingle = epingle; v.epingleLe = nowIso(); v.epinglePar = auteur; }
+  journaliser(epingle ? "publication_epinglee" : "publication_desepinglee", p.eliUri + " — " + versions.length + " version(s)");
+  if (!saveDb(db)) {
+    // Rien n'a été écrit : on remet la mémoire dans l'état d'avant.
+    versions.forEach((v, i) => Object.assign(v, avant[i]));
+    return err(507, "Le service n'a plus de place disponible.");
+  }
+  return ok(200, {
+    ...resumePublication(p, latestOf(p.eliUri) === p),
+    epingle, versions: versions.length,
+    ressource: "/v1/publications/" + encodeURIComponent(cle),
   });
 }
 
@@ -754,6 +1256,34 @@ function hResoudreEli(ctx) {
 const DBC = { config: 1, trames: 1, actes: 1, users: 1, meta: 1, journal: 1, presence: 1 };
 const MAX_SYNC_RECORDS = 4000;
 
+// Sensibilité des collections. `null` = lecture PUBLIQUE (documents de travail
+// ouverts : le référentiel des trames et les métadonnées) ; sinon la clé
+// minimale exigée. Les comptes (`users`) ne sortent que vers l'administration ;
+// les actes, le journal et la présence ne sortent pas d'un poste identifié.
+// C'est la traduction, côté service, du principe « le publié est public, le
+// reste ne l'est pas ».
+const DBC_LECTURE = {
+  config: { min: "lecteur" },
+  trames: null,
+  actes: { min: "lecteur" },
+  users: { min: "administrateur" },
+  meta: null,
+  journal: { min: "lecteur" },
+  presence: { min: "lecteur" },
+};
+// Ce que chaque écriture exige. Les comptes et la configuration ne se
+// réécrivent que par un administrateur : un jeton de rédaction ne peut donc pas
+// s'octroyer de rôle (c'était la faille d'élévation de privilèges).
+const DBC_ECRITURE = {
+  config: { min: "administrateur" },
+  trames: { min: "editeur" },
+  actes: { min: "redacteur" },
+  users: { min: "administrateur" },
+  meta: { min: "editeur" },
+  journal: { min: "redacteur" },
+  presence: { min: "redacteur" },
+};
+
 function collection(name) {
   db.collections = db.collections || {};
   let c = db.collections[name];
@@ -783,16 +1313,34 @@ function hDbHealth() {
   });
 }
 
-function hDbCollection(name) {
+function hDbCollection(name, headers) {
   if (!DBC[name]) return err(404, "Collection inconnue : " + name, { code: "collection_inconnue" });
+  const regle = DBC_LECTURE[name];
+  if (regle) {
+    const bad = authFail(headers, regle);
+    if (bad) return bad;
+  }
   const c = collection(name);
   return ok(200, { collection: name, revision: c.rev || 0, records: resumeCollection(c) });
 }
 
-function hDbSync(name, b) {
+function hDbSync(name, b, headers) {
   if (!DBC[name]) return err(404, "Collection inconnue : " + name, { code: "collection_inconnue" });
+  const bad = authFail(headers, DBC_ECRITURE[name]);
+  if (bad) return bad;
   const upserts = Array.isArray(b.upserts) ? b.upserts : [];
   const deletes = Array.isArray(b.deletes) ? b.deletes : [];
+  // `force` écrase sans contrôle de révision : c'est un geste de REPRISE de
+  // données, réservé à l'ADMINISTRATION et JOURNALISÉ. Un rôle d'écriture
+  // ordinaire ne peut donc pas écraser en silence l'écriture d'un autre poste —
+  // il reçoit le conflit, et le résout. Voir NC-II-004 (résidu) et P-17.
+  if (b.force) {
+    const id = identiteDe(headers);
+    if (!id || id.role !== "administrateur") {
+      return err(403, "L'écrasement sans contrôle de révision (`force`) est réservé au rôle administrateur.", { code: "force_reserve_admin", role: id ? id.role : null });
+    }
+    journaliser("sync_force", "Écrasement sans contrôle de révision sur « " + name + " » (clé « " + (id.label || id.id) + " » : " + upserts.length + " écriture(s), " + deletes.length + " suppression(s)).");
+  }
   if (upserts.length + deletes.length > MAX_SYNC_RECORDS) {
     return err(413, "Trop d'enregistrements dans une même synchronisation (maximum " + MAX_SYNC_RECORDS + ").", { code: "trop_d_enregistrements" });
   }
@@ -836,34 +1384,56 @@ function hDbSync(name, b) {
 // --------------------------------------------------------------- table routière
 const ROUTES = [
   { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
+  { m: "GET", p: /^\/v1\/auth\/etat$/, f: hEtatAuth },
+  { m: "POST", p: /^\/v1\/auth\/bootstrap$/, ecrit: true, f: hBootstrap },
+  { m: "GET", p: /^\/v1\/auth\/cles$/, auth: "administrateur", f: hListeCles },
+  { m: "POST", p: /^\/v1\/auth\/cles$/, auth: "administrateur", ecrit: true, f: hCreerCle },
+  { m: "POST", p: /^\/v1\/auth\/cles\/([^/]+)\/revoquer$/, auth: "administrateur", ecrit: true, f: (ctx) => hRevoquerCle(ctx.params.id) },
+  { m: "GET", p: /^\/v1\/journal$/, auth: "administrateur", f: hJournal },
   { m: "GET", p: /^\/v1\/db\/health$/, f: hDbHealth },
-  { m: "GET", p: /^\/v1\/db\/collections\/([a-z]+)$/, f: (ctx) => hDbCollection(ctx.params.id) },
-  { m: "POST", p: /^\/v1\/db\/collections\/([a-z]+)\/sync$/, auth: "jeton", ecrit: true, f: (ctx) => hDbSync(ctx.params.id, ctx.body || {}) },
+  { m: "GET", p: /^\/v1\/db\/collections\/([a-z]+)$/, f: (ctx) => hDbCollection(ctx.params.id, ctx.headers) },
+  { m: "POST", p: /^\/v1\/db\/collections\/([a-z]+)\/sync$/, ecrit: true, f: (ctx) => hDbSync(ctx.params.id, ctx.body || {}, ctx.headers) },
   { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
-  { m: "GET", p: /^\/v1\/actes$/, auth: "public", f: () => ok(200, { actes: Object.keys(db.actes).map((k) => resumeActe(db.actes[k])).sort((a, b) => cmp(b.deposeLe, a.deposeLe)) }) },
-  { m: "POST", p: /^\/v1\/actes$/, auth: "jeton", ecrit: true, f: hDeposerActe },
-  { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
-  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
-  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, auth: "jeton", ecrit: true, f: hEnvoyerEnSignature },
-  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "jeton", ecrit: true, f: hTransmettre },
-  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
-  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "jeton", ecrit: true, f: hPublier },
-  { m: "GET", p: /^\/v1\/signatures$/, f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => cmp(b.creeLe, a.creeLe)) }) },
-  { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: s.documentSigne }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
-  { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
-  { m: "POST", p: /^\/v1\/webhooks\/signature$/, auth: "public", ecrit: true, f: hWebhookSignature },
+  { m: "GET", p: /^\/v1\/actes$/, auth: "lecteur", f: () => ok(200, { actes: Object.keys(db.actes).map((k) => resumeActe(db.actes[k])).sort((a, b) => cmp(b.deposeLe, a.deposeLe)) }) },
+  { m: "POST", p: /^\/v1\/actes$/, auth: "redacteur", ecrit: true, f: hDeposerActe },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, auth: "lecteur", f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, auth: "lecteur", f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, auth: "redacteur", ecrit: true, f: hEnvoyerEnSignature },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "redacteur", ecrit: true, f: hTransmettre },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature-externe$/, auth: "redacteur", ecrit: true, f: hSignatureExterne },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/conformite$/, auth: "redacteur", ecrit: true, f: hConformite },
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "lecteur", f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
+  { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "redacteur", ecrit: true, f: hPublier },
+  { m: "GET", p: /^\/v1\/signatures$/, auth: "lecteur", f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => cmp(b.creeLe, a.creeLe)) }) },
+  // Le document signé est servi SANS sa part interne : le dossier nominatif se
+  // lit par `/v1/actes/{id}/dossier-signature`, jamais ici.
+  { m: "GET", p: /^\/v1\/signatures\/([^/]+)\/document-signe$/, auth: "lecteur", f: (ctx) => { const s = lireSignature(ctx.params.id); return s && s.documentSigne ? ok(200, { signatureId: s.id, acteId: s.acteId, documentSigne: sansInterne(s.documentSigne) }) : err(404, "Aucun document signé pour ce circuit : " + ctx.params.id); } },
+  // Le dossier INTERNE de la signature : mentions nominatives et trace des
+  // courriels. Route protégée — jamais publique.
+  { m: "GET", p: /^\/v1\/actes\/([^/]+)\/dossier-signature$/, auth: "administrateur", f: (ctx) => {
+      const a = lireActe(ctx.params.id);
+      if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+      const dossier = a.originalInterne || null;
+      if (!dossier) return err(404, "Aucun dossier de signature interne pour cet acte.", { code: "dossier_absent" });
+      return ok(200, { acteId: a.id, numero: a.numero, dossier });
+    } },
+  { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, auth: "lecteur", f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
+  { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
   { m: "GET", p: /^\/v1\/publications$/, f: () => {
       const all = Object.keys(db.publies).map((k) => db.publies[k]);
       const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
       return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => cmp(b.publieeLe, a.publieeLe)) });
     } },
-  { m: "POST", p: /^\/v1\/publications\/([^/]+)\/retrait$/, auth: "jeton", ecrit: true, f: hRetirerPublication },
+  { m: "POST", p: /^\/v1\/publications\/([^/]+)\/retrait$/, auth: "administrateur", ecrit: true, f: hRetirerPublication },
+  { m: "POST", p: /^\/v1\/publications\/([^/]+)\/epingle$/, auth: "editeur", ecrit: true, f: hEpinglerPublication },
   { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
       const cle = decodeURIComponent(ctx.params.cle);
       const p = lirePublication(cle);
       if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
       const versions = versionsOf(p.eliUri).map((x) => resumePublication(x, latestOf(x.eliUri) === x));
-      return ok(200, { ...p, latest: latestOf(p.eliUri) === p, versions });
+      // Le dossier interne ne sort JAMAIS par cette route (lecture publique).
+      const { originalInterne, ...pub } = p;
+      return ok(200, { ...pub, latest: latestOf(p.eliUri) === p, versions });
     } },
   { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/original$/, f: (ctx) => {
       const eliUri = eliKey(ctx.params);
@@ -871,6 +1441,18 @@ const ROUTES = [
       return p ? ok(200, { eli: eliUri, cle: p.cle, original: p.original, signature: p.signature }) : err(404, "ELI inconnu : " + eliUri);
     } },
   { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/, f: hResoudreEli },
+  // --- courriel : la plateforme n'a pas d'accès réseau -------------------------
+  // Ce service-ci tourne dans un environnement SANS accès à un serveur SMTP :
+  // l'envoi par courriel y est déclaré INDISPONIBLE, avec son motif.
+  // L'application le constate alors « non envoyé » (jamais silencieusement).
+  // Le service auto-hébergé (src/server/) branche un vrai serveur SMTP par les
+  // variables SMTP_* de son .env.
+  { m: "GET", p: /^\/v1\/courriel$/, f: () => ok(200, {
+      disponible: false, configure: false, actif: false,
+      raison: "Le service de démonstration de la plateforme n'a pas accès à un serveur SMTP : l'envoi par courriel n'est actif qu'avec le service auto-hébergé (voir src/server/mysql/env.example, SMTP_HOST).",
+      hote: "", port: 0, securise: "", expediteur: "", expediteurNom: "", repondreA: "", authentifie: false, derniers: [],
+    }) },
+  { m: "POST", p: /^\/v1\/courriel\/(envoi|test)$/, auth: "administrateur", ecrit: true, f: () => err(503, "Le service de démonstration de la plateforme n'a pas accès à un serveur SMTP. Déployez le service auto-hébergé (src/server/) et renseignez SMTP_* dans son .env pour activer les envois par courriel.", { code: "courriel_indisponible" }) },
 ];
 
 const eliKey = (p) => "eli:/fr/" + [p.code, p.annee, p.numero, p.entite].filter(Boolean).join("/");
@@ -888,8 +1470,12 @@ function route(req, conn) {
     if (!m) continue;
     cheminTrouve = true;
     if (r.m !== method) continue;
-    if (r.auth === "jeton") {
-      const bad = authFail(headers);
+    // `auth` nomme le rôle MINIMAL exigé ("lecteur"…"administrateur") ; `role`
+    // permet une liste exacte (le prestataire de signature). Les routes de
+    // collection n'ont pas de règle ici : leur sensibilité dépend du nom de la
+    // collection, et le gestionnaire l'applique (voir DBC_LECTURE/ECRITURE).
+    if (r.auth || r.role) {
+      const bad = authFail(headers, r.role || (r.auth ? { min: r.auth } : null));
       if (bad) return bad;
     }
     if (r.ecrit && !allowWrite(conn)) {
@@ -919,7 +1505,17 @@ self.rpc = {
     }
     return JSON.stringify({
       status: res.status,
-      headers: { "content-type": "application/json; charset=utf-8", "x-service": SERVICE, ...(res.headers || {}) },
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-service": SERVICE,
+        // Durcissement HTTP : le corps d'une réponse d'API ne doit jamais être
+        // interprété comme un autre type, ni mis en cache (il peut refléter un
+        // état qui vient de changer), ni transmettre l'URL appelante.
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        ...(res.headers || {}),
+      },
       body: res.body,
     });
   },

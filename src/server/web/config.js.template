@@ -1,7 +1,16 @@
 // Produit au démarrage du conteneur (voir web/entrypoint.sh) à partir des
-// variables d'environnement API_BASE et API_TOKEN. Ce fichier n'est jamais
-// versionné : le jeton ne doit pas entrer dans le dépôt.
+// variables d'environnement API_BASE, API_TOKEN, AUTH_MODE et DEMO_ACCOUNTS.
+// Ce fichier n'est jamais versionné : le jeton ne doit pas entrer dans le dépôt.
+//
+// `authMode` / `demoAccounts` disent au navigateur sous quel régime le service
+// tourne, AVANT même qu'il ne l'interroge : en mode « password », l'application
+// n'affiche pas la liste des comptes du référentiel (elle n'a pas le droit de le
+// lire), et c'est le service qui vérifie le mot de passe. Le mode annoncé ici
+// est un simple présage : `GET /v1/auth/config`, lui, fait autorité (voir
+// src/lib/auth.js, `setDeploiementAuth`).
 window.__SCRIBA_CONFIG__ = {
   apiBase: "${API_BASE}",
   apiToken: "${API_TOKEN}",
+  authMode: "${AUTH_MODE}",
+  demoAccounts: "${DEMO_ACCOUNTS}",
 };

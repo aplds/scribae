@@ -2,6 +2,7 @@ import { uid } from "./util.js";
 import { emptyAuth } from "./auth.js";
 import { EXTERNE_DEFAUT } from "./numbering.js";
 import { ABROGATION_DEFAUT } from "./abrogations.js";
+import { mentionsParDefaut } from "./recueil.js";
 
 export const NODE_TYPES = [
   { id: "title", label: "Intitulé", hint: "Titre de l'acte", akn: "heading", single: true, icon: "t" },
@@ -9,6 +10,7 @@ export const NODE_TYPES = [
   { id: "visas", label: "Visas", hint: "Liste des « Vu »", icon: "v" },
   { id: "considerants", label: "Considérants", hint: "Motivation de l'acte", icon: "c" },
   { id: "enact", label: "Formule d'édiction", hint: "DÉCIDE / ARRÊTE", icon: "e" },
+  { id: "division", label: "Division", hint: "Livre, titre, chapitre, section…", icon: "list" },
   { id: "article", label: "Article", hint: "Article du dispositif", icon: "a" },
   { id: "para", label: "Paragraphe", hint: "Texte libre", icon: "p" },
   { id: "list", label: "Liste", hint: "Énumération", icon: "l" },
@@ -19,6 +21,220 @@ export const NODE_TYPES = [
 ];
 
 export const NODE_MAP = Object.fromEntries(NODE_TYPES.map((n) => [n.id, n]));
+
+// ---------------------------------------------------------------------------
+// Hiérarchie du document : l'échelle des divisions.
+//
+// Un texte long ne se compose pas seulement d'articles : il se range en
+// LIVRES, TITRES, CHAPITRES, SECTIONS… — parfois en « Parties », en « Chapitres
+// liminaires », en « Sections » numérotées 1°, en articles sans division du
+// tout. Le vocabulaire et le nombre d'échelons appartiennent donc à la TRAME,
+// non au logiciel : `trame.divisions` est l'échelle, une entrée par échelon
+// (`level` croissant : 1 = le plus haut), avec le mot qui s'imprime et la façon
+// de numéroter. Une trame sans échelle reçoit celle-ci, qui est l'usage le plus
+// courant ; il suffit d'un échelon pour un texte qui ne connaît que des titres.
+//
+// Un bloc de type `division` porte son échelon (`level`) et son intitulé
+// (`heading`) : la hiérarchie est donc PRÉ-INTÉGRÉE à la trame, et la
+// numérotation se déduit de la place de chaque échelon dans l'échelle.
+// ---------------------------------------------------------------------------
+export const NIVEAUX_DEFAUT = [
+  { level: 1, label: "Livre", num: "roman" },
+  { level: 2, label: "Titre", num: "roman" },
+  { level: 3, label: "Chapitre", num: "decimal" },
+  { level: 4, label: "Section", num: "decimal" },
+];
+
+export const NUM_STYLES = [
+  { id: "roman", label: "Chiffres romains (Ier, II, III)" },
+  { id: "decimal", label: "Chiffres arabes (1, 2, 3)" },
+  { id: "letter", label: "Lettres (A, B, C)" },
+  { id: "aucun", label: "Sans numéro" },
+];
+
+// Nature du document qu'une trame produit. Un « acte » est le cas ordinaire :
+// une décision qui vit par elle-même. Une « annexe » est un document ADOPTÉ par
+// un autre — un règlement intérieur adopté par une délibération, un tableau
+// tarifaire adopté par une décision : l'annexe ne se signe ni ne se publie pour
+// elle-même, c'est l'acte qui l'adopte qui est signé, et son original est suivi
+// du texte de l'annexe (voir src/lib/annexes.js et src/lib/annexe-docs.js).
+export const ACTE_NATURES = [
+  { id: "acte", label: "Acte", hint: "Une décision qui vit par elle-même." },
+  { id: "annexe", label: "Annexe", hint: "Un document adopté par un autre : il ne se signe pas, et son texte suit l'acte qui l'adopte." },
+];
+
+// ---------------------------------------------------------------------------
+// Paramètres propres aux blocs de texte.
+//
+// Un paragraphe, une liste, un tableau, des considérants ne se ressemblent pas :
+// chacun porte ses propres réglages, réglables bloc par bloc dans l'éditeur de
+// trame (onglet « Ce bloc »). Ces réglages sont TOUS facultatifs : une valeur
+// absente vaut le défaut — et pour la liste comme pour le tableau, un défaut
+// VIDE signifie « comme la feuille de style », ce qui laisse la charte de la
+// collectivité décider pour les blocs qui ne demandent rien de particulier.
+//
+//   para  : alignement, alinéa (retrait de première ligne), encadré ;
+//   list  : marqueur des listes à puces, numérotation des listes numérotées,
+//           numéro de départ ;
+//   table : position de la légende, ligne d'en-tête, disposition, alignement ;
+//   considérants : formule placée devant chaque considérant, ponctuation
+//           finale, ou tout d'un seul alinéa.
+//
+// Ces valeurs sont honorées par le rendu (`lib/render.js`), par la compilation
+// (`lib/compile.js`), par les exports (Markdown, Akoma Ntoso, HTML autonome,
+// Word) et par les deux écrans d'édition (trame et rédaction).
+// ---------------------------------------------------------------------------
+export const BLOC_DEFAUT = {
+  para: { align: "", indent: "", boxed: false },
+  list: { ordered: false, marker: "", numbering: "", start: 1 },
+  table: { captionPos: "top", head: true, layout: "", align: "" },
+  considerants: { formule: "", fin: "", inline: false },
+};
+
+// Les vocabulaires ci-dessus sont indexés par `id` : c'est l'identifiant qui vit
+// dans les données. Les champs de formulaire, eux, attendent `{ value, label }`
+// (voir `selectField` / `choiceField`). Cette fonction fait la passerelle, pour
+// qu'un vocabulaire ne soit pas recopié en double à chaque écran.
+export const choixDe = (liste) => liste.map(({ id, label }) => ({ value: id, label }));
+
+export const PARA_ALIGNS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "justify", label: "Justifié" },
+  { id: "left", label: "Fer à gauche" },
+  { id: "center", label: "Centré" },
+  { id: "right", label: "Fer à droite" },
+];
+
+// Le retrait d'un paragraphe : aucun, l'alinéa classique (première ligne), ou
+// le bloc entier en retrait — la mise en exergue d'une citation, par exemple.
+export const PARA_INDENTS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "none", label: "Aucun retrait" },
+  { id: "first", label: "Alinéa (première ligne)" },
+  { id: "all", label: "Paragraphe entier en retrait" },
+];
+
+// La marque d'une liste à puces. `""` = le marqueur de la feuille de style.
+export const LIST_MARKERS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "disc", label: "• Puce ronde" },
+  { id: "circle", label: "◦ Puce creuse" },
+  { id: "square", label: "▪ Puce carrée" },
+  { id: "dash", label: "– Tiret" },
+  { id: "none", label: "Aucun marqueur" },
+];
+
+// La numérotation d'une liste numérotée. `""` = celle de la feuille de style.
+export const LIST_NUMBERINGS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "decimal", label: "1. 2. 3." },
+  { id: "degree", label: "1° 2° 3°" },
+  { id: "parenth", label: "1) 2) 3)" },
+  { id: "lalpha", label: "a) b) c)" },
+  { id: "ualpha", label: "A) B) C)" },
+  { id: "lroman", label: "i. ii. iii." },
+  { id: "uroman", label: "I. II. III." },
+  { id: "none", label: "Aucune numérotation" },
+];
+
+// La disposition d'un tableau. `""` = celle de la feuille de style.
+export const TABLE_LAYOUTS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "grid", label: "Quadrillage complet" },
+  { id: "rows", label: "Lignes horizontales seules" },
+  { id: "zebra", label: "Lignes alternées" },
+];
+
+export const TABLE_ALIGNS = [
+  { id: "", label: "Comme la feuille de style" },
+  { id: "left", label: "Fer à gauche" },
+  { id: "center", label: "Centré" },
+  { id: "right", label: "Fer à droite" },
+];
+
+export const TABLE_CAPTION_POS = [
+  { id: "top", label: "Au-dessus du tableau" },
+  { id: "bottom", label: "Au-dessous du tableau" },
+];
+
+export const RECITAL_FINS = [
+  { id: "", label: "Aucune (le texte porte sa ponctuation)" },
+  { id: ";", label: "Point-virgule « ; »" },
+  { id: ".", label: "Point « . »" },
+  { id: ",", label: "Virgule « , »" },
+];
+
+// Les réglages effectifs d'un bloc : ses valeurs, complétées par les défauts.
+// Un bloc hérité d'une version antérieure — qui ne connaît pas ces clés — se
+// comporte donc exactement comme avant, jusqu'à ce qu'on lui règle quelque
+// chose. C'est le point d'entrée unique de tous les rendus.
+export function paramsBloc(node) {
+  const defauts = BLOC_DEFAUT[node?.type];
+  if (!defauts) return {};
+  const out = { ...defauts };
+  for (const k of Object.keys(defauts)) {
+    const v = node[k];
+    if (v !== undefined && v !== null) out[k] = v;
+  }
+  return out;
+}
+
+// La formule d'un considérant n'est pas répétée quand le texte la porte déjà :
+// un considérant écrit « Considérant que la commune… » garde son texte intact
+// quand le bloc est réglé sur la formule « Considérant que ». Cela permet de
+// régler la formule sur un bloc EXISTANT sans réécrire ses considérants.
+// L'élision compte pour la même formule : « Considérant qu'il… » ne reçoit pas
+// un « Considérant que » de plus, pas plus que « Considérant, » n'en reçoit un.
+const sansAccent = (s) => String(s).toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+export function appliquerFormule(formule, texte) {
+  const f = String(formule || "").trim();
+  const t = String(texte || "");
+  if (!f) return t;
+  const df = sansAccent(t.trimStart());
+  const nf = sansAccent(f);
+  if (df === nf || df.startsWith(nf + " ") || df.startsWith(nf + ",") || df.startsWith(nf + "'") || df.startsWith(nf + "\u2019")) return t;
+  // Formule élidée : « Considérant que » s'écrit « Considérant qu' » devant une
+  // voyelle (« qu'il », « qu'une »). Le texte porte alors déjà la formule.
+  if (nf.endsWith("e") && (df.startsWith(nf.slice(0, -1) + "'") || df.startsWith(nf.slice(0, -1) + "\u2019"))) return t;
+  return f + " " + t;
+}
+export const natureDe = (trame) => ((trame && trame.nature === "annexe") ? "annexe" : "acte");
+
+// L'échelle d'une trame : la sienne, ou celle livrée avec l'application. Une
+// échelle vide n'est pas « aucune division » — c'est l'échelle ordinaire.
+export const ladderOf = (trame) => {
+  const l = (trame && trame.divisions) || [];
+  return l.length ? l.slice().sort((a, b) => a.level - b.level) : NIVEAUX_DEFAUT;
+};
+
+// L'échelon d'un bloc de division (le mot imprimé et le style de numéro).
+export const niveauDe = (trame, level) =>
+  ladderOf(trame).find((n) => Number(n.level) === Number(level)) || { level: Number(level) || 1, label: "Division", num: "decimal" };
+
+const ROMAIN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+export function chiffresRomains(n) {
+  let v = Math.max(1, Math.floor(Number(n) || 1));
+  let out = "";
+  for (const [k, s] of ROMAIN) while (v >= k) { out += s; v -= k; }
+  return out;
+}
+
+const lettres = (n) => {
+  let v = Math.max(1, Math.floor(Number(n) || 1));
+  let out = "";
+  while (v > 0) { const r = (v - 1) % 26; out = String.fromCharCode(65 + r) + out; v = Math.floor((v - 1) / 26); }
+  return out;
+};
+
+// Le numéro d'un échelon : « Ier » / « II », « 1 » / « 2 », « A » / « B » — ou
+// rien du tout (« Section sans numéro »). L'ordinal du premier rang suit
+// l'usage français des textes (`Livre Ier`, `Titre Ier`).
+export function numeroNiveau(n, style) {
+  if (style === "aucun") return "";
+  if (style === "roman") return Number(n) === 1 ? "Ier" : chiffresRomains(n);
+  if (style === "letter") return lettres(n);
+  return String(n);
+}
 
 export const FIELD_TYPES = [
   { id: "text", label: "Texte court" },
@@ -56,21 +272,50 @@ export function newNode(type, patch = {}) {
     case "title": d("text", "Décision n°{{numero}} du {{dateSignature|date-long}} portant …"); break;
     case "authority": d("text", "{{signataire.fonction}}"); break;
     case "visas": d("items", [{ id: uid("it"), refId: "", text: "", when: "" }]); break;
-    case "considerants": d("items", [{ id: uid("it"), text: "Considérant que …", when: "" }]); break;
+    case "considerants":
+      // La formule se règle sur le BLOC, non dans chaque considérant : un
+      // considérant neuf n'écrit donc que sa substance. La formule n'est pas
+      // répétée si un texte la porte déjà (`appliquerFormule`).
+      d("formule", "Considérant que");
+      d("fin", "");
+      d("inline", false);
+      d("items", [{ id: uid("it"), text: "", when: "" }]);
+      break;
     case "enact": d("text", "DÉCIDE"); break;
+    case "division":
+      // L'échelon (1 = le plus haut), son intitulé, et le contenu : une
+      // division peut contenir des articles comme d'autres divisions.
+      d("level", 1);
+      d("numMode", "auto");
+      d("num", "");
+      d("heading", "");
+      d("blocks", []);
+      break;
     case "article":
       d("numMode", "auto");
       d("num", "1er");
       d("heading", "");
       d("blocks", [newNode("para")]);
       break;
-    case "para": d("text", ""); break;
+    case "para":
+      d("align", "");
+      d("indent", "");
+      d("boxed", false);
+      d("text", "");
+      break;
     case "list":
       d("ordered", false);
+      d("marker", "");
+      d("numbering", "");
+      d("start", 1);
       d("items", [{ id: uid("it"), text: "", when: "" }]);
       break;
     case "table":
       d("caption", "");
+      d("captionPos", "top");
+      d("head", true);
+      d("layout", "");
+      d("align", "");
       d("columns", ["Colonne 1", "Colonne 2"]);
       d("rows", [["", ""]]);
       break;
@@ -125,7 +370,7 @@ export function newRule(patch = {}) {
 }
 
 export function newNote(patch = {}) {
-  return { id: uid("c"), kind: "instruction", author: "", date: "", text: "", ruleId: "", ...patch };
+  return { id: uid("c"), kind: "instruction", author: "", date: "", text: "", quote: "", ruleId: "", ...patch };
 }
 
 export function newTrame(patch = {}) {
@@ -163,6 +408,35 @@ export function newTrame(patch = {}) {
     entityIds: [],
     serviceId: "",
     bureauId: "",
+    // L'échelle des divisions de la trame : la hiérarchie du document est une
+    // DONNÉE de la trame (mots et numérotation libres), non du logiciel. Vide,
+    // l'application emploie l'échelle livrée (`NIVEAUX_DEFAUT`). Voir `ladderOf`.
+    divisions: [],
+    // Nature du document produit : un « acte » (le cas ordinaire), ou une
+    // « annexe » — un document adopté PAR un autre, annexé à celui-ci.
+    nature: "acte",
+    // ACTE D'ASSEMBLÉE : l'acte émane d'une assemblée délibérante (conseil
+    // municipal, conseil d'administration…) et non d'une personne. Sa ligne
+    // d'autorité est celle de l'assemblée (« Le conseil municipal de … »),
+    // tandis que l'acte est signé par le président de cette assemblée — le
+    // maire, ou le président du conseil d'administration. L'assemblée se règle
+    // dans Administration › Assemblées ; le jeton `{{autorite}}` la rend dans le
+    // texte. Voir src/lib/conseils.js.
+    assemblee: false,
+    // Un RÈGLEMENT est une annexe d'un genre particulier : un texte NORMATIF,
+    // que le recueil publie AUSSI pour lui-même, à titre informatif — comme un
+    // code, qui se consulte article par article et se met à jour par les actes
+    // qui l'adoptent ou le modifient. Le drapeau n'a de sens que sur une annexe
+    // (`nature: "annexe"`) ; il commande la publication informative autonome
+    // (voir src/lib/annexes.js, `estReglement`, et SPEC § 2.2.4 ter).
+    reglement: false,
+    // Circuit de signature de la trame (fonction « signature externe ») :
+    //   ""                  suit le réglage général (Administration › Signature) ;
+    //   "externe_impose"    le circuit externe est OBLIGATOIRE pour cette trame ;
+    //   "externe_autorise"  le circuit externe est possible, au choix du rédacteur ;
+    //   "electronique"      le circuit électronique est imposé.
+    // Voir src/lib/externe.js.
+    signature: "",
     fields: [],
     rules: [],
     body: [
@@ -262,6 +536,11 @@ export const emptyConfig = () => ({
     externe: { ...EXTERNE_DEFAUT },
   },
   entities: [],
+  // Assemblées délibérantes (conseils). Un acte d'assemblée — une
+  // délibération — émane d'un conseil : sa ligne d'autorité est celle de
+  // l'assemblée, et il est signé par le président de cette assemblée (le maire,
+  // ou le président du conseil d'administration). Voir src/lib/conseils.js.
+  councils: [],
   services: [],
   people: [],
   roles: [],
@@ -288,7 +567,29 @@ export const emptyConfig = () => ({
     recueil: "Recueil des actes administratifs",
     auto: true,
     opposabilite: { mode: "lendemain", jours: 1 },
+    // Renvois du recueil public vers d'AUTRES recueils que celui-ci (voir
+    // src/lib/recueil.js, `recueilsExternes`) : un ou plusieurs recueils « bis »
+    // tenus hors de l'application, un ou plusieurs recueils inactifs — avec la
+    // période qu'ils couvrent —, et les sites de référence (Légifrance,
+    // service-public.gouv.fr). Ces renvois s'affichent en bas de page de l'espace
+    // public et à la fin des résultats de recherche. L'administration les écrit,
+    // les ordonne et les retire sans toucher au code.
+    recueilsExternes: [],
+    // Mentions du pied de page de l'espace public (voir src/lib/recueil.js,
+    // `mentionsPubliques`) : les **mentions légales** — qui rappellent les règles
+    // de publication, d'exécution et d'opposabilité des actes administratifs — et
+    // les **mentions d'accessibilité**. Chacune s'affiche comme un texte, se
+    // remplace par un simple lien (les mentions du site principal de la
+    // collectivité, par exemple), ou se désactive : l'administration en décide.
+    mentions: mentionsParDefaut(),
   },
+  // Circuit de signature de la collectivité. `mode` : « electronique » (défaut —
+  // le prestataire, par API), ou « externe » (le document est téléchargé, signé
+  // hors de l'application, puis déposé en PDF ; le réviseur certifie la
+  // conformité avant publication). Une trame peut trancher autrement — imposer
+  // ou autoriser le circuit externe — par son réglage `signature`. Voir
+  // src/lib/externe.js et Administration › Signature.
+  signature: { mode: "electronique" },
   // Mode d'authentification : comptes de l'application (démonstration) ou
   // annuaire de la collectivité (OIDC). Brancher l'annuaire désactive
   // automatiquement les comptes de démonstration. Voir src/lib/auth.js.
@@ -334,6 +635,13 @@ export const emptyConfig = () => ({
 // héritée (créée avant l'introduction du réglage) n'a pas la propriété : elle est
 // donc considérée comme publiable — c'est le comportement historique.
 export const tramePublishable = (trame) => !!trame && trame.publishable !== false;
+
+// Une trame n'est proposée aux services rédacteurs que lorsqu'un éditeur l'a
+// MISE À DISPOSITION (« publiée ») : tant qu'elle est en brouillon, elle reste
+// l'affaire de l'atelier — on la prépare, on la corrige, on la discute, sans
+// qu'un service puisse rédiger à partir d'un modèle inachevé. Le statut porte
+// les trois états du cycle de vie : brouillon, mise à disposition, archivée.
+export const trameDisponible = (trame) => !!trame && trame.status === "published";
 
 export const validateTrameShape = (trame) => {
   const issues = [];

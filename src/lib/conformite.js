@@ -23,6 +23,7 @@
 // Ce module est pur : il ne connaît ni le DOM ni l'état de l'application.
 // ============================================================================
 import { interpolate } from "./compile.js";
+import { articlesOf } from "./amend.js";
 import { formatDate } from "./util.js";
 
 export const NIVEAUX = {
@@ -57,6 +58,11 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
   const vals = a.values || {};
   const meta = doc?.meta || {};
   const nodes = doc?.nodes || [];
+  // Une ANNEXE n'est pas un acte signé : elle est adoptée par un autre, et c'est
+  // cet acte qui est signé — son texte suit l'acte d'adoption dans l'original
+  // signé (voir src/lib/annexe-docs.js). Les contrôles de signature sont donc
+  // sans objet pour elle, et le rapport ne les réclame pas.
+  const estAnnexe = meta.nature === "annexe";
   const parId = {};
   const groupes = GROUPES.map((g) => (parId[g.id] = { ...g, checks: [] }));
   const check = (groupe, id, niveau, label, detail = "") =>
@@ -77,9 +83,15 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
     objet || "L'objet de l'acte doit être renseigné : il est repris dans les métadonnées de la publication.");
 
   const dateSignature = vals.dateSignature || meta.dateSignature || "";
-  check("identite", "date-signature", dateSignature ? "ok" : "erreur",
-    dateSignature ? "Date de signature renseignée" : "Date de signature manquante",
-    dateSignature ? formatDate(dateSignature, "date-long") : "Le document porte la date de signature au bas de l'acte.");
+  if (estAnnexe) {
+    check("identite", "date-signature", dateSignature ? "ok" : "erreur",
+      dateSignature ? "Date d'adoption renseignée" : "Date d'adoption manquante",
+      dateSignature ? formatDate(dateSignature, "date-long") : "L'annexe porte la date de l'acte qui l'adopte : elle figure sur son identité au registre et dans son intitulé.");
+  } else {
+    check("identite", "date-signature", dateSignature ? "ok" : "erreur",
+      dateSignature ? "Date de signature renseignée" : "Date de signature manquante",
+      dateSignature ? formatDate(dateSignature, "date-long") : "Le document porte la date de signature au bas de l'acte.");
+  }
 
   const dateEffet = vals.dateEffet || "";
   if (dateEffet && dateSignature && dateEffet < dateSignature) {
@@ -98,11 +110,16 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
     entite ? entite.name : "Le document ne se rattache à aucune entité du référentiel : la formule d'autorité et la valeur juridique de l'acte en dépendent.");
 
   const signataire = meta.signataire;
-  check("identite", "signataire", signataire ? "ok" : "erreur",
-    signataire ? "Signataire identifié" : "Aucun signataire identifié",
-    signataire
-      ? [[signataire.civility, signataire.firstName, signataire.lastName].filter(Boolean).join(" "), signataire.delegue ? "par délégation" : ""].filter(Boolean).join(" · ")
-      : "Un acte sans signataire identifié ne peut pas être signé : il faut renseigner l'autorité.");
+  if (estAnnexe) {
+    check("identite", "signataire", "info", "Annexe — pas de signataire propre",
+      "Une annexe ne se signe pas : c'est l'acte qui l'adopte qui est signé, et sa signature lui donne son autorité. Le texte de l'annexe suit cet acte dans l'original signé.");
+  } else {
+    check("identite", "signataire", signataire ? "ok" : "erreur",
+      signataire ? "Signataire identifié" : "Aucun signataire identifié",
+      signataire
+        ? [[signataire.civility, signataire.firstName, signataire.lastName].filter(Boolean).join(" "), signataire.delegue ? "par délégation" : ""].filter(Boolean).join(" · ")
+        : "Un acte sans signataire identifié ne peut pas être signé : il faut renseigner l'autorité.");
+  }
 
   // Une délégation de la chaîne dont une décision manque n'établit pas
   // solidement le pouvoir de signer : les deux décisions — la nomination et la
@@ -118,8 +135,26 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
         + ". Une délégation de signature s'établit par ses deux décisions : complétez la fiche du délégataire dans l'écran Délégations.");
   }
 
-  const typeActe = (config.actTypes || []).find((t) => t.id === meta.actTypeId);
-  check("identite", "type", typeActe ? "ok" : "attention",
+  // Un ACTE D'ASSEMBLÉE (délibération) émane d'un conseil : sa ligne d'autorité
+  // est celle de l'assemblée, et l'acte est signé par le président de celle-ci.
+  // On le constate, et l'on vérifie que le signataire — ou un délégataire de sa
+  // chaîne — tient bien la qualité que l'assemblée appelle (le maire, le
+  // président du conseil d'administration…). Voir src/lib/conseils.js.
+  const conseil = meta.conseil;
+  if (conseil && !estAnnexe) {
+    check("identite", "assemblee", "ok", `Acte d'assemblée — ${conseil.name || "assemblée"}`,
+      `La ligne d'autorité est celle de l'assemblée : « ${conseil.authorityFormula || ""} ».`);
+    if (conseil.signerRoleId) {
+      const ids = [signataire?.id, ...((signataire?.chaine || []).map((c) => c.id))].filter(Boolean);
+      const porte = ids.some((id) => ((config.people || []).find((p) => p.id === id)?.roles || []).includes(conseil.signerRoleId));
+      const role = (config.roles || []).find((r) => r.id === conseil.signerRoleId);
+      check("identite", "assemblee-signataire", porte ? "ok" : "attention",
+        porte ? `Signataire compétent pour l'assemblée — ${role?.label || conseil.signerRoleId}` : "Le signataire ne porte pas la qualité appelée par l'assemblée",
+        porte ? "" : `L'assemblée « ${conseil.name || ""} » fait signer sous la qualité « ${role?.label || conseil.signerRoleId} » : vérifiez que le signataire — ou un délégataire de sa chaîne — tient bien ce rôle (Administration › Personnes).`);
+    }
+  }
+
+  const typeActe = (config.actTypes || []).find((t) => t.id === meta.actTypeId);  check("identite", "type", typeActe ? "ok" : "attention",
     typeActe ? "Type d'acte reconnu — " + typeActe.label : "Type d'acte inconnu du référentiel",
     typeActe ? "" : `Le type « ${meta.actTypeId || "—"} » n'est pas dans le référentiel : la nature de l'acte et sa référence ELI peuvent être inexactes.`);
 
@@ -154,7 +189,9 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
       texteDe(enact) ? `Formule d'édiction — « ${texteDe(enact)} »` : "Formule d'édiction manquante");
   }
 
-  const articles = nodes.filter((n) => n.type === "article");
+  // Les articles du dispositif, divisions comprises : un règlement rangé en
+  // Titres et Chapitres a bien un dispositif, et il compte.
+  const articles = articlesOf(doc);
   check("structure", "dispositif", articles.length ? "ok" : "erreur",
     articles.length ? `Dispositif composé de ${articles.length} article(s)` : "Aucun article au dispositif",
     articles.length ? articles.map((x) => x.numLabel).filter(Boolean).join(" · ") : "Un acte sans dispositif ne décide rien.");
@@ -168,9 +205,14 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
   }
 
   const blocSignature = noeud("signature");
-  check("structure", "signature", blocSignature ? "ok" : "erreur",
-    blocSignature ? "Bloc de signature" : "Bloc de signature manquant",
-    blocSignature ? [blocSignature.place, blocSignature.date].filter(Boolean).join(" · ") : "Le document doit porter le lieu, la date et le signataire.");
+  if (estAnnexe) {
+    check("structure", "signature", "info", "Annexe — pas de bloc de signature",
+      "L'annexe ne porte pas de signature : elle tient son autorité de l'acte qui l'adopte, dont l'original est suivi de son texte.");
+  } else {
+    check("structure", "signature", blocSignature ? "ok" : "erreur",
+      blocSignature ? "Bloc de signature" : "Bloc de signature manquant",
+      blocSignature ? [blocSignature.place, blocSignature.date].filter(Boolean).join(" · ") : "Le document doit porter le lieu, la date et le signataire.");
+  }
 
   // ------------------------------------------------------ visas et références
   const visas = noeud("visas");
@@ -230,7 +272,7 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
     if (n.kind !== "legal" && n.kind !== "question") continue;
     check("redaction", "note-" + n.id, n.kind === "legal" ? "attention" : "info",
       (n.kind === "legal" ? "Contrainte juridique de la trame" : "Point à arbitrer signalé par la trame") + (n.author ? ` (${n.author})` : ""),
-      n.text || "");
+      (n.quote ? "« " + n.quote + " » — " : "") + (n.text || ""));
   }
   const nbVersions = (a.revisions || []).length;
   if (nbVersions) check("redaction", "versions", "info", `${nbVersions} version(s) de travail dans l'historique de l'acte`);

@@ -68,7 +68,7 @@ function construire(qui) {
     class: "fr-btn fr-btn--tertiary fr-btn--sm", type: "button", hidden: true, text: "Arrêter",
     on: { click: () => { s.arret?.abort(); } },
   });
-  const avertissement = h("div", { class: "fr-alert fr-alert--warning assist__avertissement", hidden: true });
+  const avertissement = h("div", { class: "fr-alert assist__avertissement", hidden: true });
   const saisie = h("form", {
     class: "assist__saisie",
     on: { submit: (e) => { e.preventDefault(); envoyer(); } },
@@ -177,16 +177,25 @@ function construire(qui) {
     }
   }
 
-  // Le moteur manque, ou l'assistant est éteint : on le dit, plutôt que de
-  // laisser une zone de saisie qui ne répondrait jamais.
+  // Pas de moteur ? On le dit, plutôt que de laisser une zone de saisie qui ne
+  // répondrait jamais. Deux cas, et ils ne se ressemblent pas :
+  //   • « aucun » — la configuration réclame un moteur qui n'est pas là (une
+  //     adresse vide, le moteur intégré hors de Perchance) : c'est à réparer,
+  //     donc alerte, et la saisie disparaît ;
+  //   • « repli » — il n'y a pas de moteur, et il n'y en aura pas sans qu'on en
+  //     branche un : l'assistant répond par recherche documentaire (voir
+  //     src/lib/assistant.js). Ce n'est pas une panne, c'est un mode de
+  //     fonctionnement : note d'information, et la saisie reste ouverte.
   function peindreDisponibilite() {
     const moteur = moteurDe(state.config, qui);
     const indisponible = moteur.type === "aucun";
-    avertissement.hidden = !indisponible;
+    const repli = moteur.type === "repli";
+    avertissement.hidden = !(indisponible || repli);
     saisie.hidden = indisponible;
-    if (!indisponible) return;
+    if (!indisponible && !repli) return;
+    avertissement.className = "fr-alert assist__avertissement " + (indisponible ? "fr-alert--warning" : "fr-alert--info");
     clear(avertissement);
-    avertissement.appendChild(h("p", { class: "fr-alert__title", text: "L'assistant n'a pas de moteur" }));
+    avertissement.appendChild(h("p", { class: "fr-alert__title", text: indisponible ? "L'assistant n'a pas de moteur" : "Réponses sans moteur de langage" }));
     avertissement.appendChild(h("p", { class: "fr-small", text: moteur.raison }));
     if (state.user && !estVisiteur(state.user)) {
       avertissement.appendChild(h("p", {},

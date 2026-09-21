@@ -1,10 +1,11 @@
 // ============================================================================
 // Documentation technique — lire les documents du dépôt depuis l'application.
 //
-// `src/docs/ADMINISTRATION.md`, `src/server/README.md`, `SPEC.md`… décrivent
-// l'exploitation, la sécurité, les sauvegardes, l'auto-hébergement. Ils vivent
-// dans les fichiers du logiciel : cet écran les rend consultables là où on les
-// cherche — dans l'application — sans dépôt ni éditeur de texte.
+// `src/docs/ADMINISTRATION.md`, `src/server/README.md`, `SPEC.md`, `LICENSE.md`…
+// décrivent l'exploitation, la sécurité, les sauvegardes, l'auto-hébergement, la
+// licence. Ils vivent dans les fichiers du logiciel : cet écran les rend
+// consultables là où on les cherche — dans l'application — sans dépôt ni
+// éditeur de texte.
 //
 // Les fichiers sont lus à la demande (jamais embarqués dans le code) puis mis
 // en cache pour la session ; ils sont affichés bruts et téléchargeables tels
@@ -42,6 +43,11 @@ const DOCUMENTS = [
     desc: "Le schéma de la base, les routes du service, l'édition du conteneur.",
   },
   {
+    id: "industrialisation", group: "Exploitation",
+    path: "src/docs/INDUSTRIALISATION.md", title: "Vérifier, tester, livrer",
+    desc: "Les commandes de vérification, ce qui est testé sans navigateur, la CI, et ce qui reste à mettre en place.",
+  },
+  {
     id: "spec", group: "Conception",
     path: "src/SPEC.md", title: "Spécification fonctionnelle",
     desc: "Ce que fait le logiciel, écran par écran, et ce qui n'y est pas.",
@@ -55,6 +61,11 @@ const DOCUMENTS = [
     id: "todo", group: "Conception",
     path: "src/TODO.md", title: "Chantiers ouverts",
     desc: "Ce qui reste à faire, par ordre d'importance, et pourquoi.",
+  },
+  {
+    id: "licence", group: "Conception",
+    path: "src/LICENSE.md", title: "Licence",
+    desc: "Le régime du logiciel, les conditions de réutilisation des actes publiés, et le statut du code produit par l'IA.",
   },
 ];
 

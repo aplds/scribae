@@ -67,6 +67,8 @@ const ICONS = {
   grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   refresh: "M20 12a8 8 0 11-3-6M20 4v5h-5",
   palette: "M12 3a9 9 0 000 18h1.5a2 2 0 001.5-3.3 2 2 0 011.5-3.2H18a3 3 0 003-3A9 9 0 0012 3zM7.5 11.5h.01M10 7.5h.01M15 8h.01",
+  // Crayon : modifier un commentaire (voir ui/annotations.js).
+  edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   sun: "M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9zM12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7",
   search: "M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4",
   left: "M15 5l-7 7 7 7",
@@ -78,6 +80,13 @@ const ICONS = {
   moon: "M20.5 14.6A8.5 8.5 0 019.4 3.5a7.6 7.6 0 1011.1 11.1z",
   // Bulle de conversation : les assistants (Plume et Publia) et leur réglage.
   bulle: "M4 4h16v11H10l-6 5V4z",
+  // Punaise : épingler un acte au recueil public (voir views/actes.js).
+  pin: "M8 3h8v2l-2 5h-4L8 5zM12 10v10",
+  // Partager : une flèche qui sort d'un plateau. C'est « mettre à disposition »
+  // une trame — la faire passer de l'atelier aux services (voir views/trames.js).
+  partage: "M4 12v7h16v-7M12 3v11M8 6l4-4 4 4",
+  // Enveloppe : les notifications par courriel (voir src/lib/courriel.js).
+  mail: "M3 6h18v12H3zM3 7.5l9 6 9-6",
 };
 
 export function icon(name, size = 16) {

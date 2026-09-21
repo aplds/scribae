@@ -125,7 +125,15 @@ async function verifyWith(cert, text, valueB64) {
 // Un « original signé » : le document (Akoma Ntoso, source de vérité) figé à la
 // signature, ses signatures, son horodatage, et la page consultable qui
 // présente la signature au même niveau que le texte.
-export async function buildSignedPackage({ akn, pageHtml, pageCss, numero, objet, signataire, prestataire, brand, signeLe }) {
+//
+// `interne` est le DOSSIER DE SIGNATURE — la part de l'original qui ne se
+// diffuse pas. Il porte ce qui identifie le signataire au sens des données
+// personnelles (son adresse, son compte, la façon dont il s'est authentifié)
+// et les courriels de notification qui ont été envoyés. L'original signé est
+// donc scindé en deux : sa PARTIE PUBLIQUE (le paquet sans `interne`, et sans
+// les coordonnées du signataire), qui part au recueil, et sa part interne, qui
+// reste au registre et ne se lit qu'avec une session (voir `partiePublique`).
+export async function buildSignedPackage({ akn, pageHtml, pageCss, numero, objet, signataire, prestataire, brand, signeLe, interne = null }) {
   const empreinte = await sha256Hex(akn);
   const auth = await certificate("signataire", { brand, subject: signataire.nom, org: signataire.entite });
   const signedAt = signeLe || new Date().toISOString();
@@ -159,8 +167,43 @@ export async function buildSignedPackage({ akn, pageHtml, pageCss, numero, objet
     horodatage,
     prestataire: prestataire ? { id: prestataire.id, nom: prestataire.nom, niveau: prestataire.niveau } : null,
   };
+  // Le dossier interne, quand il est fourni : c'est la part non diffusable de
+  // l'original (coordonnées du signataire, compte, authentification, courriels
+  // de notification). Il n'apparaît JAMAIS dans la page publique — voir
+  // `partiePublique`.
+  if (interne) pack.interne = { format: "application/vnd.actes.dossier-signature+json", version: 1, ...interne };
   pack.pageHtml = originalPageHtml(pack, pageHtml, brand, pageCss);
   return pack;
+}
+
+// La PARTIE PUBLIQUE d'un original signé : le paquet débarrassé de son dossier
+// interne, et de tout ce qui, dans l'identité du signataire, n'a pas à être
+// publié — l'adresse électronique, le rattachement au compte, le compte de
+// l'outil de signature et l'état du rapprochement. Ce qui reste (nom, fonction,
+// entité) est ce que la signature donne à lire au public.
+//
+// C'est cette partie-là qui est déposée au recueil ; la part interne reste au
+// registre, sous `originalInterne`, et ne se lit qu'avec une session.
+export function partiePublique(pack) {
+  if (!pack || typeof pack !== "object") return pack;
+  const { interne, ...reste } = pack;
+  const signatures = (pack.signatures || []).map((s) => {
+    const sig = { ...(s.signataire || {}) };
+    delete sig.courriel;
+    delete sig.personId;
+    delete sig.compteId;
+    delete sig.compteOutil;
+    delete sig.rapproche;
+    return { ...s, signataire: sig };
+  });
+  return { ...reste, signatures };
+}
+
+// Le dossier INTERNE d'un acte signé : la part non diffusable de l'original,
+// qu'elle provienne de la signature simple (signée dans l'application) ou d'un
+// circuit électronique. Rend `null` quand l'original n'en porte pas.
+export function dossierInterne(pack) {
+  return (pack && pack.interne) || null;
 }
 
 // Vérification complète : c'est cette fonction qui tourne à la consultation.
@@ -324,13 +367,13 @@ export const prestataire = {
   },
 
   // Le geste de signature : c'est ici que la cryptographie est réellement faite.
-  async signer({ docId, signataire, pageHtml, pageCss, brand, flow }) {
+  async signer({ docId, signataire, pageHtml, pageCss, brand, flow, interne = null }) {
     return external(
       async () => {
         const d = require_(docId);
         const pack = await buildSignedPackage({
           akn: d.xml, pageHtml, pageCss, numero: d.reference, objet: d.titre,
-          signataire, prestataire: PRESTATAIRE, brand,
+          signataire, prestataire: PRESTATAIRE, brand, interne,
         });
         d.documentSigne = pack;
         d.statut = "signee";

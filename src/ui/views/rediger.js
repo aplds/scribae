@@ -18,26 +18,37 @@ import {
   revisionPour,
 } from "../state.js";
 import { fullName } from "../../lib/users.js";
-import { ajouterRevision } from "../../lib/revisions.js";
+import { ajouterRevision } from "../../lib/historique-brouillons.js";
 import { demarrerValidation, etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
 import { etatRevision } from "../../lib/revision.js";
 import { h, clear, button, icon, toast, modal, fitPaper } from "../dom.js";
 import { compile, interpolate } from "../../lib/compile.js";
-import { applyPaper, personSignatureName } from "../../lib/render.js";
+import { applyPaper, personSignatureName, renderDocument } from "../../lib/render.js";
+import { styleForDoc } from "../../lib/styles.js";
 import { lignesQualites, decisionsDeSignature } from "../../lib/delegations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
-import { download, uid, debounce, formatDate, todayIso } from "../../lib/util.js";
-import { helpLink, emptyState, sectionHeader, statusBadge, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, abrogationBadge } from "../components.js";
+import { download, uid, debounce, formatDate, todayIso, normalizeSpace } from "../../lib/util.js";
+import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
-import { tramePublishable } from "../../lib/schema.js";
+import { tramePublishable, natureDe, NODE_MAP, newNode, ladderOf, paramsBloc, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { estExterne, reserverNumero } from "../../lib/numbering.js";
 import { safeEval } from "../../lib/expr.js";
-import { listSlots, locateAddr, fieldIdsInText } from "../../lib/redaction.js";
+import { listSlots, locateAddr, fieldIdsInText, valeurReglage } from "../../lib/redaction.js";
 import { abrogationVocab, clauseAbrogation, cibleTexte, KINDS, designationDe as designationDeActe } from "../../lib/abrogations.js";
 import { entreeEnVigueur } from "../../lib/execution.js";
-import { buildRedactionDoc, controlFor, focusFieldWidget, hiddenPassages, bindConfig, closeTokenEditor } from "./wysiwyg.js";
+import { buildRedactionDoc, controlFor, focusFieldWidget, focusNodeWidget, hiddenPassages, bindConfig, closeTokenEditor } from "./wysiwyg.js";
+import { AUTO_TOKENS } from "../../lib/auto-tokens.js";
+import { annotationStrip, notesByPath, countNotes } from "../annotations.js";
 import { signerPicker } from "../signer-picker.js";
 import { champFonction, roleDeFonction } from "../../lib/fonctions.js";
+import { ordresModifies, rangerCommeLaTrame, ordreConteneur, rangDe, deplacerVers, aOrdre } from "../../lib/ordre.js";
+import {
+  ajoutsDe, ajouterA, ajoutPour, retirerAjoutPour, suppressions, supprimer, retablir, slotsAjoutes, majAjout,
+} from "../../lib/structure.js";
+import { glissable } from "../dnd.js";
+import { trameEstDisponible } from "../mise-a-disposition.js";
+import { natureOfActe, identification, annexesVocab, libelleAnnexe, appellationAnnexe, numeroAffiche } from "../../lib/annexes.js";
+import { annexesJointes, libellePartAnnexe } from "../../lib/annexe-docs.js";
 
 export function openActe(acte) {
   state.ui = state.ui || {};
@@ -81,9 +92,12 @@ function renderChooser(root) {
   const ui = (state.ui = state.ui || {});
   if (ui.redigerQ === undefined) ui.redigerQ = "";
 
-  const trames = visibleTrames();
+  const trames = visibleTrames().filter(trameEstDisponible);
   const actes = visibleActes();
-  const enCours = state.rediger ? trames.find((t) => t.id === state.rediger.trameId) : null;
+  // La rédaction en cours est cherchée dans TOUTES les trames visibles, pas
+  // seulement celles qui sont à disposition : si le modèle a été retiré entre
+  // temps, celui qui écrivait doit pouvoir finir son acte.
+  const enCours = state.rediger ? visibleTrames().find((t) => t.id === state.rediger.trameId) : null;
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
@@ -147,7 +161,7 @@ function renderChooser(root) {
     for (const a of aReprendre.slice(0, 12)) {
       const trame = state.trames.find((t) => t.id === a.trameId);
       tb.appendChild(h("tr", {},
-        h("td", { class: "fr-mono", text: a.numero || "—" }),
+        h("td", { class: "fr-mono", text: numeroAffiche(a, state.config, state.trames) || "—" }),
         h("td", { text: a.objet || "—" }),
         h("td", { class: "fr-small", text: trame?.name || "—" }),
         h("td", { class: "fr-small fr-muted", text: a.updatedAt ? formatDate(String(a.updatedAt).slice(0, 10), "date-short") : "—" }),
@@ -168,9 +182,9 @@ function renderChooser(root) {
   if (!trames.length) {
     root.appendChild(emptyState(
       state.trames.length
-        ? "Aucune trame dans votre périmètre (service et bureaux). Les trames des autres services ne vous sont pas accessibles : demandez à un administrateur de rattacher une trame à votre service, ou de la rendre générale."
+        ? "Aucune trame n'est proposée à votre périmètre (service et bureaux). Un modèle n'apparaît ici qu'une fois MIS À DISPOSITION par un administrateur : si vous attendiez une trame, demandez-lui de l'ouvrir."
         : "Aucune trame pour l'instant.",
-      can("trames.gerer") ? button("Créer une trame", { variant: "primary", icon: "plus", onClick: () => navigate("trames") }) : button("Lire le guide", { variant: "secondary", icon: "info", onClick: () => navigate("aide/demarrer") })));
+      can("trames.gerer") ? button("Voir les trames", { variant: "primary", icon: "doc", onClick: () => navigate("trames") }) : button("Lire le guide", { variant: "secondary", icon: "info", onClick: () => navigate("aide/demarrer") })));
     return;
   }
 
@@ -211,12 +225,13 @@ function renderChooser(root) {
 function chooserTrameCard(t, nbActes) {
   const config = state.config;
   const family = (config.families || []).find((f) => f.id === t.familyId);
-  const commentaires = (t.body || []).reduce((n, node) => n + (node.notes?.length || 0) + (node.blocks || []).reduce((m, b) => m + (b.notes?.length || 0), 0), 0);
+  const commentaires = countNotes(t.body);
   const regles = (t.rules || []).length;
-  return h("div", { class: "fr-card" },
+  return h("div", { class: "fr-card fr-card--pied" },
     h("div", { class: "fr-row" },
+      // Pas de pastille de statut ici : cette liste ne contient QUE des trames
+      // mises à disposition (voir renderChooser) — elle serait la même partout.
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto" }, text: t.name }),
-      statusBadge(t.status),
     ),
     h("p", { class: "fr-card__sub", text: [family?.label, "v" + t.version].filter(Boolean).join(" · ") }),
     t.description ? h("p", { class: "fr-small fr-muted", text: t.description }) : null,
@@ -239,9 +254,11 @@ function chooserTrameCard(t, nbActes) {
 
 export function renderRediger(root, params) {
   if (!params || !params.id) { renderChooser(root); return; }
-  const trame = state.trames.find((t) => t.id === params.id) || state.trames[0];
+  const trame = visibleTrames().find((t) => t.id === params.id);
   if (!trame) {
-    root.appendChild(emptyState("Aucune trame disponible.", button("Créer une trame", { variant: "primary", onClick: () => navigate("trames") })));
+    root.appendChild(emptyState(
+      "Cette trame ne vous est pas accessible : elle n'existe plus, ou elle relève d'un autre service.",
+      button("Choisir une trame", { variant: "primary", onClick: () => { resetDraft(); navigate("rediger"); } })));
     return;
   }
   state.ui = state.ui || {};
@@ -250,6 +267,23 @@ export function renderRediger(root, params) {
   // une adresse suivie à la main) ne doit pas charger les valeurs d'un autre
   // acte sous une autre trame.
   const existing = openId ? state.actes.find((a) => a.id === openId && a.trameId === trame.id) : null;
+
+  // Un brouillon n'est pas ouvert à la rédaction : c'est la règle générale de
+  // l'application (le modèle n'est proposé qu'une fois mis à disposition). Trois
+  // exceptions, et elles comptent : un éditeur doit pouvoir essayer son modèle
+  // avant de l'ouvrir aux services ; une rédaction DÉJÀ COMMENCÉE garde l'accès
+  // (retirer la trame sous les pieds de celui qui écrit serait absurde) ; et
+  // rouvrir un ACTE enregistré — depuis le parapheur, la révision ou la file de
+  // signature — doit rester possible, même si le modèle a été retiré entre-temps.
+  const dejaCommencee = state.rediger?.trameId === trame.id || !!existing;
+  if (!trameEstDisponible(trame) && !can("trames.gerer") && !dejaCommencee) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+      h("p", { class: "fr-alert__title", text: "Cette trame n'est pas encore disponible" }),
+      h("p", { class: "fr-small", text: `« ${trame.name} » est encore en brouillon : elle sera proposée à la rédaction dès qu'un administrateur l'aura mise à disposition.` }),
+      h("div", { style: { marginTop: "8px" } },
+        button("Choisir une autre trame", { variant: "primary", onClick: () => { resetDraft(); navigate("rediger"); } }))));
+    return;
+  }
 
   const needInit = !state.rediger
     || state.rediger.trameId !== trame.id
@@ -280,7 +314,16 @@ export function renderRediger(root, params) {
   draft.values.__abrogations = Array.isArray(draft.values.__abrogations) ? draft.values.__abrogations : [];
   const overrides = draft.values.__overrides;
   const sources = new Map(listSlots(trame, config).map((s) => [s.addr, s.original]));
+  // Les emplacements des blocs et éléments AJOUTÉS (voir lib/structure.js) : ils
+  // sont éditables comme les autres, mais leur origine est l'ajout lui-même —
+  // sans quoi leur texte serait signalé comme un écart à une trame qui ne le
+  // contient pas.
+  for (const s of slotsAjoutes(draft.values)) sources.set(s.addr, s.original);
   const fieldsInText = fieldIdsInText(trame);
+  // `ui.selPath` : l'adresse du bloc désigné — cliquer un bloc ouvre ses
+  // options dans l'onglet « Bloc ». Une adresse périmée est simplement ignorée
+  // (voir `paintBloc`). `ui.arme` : la variable cliquée dans la bibliothèque,
+  // en attente d'un clic dans le texte (le repli du glisser-déposer).
   const ui = (draft.ui = draft.ui || { tab: "completer", showAll: false });
   let counterEls = null;
   let signaturePreviewEl = null;
@@ -293,18 +336,49 @@ export function renderRediger(root, params) {
     state.redigerIntent = null;
   }
 
-  let doc = compile(trame, draft.values, config, { markMissing: true });
+  // Le document du brouillon, et les documents qu'il ANNEXE : l'original de
+  // l'acte qui les adopte est suivi de leur texte, et c'est ici qu'on les
+  // résout — le registre est sous la main (voir src/lib/annexe-docs.js). Ils
+  // sont joints à chaque compilation, donc aux exports comme à l'écran.
+  const compileDoc = () => {
+    const d = compile(trame, draft.values, config, { markMissing: true });
+    const joints = annexesJointes(draft.values, {
+      actes: state.actes, trames: state.trames, config, acteId: draft.acteId || "",
+    });
+    if (joints.length) d.annexeDocs = joints;
+    return d;
+  };
+  let doc = compileDoc();
 
   // ---------------------------------------------------------- publication
   const redraw = () => redrawView();
   const rx = {
     trame, config, values: draft.values, overrides, sources,
     get doc() { return doc; },
+    get selPath() { return ui.selPath || null; },
+    get arme() { return ui.arme || null; },
     setField(id, value) { draft.values[id] = value; },
     markDirty() {},
     paintSoon: debounce(() => paintPaper(), 130),
     paintPanelSoon: debounce(() => paintStatus(), 200),
     paintFull: () => { closeTokenEditor(); redraw(); },
+    // Cliquer un bloc : on le désigne dans le panneau, SANS redessiner la page
+    // (le curseur de saisie reste où il est). Seul le panneau se rafraîchit.
+    selectBlock: (path) => selectBlock(path),
+    desarmer: () => { ui.arme = null; paintPalette(); },
+    // Retirer un bloc (ou un élément) du document — jamais de la trame.
+    supprimer: (addr) => supprimerAdresse(addr),
+    // Ajouter un élément à une liste (visa, considérant, item).
+    ajouterElement: (nodePath, refAddr) => ajouterElement(nodePath, refAddr),
+    // Ajouter un bloc après un bloc existant.
+    menuAjout: (anchor, containerPath, rang, position) => menuAjout(anchor, containerPath, rang, position),
+    // Ce qui est saisi dans un bloc AJOUTÉ vit dans l'ajout, pas dans les écarts.
+    onCommit: (addr, src) => {
+      if (majAjout(draft.values, addr, src)) {
+        delete overrides[addr];
+        sources.set(addr, src);
+      }
+    },
   };
   const paintFull = rx.paintFull;
   const paintSoon = rx.paintSoon;
@@ -367,37 +441,96 @@ export function renderRediger(root, params) {
   const paper = h("div", { class: "paper paper--edit" });
   paper.style.fontFamily = config.brand.documentFont || "";
   paperBox.appendChild(paper);
+  docCol.appendChild(annexeCard());
   docCol.appendChild(paperBox);
+  // Le TEXTE des documents annexés : il suit l'acte, mais il ne se rédige pas
+  // ici — il vit dans son propre acte, où l'on va le corriger. On le montre donc
+  // en lecture seule, sous le document, à la place où il sera imprimé.
+  const annexesBox = h("div", { class: "rx-annexes-doc" });
+  docCol.appendChild(annexesBox);
+  docCol.appendChild(annexesCard());
 
   // -------------------------------------------------------- colonne panneau
   const sideCol = h("div", { class: "fr-stack redaction-col--side" });
   cols.appendChild(sideCol);
+  // La bibliothèque de variables reste OUVERTE au-dessus des onglets : insérer
+  // un champ ne doit jamais demander d'abord d'aller le chercher ailleurs. On
+  // la glisse dans le document — ou on la clique, puis on clique dans le texte.
+  const varChips = h("div", { class: "var-lib__chips" });
+  const varSearch = h("input", {
+    class: "fr-input var-lib__search", type: "search", placeholder: "Chercher une variable…",
+    on: { input: (e) => { ui.rechercheVar = e.target.value; paintPalette(); } },
+  });
+  const paletteCard = h("details", { class: "fr-card var-lib", open: true },
+    h("summary", { class: "var-lib__head" }, icon("palette", 15),
+      h("span", { class: "var-lib__title", text: "Variables" }),
+      h("span", { class: "var-lib__aide", text: "à glisser dans le document" })),
+    varSearch,
+    varChips,
+  );
+  sideCol.appendChild(paletteCard);
+
   const tabsBar = h("div", { class: "fr-tabs", style: { marginBottom: "0" } });
   const panelBody = h("div", { class: "fr-card", id: "redaction-panel" });
   sideCol.appendChild(tabsBar);
   sideCol.appendChild(panelBody);
 
-  renderTabs();
-  paintPaper(true);
-  paintStatus();
-  paintPanel();
+  // Le premier rendu vient APRÈS toutes les déclarations du corps de la
+  // fonction : `paintBloc` et la bibliothèque lisent des constantes définies
+  // plus bas (`TYPE_NOMS`, `ELEMENT_VIDE`…) — les appeler ici les prendrait
+  // dans leur zone morte. Voir la fin de `renderRediger`.
 
   // ------------------------------------------------------------------ rendu
   function paintPaper(refit = false) {
-    doc = compile(trame, draft.values, config, { markMissing: true });
+    doc = compileDoc();
     majSourcesAbrogations();
     clear(paper);
     applyPaper(paper, doc, config);
     paper.appendChild(buildRedactionDoc(rx));
     requestAnimationFrame(() => fitPaper(paperBox, paper));
+    paintAnnexesParts();
     paintBadge();
     if (refit) requestAnimationFrame(() => fitPaper(paperBox, paper));
+  }
+
+  // Le texte des documents ANNEXÉS, en lecture seule, à la suite du document :
+  // l'original signé de l'acte les porte dans cet ordre exact (voir
+  // src/lib/annexe-docs.js). On ne les rédige pas ici — ils ont leur propre
+  // acte, et ils changeront là-bas, pas dans une copie.
+  function paintAnnexesParts() {
+    clear(annexesBox);
+    const joints = doc.annexeDocs || [];
+    if (!joints.length) return;
+    for (const joint of joints) {
+      const box = h("div", { class: "paper-box rx-annexe-paper" });
+      box.dataset.annexeId = joint.acte.id;
+      const bandeau = h("div", { class: "rx-annexe-paper__bandeau" },
+        h("span", { class: "rx-annexe-paper__label", text: annexesVocab(config).label || "Annexe" }),
+        h("span", { class: "rx-annexe-paper__titre", text: joint.libelle }),
+        h("span", { class: "fr-spacer" }),
+        button("Ouvrir l'annexe dans son acte", {
+          variant: "tertiary", size: "sm", icon: "eye",
+          onClick: () => navigate("acte/" + joint.acte.id),
+        }),
+      );
+      box.appendChild(bandeau);
+      box.appendChild(h("p", { class: "rx-annexe-paper__note fr-small fr-muted",
+        text: "Ce texte n'est pas rédigé ici : il suit son acte dans l'original signé, sans signature propre." }));
+      const feuille = h("div", { class: "paper paper--lecture" });
+      const style = applyPaper(feuille, joint.doc, config, { style: styleForDoc(config, doc) });
+      feuille.appendChild(renderDocument(joint.doc, config, {
+        showNotes: false, showTrail: false, annexes: false, sansSignature: true, style,
+      }));
+      box.appendChild(feuille);
+      annexesBox.appendChild(box);
+      requestAnimationFrame(() => fitPaper(box, feuille));
+    }
   }
 
   function paintStatus() {
     // Le texte peut avoir été réécrit depuis le dernier rendu de la page : on
     // recalcule le document pour que compteurs, écarts et contrôles soient justes.
-    doc = compile(trame, draft.values, config, { markMissing: true });
+    doc = compileDoc();
     paintBadge();
     renderTabs();
     // Le panneau se rafraîchit, sauf si le curseur y est : le reconstruire
@@ -418,6 +551,18 @@ export function renderRediger(root, params) {
         class: "fr-badge fr-badge--warning", style: { marginLeft: "6px" },
         title: "Passages réécrits par rapport à la trame : visibles par les administrateurs, non bloquants.",
         text: `${nbEcarts} écart${nbEcarts > 1 ? "s" : ""} à la trame`,
+      }));
+    }
+    // Les consignes laissées par la trame : un bouton, à côté de l'état de
+    // l'acte, pour qu'elles ne se perdent pas dans le fil de la lecture.
+    const nbNotes = (doc.notes || []).length;
+    if (nbNotes) {
+      el.appendChild(h("button", {
+        class: "fr-badge fr-badge--info", type: "button",
+        style: { marginLeft: "6px", cursor: "pointer" },
+        title: "Commentaires laissés par les administrateurs dans la trame — cliquez pour les lire",
+        text: `${nbNotes} consigne${nbNotes > 1 ? "s" : ""} de la trame`,
+        onClick: () => { ui.tab = "consignes"; redraw(); },
       }));
     }
     paintParapheur();
@@ -519,16 +664,126 @@ export function renderRediger(root, params) {
     redraw();
   }
 
+  // ------------------------------------------------------ annexes & adoption
+  // Une ANNEXE est un document ADOPTÉ par un autre — un règlement intérieur
+  // adopté par une délibération, un tableau tarifaire adopté par une décision.
+  // L'annexe NE SE SIGNE PAS : c'est l'acte d'adoption qui est signé, et c'est
+  // sa signature qui donne à l'annexe son autorité. L'original de l'acte
+  // d'adoption est donc SUIVI du document annexé, dans le même document, à la
+  // suite de la signature (voir src/lib/annexe-docs.js). Les deux gestes sont
+  // symétriques, et se font ici :
+  //
+  //   • dans l'annexe, on désigne l'ACTE D'ADOPTION — dont le visa s'ajoute de
+  //     lui-même en tête des visas (« Vu la délibération n°… du …, qui
+  //     l'adopte ») ;
+  //   • dans l'acte qui adopte, on annonce les documents ANNEXÉS — ils sont
+  //     listés à la fin du dispositif, et leur texte suit l'acte.
+  //
+  // Ce qu'on fige ici, c'est l'IDENTIFICATION de l'autre acte (numéro, nature,
+  // date, adresse de recueil), non l'acte lui-même : sa fiche reste la source
+  // vivante. Voir src/lib/annexes.js.
+  function designationDeActe(a) {
+    const tr = state.trames.find((x) => x.id === a?.trameId);
+    return (config.actTypes || []).find((x) => x.id === tr?.actTypeId)?.label || a?.designation || "";
+  }
+  // Déclarées en fonctions (et non en `const`) : `annexeCard()` est appelée dès
+  // la construction de la colonne du document, plus haut dans ce rendu.
+  function candidatsAdoption() { return state.actes.filter((a) => !a.deletedAt && natureOfActe(a, state.trames) !== "annexe"); }
+  function candidatsAnnexes() { return state.actes.filter((a) => !a.deletedAt && natureOfActe(a, state.trames) === "annexe"); }
+  function libelleActe(a) {
+    // Une annexe n'a pas de numéro : on la nomme par la décision qui l'adopte.
+    if (natureOfActe(a, state.trames) === "annexe") return appellationAnnexe(a, config) + (a.objet ? " — " + a.objet : "");
+    return `${designationDeActe(a) || "Acte"} n° ${a.numero || "(sans numéro)"}${a.objet ? " — " + a.objet : ""}`;
+  }
+
+  function annexeCard() {
+    if (natureDe(trame) !== "annexe") return h("span", { hidden: true });
+    const box = h("div", { class: "fr-card fr-card--soft rx-annexe" });
+    box.appendChild(h("p", { class: "rx-annexe__titre",
+      text: "Annexe — ce document ne se signe pas et ne porte pas de numéro propre : il s'identifie par la décision qui l'adopte, et son texte suit cet acte dans le même document." }));
+    box.appendChild(selectField({
+      label: "Acte d'adoption",
+      value: draft.values.__adoption?.acteId || "",
+      placeholder: "— À désigner (document non encore adopté) —",
+      options: candidatsAdoption().map((a) => ({ value: a.id, label: libelleActe(a).slice(0, 130) })),
+      help: "L'acte qui adopte ce document, et dont il tient son autorité : c'est lui qui est signé, et son original est suivi de ce texte. Il est rappelé en tête des visas. Laissez vide tant que l'adoption n'est pas décidée.",
+      onChange: (v) => {
+        const a = state.actes.find((x) => x.id === v);
+        draft.values.__adoption = a ? identification(a, designationDeActe(a)) : null;
+        toast(a ? "Acte d'adoption enregistré" : "Acte d'adoption retiré", "success");
+        redraw();
+      },
+    }));
+    return box;
+  }
+
+  function annexesCard() {
+    if (natureDe(trame) === "annexe") return h("span", { hidden: true });
+    const list = draft.values.__annexes || [];
+    const box = h("div", { class: "fr-card fr-card--soft rx-annexes" },
+      h("div", { class: "fr-row" },
+        h("strong", { class: "fr-small", text: annexesVocab(config).sectionTitle }),
+        h("span", { class: "fr-spacer" }),
+        button("Joindre une annexe", { variant: "secondary", size: "sm", icon: "plus", onClick: joindreAnnexe })),
+      h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 6px" }, text: list.length
+        ? "Ces documents sont annexés à l'acte : ils sont annoncés à la fin de son dispositif, et leur texte suit l'acte dans l'original signé. Ils ne sont ni signés ni publiés pour eux-mêmes."
+        : "Aucun document annexé. Un règlement intérieur adopté par une délibération, un tableau tarifaire adopté par une décision : joignez-les ici." }),
+    );
+    list.forEach((a, i) => {
+      box.appendChild(h("div", { class: "fr-row rx-annexe__ligne" },
+        h("span", { class: "fr-small", text: libelleAnnexe(a, config) + (a.objet ? " — " + a.objet : "") }),
+        h("span", { class: "fr-spacer" }),
+        button("Voir dans le document", { variant: "tertiary", size: "sm", icon: "eye",
+          title: "Aller au texte de cette annexe, à la suite du document",
+          onClick: () => {
+            const part = annexesBox.querySelector(`[data-annexe-id="${a.acteId}"]`);
+            if (part) part.scrollIntoView({ behavior: "smooth", block: "start" });
+            else toast("Le texte de cette annexe n'est pas disponible : son acte est introuvable au registre.", "info");
+          } }),
+        button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Retirer cette annexe",
+          onClick: () => { const l = [...list]; l.splice(i, 1); draft.values.__annexes = l; redraw(); } })));
+    });
+    return box;
+  }
+
+  function joindreAnnexe() {
+    const deja = new Set((draft.values.__annexes || []).map((a) => a.acteId));
+    const dispo = candidatsAnnexes().filter((a) => !deja.has(a.id));
+    const corps = h("div", { class: "fr-stack" });
+    corps.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: 0 },
+      text: "Les documents qu'une trame a déclarés « Annexe » (onglet Trame de l'éditeur de trame). Ils seront annoncés à la fin du dispositif, et leur texte suivra l'acte dans l'original signé." }));
+    if (!dispo.length) {
+      corps.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucune annexe enregistrée pour l'instant. Rédigez d'abord le document depuis une trame de nature « Annexe »." }));
+    }
+    for (const a of dispo) {
+      corps.appendChild(button(libelleActe(a), {
+        variant: "secondary", onClick: () => { draft.values.__annexes = [...(draft.values.__annexes || []), identification(a, designationDeActe(a))]; m.close(); redraw(); toast("Annexe jointe à l'acte", "success"); },
+      }));
+    }
+    const m = modal({
+      title: "Joindre une annexe",
+      body: corps,
+      actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })],
+    });
+  }
+
   function renderTabs() {
     const nbTodo = requiredTodo();
     const nbCtrl = doc.issues.length + doc.ecarts.length;
     const nbAbr = (draft.values.__abrogations || []).length;
+    const nbNotes = (doc.notes || []).length;
     tabsBar.replaceChildren();
     for (const t of [
+      // L'onglet du bloc désigné n'apparaît que quand un bloc l'est : il porte
+      // ses réglages, ses éléments et sa suppression (voir `paintBloc`).
+      ui.selPath ? { id: "bloc", label: "Bloc" } : null,
       { id: "completer", label: "À compléter" + (nbTodo ? ` (${nbTodo})` : "") },
+      // Les consignes de la trame : l'onglet n'apparaît que s'il y en a, mais
+      // elles s'affichent de toute façon DANS le document (voir ui/annotations.js).
+      nbNotes ? { id: "consignes", label: `Consignes (${nbNotes})` } : null,
       { id: "abrogations", label: "Abrogations" + (nbAbr ? ` (${nbAbr})` : "") },
       { id: "controle", label: "Contrôle & écarts" + (nbCtrl ? ` (${nbCtrl})` : "") },
-    ]) {
+    ].filter(Boolean)) {
       tabsBar.appendChild(h("button", {
         class: "fr-tab" + (ui.tab === t.id ? " fr-tab--active" : ""), text: t.label,
         onClick: () => { ui.tab = t.id; redraw(); },
@@ -537,9 +792,557 @@ export function renderRediger(root, params) {
   }
   function paintPanel() {
     clear(panelBody);
-    if (ui.tab === "completer") paintCompleter(panelBody);
+    if (ui.tab === "bloc" && ui.selPath) paintBloc(panelBody);
+    else if (ui.tab === "consignes" && (doc.notes || []).length) paintConsignes(panelBody);
     else if (ui.tab === "abrogations") paintAbrogations(panelBody);
-    else paintControle(panelBody);
+    else if (ui.tab === "controle") paintControle(panelBody);
+    else paintCompleter(panelBody);
+  }
+
+  // ======================================================= bibliothèque de vars
+  // Toutes les variables du document, dans le panneau de droite, prêtes à être
+  // glissées dans le texte. C'était le principal manque de l'atelier : les
+  // champs n'existaient que sous forme de pastilles dans les phrases, sans
+  // moyen d'en poser un là où on en avait besoin.
+  function puceVar(kind, label, token, icone) {
+    const actif = !!ui.arme && ui.arme.token === token;
+    const btn = h("button", {
+      class: "puce" + (actif ? " is-on" : ""), type: "button",
+      title: actif ? `${label} — cliquez dans le texte pour l'insérer` : label,
+      onClick: (e) => {
+        e.preventDefault(); e.stopPropagation();
+        ui.arme = actif ? null : { token, label };
+        paintPalette();
+        if (ui.arme) toast(`${label} : cliquez dans le texte à l'endroit voulu`, "info");
+      },
+    }, h("span", { class: "fr-icon" }, icon(icone || "doc", 13)), h("span", { class: "puce__label", text: label }));
+    return glissable(btn, { kind, token, label });
+  }
+
+  function paintPalette() {
+    if (!varChips) return;
+    const q = String(ui.rechercheVar || "").trim().toLowerCase();
+    const garde = (lbl) => !q || String(lbl).toLowerCase().includes(q);
+    clear(varChips);
+    // Une annexe n'a pas de numéro propre : la variable n'a rien à y faire, et
+    // sa valeur serait vide (voir src/lib/annexes.js).
+    const champs = (trame.fields || []).filter((f) => !(natureDe(trame) === "annexe" && f.id === "numero") && garde(f.label || f.id));
+    // Le jeton « numero » n'a pas de sens dans une annexe, qui n'en a pas
+    // (voir src/lib/annexes.js).
+    const autos = AUTO_TOKENS.filter((t) => !(natureDe(trame) === "annexe" && t.token === "numero") && garde(t.label));
+    if (!champs.length && !autos.length) {
+      varChips.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Aucune variable ne correspond." }));
+      return;
+    }
+    const groupe = (titre, puces) => {
+      if (!puces.length) return;
+      varChips.appendChild(h("div", { class: "var-lib__groupe" },
+        h("span", { class: "var-lib__titre", text: titre }),
+        h("div", { class: "palette__puces" }, ...puces)));
+    };
+    groupe("Vos champs", champs.map((f) => puceVar("champ", f.label || f.id, "{{" + f.id + "}}", "doc")));
+    groupe("Rempli automatiquement", autos.map((t) => puceVar("auto", t.label, "{{" + t.token + "}}", "check")));
+  }
+
+  // ================================================= structure & blocs désignés
+  // Cliquer un bloc, c'est le désigner : le panneau montre alors tout ce qui le
+  // concerne. On ne redessine PAS la page — le curseur de saisie ne doit pas
+  // être volé par un simple clic.
+  function selectBlock(path) {
+    if (!path) return;
+    const deja = ui.selPath === path && ui.tab === "bloc";
+    ui.selPath = path;
+    ui.tab = "bloc";
+    for (const el of paper.querySelectorAll(".mv")) el.classList.toggle("mv--sel", el.dataset.node === path);
+    if (!deja) paintStatus();
+  }
+
+  // La liste de la TRAME qui porte un conteneur (`body`, `body.3.blocks`,
+  // `body.2.items`). Sert à connaître le nombre de blocs d'origine — les rangs
+  // des ajouts commencent juste après (voir lib/structure.js).
+  function listeTrame(containerPath) {
+    const parts = String(containerPath || "").split(".").filter(Boolean);
+    let cur = trame;
+    for (const p of parts) cur = cur?.[/^\d+$/.test(p) ? Number(p) : p];
+    return Array.isArray(cur) ? cur : null;
+  }
+
+  const parentPathDe = (path) => String(path || "").split(".").slice(0, -1).join(".");
+
+  function supprimerAdresse(addr) {
+    if (!addr) return;
+    if (ajoutPour(draft.values, addr)) {
+      retirerAjoutPour(draft.values, addr);
+      toast("Élément ajouté retiré", "info");
+    } else {
+      supprimer(draft.values, addr);
+      toast("Bloc retiré du document — « Contrôle & écarts » permet de le rétablir", "info");
+    }
+    if (ui.selPath === addr) {
+      ui.selPath = null;
+      if (ui.tab === "bloc") ui.tab = "controle";
+    }
+    paintFull();
+  }
+
+  const ELEMENT_VIDE = {
+    visas: () => ({ id: uid("v"), text: "" }),
+    considerants: () => ({ id: uid("c"), text: "Considérant que ", when: "" }),
+    list: () => ({ id: uid("i"), text: "", when: "" }),
+  };
+  const ETIQUETTE_ELEMENT = { visas: "Un visa", considerants: "Un considérant", list: "Un élément" };
+
+  // Ajouter un visa, un considérant ou un élément à une liste : un seul clic,
+  // puis on écrit. L'élément appartient au DOCUMENT, pas à la trame.
+  function ajouterElement(nodePath, refAddr) {
+    const trameNode = nodeAt(trame, nodePath);
+    if (!trameNode) return;
+    const itemsPath = `${nodePath}.items`;
+    const count = (trameNode.items || []).length;
+    const ordre = ordreConteneur(draft.values, itemsPath, count);
+    const i = refAddr ? ordre.indexOf(rangDe(refAddr)) + 1 : null;
+    const entree = ajouterA(draft.values, itemsPath, (ELEMENT_VIDE[trameNode.type] || ELEMENT_VIDE.list)(), i, count);
+    paintFull();
+    const addr = `${itemsPath}.${entree.rang}`;
+    requestAnimationFrame(() => {
+      paper.querySelector(`[data-slot="${addr}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    toast((ETIQUETTE_ELEMENT[trameNode.type] || "Un élément") + " ajouté au document", "success");
+  }
+
+  // Les types de bloc qu'un conteneur accepte : on n'ouvre pas une signature au
+  // milieu d'un article, et l'intitulé de l'acte ne se duplique pas.
+  function typesAjoutables(containerPath) {
+    if (containerPath === "body") return ["article", "division", "para", "list", "table", "considerants", "visas", "mention", "raw"];
+    return ["para", "list", "table", "considerants", "visas", "mention", "raw", "division"];
+  }
+
+  // Ajouter un bloc neuf à une place donnée. La fenêtre ne propose que ce que le
+  // conteneur accepte — c'est le « revenir à la liste pour ajouter » du
+  // rédacteur, à un clic de la barre d'outils du bloc.
+  function menuAjout(anchor, containerPath, rang, position) {
+    const corps = h("div", { class: "fr-stack" });
+    const m = modal({
+      title: "Ajouter un bloc au document",
+      body: corps,
+      actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })],
+    });
+    for (const id of typesAjoutables(containerPath)) {
+      const t = NODE_MAP[id] || { label: id, hint: "" };
+      corps.appendChild(h("button", {
+        class: "fr-btn fr-btn--secondary", type: "button", style: { justifyContent: "flex-start" },
+        onClick: () => {
+          const count = (listeTrame(containerPath) || []).length;
+          const ordre = ordreConteneur(draft.values, containerPath, count);
+          const i = Math.max(0, ordre.indexOf(Number(rang)) + (position === "avant" ? 0 : 1));
+          const entree = ajouterA(draft.values, containerPath, newNode(id), i, count);
+          ui.selPath = `${containerPath}.${entree.rang}`;
+          ui.tab = "bloc";
+          m.close();
+          paintFull();
+          toast(t.label + " ajouté au document", "success");
+        },
+      }, h("span", { class: "fr-icon" }, icon(t.icon || "doc", 15)), h("span", { text: t.label }),
+        h("span", { class: "fr-spacer" }), h("span", { class: "fr-small fr-muted", text: t.hint || "" })));
+    }
+    corps.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
+      text: "Ce bloc est ajouté au document, non à la trame : les administrateurs le verront signalé comme un ajout de la rédaction." }));
+  }
+
+  // ============================================================ onglet « Bloc »
+  // Tout ce qui concerne le bloc désigné, à un seul endroit : ce qu'il est, sa
+  // place, son intitulé, sa numérotation, son échelon, ses éléments, et sa
+  // suppression. Le pendant rédaction de l'inspecteur de l'éditeur de trame.
+  function nodeDuDoc(path) {
+    let found = null;
+    const walk = (list) => (list || []).forEach((n) => {
+      if (found) return;
+      if (n.path === path) { found = n; return; }
+      walk(n.blocks);
+    });
+    walk(doc.nodes);
+    return found;
+  }
+
+  function paintBloc(box) {
+    const path = ui.selPath;
+    const node = path ? nodeDuDoc(path) : null;
+    const trameNode = path ? nodeAt(trame, path) : null;
+    const ajout = path ? ajoutPour(draft.values, path) : null;
+    if (!node) {
+      box.appendChild(h("div", { class: "inspector__section" },
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 },
+          text: "Le bloc désigné n'apparaît plus dans le document (il a été retiré, ou sa condition n'est plus remplie). Choisissez-en un autre, ou rétablissez-le dans « Contrôle & écarts »." })));
+      return;
+    }
+    const fixe = ["title", "authority", "annexes"].includes(node.type);
+    const container = parentPathDe(path);
+    const trameList = listeTrame(container);
+    const count = (trameList || []).length;
+    const rang = rangDe(path);
+    const ordre = ordreConteneur(draft.values, container, count);
+    const pos = ordre.indexOf(rang);
+    const precedent = ordre[pos - 1];
+    const suivant = ordre[pos + 1];
+    const apresSuivant = ordre[pos + 2];
+    const typeLabel = NODE_MAP[node.type]?.label || node.type;
+
+    const sec = (children) => h("div", { class: "inspector__section" }, ...children);
+
+    box.appendChild(sec([
+      h("span", { class: "inspector__label" }, "Bloc désigné · ", h("strong", { text: typeLabel })),
+      h("p", { class: "fr-small fr-muted", style: { margin: 0 },
+        text: ajout ? "Bloc ajouté par la rédaction : il n'existe pas dans la trame." : "Bloc de la trame." }),
+      h("p", { class: "fr-small", style: { margin: "6px 0 0" }, text: libelleAdresse(path) }),
+    ]));
+
+    if (!fixe) {
+      const bouger = (versRang) => {
+        if (deplacerVers(draft.values, container, count, rang, versRang)) {
+          paintFull();
+          toast("Bloc déplacé", "success");
+        }
+      };
+      box.appendChild(sec([
+        h("div", { class: "fr-row", style: { flexWrap: "wrap" } },
+          button("Monter", { variant: "tertiary", size: "sm", icon: "up", disabled: pos <= 0, onClick: () => bouger(precedent) }),
+          button("Descendre", { variant: "tertiary", size: "sm", icon: "down", disabled: suivant === undefined, onClick: () => bouger(apresSuivant === undefined ? null : apresSuivant) }),
+          h("span", { class: "fr-spacer" }),
+          button(ajout ? "Retirer cet ajout" : "Retirer du document", {
+            variant: "tertiary", size: "sm", icon: "trash",
+            onClick: () => supprimerAdresse(path),
+          })),
+        h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
+          text: ajout
+            ? "Le bloc ajouté est retiré du document ; il n'existe nulle part ailleurs."
+            : "Le bloc est retiré du document, non de la trame : « Contrôle & écarts » permet de le rétablir." }),
+      ]));
+    }
+
+    // Intitulé, numérotation, échelon : les réglages du bloc. On écrit dans les
+    // écarts (`__overrides`) — la trame, elle, ne bouge pas.
+    const lire = (k, defaut) => (overrides[path + "." + k] !== undefined ? overrides[path + "." + k] : defaut);
+    // `relance` : un réglage qui change la FORME du panneau (la numérotation
+    // manuelle fait apparaître le champ du numéro) demande un redessin complet.
+    // Une simple saisie de texte, non — le focus doit rester dans le champ.
+    const ecrire = (k, v, relance = true) => {
+      const original = trameNode?.[k] ?? "";
+      if (String(v) === String(original)) delete overrides[path + "." + k];
+      else overrides[path + "." + k] = v;
+      if (relance) paintFull(); else paintSoon();
+    };
+    if (node.type === "article" || node.type === "division") {
+      const reglages = [];
+      reglages.push(textField({
+        label: node.type === "article" ? "Intitulé de l'article" : "Intitulé de la division",
+        value: lire("heading", trameNode?.heading ?? ""),
+        help: "Laissez vide pour suivre la trame. Une modification est signalée aux administrateurs comme un écart.",
+        onChange: (v) => {
+          const original = trameNode?.heading ?? "";
+          if (normalizeSpace(v) === normalizeSpace(original)) delete overrides[path + ".heading"];
+          else overrides[path + ".heading"] = v;
+          paintSoon();
+        },
+      }));
+      if (node.type === "division") {
+        reglages.push(selectField({
+          label: "Échelon dans la hiérarchie",
+          value: String(lire("level", trameNode?.level ?? 1)),
+          options: ladderOf(trame).map((n) => ({ value: String(n.level), label: `${n.label} — échelon ${n.level}` })),
+          help: "L'échelle elle-même se règle dans la trame (onglet « Trame », rubrique « Hiérarchie »).",
+          onChange: (v) => ecrire("level", Number(v)),
+        }));
+      }
+      reglages.push(selectField({
+        label: "Numérotation",
+        value: String(lire("numMode", trameNode?.numMode ?? "auto")),
+        options: [{ value: "auto", label: "Automatique" }, { value: "fixed", label: "Écrite à la main" }],
+        help: "Automatique : le numéro suit l'ordre des articles. Écrite à la main : le numéro est celui que vous tapez (« Article R. 1 »).",
+        onChange: (v) => {
+          const num = String(lire("num", trameNode?.num ?? "")).trim();
+          if (v === "fixed") {
+            // Passer en numérotation manuelle ne doit pas effacer le numéro :
+            // on part de celui qui s'affiche (« Article 2 »).
+            if (!num) overrides[path + ".num"] = node.numLabel || "";
+          } else if (overrides[path + ".num"] !== undefined) {
+            delete overrides[path + ".num"];   // redevenu automatique : rien à signaler
+          }
+          ecrire("numMode", v);
+        },
+      }));
+      if (String(lire("numMode", "auto")) === "fixed") {
+        reglages.push(textField({
+          label: "Texte du numéro", value: lire("num", trameNode?.num ?? ""),
+          onChange: (v) => ecrire("num", v, false),
+        }));
+      }
+      box.appendChild(sec([h("span", { class: "inspector__label", text: "Réglages du bloc" }), ...reglages]));
+    }
+
+    // La MISE EN FORME d'un bloc de texte se règle ici aussi — alignement,
+    // retrait, encadré, marque de liste, disposition de tableau, formule des
+    // considérants. Ce sont des RÉGLAGES du bloc au même titre que l'intitulé
+    // d'un article : ils s'écrivent dans les écarts, la trame ne bouge pas, et
+    // « Contrôle & écarts » les présente aux administrateurs. Tout part des
+    // défauts déclarés par la trame (`paramsBloc`, lib/schema.js) : régler un
+    // bloc sur ce qu'il était déjà ne crée donc aucun écart.
+    const defautsForme = paramsBloc(trameNode || {});
+    const lireForme = (k) => {
+      const v = overrides[path + "." + k];
+      return v !== undefined ? valeurReglage(k, v) : defautsForme[k];
+    };
+    const ecrireForme = (k, v, relance = true) => {
+      const original = defautsForme[k];
+      if (String(v) === String(original ?? "")) delete overrides[path + "." + k];
+      else overrides[path + "." + k] = v;
+      if (relance) paintFull(); else paintSoon();
+    };
+    const forme = [];
+    if (node.type === "para") {
+      forme.push(
+        selectField({
+          label: "Alignement", value: lireForme("align"), options: choixDe(PARA_ALIGNS),
+          help: "« Comme la feuille de style » suit la charte de la collectivité.",
+          onChange: (v) => ecrireForme("align", v),
+        }),
+        selectField({ label: "Retrait", value: lireForme("indent"), options: choixDe(PARA_INDENTS), onChange: (v) => ecrireForme("indent", v) }),
+        choiceField({
+          label: "Encadré", value: !!lireForme("boxed"),
+          options: [{ value: false, label: "Non" }, { value: true, label: "Oui" }],
+          onChange: (v) => ecrireForme("boxed", v),
+        }),
+      );
+    } else if (node.type === "list") {
+      const ordonne = !!lireForme("ordered");
+      forme.push(
+        choiceField({
+          label: "Genre de liste", value: ordonne,
+          options: [{ value: false, label: "À puces" }, { value: true, label: "Numérotée" }],
+          onChange: (v) => ecrireForme("ordered", v),
+        }),
+        ordonne
+          ? selectField({ label: "Numérotation", value: lireForme("numbering"), options: choixDe(LIST_NUMBERINGS), onChange: (v) => ecrireForme("numbering", v) })
+          : selectField({ label: "Marqueur", value: lireForme("marker"), options: choixDe(LIST_MARKERS), onChange: (v) => ecrireForme("marker", v) }),
+        ordonne ? textField({
+          label: "Numéro de départ", type: "number", value: lireForme("start"),
+          onChange: (v) => ecrireForme("start", Math.max(1, Number(v) || 1)),
+        }) : null,
+      );
+    } else if (node.type === "table") {
+      forme.push(
+        selectField({ label: "Position de la légende", value: lireForme("captionPos"), options: choixDe(TABLE_CAPTION_POS), onChange: (v) => ecrireForme("captionPos", v) }),
+        choiceField({
+          label: "Ligne d'en-tête", value: lireForme("head") !== false,
+          options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
+          onChange: (v) => ecrireForme("head", v),
+        }),
+        selectField({ label: "Disposition", value: lireForme("layout"), options: choixDe(TABLE_LAYOUTS), onChange: (v) => ecrireForme("layout", v) }),
+        selectField({ label: "Alignement des cellules", value: lireForme("align"), options: choixDe(TABLE_ALIGNS), onChange: (v) => ecrireForme("align", v) }),
+      );
+    } else if (node.type === "considerants") {
+      forme.push(
+        textField({
+          label: "Formule devant chaque considérant", value: lireForme("formule"),
+          placeholder: "Considérant que",
+          help: "Placée devant le texte de chaque considérant, sauf s'il la porte déjà. Laissez vide pour ne rien ajouter.",
+          onChange: (v) => ecrireForme("formule", v, false),
+        }),
+        selectField({ label: "Ponctuation finale", value: lireForme("fin"), options: choixDe(RECITAL_FINS), onChange: (v) => ecrireForme("fin", v) }),
+        choiceField({
+          label: "En un seul alinéa", value: !!lireForme("inline"),
+          options: [{ value: false, label: "Un par paragraphe" }, { value: true, label: "Tous suivis" }],
+          onChange: (v) => ecrireForme("inline", v),
+        }),
+      );
+    }
+    const champsForme = forme.filter(Boolean);
+    if (champsForme.length) {
+      box.appendChild(sec([h("span", { class: "inspector__label", text: "Mise en forme" }), ...champsForme]));
+    }
+
+    box.appendChild(sec([
+      h("span", { class: "inspector__label", text: "Ajouter dans ce bloc" }),
+      h("div", { class: "fr-choices" }, ...boutonsAjoutBloc(node, path, container, rang)),
+    ]));
+
+    // Les éléments d'une liste se règlent ici aussi : c'est l'autre « revenir à
+    // la liste » que réclamait la rédaction.
+    if (["visas", "considerants", "list"].includes(node.type) && trameNode) {
+      const items = h("div", { class: "fr-stack" });
+      const itemsPath = `${path}.items`;
+      const countItems = (trameNode.items || []).length;
+      const ordreItems = ordreConteneur(draft.values, itemsPath, countItems);
+      (node.items || []).forEach((it, i) => {
+        const idx = (trameNode.items || []).findIndex((x) => x.id === it.id);
+        const addr = idx >= 0 ? `${path}.items.${idx}` : (it.ajout ? it.path : "");
+        const rang = addr ? rangDe(addr) : -1;
+        const pos = ordreItems.indexOf(rang);
+        const bougerItem = (versRang) => {
+          if (deplacerVers(draft.values, itemsPath, countItems, rang, versRang)) { paintFull(); toast("Élément déplacé", "success"); }
+        };
+        const ligne = h("div", { class: "rx-field" });
+        ligne.appendChild(h("div", { class: "rx-field__head" },
+          h("span", { class: "rx-field__label", text: `#${i + 1}${it.ajout ? " · ajouté" : ""}` }),
+          h("span", { class: "fr-spacer" }),
+          addr ? button("", { variant: "tertiary", size: "sm", icon: "up", title: "Monter cet élément",
+            disabled: pos <= 0, onClick: () => bougerItem(ordreItems[pos - 1]) }) : null,
+          addr ? button("", { variant: "tertiary", size: "sm", icon: "down", title: "Descendre cet élément",
+            disabled: pos < 0 || pos >= ordreItems.length - 1, onClick: () => bougerItem(ordreItems[pos + 2]) }) : null,
+          button("", { variant: "tertiary", size: "sm", icon: "eye", title: "Voir dans le document",
+            onClick: () => { if (!focusNodeWidget(paper, addr)) focusSlot(paper, addr); } }),
+          addr ? button("", { variant: "tertiary", size: "sm", icon: "trash", title: it.ajout ? "Retirer cet élément ajouté" : "Retirer cet élément du document",
+            onClick: () => supprimerAdresse(addr) }) : null,
+        ));
+        const ta = h("textarea", { class: "fr-textarea", rows: 2 });
+        ta.value = idx >= 0 ? (overrides[addr] !== undefined ? overrides[addr] : (trameNode.items[idx]?.text || "")) : (ajoutPour(draft.values, addr)?.node.text || "");
+        ta.addEventListener("input", () => {
+          if (idx >= 0) {
+            const original = trameNode.items[idx]?.text || "";
+            if (normalizeSpace(ta.value) === normalizeSpace(original)) delete overrides[addr];
+            else overrides[addr] = ta.value;
+          } else if (addr) {
+            majAjout(draft.values, addr, ta.value);
+            sources.set(addr, ta.value);
+          }
+          paintSoon();
+        });
+        ligne.appendChild(ta);
+        items.appendChild(ligne);
+      });
+      box.appendChild(sec([
+        sectionHeader("Éléments", button("Ajouter", { variant: "secondary", size: "sm", icon: "plus", onClick: () => ajouterElement(path, "") })),
+        ...(node.items || []).length ? [items] : [h("p", { class: "fr-small fr-muted", text: "Aucun élément affiché pour l'instant." })],
+      ]));
+    }
+
+    const notes = (doc.notes || []).filter((n) => n.path === path);
+    if (notes.length) {
+      box.appendChild(sec([
+        sectionHeader("Consignes de la trame sur ce bloc", null),
+        annotationStrip({ notes, bare: true }),
+      ]));
+    }
+
+    const when = trameNode?.when;
+    if (when) {
+      box.appendChild(sec([
+        h("span", { class: "inspector__label", text: "Condition d'affichage" }),
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: when + " — un passage conditionnel n'apparaît que si la condition est remplie." }),
+      ]));
+    }
+  }
+
+  // Les boutons « ajouter » adaptés au bloc désigné : un paragraphe dans un
+  // article, un visa dans une liste de visas, un bloc à la suite…
+  function boutonsAjoutBloc(node, path, container, rang) {
+    const out = [];
+    if (node.type === "article" || node.type === "division") {
+      for (const id of ["para", "list", "table", "considerants"]) {
+        out.push(button(NODE_MAP[id].label, { variant: "tertiary", size: "sm", icon: "plus",
+          onClick: () => ajouterDansConteneur(`${path}.blocks`, id) }));
+      }
+      return out;
+    }
+    if (node.type === "visas" || node.type === "considerants" || node.type === "list") {
+      out.push(button(ETIQUETTE_ELEMENT[node.type], { variant: "tertiary", size: "sm", icon: "plus",
+        onClick: () => ajouterElement(path, "") }));
+      return out;
+    }
+    out.push(button("Après ce bloc", { variant: "tertiary", size: "sm", icon: "plus",
+      onClick: (e) => menuAjout(e.currentTarget, container, rang, "apres") }));
+    return out;
+  }
+
+  // Ajoute un bloc à la fin d'un conteneur de blocs (les paragraphes d'un
+  // article ou d'une division). Le bloc ajouté est désigné aussitôt, pour qu'on
+  // puisse l'écrire et le régler sans le chercher.
+  function ajouterDansConteneur(containerPath, type) {
+    const count = (listeTrame(containerPath) || []).length;
+    const entree = ajouterA(draft.values, containerPath, newNode(type || "para"), null, count);
+    ui.selPath = `${containerPath}.${entree.rang}`;
+    ui.tab = "bloc";
+    paintFull();
+    toast((NODE_MAP[type]?.label || "Bloc") + " ajouté au document", "success");
+  }
+
+  // Fait défiler jusqu'à un emplacement d'élément (les pastilles `data-slot`).
+  function focusSlot(paperEl, addr) {
+    const el = paperEl.querySelector(`[data-slot="${addr}"]`);
+    if (!el) return false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  }
+
+  // Un libellé lisible pour une adresse de bloc ou d'élément de la TRAME — les
+  // blocs retirés ne sont plus dans le document compilé, `locateAddr` ne peut
+  // donc pas les nommer.
+  const TYPE_NOMS = {
+    title: "Intitulé", authority: "Formule d'autorité", visas: "Visas", considerants: "Considérants",
+    enact: "Formule d'édiction", division: "Division", article: "Article", para: "Paragraphe",
+    list: "Liste", table: "Tableau", signature: "Signature", mention: "Mention", raw: "Passage libre",
+  };
+  function libelleAdresse(addr) {
+    const m = String(addr).match(/^(.*)\.items\.(\d+)$/);
+    if (m) {
+      const parent = nodeAt(trame, m[1]);
+      return `${TYPE_NOMS[parent?.type] || "Liste"} · élément ${Number(m[2]) + 1}`;
+    }
+    const n = nodeAt(trame, addr);
+    if (!n) return addr;
+    const t = TYPE_NOMS[n.type] || n.type;
+    const titre = n.heading || n.text;
+    return titre ? `${t} — ${resume(titre, 50)}` : t;
+  }
+
+  // ------------------------------------------------------- onglet consignes
+  // Ce que les administrateurs ont laissé dans la trame : à lire avant de
+  // remplir. Ces commentaires ne sont pas publiés — mais ils sont là, dans le
+  // document, sous le passage qu'ils visent, et repris ici avec le lien qui y
+  // mène.
+  function paintConsignes(box) {
+    const groups = notesByPath(doc.notes || []);
+    const parChemin = new Map();
+    const walk = (ns) => (ns || []).forEach((n) => { if (n.path) parChemin.set(n.path, n); walk(n.blocks); });
+    walk(doc.nodes);
+    box.appendChild(h("div", { class: "fr-row" },
+      h("strong", { text: groups.size > 1 ? `${groups.size} passages commentés par la trame` : "Un passage commenté par la trame" }),
+    ));
+    box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 10px" },
+      text: "Consignes, explications ou points à arbitrer laissés par les administrateurs : ils accompagnent la rédaction et ne sont pas publiés avec l'acte. Le document les affiche aussi, sous chaque passage concerné." }));
+    for (const [path, list] of groups) {
+      box.appendChild(h("div", { class: "cmt-group" },
+        h("div", { class: "cmt-group__head" },
+          h("button", {
+            class: "cmt-group__jump", type: "button", title: "Voir ce passage dans le document",
+            onClick: () => { if (!focusNodeWidget(paper, path)) toast("Ce passage n'est pas affiché (condition non remplie).", "info"); },
+          }, icon("eye", 13), h("span", { class: "cmt-group__label", text: libelleBloc(parChemin.get(path)) })),
+          h("span", { class: "fr-badge fr-badge--info", text: String(list.length) }),
+        ),
+        h("div", { class: "cmt-group__body" }, annotationStrip({ notes: list, bare: true })),
+      ));
+    }
+  }
+
+  function libelleBloc(n) {
+    if (!n) return "Le document";
+    switch (n.type) {
+      // `numLabel` porte déjà le mot (« Article 2 », « Titre Ier ») : on ne le
+      // répète pas.
+      case "article": return [n.numLabel || "Article", n.heading].filter(Boolean).join(" — ");
+      case "division": return [n.numLabel || n.levelLabel || "Division", n.heading].filter(Boolean).join(" — ");
+      case "title": return "Intitulé de l'acte";
+      case "authority": return "Formule d'autorité";
+      case "visas": return "Visas";
+      case "considerants": return "Considérants";
+      case "enact": return "Formule d'édiction";
+      case "para": return "Paragraphe";
+      case "list": return "Liste";
+      case "table": return "Tableau";
+      case "signature": return "Signature";
+      case "mention": return "Mention";
+      case "annexes": return "Annexes";
+      default: return "Bloc du document";
+    }
   }
 
   // ------------------------------------------------------- onglet compléter
@@ -604,7 +1407,15 @@ export function renderRediger(root, params) {
   }
 
   function applicableFields() {
-    return (trame.fields || []).filter((f) => !f.appliesWhen || safeEval(f.appliesWhen, doc.ctx).value);
+    return (trame.fields || []).filter((f) =>
+      // Une annexe ne se signe pas : son signataire est celui de l'acte qui
+      // l'adopte, et le champ n'a donc pas lieu d'être dans son atelier de
+      // rédaction (voir src/lib/compile.js, qui l'écarte aussi à la compilation).
+      !(natureDe(trame) === "annexe" && f.type === "signataire")
+      // Une annexe n'a pas de numéro propre non plus : ni dans son atelier, ni
+      // dans le compte des champs à compléter (voir src/lib/annexes.js).
+      && !(natureDe(trame) === "annexe" && f.id === "numero")
+      && (!f.appliesWhen || safeEval(f.appliesWhen, doc.ctx).value));
   }
 
   // Aperçu de la signature sous le champ « Signataire ». La qualité s'accorde en
@@ -676,6 +1487,9 @@ export function renderRediger(root, params) {
     row.appendChild(head);
     if (f.help) row.appendChild(h("p", { class: "fr-hint", text: f.help }));
     if (f.id === "numero") {
+      // Une annexe n'arrive jamais ici : `applicableFields()` écarte le champ
+      // « numero » pour elle (elle n'a pas de numéro propre, et la séquence
+      // n'est pas consommée — voir src/lib/annexes.js).
       // Le numéro vient soit de la séquence de l'application, soit d'un service
       // externe (Administration › Numérotation) : dans ce second cas, le bouton
       // demande le numéro, et l'acte retient la ligne qui le porte.
@@ -736,9 +1550,69 @@ export function renderRediger(root, params) {
   }
 
   // --------------------------------------------------------- onglet contrôle
+  // « Article 2 — Paragraphe », pour un ajout : son texte peut être vide tant
+  // qu'on ne l'a pas écrit.
+  function libelleAjout(a) {
+    const type = a.node?.type;
+    const t = TYPE_NOMS[type] || (a.container.endsWith(".items") ? "Élément" : "Bloc");
+    const texte = a.node?.text || a.node?.heading || "";
+    return texte ? `${t} — ${resume(texte, 50)}` : t;
+  }
+
   function paintControle(box) {
     const blocking = doc.issues.filter((i) => i.level === "blocking");
     const warnings = doc.issues.filter((i) => i.level === "warning");
+    // Ce que la rédaction a changé à la STRUCTURE du document : un bloc retiré,
+    // un paragraphe ou un visa ajouté. Ce n'est pas un contrôle, et le modèle
+    // n'est pas touché — mais rien ne doit pouvoir disparaître sans trace.
+    const supp = suppressions(draft.values);
+    const ajouts = [];
+    for (const [container, list] of Object.entries(draft.values.__ajouts || {})) {
+      for (const a of list || []) ajouts.push({ container, addr: `${container}.${a.rang}`, node: a.node });
+    }
+    if (supp.length || ajouts.length) {
+      box.appendChild(h("h3", { class: "rx-h3", text: "Structure du document" }));
+      box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" },
+        text: "Ce que vous avez ajouté ou retiré par rapport à la trame. La trame n'est pas modifiée : les administrateurs verront ces changements signalés." }));
+      for (const addr of supp) {
+        box.appendChild(h("div", { class: "rx-ecart", style: { borderLeftColor: "var(--warning)" } },
+          h("div", { class: "rx-ecart__head" },
+            h("span", { class: "rx-ecart__where", text: "Retiré · " + libelleAdresse(addr) }),
+            h("span", { class: "fr-spacer" }),
+            button("Rétablir", { variant: "tertiary", size: "sm", icon: "refresh",
+              onClick: () => { retablir(draft.values, addr); redraw(); toast("Bloc rétabli dans le document", "success"); } })),
+          h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Le passage reste dans la trame ; il n'est plus dans le document." })));
+      }
+      for (const a of ajouts) {
+        box.appendChild(h("div", { class: "rx-ecart", style: { borderLeftColor: "var(--brand)" } },
+          h("div", { class: "rx-ecart__head" },
+            h("span", { class: "rx-ecart__where", text: "Ajouté · " + libelleAjout(a) }),
+            h("span", { class: "fr-spacer" }),
+            button("", { variant: "tertiary", size: "sm", icon: "eye", title: "Voir et régler ce bloc",
+              onClick: () => { ui.selPath = a.addr; ui.tab = "bloc"; redraw(); } }),
+            button("", { variant: "tertiary", size: "sm", icon: "trash", title: "Retirer ce bloc ajouté",
+              onClick: () => supprimerAdresse(a.addr) }))));
+      }
+      box.appendChild(h("hr", { class: "fr-sep" }));
+    }
+    // L'ordre des blocs : un geste de mise en page, pas un contrôle. Il se dit
+    // à part, et se défait d'un clic (« Ranger comme la trame »).
+    const ordres = ordresModifies(draft.values);
+    if (ordres.length) {
+      box.appendChild(h("h3", { class: "rx-h3", text: "Ordre du document" }));
+      box.appendChild(h("div", { class: "rx-ecart", style: { borderLeftColor: "var(--brand)" } },
+        h("div", { class: "rx-ecart__head" },
+          h("span", { class: "rx-ecart__where", text: `${ordres.length} endroit(s) réordonné(s)` }),
+          h("span", { class: "fr-spacer" }),
+          button("Ranger comme la trame", {
+            variant: "tertiary", size: "sm", icon: "refresh",
+            onClick: () => { rangerCommeLaTrame(draft.values); redraw(); toast("Ordre du modèle rétabli", "success"); },
+          })),
+        h("p", { class: "fr-small fr-muted", style: { margin: 0 },
+          text: "Vous avez déplacé des blocs (articles, divisions, paragraphes) par rapport au modèle. La trame elle-même n'est pas modifiée ; les administrateurs le verront." }),
+      ));
+      box.appendChild(h("hr", { class: "fr-sep" }));
+    }
     box.appendChild(h("h3", { class: "rx-h3", text: "Contrôles de la trame" }));
     if (!doc.issues.length) {
       box.appendChild(h("p", { class: "fr-small", style: { color: "var(--success)", margin: 0 }, text: "✓ Aucun contrôle en échec." }));
@@ -759,8 +1633,15 @@ export function renderRediger(root, params) {
       box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Aucun passage réécrit : le texte suit exactement le modèle." }));
       return;
     }
+    const nbTextes = doc.ecarts.filter((e) => !e.reglage).length;
+    const nbReglages = doc.ecarts.length - nbTextes;
     box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" },
-      text: `${doc.ecarts.length} passage(s) réécrit(s) par rapport au modèle. C'est autorisé, mais les administrateurs le verront.` }));
+      text: [
+        nbTextes ? `${nbTextes} passage(s) réécrit(s)` : "",
+        nbReglages ? `${nbReglages} réglage(s) de bloc modifié(s)` : "",
+      ].filter(Boolean).join(" · ") + " par rapport au modèle. C'est autorisé, mais les administrateurs le verront." }));
+    const ligne = (k, cls, v) => h("p", { class: "rx-ecart__line" },
+      h("span", { class: "rx-ecart__k", text: k }), h("span", { class: cls, text: v }));
     for (const e of doc.ecarts) {
       const loc = locateAddr(doc, e.addr);
       const card = h("div", { class: "rx-ecart" },
@@ -769,18 +1650,42 @@ export function renderRediger(root, params) {
           h("span", { class: "fr-spacer" }),
           button("Revenir à la trame", {
             variant: "tertiary", size: "sm",
-            onClick: () => { delete overrides[e.addr]; redraw(); toast("Texte du modèle rétabli", "success"); },
+            onClick: () => { delete overrides[e.addr]; redraw(); toast("Réglage du modèle rétabli", "success"); },
           }),
         ),
-        h("p", { class: "rx-ecart__line" },
-          h("span", { class: "rx-ecart__k", text: "modèle" }),
-          h("span", { class: "rx-ecart__was", text: interpolate(e.original, doc.ctx) || "—" })),
-        h("p", { class: "rx-ecart__line" },
-          h("span", { class: "rx-ecart__k", text: "vous" }),
-          h("span", { class: "rx-ecart__now", text: interpolate(e.current, doc.ctx) || "(texte supprimé)" })),
+        e.reglage
+          ? ligne("modèle", "rx-ecart__was", libelleReglage(e.addr, e.original))
+          : ligne("modèle", "rx-ecart__was", interpolate(e.original, doc.ctx) || "—"),
+        e.reglage
+          ? ligne("vous", "rx-ecart__now", libelleReglage(e.addr, e.current))
+          : ligne("vous", "rx-ecart__now", interpolate(e.current, doc.ctx) || "(texte supprimé)"),
       );
       box.appendChild(card);
     }
+  }
+
+  // Un réglage se lit en clair (jamais « first » ni « 3 » tout court).
+  function libelleReglage(addr, v) {
+    const k = String(addr).split(".").pop();
+    // La valeur d'un choix se dit par son libellé, celui du vocabulaire qui l'a
+    // proposé (voir les listes de `lib/schema.js`).
+    const dans = (liste, defaut = "—") => (liste.find((x) => String(x.id) === String(v ?? ""))?.label) || defaut;
+    const ouiNon = () => (v === true || v === "true" ? "Oui" : "Non");
+    if (k === "numMode") return String(v) === "fixed" || String(v) === "manual" ? "Écrite à la main" : "Automatique";
+    if (k === "level") {
+      const n = ladderOf(trame).find((x) => String(x.level) === String(v));
+      return (n?.label || "Échelon") + " (échelon " + v + ")";
+    }
+    if (k === "align") return dans(PARA_ALIGNS);
+    if (k === "indent") return dans(PARA_INDENTS);
+    if (k === "marker") return dans(LIST_MARKERS);
+    if (k === "numbering") return dans(LIST_NUMBERINGS);
+    if (k === "layout") return dans(TABLE_LAYOUTS);
+    if (k === "captionPos") return dans(TABLE_CAPTION_POS);
+    if (k === "fin") return dans(RECITAL_FINS, "Aucune");
+    if (k === "ordered") return v ? "Numérotée" : "À puces";
+    if (k === "boxed" || k === "inline" || k === "head") return ouiNon();
+    return String(v ?? "—") || "—";
   }
 
   // ---------------------------------------------------- onglet abrogations
@@ -1111,7 +2016,7 @@ export function renderRediger(root, params) {
 
   function save() {
     const nouveau = !draft.acteId;
-    doc = compile(trame, draft.values, config);
+    doc = compileDoc();
     const blocking = doc.issues.filter((i) => i.level === "blocking").length;
     const now = new Date().toISOString();
     const ecarts = doc.ecarts.map((e) => {
@@ -1128,6 +2033,7 @@ export function renderRediger(root, params) {
       if (change) ajouterRevision(a, { label: "Enregistrement", by: state.user?.id || "", byName: state.user ? fullName(state.user) : "" });
       Object.assign(a, {
         values: structuredClone(draft.values), statut: blocking ? "brouillon" : "pret",
+        nature: natureDe(trame),
         updatedAt: now, issues: doc.issues, eli: doc.meta.eli,
         overrides: structuredClone(overrides), ecarts,
         numero: draft.values.numero || "", objet: draft.values.objet || "",
@@ -1145,6 +2051,11 @@ export function renderRediger(root, params) {
         bureauId: trame.bureauId || "",
         numero: draft.values.numero || "",
         objet: draft.values.objet || "",
+        // L'annexe et son acte d'adoption, ou les documents annexés à l'acte :
+        // deux liens figés par la rédaction (voir src/lib/annexes.js).
+        nature: natureDe(trame),
+        adoptePar: draft.values.__adoption || null,
+        annexes: draft.values.__annexes || [],
         numeroSource: draft.numeroSource || null,
         entityId: draft.values.__entityId,
         dateSignature: draft.values.dateSignature || "",
@@ -1186,7 +2097,7 @@ export function renderRediger(root, params) {
   }
 
   function exportMenu() {
-    doc = compile(trame, draft.values, config);
+    doc = compileDoc();
     const blocking = doc.issues.filter((i) => i.level === "blocking");
     const base = (draft.values.numero || trame.id).replace(/[^\w-]+/g, "_");
     const body = h("div", { class: "fr-stack" });
@@ -1227,9 +2138,34 @@ export function renderRediger(root, params) {
 
   rx.save = save;
   rx.exportMenu = exportMenu;
+
+  // Le premier rendu de l'écran — une fois TOUT le corps de la fonction évalué
+  // (voir le commentaire plus haut, à la place des colonnes).
+  paintPaper(true);
+  paintPalette();
+  paintStatus();
+  paintPanel();
 }
 
 // --------------------------------------------------------------------------
+// L'adresse d'un bloc dans la TRAME (`body.3`, `body.3.blocks.1`, `body.2.items.0`).
+// Défini ici plutôt qu'importé de l'éditeur de trame : modifier.js importe ce
+// module, et le cycle n'apporterait rien.
+function nodeAt(trame, path) {
+  const parts = String(path || "").split(".").filter(Boolean);
+  let cur = trame;
+  for (const p of parts) {
+    if (cur == null) return null;
+    cur = cur[/^\d+$/.test(p) ? Number(p) : p];
+  }
+  return cur || null;
+}
+
+const resume = (text, max) => {
+  const t = String(text || "");
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+};
+
 function isEmpty(f, v) {
   if (v == null || v === "") return true;
   if (Array.isArray(v) && !v.length) return true;

@@ -698,9 +698,14 @@ export function styleCss(style, config, { scope = "" } = {}) {
   const ruleBox = (sel, sides, decl) => { const d = boxSides(sides, decl); if (d.length) rule2(sel, d.join(";")); };
 
   // -- corps du document
+  // La règle porte aussi la PALETTE, sous forme de variables : les réglages
+  // posés bloc par bloc (encadré d'un paragraphe, filets d'un tableau —
+  // voir `paramsBloc`, lib/schema.js) s'y réfèrent, et suivent donc la charte
+  // de la collectivité au lieu de coder des couleurs en dur.
   rule2(R(".doc"),
     `font-family:${font};font-size:${ptv(s.fontSize, "11pt")};line-height:${num(s.lineHeight, 1.5)};color:${ink}`
     + `;letter-spacing:${emv(s.letterSpacing, "0em")}`
+    + `;--doc-ink:${ink};--doc-muted:${muted};--doc-rule:${rule};--doc-grid:${gridLine};--doc-soft:${soft};--doc-neutral:${neutral};--doc-heading:${headingColor}`
     + (s.hyphens ? ";hyphens:auto;-webkit-hyphens:auto" : ""));
 
   // -- cadre de page : un filet (ou deux) tout autour du texte
@@ -768,7 +773,12 @@ export function styleCss(style, config, { scope = "" } = {}) {
   rule2(A("ul.doc-list"), `list-style-type:${LIST_MARKER[s.listMarker] || "disc"};padding-left:${indent}`);
   const numbering = LIST_NUMBER[s.listNumbering] || "decimal";
   rule2(A("ol.doc-list"), `list-style-type:${numbering};padding-left:${indent}`);
-  if (COUNTER_STYLES[numbering]) w.push(`@counter-style ${numbering}{${COUNTER_STYLES[numbering]}}`);
+  // Tous les compteurs sur mesure sont déclarés, pas seulement celui de la
+  // feuille : une liste peut choisir sa numérotation BLOC PAR BLOC (« 1° »,
+  // « a) », « i. » — voir `paramsBloc`, lib/schema.js) sans que l'on touche à
+  // la charte. Six règles de plus, et toutes les numérotations restent
+  // possibles partout.
+  for (const [name, decl] of Object.entries(COUNTER_STYLES)) w.push(`@counter-style ${name}{${decl}}`);
 
   // -- formule d'édiction
   if (s.enactStyle === "rule") rule2(A(".doc-enact"), `border-top:${W} solid ${rule};border-bottom:${W} solid ${rule};padding:.35em 0`);

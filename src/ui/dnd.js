@@ -1,113 +1,267 @@
 // ============================================================================
 // Glisser-déposer — primitives partagées.
 //
-// L'éditeur de trame s'en sert pour trois gestes qui doivent se comprendre sans
+// L'éditeur de trame s'en sert pour quatre gestes qui doivent se comprendre sans
 // mode d'emploi (le public visé n'est pas informaticien) :
 //
 //   • glisser un CHAMP dans le texte d'un bloc : la pastille est insérée là où
 //     on la lâche (le point de dépôt est converti en position de curseur) ;
 //   • glisser un BLOC neuf depuis la réserve de blocs ;
-//   • glisser un bloc EXISTANT (depuis le plan ou le document) pour le ranger.
+//   • glisser un bloc EXISTANT (depuis le plan ou le document) pour le ranger ;
+//   • glisser une QUESTION pour changer l'ordre du formulaire.
 //
-// Deux choses apprises à la dure :
+// Deux gestes du même moteur : on SAISIT une prise (`glissable`), on la LÂCHE
+// sur une cible (`deposable`).
 //
-//   1. `dataTransfer.getData()` est VIDE pendant `dragover` — règle des
-//      navigateurs, pour empêcher un site de lire les données préparées par un
-//      autre document. On garde donc la charge utile courante dans une variable
-//      de module : c'est fiable ici, un glisser-déposer ne quittant jamais la
-//      page.
-//   2. Une cible qui n'accepte pas la charge déposée ne doit PAS appeler
-//      `preventDefault()` : le navigateur affiche alors le curseur « interdit »
-//      et l'utilisateur comprend le refus sans qu'on ait à le lui écrire.
+// ---------------------------------------------------------------------------
+// POURQUOI PAS LE GLISSER-DÉPOSER HTML5
+//
+// Il a été essayé, et remplacé. Trois raisons, apprises à la dure :
+//
+//   1. **Il ne fonctionne pas au doigt.** Ni sur iOS, ni de façon fiable sur
+//      Android : la tablette est un poste de travail courant, et un geste qui
+//      n'y répond pas est un geste qui n'existe pas.
+//   2. **Le navigateur interrompt le glisser dès que la source quitte le
+//      document.** Or ici un re-rendu peut suivre la perte du focus d'un bloc
+//      en cours d'édition (`blurGuard`) : le bloc se réécrit, la poignée
+//      saisie disparaît de l'arbre, et le glisser meurt sans rien dire.
+//   3. **Il ne dit pas où l'on lâche.** Il faut de toute façon un
+//      `elementFromPoint` pour savoir sur quoi on dépose — et une fois qu'on
+//      l'a, son `dataTransfer` n'apporte plus rien.
+//
+// Le moteur s'appuie donc sur les POINTER EVENTS, qui couvrent souris, doigt et
+// stylet, et que l'on peut éprouver par des événements synthétiques.
+//
+// ---------------------------------------------------------------------------
+// LE CLIC RESTE UN CLIC
+//
+// Rien n'est saisi avant que le pointeur n'ait bougé de quelques pixels : un
+// appui sans déplacement laisse passer le clic (c'est ce qui fait qu'un bouton
+// reste un bouton). Et là où le texte s'édite, le texte reste sélectionnable :
+// une prise posée sur un bloc ENTIER ne démarre pas dans une zone éditable —
+// on déplace le bloc par son intitulé, ses marges, sa barre d'outils ; on
+// sélectionne son texte à la souris.
+//
+// Une prise déclarée `auDoigt` reçoit `touch-action: none` : le contact
+// démarre un glisser au lieu de faire défiler la page. C'est le cas des
+// poignées ⠿, et d'elles seules — ailleurs, le doigt doit continuer de faire
+// défiler.
 //
 // Le module ne connaît ni les champs ni les blocs : il ne manipule que des
-// charges utiles `{ kind, label, ... }` et des nœuds DOM.
+// charges utiles `{ kind, label, ... }` et des nœuds DOM, et convertit un point
+// de dépôt en position de curseur.
 // ============================================================================
 
-export const MIME = "application/x-scribae";
+// ---------------------------------------------------------------- registres
+// Les prises (ce que l'on saisit) et les cibles (ce qui accepte un dépôt).
+// Deux WeakMap : rien à défaire quand un nœud quitte le document.
+const prises = new WeakMap();
+const cibles = new WeakMap();
 
-let courant = null;
 let installe = false;
+
+// La candidature : un appui sur une prise, tant qu'il n'a pas bougé.
+let candidat = null;   // { el, opt, id, depuis }
+// Le glisser en cours.
+let courant = null;    // la charge en vol
+let sourceEl = null;   // l'élément saisi
+let cibleEl = null;    // la cible survolée
+let cibleOpt = null;
+let actif = false;
+let fantome = null;
+let boucle = null;     // la boucle d'animation du glisser (autodéfilement)
+let point = { x: 0, y: 0 };
+
+const SEUIL = 6;       // pixels avant que l'appui ne devienne un glisser
 
 function installer() {
   if (installe) return;
   installe = true;
-  // Filet de sécurité : quel que soit le chemin (dépôt refusé, source
-  // reconstruite pendant le glisser, Échap), l'état visuel est remis à zéro.
-  document.addEventListener("dragend", () => terminer());
-  document.addEventListener("drop", () => terminer());
+  document.addEventListener("pointerdown", aLAppui, true);
+  document.addEventListener("pointermove", auMouvement, true);
+  document.addEventListener("pointerup", auRelachement, true);
+  // Un contact qui devient un défilement (ou que le système reprend) annule le
+  // glisser : c'est ce que fait le doigt quand il fait défiler la page.
+  document.addEventListener("pointercancel", () => terminer(), true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") terminer(); }, true);
   window.addEventListener("blur", () => terminer());
 }
 
-export function terminer() {
-  courant = null;
-  document.documentElement.classList.remove("dnd-actif");
-  document.querySelectorAll(".dnd-sur").forEach((el) => el.classList.remove("dnd-sur"));
-}
-
-export const chargeCourante = () => courant;
-
-function lire(e) {
-  try {
-    const brut = e.dataTransfer?.getData(MIME);
-    return brut ? JSON.parse(brut) : null;
-  } catch (err) { return null; }
-}
-
-// ------------------------------------------------------------------- source
-// `charge` : { kind: "champ" | "auto" | "bloc" | "deplacement", label, ... }.
-export function glissable(el, charge, { onDebut, onFin } = {}) {
+// -------------------------------------------------------------------- prise
+// `charge` : { kind: "champ" | "auto" | "bloc" | "deplacement" | "rangement" | "mv", label, ... }.
+// `auDoigt` : la prise répond au doigt (voir l'en-tête).
+// `onFin`   : appelé dans tous les cas à la fin du geste (dépôt, annulation).
+export function glissable(el, charge, { auDoigt = false, onFin } = {}) {
   installer();
-  el.draggable = true;
-  el.addEventListener("dragstart", (e) => {
-    courant = charge;
-    document.documentElement.classList.add("dnd-actif");
-    try {
-      e.dataTransfer.effectAllowed = "copyMove";
-      e.dataTransfer.setData(MIME, JSON.stringify(charge));
-      // Repli texte : un dépôt hors de l'application ne casse rien.
-      e.dataTransfer.setData("text/plain", charge.label || "");
-    } catch (err) { /* certains navigateurs refusent setData pendant dragstart ? sans conséquence */ }
-    el.classList.add("dnd-source");
-    // `onDebut` sert à l'aperçu de glisser (`setDragImage`) : il lève si le
-    // navigateur n'est pas dans un vrai glisser — sans conséquence ici.
-    try { onDebut?.(e); } catch (err) { /* aperçu indisponible : on continue */ }
-  });
-  el.addEventListener("dragend", () => {
-    el.classList.remove("dnd-source");
-    onFin?.();
-    terminer();
-  });
+  prises.set(el, { charge, onFin });
+  if (auDoigt) {
+    el.classList.add("dnd-prise-doigt");
+    el.style.touchAction = "none";
+  }
   return el;
 }
 
 // -------------------------------------------------------------------- cible
-// `accepte(charge)` filtre ; `onDepot(charge, evenement)` agit.
-// `halo(el, charge)` (facultatif) permet de nuancer l'aperçu (avant / après).
+// `accepte(charge)` filtre ; `onDepot(charge, point)` agit — `point` porte
+// `clientX` / `clientY`, comme un événement de pointeur.
+// `halo(el, charge, point)` (facultatif) nuance l'aperçu (avant / après).
+// `classe` est la classe posée sur la cible survolée.
 export function deposable(el, { accepte, onDepot, halo, classe = "dnd-sur" } = {}) {
   installer();
-  const ok = (c) => !!c && (!accepte || accepte(c));
-  el.addEventListener("dragover", (e) => {
-    if (!ok(courant)) return;           // pas de preventDefault : dépôt refusé
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = courant.kind === "deplacement" ? "move" : "copy";
-    el.classList.add(classe);
-    if (halo) halo(el, courant, e);
-  });
-  el.addEventListener("dragleave", (e) => {
-    if (el.contains(e.relatedTarget)) return;
-    el.classList.remove(classe, "dnd-avant", "dnd-apres");
-  });
-  el.addEventListener("drop", (e) => {
-    const charge = courant || lire(e.dataTransfer);
-    el.classList.remove(classe, "dnd-avant", "dnd-apres");
-    if (!ok(charge)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    terminer();
-    onDepot(charge, e);
-  });
+  cibles.set(el, { accepte, onDepot, halo, classe });
   return el;
+}
+
+export const chargeCourante = () => courant;
+
+// La prise la plus proche du point d'appui (c'est la plus fine qui gagne : une
+// poignée posée dans un bloc se saisit avant le bloc lui-même).
+function sourcePour(node) {
+  for (let n = node; n; n = n.parentElement) if (prises.has(n)) return { el: n, opt: prises.get(n) };
+  return null;
+}
+
+// La cible qui ACCEPTE la charge, en remontant depuis le point visé : un
+// paragraphe qui refuse un bloc laisse passer à l'article qui le contient —
+// exactement ce que ferait la remontée d'un événement.
+function ciblePour(x, y) {
+  let n = typeof document.elementFromPoint === "function" ? document.elementFromPoint(x, y) : null;
+  while (n) {
+    const opt = cibles.get(n);
+    if (opt && (!opt.accepte || opt.accepte(courant))) return n;
+    n = n.parentElement;
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------- appui
+function aLAppui(e) {
+  if (actif) terminer();                    // filet : un glisser resté ouvert
+  if (e.button !== 0) return;               // bouton principal seulement
+  const src = sourcePour(e.target);
+  if (!src) return;
+  // Le doigt ne déplace que les prises faites pour lui (les poignées) :
+  // partout ailleurs, le doigt doit faire défiler le document.
+  if (e.pointerType === "touch" && !src.el.classList.contains("dnd-prise-doigt")) return;
+  // Un contrôle qui COMMANDE (bouton, champ, zone de texte éditable, résumé
+  // dépliable) l'emporte sur la prise, sauf s'il appartient à la prise
+  // elle-même : cliquer « supprimer ce bloc » ne déplace pas le bloc, et
+  // sélectionner un mot ne le déplace pas non plus.
+  const inter = e.target.closest?.("button, a, input, select, textarea, summary, [contenteditable='true']");
+  if (inter && inter !== src.el && !inter.contains(src.el)) return;
+  candidat = { el: src.el, opt: src.opt, id: e.pointerId, depuis: { x: e.clientX, y: e.clientY } };
+}
+
+function auMouvement(e) {
+  if (!candidat || (e.pointerId != null && e.pointerId !== candidat.id)) return;
+  if (!actif) {
+    const d = Math.abs(e.clientX - candidat.depuis.x) + Math.abs(e.clientY - candidat.depuis.y);
+    if (d < SEUIL) return;
+    demarrer(e);
+    return;
+  }
+  point = { x: e.clientX, y: e.clientY };
+  placerFantome(point);
+}
+
+function demarrer(e) {
+  actif = true;
+  courant = candidat.opt.charge;
+  sourceEl = candidat.el;
+  point = { x: e.clientX, y: e.clientY };
+  document.documentElement.classList.add("dnd-actif");
+  sourceEl.classList.add("dnd-source");
+  // La sélection de texte a pu commencer avant le seuil : on la retire.
+  try { window.getSelection()?.removeAllRanges?.(); } catch (err) { /* sans sélection */ }
+  fantome = document.createElement("div");
+  fantome.className = "dnd-fantome";
+  fantome.textContent = courant.label || "Déplacer";
+  document.body.appendChild(fantome);
+  placerFantome(point);
+  boucle = requestAnimationFrame(tourner);
+}
+
+// La boucle du glisser : le pointeur ne bouge pas, mais la page peut défiler
+// sous lui (autodéfilement) — et la cible change alors sans `pointermove`.
+function tourner() {
+  boucle = requestAnimationFrame(tourner);
+  autodefiler();
+  const c = ciblePour(point.x, point.y);
+  if (c !== cibleEl) {
+    nettoyerCible();
+    cibleEl = c;
+    cibleOpt = c ? cibles.get(c) : null;
+    if (c) marquer(c);
+  } else if (c && cibleOpt?.halo) {
+    cibleOpt.halo(c, courant, point);      // « avant » ou « après » selon la moitié
+  }
+}
+
+function marquer(c) {
+  if (!cibleOpt) return;
+  c.classList.add(cibleOpt.classe);
+  cibleOpt.halo?.(c, courant, point);
+}
+
+function nettoyerCible() {
+  if (cibleEl) cibleEl.classList.remove(cibleOpt?.classe || "dnd-sur", "dnd-avant", "dnd-apres");
+  cibleEl = null;
+  cibleOpt = null;
+}
+
+// Autodéfilement : quand on glisse près du bord d'une zone qui défile, la zone
+// suit — sans quoi l'on ne peut pas déposer plus loin que l'écran.
+function autodefiler() {
+  const MARGE = 46;
+  const PAS = 18;
+  let n = typeof document.elementFromPoint === "function" ? document.elementFromPoint(point.x, point.y) : null;
+  while (n) {
+    const r = n.getBoundingClientRect();
+    if (r.height > 80 && n.scrollHeight > n.clientHeight + 4) {
+      const ov = getComputedStyle(n).overflowY;
+      if (ov === "auto" || ov === "scroll") {
+        if (point.y < r.top + MARGE) n.scrollTop -= PAS;
+        else if (point.y > r.bottom - MARGE) n.scrollTop += PAS;
+        return;
+      }
+    }
+    n = n.parentElement;
+  }
+}
+
+function placerFantome(p) {
+  if (!fantome) return;
+  fantome.style.left = p.x + 14 + "px";
+  fantome.style.top = p.y + 14 + "px";
+}
+
+// --------------------------------------------------------------- relâchement
+function auRelachement(e) {
+  if (!candidat || (e.pointerId != null && e.pointerId !== candidat.id)) return;
+  const charge = actif ? courant : null;
+  const c = charge ? (cibleEl || ciblePour(e.clientX, e.clientY)) : null;
+  const opt = c ? cibles.get(c) : null;
+  const fin = candidat.opt.onFin;
+  const compte = actif;
+  terminer();
+  if (compte) {
+    if (c && opt && (!opt.accepte || opt.accepte(charge))) opt.onDepot(charge, { clientX: e.clientX, clientY: e.clientY });
+    fin?.();
+  }
+}
+
+// Remet tout à zéro : quelle que soit la sortie (dépôt, Échap, contact repris
+// par le système, perte du focus de la fenêtre), l'état visuel est nettoyé.
+export function terminer() {
+  if (boucle) { cancelAnimationFrame(boucle); boucle = null; }
+  if (fantome) { fantome.remove(); fantome = null; }
+  if (sourceEl) sourceEl.classList.remove("dnd-source");
+  nettoyerCible();
+  document.documentElement.classList.remove("dnd-actif");
+  candidat = null;
+  courant = null;
+  sourceEl = null;
+  actif = false;
 }
 
 // Position (avant / après) selon la moitié survolée — le geste habituel des

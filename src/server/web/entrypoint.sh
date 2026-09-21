@@ -26,12 +26,15 @@ done
 
 export API_BASE="${API_BASE:-}"
 export API_TOKEN="${API_TOKEN:-}"
+export AUTH_MODE="${AUTH_MODE:-}"
+export DEMO_ACCOUNTS="${DEMO_ACCOUNTS:-}"
 
 if [ -r "$TPL/config.js.template" ]; then
   if command -v envsubst >/dev/null 2>&1; then
-    envsubst '${API_BASE} ${API_TOKEN}' < "$TPL/config.js.template" > "$WWW/config.js" || erreur=1
+    envsubst '${API_BASE} ${API_TOKEN} ${AUTH_MODE} ${DEMO_ACCOUNTS}' < "$TPL/config.js.template" > "$WWW/config.js" || erreur=1
   else
     sed -e "s|\${API_BASE}|$API_BASE|g" -e "s|\${API_TOKEN}|$API_TOKEN|g" \
+      -e "s|\${AUTH_MODE}|$AUTH_MODE|g" -e "s|\${DEMO_ACCOUNTS}|$DEMO_ACCOUNTS|g" \
       "$TPL/config.js.template" > "$WWW/config.js" || erreur=1
   fi
   chmod 644 "$WWW/config.js" 2>/dev/null || true
@@ -40,5 +43,5 @@ fi
 if [ "$erreur" = "1" ]; then
   echo "Scribae — la préparation de $WWW a échoué ; vérifiez le montage de ./web."
 else
-  echo "Scribae — application préparée dans $WWW (API : ${API_BASE:-même origine})."
+  echo "Scribae — application préparée dans $WWW (API : ${API_BASE:-même origine}, mode : ${AUTH_MODE:-référentiel})."
 fi

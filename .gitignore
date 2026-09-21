@@ -1,13 +1,11 @@
-# Système
+# Dépendances
+node_modules/
+
+# Système / éditeur
 .DS_Store
 Thumbs.db
-desktop.ini
+*.swp
 
-# Éditeurs et outils locaux
-.vscode/
-.idea/
-node_modules/
+# Divers
 scratch/
-
-# Journaux
 *.log

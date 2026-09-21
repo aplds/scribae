@@ -22,7 +22,7 @@ import { ROLES, ROLE_ORDER, accountUsable, isDemoUser, sourceOf, estVisiteur } f
 import { scopeLabel } from "../lib/scope.js";
 import {
   AUTH_MODES, UNKNOWN_POLICIES, authConfig, emptyAuth, isOidc, isTestProvider,
-  providerLabel, providerProblems, redirectUriFor, demoAccountsDisabled,
+  providerLabel, providerProblems, redirectUriFor, demoAccountsDisabled, modeDeploiement,
 } from "../lib/auth.js";
 import {
   AuthError, buildAuthorizationUrl, completeAuthorizationFromUrl, discover,
@@ -271,29 +271,48 @@ export function annuairePanel(save, redraw, card) {
   const commit = () => { save(); };
   const change = async (fn, opts = {}) => { fn(); commit(); if (opts.auth) { await applyAuthMode(); } if (opts.rerender) redraw(); };
 
+  // Le mode « comptes locaux » (mot de passe) ne se règle PAS ici : il dépend du
+  // service qui héberge l'application, et c'est son fichier `.env` qui fait foi
+  // (`AUTH_MODE=password`, voir src/server/README.md). On ne l'offre donc pas au
+  // choix du référentiel — sinon un administrateur pourrait exiger un mot de
+  // passe qu'aucun service ne vérifie, et se retrouver enfermé dehors.
+  const impose = modeDeploiement();
+  const modesReferentiel = AUTH_MODES.filter((m) => m.id !== "password");
+  const demoOuverts = !demoAccountsDisabled(state.config);
+
   wrap.appendChild(card("Mode de connexion",
-    "L'application sait ouvrir une session de deux façons : par ses propres comptes (démonstration), ou par l'annuaire de la collectivité (OpenID Connect). Brancher l'annuaire désactive automatiquement les comptes de démonstration : ils ne sont plus proposés à la connexion et ne peuvent plus ouvrir de session.",
-    choiceField({
-      label: "Qui délivre les identités ?",
-      value: a.mode,
-      options: AUTH_MODES.map((m) => ({ value: m.id, label: m.label })),
-      help: AUTH_MODES.find((m) => m.id === a.mode)?.summary,
-      onChange: (v) => change(() => {
-        a.mode = v;
-        // Aucun fournisseur encore renseigné : l'annuaire d'essai prend le
-        // relais, pour ne jamais bloquer l'installation sur un écran de
-        // connexion inutilisable.
-        if (v === "oidc" && !String(a.issuer || "").trim()) a.test = true;
-      }, { auth: true, rerender: true }),
-    }),
+    "L'application sait ouvrir une session de deux façons, que vous choisissez ici : par ses propres comptes (démonstration, sans mot de passe), ou par l'annuaire de la collectivité (OpenID Connect). Brancher l'annuaire désactive automatiquement les comptes de démonstration : ils ne sont plus proposés à la connexion et ne peuvent plus ouvrir de session. Un troisième mode — des comptes locaux protégés par un mot de passe — ne se règle pas ici : il dépend du service qui héberge l'application, et s'active dans le fichier `.env` du déploiement (`AUTH_MODE=password`).",
+    impose === "password"
+      ? h("div", { class: "fr-alert fr-alert--info" },
+        h("p", { class: "fr-alert__title", text: "Mode « comptes locaux » imposé par le déploiement" }),
+        h("p", { text: "Le service qui héberge l'application exige un identifiant et un mot de passe (AUTH_MODE=password). Ce réglage du déploiement prime sur le référentiel : le choix ci-dessous est sans effet tant qu'il est en place." }))
+      : choiceField({
+        label: "Qui délivre les identités ?",
+        value: a.mode,
+        options: modesReferentiel.map((m) => ({ value: m.id, label: m.label })),
+        help: modesReferentiel.find((m) => m.id === a.mode)?.summary,
+        onChange: (v) => change(() => {
+          a.mode = v;
+          // Aucun fournisseur encore renseigné : l'annuaire d'essai prend le
+          // relais, pour ne jamais bloquer l'installation sur un écran de
+          // connexion inutilisable.
+          if (v === "oidc" && !String(a.issuer || "").trim()) a.test = true;
+        }, { auth: true, rerender: true }),
+      }),
     statusLine(),
     h("div", { style: { marginTop: "10px" } }, helpLink("annuaire", "Comment brancher l'annuaire")),
   ));
 
-  if (a.mode !== "oidc") {
+  if (a.mode !== "oidc" || impose === "password") {
     wrap.appendChild(card("Comptes de démonstration",
-      "Les comptes de démonstration sont actifs : c'est le réglage d'origine, pour essayer l'application. L'écran de connexion les présente par profil (administrateur, éditeur, rédacteur) et un clic ouvre la session, sans mot de passe.",
-      h("p", { class: "fr-small fr-muted", text: "Pour passer en production, choisissez « Annuaire de la collectivité (OIDC) » ci-dessus : les comptes de démonstration seront désactivés automatiquement, et pourront être réactivés si l'on revient à ce mode." }),
+      demoOuverts
+        ? "Les comptes de démonstration sont actifs : l'écran de connexion les présente par profil (administrateur, éditeur, rédacteur) et un clic ouvre la session, sans mot de passe. C'est le réglage d'origine, pour essayer l'application."
+        : "Les comptes de démonstration sont fermés : seul un compte local (identifiant et mot de passe) ouvre une session.",
+      h("p", { class: "fr-small fr-muted", text: impose === "password"
+        ? (demoOuverts
+          ? "Sur ce service, le raccourci « choisir un compte » reste ouvert (DEMO_ACCOUNTS=true) : pratique pour essayer, à fermer en service dans le fichier `.env`."
+          : "C'est le service qui en décide (DEMO_ACCOUNTS=false dans le fichier `.env`) : le référentiel n'a pas voix au chapitre dans ce mode.")
+        : "Pour passer en production, choisissez « Annuaire de la collectivité (OIDC) » ci-dessus : les comptes de démonstration seront désactivés automatiquement, et pourront être réactivés si l'on revient à ce mode." }),
     ));
     return wrap;
   }

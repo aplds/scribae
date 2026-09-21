@@ -154,6 +154,10 @@ numérotation).
 {
   id, name, version, familyId, actTypeId, status,
   description, owner, entityIds:[] , serviceId, bureauId,
+  nature,                  // "acte" (défaut) | "annexe" — un document adopté par un autre (§ 2.2.4)
+  adoptionVisa,            // annexe : rappeler l'acte d'adoption en tête des visas (true par défaut)
+  reglement,               // annexe : true = RÈGLEMENT, publié à part au recueil à titre informatif (§ 2.2.4 ter)
+  divisions: [],           // l'échelle des divisions de CETTE trame (§ 2.2.3) ; vide = échelle livrée
   publishable,             // true par défaut ; false = trame non publiable
   styleId,                 // feuille de style (charte) désignée, "" = automatique
   circuitId,               // circuit de validation désigné, "" = automatique, "aucun" = pas de parapheur
@@ -161,6 +165,8 @@ numérotation).
   notification,            // "" (règle générale) | "requise" | "aucune" — notification aux intéressés
   fields: [ Field ], rules: [ Rule ], body: [ Node ]
 }
+
+Niveau = { level, label, num }   // un échelon de division : « Livre »/roman, « Titre »/roman…
 
 Field = { id, label, type, required, group, help, placeholder, options,
           format, refKind, appliesWhen }
@@ -171,11 +177,18 @@ Rule  = { id, level:"blocking"|"warning"|"info", kind:"check"|"inclusion",
 Node  = { id, type, ...propriétés..., when, notes:[Note], amend }
 
 Note  = { id, author, date, kind:"legal"|"instruction"|"question"|"watch",
-          text, ruleId }
+          text, quote, ruleId }
 ```
 
-Types de nœuds : `title`, `authority`, `visas`, `considerants`, `enact`, `article`,
-`para`, `list`, `table`, `signature`, `mention`, `raw`.
+`Note` est un **commentaire de préparation** posé sur un bloc — il peut citer un **passage**
+(§ 2.2.5).
+
+Types de nœuds : `title`, `authority`, `visas`, `considerants`, `enact`, `division`,
+`article`, `para`, `list`, `table`, `signature`, `mention`, `raw`.
+
+Un `division` porte `level` (son échelon dans `trame.divisions`), `numMode`
+(`auto` | `manual`), `num`, `heading`, et **`blocks`** — qui contient ses articles et ses
+divisions imbriquées. Un `article` a la même forme (`heading`, `blocks`).
 
 Dans tout texte : `{{chemin}}` (avec filtres `|upper`, `|lower`, `|capitalize`,
 `|date-long`, `|date-short`, `|money`).
@@ -191,6 +204,75 @@ les valeurs par défaut (`newTrame`) et régénère tous les identifiants — un
 bloc `aide` documente chaque clé, chaque type de bloc/champ/règle/commentaire et les jetons, et
 un bloc `trame` est un exemple complet et valide. Les erreurs bloquantes sont listées avant tout
 import ; les corrections automatiques (type inconnu, valeur par défaut) sont signalées après.
+
+#### 2.2.1 bis Importer un document (.docx, .odt)
+
+Un éditeur importe son modèle d'acte **tel qu'il l'a écrit** dans un traitement de texte. Le
+bouton « Importer une trame » accepte aussi bien un **document Word** (`.docx`) qu'un
+**document LibreOffice** (`.odt`) — la distinction se fait sur l'extension, un document étant
+binaire quand un fichier de trames est du texte. `src/lib/doc-import.js` ouvre l'archive ZIP
+sans aucune dépendance (repérage de l'EOCD, lecture du répertoire central,
+`DecompressionStream("deflate-raw")`) et lit le XML avec le `DOMParser` du navigateur :
+`word/document.xml` pour Word (`word/numbering.xml` distinguant liste numérotée et liste à
+puces), `content.xml` pour LibreOffice (les `text:list-style` jouant le même rôle). Le texte est
+pris **tel qu'il se présente** : les passages supprimés par une révision Word ne sont pas
+importés.
+
+`trameDepuisBlocs` reconnaît la structure d'un acte administratif et en fait une trame :
+
+| Élément du document | Ce qu'il devient |
+| --- | --- |
+| Ligne de la collectivité (mairie, département, établissement…) | bloc **Autorité** (la ligne d'État « RÉPUBLIQUE FRANÇAISE » n'est retenue qu'à défaut) |
+| Intitulé, avec son numéro, sa date et son « portant … » | bloc **Intitulé**, où ils deviennent `{{numero}}`, `{{dateSignature}}` et `{{objet}}` — l'objet donnant aussi son **nom** à la trame |
+| « Vu … » | bloc **Visas** (un élément par ligne) |
+| « Considérant … » | bloc **Considérants** |
+| « ARRÊTE », « DÉCIDE »… | bloc **Formule d'édiction** — c'est lui qui détermine le **type d'acte** de la trame |
+| « Article N », « Article 1er » | blocs **Article** (`numMode: "auto"` si la numérotation suit 1..n, `"manual"` sinon) ; un intitulé d'article n'est retenu que s'il est court et ne finit pas par un point |
+| Styles de titre, « Livre/Titre/Chapitre/Section N » | blocs **Division**, à l'échelon correspondant |
+| Listes du traitement de texte, et numérotations écrites à la main (« 1° », « 1) », « a) ») | blocs **Liste** (`degree`, `parenth`, `lalpha`, `decimal`) |
+| Tableaux | blocs **Tableau** (première ligne d'en-tête si ses cellules sont des libellés courts) |
+| Mention de recours (contentieux, tribunal administratif, deux mois…) | bloc **Mention** (`textOverride`) |
+| « Fait à … » | bloc **Signature** — le signataire du document n'est **jamais** repris : il vient du champ « Signataire » |
+
+Les **champs** créés sont les cinq canoniques (`numero`, `objet`, `dateSignature`, `dateEffet`,
+`signataire`) **et** un champ par jeton `{{…}}` trouvé dans le document — cherché sur les blocs
+**bruts**, avant toute tokenisation de l'intitulé, pour ne pas prendre les jetons écrits par
+l'import lui-même pour des jetons d'origine.
+
+L'import **n'enregistre rien**. `trameDepuisFichier` rend `{ trame, issues, avertissements,
+kind, nom }` ; l'interface (`src/ui/import-trame.js`) pose la trame dans `state.trameImport`,
+ouvre l'adresse réservée `trame/__import__` (`IMPORT_ID`) et affiche d'abord une fenêtre de
+**points à vérifier** — chaque décision de lecture est signalée plutôt que tue (« le bloc
+Autorité reprend la ligne du document », « le signataire n'a pas été repris », « l'intitulé a été
+relié aux champs »…). L'éditeur affiche alors une **bannière** et deux gestes : « Enregistrer la
+trame » (elle entre au registre en **brouillon**) ou « Abandonner l'import ». Un document sans
+texte exploitable (image seule), un fichier d'un autre format ou une archive illisible sont
+refusés, sans rien écrire.
+
+#### 2.2.1 ter Mise à disposition des services
+
+**Une trame reste en brouillon tant qu'un éditeur ne l'a pas mise à disposition.** C'est la règle
+générale de l'application : un modèle se prépare à l'abri, puis s'ouvre.
+
+- **Ce qu'elle change.** `trameDisponible(trame)` (`src/lib/schema.js`) répond
+  `trame.status === "published"`. L'écran **« Rédiger un acte »** ne propose que
+  `visibleTrames().filter(trameDisponible)`, et `renderRediger` **refuse** l'ouverture directe
+  d'une trame non disponible — sauf pour un **éditeur** (qui doit pouvoir essayer son modèle) et
+  pour une **rédaction déjà commencée** (retirer la trame sous les pieds de celui qui écrit
+  serait absurde).
+- **Le geste.** `mettreTrameADisposition` / `retirerTrame` (`src/ui/state.js`) posent le statut,
+  horodatent la mise à disposition et **journalisent** (`trame.disponible` / `trame.retiree`).
+  Le bouton est le même partout — carte de la trame, bannière et en-tête de l'éditeur de trame,
+  champ « Statut » de l'onglet « Trame » — et vit une seule fois
+  (`src/ui/mise-a-disposition.js`), avec sa confirmation. « Retirer » ne touche **jamais** les
+  actes déjà rédigés à partir de la trame : ils portent leur propre copie du texte et des valeurs.
+- **Ce qu'on voit.** Le badge du statut `published` dit « **Mise à disposition** »
+  (`statusBadge`, `src/ui/components.js`) ; un brouillon porte une bande de tête dans l'éditeur de
+  trame (« les services ne la voient pas ») et une ligne d'explication sur sa carte.
+- **Ce qui arrive en brouillon.** Une trame **créée**, **dupliquée** ou **importée**. Le jeu de
+  démonstration, lui, livre ses trames déjà mises à disposition ; et un fichier JSON qui déclare
+  ses trames `published` les met à disposition à l'import (l'interface le signale alors
+  explicitement).
 
 #### 2.2.2 Feuille de style (charte graphique des décisions)
 
@@ -336,6 +418,200 @@ les ajoute au document à partir de la feuille, et leur texte accepte des jetons
 `{{style.label}}`). Un acte type (`sampleDocument`) sert d'aperçu dans l'écran de réglage.
 Une feuille s'exporte/s'importe en JSON (`{ "feuille": { … } }`).
 
+#### 2.2.3 Divisions : livre, titre, chapitre, section…
+
+Un texte long ne se compose pas seulement d'articles : il se range en **livres**, **titres**,
+**chapitres**, **sections**. Le vocabulaire et le nombre d'échelons n'appartiennent pas au
+logiciel — ils appartiennent à la **trame** : `trame.divisions` est l'**échelle**, une entrée par
+échelon (`level` croissant, 1 = le plus haut) avec le **mot imprimé** (`label`, libre :
+« Partie », « Chapitre liminaire », « Section »…) et sa **numérotation**
+(`num` : `roman` | `decimal` | `letter` | `aucun`). Une échelle vide n'est pas « aucune
+division » : c'est l'échelle livrée (`NIVEAUX_DEFAUT` — Livre/Titre en romains, Chapitre/Section
+en arabes), de sorte qu'une trame ordinaire peut poser un `division` sans rien régler.
+
+Dans le document, un nœud **`division`** se place à l'un de ces échelons et porte son `heading`.
+La **hiérarchie est donc pré-intégrée à la trame** : le rang s'imprime d'après la place de
+l'échelon dans l'échelle, non d'après une saisie. La **numérotation suit l'ouverture des
+échelons** (`compile.js`) : « Livre Ier », « Titre Ier », « Titre II », « Livre II », « Titre
+Ier » — un échelon ouvert remet à zéro ceux qui le suivent. L'ordinal suit l'usage français
+(« Livre Ier », non « Livre I »). Les divisions se rendent imbriquées (`render.js`,
+`section.doc-division--n<échelon>`, h2…h5), s'exportent en Akoma Ntoso (`part` / `title` /
+`chapter` / `section`, `hcontainer` au-delà) et en Markdown, et se relisent (`akn.js`). Dans
+l'éditeur de trame, elles se posent depuis la palette (« Division »), s'imbriquent, et
+l'onglet « Trame » règle l'échelle (nombre d'échelons, mot, numérotation).
+
+#### 2.2.4 Annexes : le document adopté par un autre
+
+Une **annexe** n'est pas un acte comme les autres : c'est un document **adopté** par un autre, auquel
+il est annexé — et c'est cet acte qui lui donne son autorité. **Une annexe ne se signe donc pas** :
+c'est l'acte qui l'adopte qui est signé, et **l'original de cet acte est suivi du texte de l'annexe,
+dans le même document**, à la suite de la signature et sur une page neuve. Elle n'est ni signée ni
+publiée pour elle-même ; la date qu'elle porte est celle de la décision qui l'adopte, et **elle n'a
+pas de numéro propre**. Son identité, c'est cette **décision** — celle qui l'adopte, celle qui en
+adopte la nouvelle rédaction (§ 2.5), ou celle qui l'abroge : partout où un acte ordinaire montre
+« n° 2026-416-VSL », une annexe montre à quoi elle tient (« Annexe à la délibération n° 2026-416-VSL
+du 24 septembre 2026 », § 2.2.4 bis). Elle garde en revanche un **identifiant interne** (`id`), pour
+les liens et l'historique. L'exemple d'école est le règlement intérieur : une délibération
+l'adopte, le règlement lui est annexé, et son texte suit la délibération signée — la délibération
+d'adoption figure dans ses visas. Il arrive aussi que l'annexe ne soit qu'un tableau (une grille
+tarifaire adoptée par une décision).
+
+Une trame s'en déclare par `trame.nature: "annexe"` (onglet « Trame » de l'éditeur) ; le module
+`src/lib/annexes.js` tient tout le vocabulaire du lien — tournures d'adoption, identification
+figée de l'autre acte, intitulés des listes — et `src/lib/annexe-docs.js` résout et compose la
+**partie annexée** du document (l'annexe imprimée à la suite de l'acte qui l'adopte). Quatre
+choses s'ensuivent :
+
+1. **À la rédaction**, l'annexe **désigne l'acte qui l'adopte** (`values.__adoption`) et l'acte
+   qui adopte **annonce ses annexes** (`values.__annexes`). Ce qu'on fige est une
+   **identification** (nature, numéro, date, objet, `acteId`), non l'acte : sa fiche reste
+   la source vivante.
+2. **À la compilation** (`compile.js`) : l'annexe reçoit, **en tête de ses visas**, le visa qui
+   rappelle son adoption, avec son lien (`{designationThe} n°{numero} du {date}, qui l'adopte`,
+   tournure `config.vocab.annexe.visa`, éteignable par `trame.adoptionVisa === false`) ; son
+   **bloc de signature est retiré** et le champ `signataire` n'est pas réclamé — une annexe n'a pas
+   de signataire propre. L'acte qui adopte reçoit, **à la fin de son dispositif**, le nœud
+   `annexes` — la liste de ce qui est annexé, par intitulé. `doc.meta.nature`, `doc.meta.adoption`
+   et `doc.meta.annexes` portent ces liens.
+3. **La partie annexée du document** : là où le registre est connu (rédaction, écran de l'acte,
+   original signé, publications), le document de l'acte d'adoption est complété de
+   `doc.annexeDocs` (voir `annexesJointes`, `src/lib/annexe-docs.js`). Toutes les sorties —
+   écran, impression, HTML, Word, Markdown, Akoma Ntoso (`<attachments>`), original signé,
+   version publiée — écrivent alors le texte de l'annexe **à la suite de la signature**, dans une
+   section `.doc-annexe-part` qui commence sur une page neuve, avec la charte de l'acte. En Akoma
+   Ntoso, la **nature** du document voyage avec lui (`<ia:nature>`) ; à la relecture, le lecteur
+   (`src/lib/akn.js`) **signale** la présence du texte annexé (`<attachments>`) sans le rattacher de
+   lui-même : une annexe reste un acte à part, joint à son acte d'adoption depuis le registre.
+4. **Sur les fiches et en ligne** : la fiche de l'acte porte un encart qui dit **d'où le document
+   vient** (l'acte d'adoption) ou **ce qu'il annexe**, avec un lien vers l'autre fiche ; la
+   version publiée (`buildWebVersion`, `src/lib/eli.js`) porte le même encart. L'annexe n'ayant pas
+   de publication propre, c'est la version en ligne de **l'acte d'adoption** qui porte son texte.
+
+Une annexe **ne se signe ni ne se publie pour elle-même** : `actePubliable` (`src/ui/state.js`)
+répond non pour tout acte de nature « annexe », l'écran de signature le dit et renvoie vers l'acte
+d'adoption, et la carte « Annexes adoptées » de l'onglet Publication les rassemble. Elle se
+**modifie** par adoption d'une nouvelle rédaction (voir 2.5), et son acte modificatif est suivi du
+texte consolidé de l'annexe.
+
+**Modifier une annexe** suit son régime propre (§ 2.5) : l'acte modificatif en **adopte la
+nouvelle rédaction**, présentée en suivi des modifications.
+
+#### 2.2.4 bis L'annexe n'a pas de numéro propre
+
+Le corollaire du § 2.2.4 est une règle de **nommage** : une annexe n'a **pas de numéro**. Elle n'a
+ni rang ni place au recueil, puisqu'elle n'y est pas déposée ; elle est toujours liée à la décision
+qui la fait exister — celle qui l'**adopte**, celle qui en adopte la **nouvelle rédaction** (sa
+modification, § 2.5), ou celle qui l'**abroge**. Elle garde un **identifiant interne** (`id` du
+registre), qui sert aux liens et à l'historique, mais rien à l'écran ne présente de numéro.
+
+Ce que cela change, concrètement :
+
+1. **La numérotation ne consomme rien.** L'atelier ne montre pas le champ « Numéro de l'acte »
+   (`applicableFields`, src/ui/views/rediger.js) ni le bouton de réservation, et la variable
+   `{{numero}}` n'est pas proposée ; la trame d'annexe du jeu de démonstration ne porte donc pas ce
+   champ (src/lib/seed.js). À la compilation, `compile()` remet le numéro à vide pour une annexe —
+   **et l'ELI aussi** : une annexe n'est pas publiée, son adresse de recueil n'existe pas
+   (`doc.meta.numero === ""`, `doc.meta.eli === ""`).
+2. **L'appellation passe par la décision d'adoption.** `src/lib/annexes.js` compose les deux formes :
+   `appellationAnnexe()` (« Annexe à la délibération n° 2026-416-VSL du 24 septembre 2026 ») pour une
+   étiquette, `appellationAnnexeDefinie()` (« l'annexe à la délibération n° … ») pour une phrase, et
+   `numeroAffiche()` (« annexe à 2026-416-VSL ») pour une colonne de tableau. La liste des annexes
+   d'un acte, la partie annexée et les exports s'appuient sur `libelleAnnexe()` (« Annexe —
+   Règlement intérieur du conseil municipal ») : une annexe se nomme par ce qu'elle est.
+3. **Les tournures de modification la désignent par cette décision.** `targetPhrase()`
+   (src/lib/amend.js) produit « le règlement (la délibération n° 2026-416-VSL du 24 septembre 2026) »
+   quand la cible n'a pas de numéro : l'acte modificatif dit donc « portant adoption de la nouvelle
+   rédaction du règlement (…) », et non « n° à compléter ».
+4. **Le schéma et la relecture ne réclament plus de numéro.** Le Schematron ne porte pas l'assertion
+   `s-numero` pour une annexe (src/lib/export.js), et la relecture d'un Akoma Ntoso ne signale pas
+   son absence (src/lib/akn.js).
+
+#### 2.2.4 ter Les RÈGLEMENTS : la publication informative autonome
+
+Une annexe peut être déclarée **RÈGLEMENT** sur sa trame (`trame.reglement: true`, onglet « Trame » de
+l'éditeur — sans effet sur une trame d'acte). Un règlement est un texte **NORMATIF** : un règlement
+intérieur, un règlement d'usage. Il ne se lit pas seulement dans l'acte qui l'adopte — il se
+**consulte pour lui-même**, comme un **code** : ses articles font droit, et les actes qui l'adoptent
+ou le modifient en publient les versions successives. Pour qu'un tel texte soit **facilement
+accessible**, le recueil public lui donne une **publication informative autonome**, à côté de sa
+place dans l'acte qui l'adopte.
+
+**Ce que l'annexe ne porte plus.** L'annexe n'est pas un acte : le compilateur (`src/lib/compile.js`)
+écarte donc de son document, en un seul point, les blocs qui appartiennent à un acte —
+**l'AUTORITÉ** (« La maire de … » : une annexe n'émane pas d'une autorité, elle est *adoptée* par un
+acte) et la **MENTION DE PUBLICATION AU RECUEIL** (« Le présent arrêté est publié au recueil… » :
+une annexe ne se publie pas elle-même). Le **bloc de signature** l'était déjà. Les **VISAS**, en
+revanche, sont **conservés** : un règlement se fonde sur des textes, et le visa de son adoption
+(« Vu la délibération n°…, qui l'adopte ») est ce qui le rattache à sa décision — il devient un lien
+vers l'acte (§ « liens par l'identifiant ELI »).
+
+**Comment elle est publiée.** À la publication d'un acte (`publier`, `src/ui/views/signature.js`),
+`publierReglements` publie, dans la foulée, la version en vigueur de chaque règlement annexé :
+
+1. **L'identifiant est créé une fois, puis conservé** sur l'annexe (`annexe.eli`). Il est minté par
+   `eliUri()` sur le premier acte qui adopte le règlement — la table `ELI_CODES` lui donne le code
+   `reg` (`eli:/fr/reg/2026/0416/vsl`) — et **ne change plus**. C'est lui qui rend les publications
+   successives **solidaires** : un règlement modifié est le **MÊME** règlement, et la dernière
+   version déposée est celle que le recueil montre (version en vigueur). Un règlement se consulte
+   donc, comme un code, à **une adresse stable**.
+2. **C'est une publication informative**, pas un acte : le client envoie `informative: true` et
+   **aucun original** (le règlement n'est pas signé). Le service l'accepte (`hPublier`,
+   `src/server/mysql/actes.mjs` et `index.html`) : `original` et `signature` restent nuls, et la
+   publication **ne touche pas à l'état de l'acte déposé** (`acte.statut` / `acte.publication` sont
+   laissés tels quels). Tout le reste de la mécanique est celle des actes — clé, ELI, versions,
+   épinglage —, et `resumePublication` porte `informative` et `adoption` (l'acte qui l'adopte) pour
+   que le recueil les connaisse.
+3. **Le texte voyage entier** : la version en ligne (`buildWebVersion`), l'Akoma Ntoso, le JSON-LD,
+   le Markdown et le texte brut, comme pour un acte. La page autonome (`buildWebVersion`) se
+   présente autrement : pas d'« Opposabilité », pas de « publié le », pas de renvoi à un original
+   signé — un encart « Texte informatif » dit que seule la décision d'adoption fait foi.
+
+**Ce que le recueil en montre.** La notice d'une publication informative (`src/ui/views/acte-publie.js`)
+ne mentionne **ni la publication au recueil** (« Publié le », « Recueil », « Entrée en vigueur ») —
+le règlement n'est pas publié pour être opposable —, **ni une autorité**. Elle donne ce qui
+l'identifie : sa **nature**, son **identifiant ELI**, sa date, et **l'acte qui l'adopte**
+(« Texte adopté par — Délibération n° 2026-418-VSL du 30 septembre 2026 »). Elle porte les marques
+« Texte informatif » et « texte en vigueur », un avertissement (« Texte publié à titre
+informatif… »), et **ni bloc de signature ni original**. Le bloc « Versions publiées sous le même
+identifiant » y prend tout son sens : ce sont les rédactions successives du règlement. Dès lors,
+l'annexe **compte parmi les publications du recueil** : elle se cherche, se classe par thème, et son
+identifiant s'ouvre directement (`?eli=eli:/fr/reg/2026/0418/vsl`, ou `/eli/reg/…` sur un
+déploiement serveur).
+
+**Une annexe qui n'est pas un règlement** — un tableau, une grille tarifaire — **ne reçoit rien de
+tel** : elle reste la partie annexée de l'acte qui l'adopte, et rien de plus. Le drapeau est le seul
+qui décide, et il ne vaut que pour une annexe.
+
+#### 2.2.5 Commentaires : annoter un article, citer un passage
+
+Un commentaire (`Note`) est posé sur un **bloc** de la trame — un article, un paragraphe, un
+visa… — et **reste dans la page**, sous le bloc qu'il vise. Il porte une **nature** (contrainte
+juridique, consigne de rédaction, point à arbitrer, veille normative), un **texte**, son
+**auteur** (le **service** du compte, jamais l'agent — § 1.3) et sa date ; il peut en outre citer
+un **passage** (`quote`) : la phrase du document sur laquelle il porte.
+
+Deux règles gouvernent le dispositif (`src/ui/annotations.js`) :
+
+1. **On commente ce qu'on voit.** Le commentaire ne se pose pas depuis une liste : un bouton
+   « commenter » est posé sur chaque bloc de la page, et **sélectionner un passage** dans le
+   document — un paragraphe, une phrase, un membre de phrase — fait apparaître une pastille
+   « Commenter » qui ouvre la fenêtre d'écriture **en citant le passage sélectionné**. La citation
+   suit le commentaire, dans l'aperçu, dans l'inspecteur et dans les exports.
+2. **Un commentaire ne peut pas passer inaperçu.** Il s'affiche dans la page, en **bande
+   distincte du texte de l'acte** (fond coloré, filet pointillé, nature et auteur rappelés), sous
+   le bloc qu'il vise ; un **repère de marge** numéroté marque chaque bloc commenté ; l'en-tête de
+   l'éditeur annonce le compte et ouvre la liste d'un clic ; l'inspecteur a un onglet
+   **« Commentaires »** qui les rassemble tous, rangés par bloc, chacun menant au passage visé.
+   L'« Aperçu » compilé les reprend à la fin du document (`showNotes`, `notesAppendix`).
+
+**Le rédacteur les voit aussi.** Ils ne servent à rien s'ils restent dans l'atelier de la trame :
+à la **rédaction**, chaque commentaire de la trame apparaît en **consigne** sous le passage
+concerné (même bande, en lecture seule), l'onglet **« Consignes »** les rassemble, et un bouton
+dans l'en-tête de l'acte annonce leur nombre. Ils **ne sont pas publiés** avec l'acte — ils font
+partie de la **préparation** —, mais ils accompagnent les exports internes (Akoma Ntoso
+`meta/notes` avec `data-target` et le passage cité, Markdown « Notes de préparation ») et le
+rapport de conformité reprend les contraintes juridiques et les points à arbitrer.
+
 ### 2.3 Règles (le cœur)
 
 Trois niveaux :
@@ -359,15 +635,27 @@ Un acte rédigé à partir d'une trame n'est pas seulement un jeu de valeurs :
 
 ```js
 Acte = { id, trameId, numero, objet, entityId, serviceId, bureauId, dateSignature, statut,
-         values: { …, __entityId, __overrides: { [adresse]: "texte source" } },
+         values: { …, __entityId,
+                   __overrides: { [adresse]: "texte source" },
+                   __ordre:     { [chemin de conteneur]: [rangs] },  // réordonnancement (§ 2.4.1)
+                   __supprimes: { [adresse]: true },                 // blocs retirés du document (§ 2.4.2)
+                   __ajouts:    { [conteneur]: [ { id, rang, node } ] },  // blocs et éléments ajoutés (§ 2.4.2)
+                   __abrogations: [ … ],                            // § 2.5 bis
+                   __adoption:  Ident | null,                       // annexe : l'acte qui l'adopte (§ 2.2.4)
+                   __annexes:   [ Ident ] },                        // acte : les documents annexés
          overrides: { [adresse]: "texte source" },   // recopie lisible de __overrides
          ecarts:    [ { addr, label, original, current } ],
          issues: [], eli, createdAt, updatedAt,
+         nature: "acte" | "annexe",          // la nature du document (§ 2.2.4)
+         adoptePar: Ident | null,            // annexe : l'acte qui l'adopte
+         annexes: [ Ident ],                 // acte : les documents annexés
          numeroSource: { source:"externe", ref, valeur, at, par, parName } | null,  // § 2.1 bis : numéro attribué par un service
          execution: {  …formalités constatées (voir § 2.8.2) :
             transmission: { at, ref, mode, byName, api?, certificat? },  // certificat = accusé de réception
             publication:  { at, ref, mode, byName },                    // constatée hors chaîne ELI
             notification: { at, ref, mode, destinataires, byName } } }
+
+Ident = { acteId, numero, designation, date, objet, eli }   // l'identification FIGÉE d'un autre acte (§ 2.2.4)
 ```
 
 Une **adresse d'emplacement** désigne un texte précis de la trame :
@@ -375,11 +663,15 @@ Une **adresse d'emplacement** désigne un texte précis de la trame :
 | Adresse | Ce qu'elle désigne |
 |---|---|
 | `body.3` | le texte du bloc n°3 (`title`, `authority`, `enact`, `para`, `raw`, mention) |
-| `body.3.heading` | l'intitulé de l'article n°3 |
-| `body.3.blocks.1` | le texte du paragraphe n°1 de l'article n°3 |
+| `body.3.heading` | l'intitulé de l'article n°3, ou de la division n°3 |
+| `body.3.blocks.1` | le paragraphe n°1 de l'article n°3 — ou l'article/division n°1 de la division n°3 |
 | `body.2.items.0` | le texte du visa / considérant / élément de liste n°0 |
 | `body.5.caption` · `.columns.1` · `.rows.0.2` | légende, titre de colonne, cellule |
 | `body.7.place` | le lieu du bloc signature |
+
+Une division descend donc aussi loin qu'elle est profonde (`body.3.blocks.0.blocks.2`) : les
+adresses restent celles du **document**, et le conteneur de réordonnancement est le chemin de
+l'adresse qui les porte (`body`, `body.3.blocks`).
 
 `__overrides[adresse]` conserve le **texte source** du rédacteur — jetons `{{…}}`
 préservés — uniquement lorsqu'il diffère du texte de la trame (sinon la clé est
@@ -393,6 +685,71 @@ JSON de l'acte — **jamais** dans le corps du document publié, et jamais inven
 éléments Akoma Ntoso standard. Ils n'entrent pas dans les `issues`, qui restent les
 contrôles de la trame.
 
+#### 2.4.1 Réorganiser le document
+
+Dans l'atelier de rédaction, le document n'est pas figé dans l'ordre du modèle : chaque bloc —
+article, division, visa, considérant, mention — **se déplace**. Le geste est direct (deux flèches
+sur le bloc, ou une prise pour le **glisser** : la poignée, ou le numéro de l'article, qui est la
+prise naturelle — c'est ce qu'on vise en pensant « cet article-là »), et les primitives sont
+celles de l'éditeur de trame (`src/ui/dnd.js`). Un bloc de tête (l'intitulé, l'auteur de l'acte)
+et la liste des annexes ne se déplacent pas : ils sont à leur place par nature.
+
+L'ordre vit **à part du modèle**, dans `values.__ordre` (`src/lib/ordre.js`) :
+
+```
+__ordre = { "body": [0, 1, 4, 3, 2, 5], "body.4.blocks": [1, 0] }
+```
+
+Chaque entrée donne, pour un **conteneur** (le corps, ou les `blocks` d'un article/d'une
+division), la suite des **rangs d'origine** de ses entrées. Un conteneur sans entrée suit
+l'ordre de la trame : le plan ne se matérialise qu'à partir du premier geste. `deplacerVers`
+écrit une entrée, `rangerCommeLaTrame` efface tout, `ordresModifies` dit ce qui a bougé.
+`compile()` applique l'ordre **après** résolution des blocs (`appliquerOrdre`), puis
+**renumérote** articles et divisions dans l'ordre imprimé — sans quoi un article remonté se
+lirait à contretemps. Seuls les numéros **automatiques** suivent (`numMode: "auto"`) ; un
+numéro écrit à la main reste ce qu'il est, et les **identifiants** (`eId`) ne changent jamais :
+ils sont la mémoire des blocs, pas leur rang.
+
+Le réordonnancement est un geste de **rédaction**, non une modification de la trame : la trame
+reste intacte, l'onglet « Contrôle » signale les endroits réordonnés (niveau `info`) et propose
+de **revenir au modèle** d'un clic. Un acte enregistré conserve son ordre dans ses valeurs.
+
+#### 2.4.2 Ajouter, retirer, régler un bloc (`src/lib/structure.js`)
+
+La trame dit ce que l'acte doit contenir ; l'acte se rédige. Trois gestes de l'atelier touchent
+donc à la **structure** du document — jamais à celle du modèle, et jamais sans trace :
+
+| Geste | Ce qui est écrit | Ce qui se passe |
+|---|---|---|
+| **Retirer un bloc** (corbeille sur le bloc, ou panneau « Bloc ») | `__supprimes[adresse] = true` | le bloc et ses descendants ne sont plus résolus : ni affichés, ni comptés, ni exportés. Ses réécritures ne sont pas effacées — « Rétablir » le rend tel qu'il était |
+| **Retirer un élément** (un visa, un considérant) | idem | même mécanisme, à l'adresse de l'élément (`body.2.items.0`) |
+| **Ajouter un bloc ou un élément** | `__ajouts[conteneur] ← { id, rang, node }` | le bloc entre dans le document à la place demandée ; son texte vit dans l'ajout lui-même |
+| **Régler un bloc** (intitulé, échelon, numérotation) | `__overrides[adresse + `.level` · `.numMode` · `.num` · `.heading`]` | le réglage s'applique à la compilation, et compte parmi les écarts (§ 2.4) |
+
+Un ajout reçoit un **rang synthétique** : il commence après le dernier bloc de la trame de son
+conteneur et ne bouge plus. Son adresse est donc de la même forme que celle d'un bloc ordinaire
+(`body.5`, `body.3.blocks.2`, `body.2.items.4`) — il se déplace, se commente et se supprime avec
+les mêmes outils. `ordreConteneur` (`src/lib/ordre.js`) fait cohabiter ces rangs avec ceux de la
+trame ; une insertion **en fin de conteneur** n'écrit aucun ordre (c'est la place naturelle).
+
+Ce qu'un ajout contient se saisit dans l'**ajout**, non dans les écarts : `majAjout` reporte le
+texte écrit dans le document sur le nœud de `__ajouts`, et `slotsAjoutes` déclare ces
+emplacements pour que leur texte ne soit pas signalé comme « hors trame » — il ne l'est pas, il
+n'est pas dans la trame. `compile()` résout les ajouts **après** les blocs du modèle
+(`resolveBlocks`, le corps, les listes d'éléments), puis applique l'ordre.
+
+L'onglet **« Contrôle & écarts »** tient les trois registres : réécritures, **réglages** de bloc
+(avec leur lecture en clair : « Titre (échelon 1) » / « Chapitre (échelon 2) »), et **structure du
+document** (chaque ajout et chaque retrait, avec « Voir et régler » ou « Rétablir »). Un acte
+enregistré conserve le tout dans ses valeurs.
+
+Un ajout peut être un **bloc de texte hors article** — un paragraphe, une liste, un tableau posé
+dans le corps du document ou dans une division — et non seulement un article, une division ou un
+élément de liste. Il appartient alors au même jeu de types que les blocs d'un article
+(`para`, `list`, `table`, `raw`) et suit le même chemin partout : le rendu (`src/lib/render.js`),
+le Markdown et l'Akoma Ntoso (où il est rangé dans un `<block name="disposition">`, repris à
+l'import par `src/lib/akn.js`), l'export HTML/Word et l'impression.
+
 ### 2.5 Modification d'un acte
 
 Un acte signé ne se réécrit pas : il se modifie. L'écran « Modifier un acte » n'est pas un
@@ -400,8 +757,12 @@ formulaire : c'est **l'acte en vigueur lui-même**, rendu éditable comme dans u
 de texte (passages `contenteditable`, abrogation et insertion d'article d'un clic). Chaque
 geste est traduit en amendement (`src/lib/amend-edit.js`, adresses stables calculées sur le
 document d'origine), puis `buildModificatif` produit l'**acte modificatif** et
-`buildConsolidated` la **version consolidée** lorsque la modification est confirmée. La
-version consolidée est présentée par défaut dans sa **seule rédaction en vigueur**, chaque
+`buildConsolidated` la **version consolidée** lorsque la modification est confirmée. Les
+**divisions** (§ 2.2.3) ne sont pas un obstacle : les articles d'un texte rangé en Livres, Titres
+ou Chapitres s'atteignent comme ceux du corps (`flatNodes`, l'ordre imprimé qui sert à la fois
+d'adresses de saisie, de plan de modifications et de numérotation continue) ; un article inséré
+« après » un article de division prend place **dans cette division**, et « ajouter en fin de
+dispositif » entre dans la **dernière** division quand le texte s'y termine. La version consolidée est présentée par défaut dans sa **seule rédaction en vigueur**, chaque
 article modifié portant sous son intitulé la mention de l'acte qui l'a modifié (« Modifié par
 la décision n°… du … », « Abrogé par … », « Ajouté par … ») ; l'affichage du **suivi des
 modifications** (ajouts et suppressions apparents `ins`/`del` + tableau des modifications) est
@@ -413,6 +774,26 @@ automatiquement la version consolidée **sous l'ELI de l'acte d'origine**, qui *
 celui-ci : l'originale reste accessible dans l'historique des modifications (fiche de
 l'acte, onglet « Versions » du registre public). Un acte importé (`.akn.xml` ou JSON) est
 relu par `src/lib/akn.js`.
+
+**Modifier une annexe.** Une annexe (§ 2.2.4) ne se modifie pas article par article comme un
+acte ordinaire : l'acte modificatif en **adopte la nouvelle rédaction**. C'est le régime ouvert
+par défaut par l'écran « Modifier » (`state.modifier.suivi`, décochable) :
+
+- l'**intitulé** de l'acte modificatif devient « … portant adoption de la nouvelle rédaction de
+  {l'annexe} » (`annexesVocab().adoptTitle`), et son **objet** de même — la tournure emploie
+  `{targetDe}`, l'appellation de la cible *contractée avec « de »* (« portant adoption de la
+  nouvelle rédaction **du** règlement intérieur n°… », et non « de le règlement ») ;
+- son **article premier** énonce l'adoption, en citant l'annexe (`clauseAdoption`) ; les
+  modifications la suivent, **décalées d'un rang** de numérotation ;
+- la **nouvelle rédaction** de l'annexe suit l'acte modificatif, comme une **partie annexée** de
+  son document signé (`doc.annexeDocs`, voir `src/lib/annexe-docs.js`), et l'action est enregistrée
+  dans `modActe.adopteAnnexe` / `doc.meta.adopteAnnexe` ;
+- le texte consolidé porte, **en tête de ses visas**, l'acte qui vient de l'adopter — le visa de
+  l'adoption précédente est remplacé, non empilé —, et la fiche de l'annexe enregistre ce nouvel
+  acte d'adoption (`values.__adoption`, `adoptePar`, `nature`).
+
+La modification **classique** (mention expresse, article par article) reste possible en décochant
+la case : c'est elle que demande parfois une décision qui vise expressément tel article.
 
 ### 2.5 bis Abrogation d'un acte, ou d'un article
 
@@ -496,12 +877,19 @@ elle-même. Le service expose :
 |---|---|---|
 | `POST` | `/v1/actes` | déposer l'acte finalisé (Akoma Ntoso) ; idempotent tant que le circuit est ouvert |
 | `POST` | `/v1/actes/{id}/signature` | ouvrir un circuit auprès du prestataire → `202` + `signatureId` |
+| `POST` | `/v1/actes/{id}/signature-externe` | *(circuit externe)* déclarer la **version signée** déposée (PDF + empreinte) → `201` + statut `signee` |
+| `POST` | `/v1/actes/{id}/conformite` | *(circuit externe)* enregistrer la **certification de conformité** du réviseur → `201` |
 | `POST` | `/v1/webhooks/signature` | notification entrante du prestataire : retour de l'acte signé |
-| `GET` | `/v1/signatures/{id}`, `/v1/signatures/{id}/document-signe` | suivre le circuit, récupérer l'original signé |
+| `GET` | `/v1/signatures/{id}`, `/v1/signatures/{id}/document-signe` | suivre le circuit, récupérer l'original signé (**part publique** seulement) |
+| `GET` | `/v1/actes/{id}/dossier-signature` | lire la **part interne** de l'original (mentions nominatives, courriels) — exige le jeton |
+| `GET` | `/v1/courriel` | état de la chaîne d'envoi du service (hôte, expéditeur, disponible ou non) — **sans aucun secret** |
+| `POST` | `/v1/courriel/envoi` | demander l'envoi d'une notification par courriel (le service parle au serveur SMTP) |
+| `POST` | `/v1/courriel/test` | message d'essai de l'écran d'administration |
 | `POST` | `/v1/actes/{id}/transmission` | télétransmettre l'acte signé au contrôle de légalité → `201` + certificat *(fonction expérimentale, § 2.8.2 bis)* |
 | `GET` | `/v1/actes/{id}/transmission` | relire le certificat de transmission |
 | `POST` | `/v1/actes/{id}/publication` | publier et attribuer l'ELI |
 | `POST` | `/v1/publications/{cle}/retrait` | retirer un acte du recueil (motif technique exigé, administrateur seul) |
+| `POST` | `/v1/publications/{cle}/epingle` | épingler un acte à la « une » du recueil public (corps `{ epingle, auteur }`) |
 | `GET` | `/v1/publications`, `/v1/publications/{cle}`, `/v1/eli/{...}` | registre public et résolution ELI |
 
 Les lectures sont publiques ; les écritures exigent `Authorization: Bearer <jeton>`
@@ -546,6 +934,13 @@ datées diffèrent. La consultation publique est un client de `GET /v1/publicati
 rien n'est lu dans les données locales. Le recueil public et la consultation d'une
 publication rendent le texte **dans la page** (§ 2.6 bis).
 
+L'**encart des annexes** (§ 2.2.4) fait partie de la version en ligne : le document publié dit
+s'il est lui-même une annexe — et de quel acte — ou quels documents il annexe. C'est nécessaire,
+puisque l'annexe n'a pas de publication propre : c'est la version en ligne de **l'acte qui
+l'adopte** qui porte son texte, et c'est par cet encart, et par le visa d'adoption du document,
+que le lecteur remonte de l'un à l'autre. Le registre public, lui, n'exploite pas encore ce lien
+(voir `TODO.md`).
+
 **Le retour signé publie l'acte.** Le webhook accepté (§ ci-dessus) déclenche la
 **transmission au contrôle de légalité** si elle est active (§ 2.8.2 bis), puis la
 publication **automatique** de l'acte **publiable** : `publierApresSignature`
@@ -562,21 +957,189 @@ ni transmission —, et l'acte signé attend au registre (§ 2.6 bis).
 
 Si le service ne connaît pas l'acte au moment de publier (il a redémarré, ou l'acte a été
 signé sur un autre poste), le client le **redépose** avec sa signature déjà approuvée —
-le service revérifie l'empreinte — puis republie.
+le service revérifie l'empreinte — puis republie. Dans le circuit externe, le client
+rejoue de la même façon la **déclaration de la version signée** et la **certification**,
+et il le fait aussi quand le service répond `409 version_signee_absente` ou
+`409 conformite_non_certifiee` alors qu'il détient lui-même la pièce et l'attestation :
+la publication porte ce que le client a.
 
-**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **quinze
-actes**, dont **dix rédigés et posés comme signés** (document compilé depuis sa trame,
-exporté en Akoma Ntoso, signé par `buildSignedPackage` — certificat, ECDSA P-256,
-horodatage, donc vérifiables), trois prêts à signer, un brouillon incomplet, un acte **en
-attente de révision** et un acte **rejeté** en révision, revenu en brouillon avec son motif.
-Un acte signé porte en outre la trace d'une **révision validée** (avec correction du réviseur).
-Deux de
-ces actes sont des **actes individuels non publiables** (trame `tpl-revalorisation`,
-`publishable: false`), l'un signé et l'autre prêt à signer. Leurs **transmissions au
+#### 2.6 ter Le circuit de signature externe (papier, ou outil tiers)
+
+Le circuit électronique suppose un prestataire joignable en API. Ce n'est pas toujours le
+cas : une collectivité peut faire signer ses actes **sur papier**, ou par un outil qu'elle
+ne pilote pas (parapheur hors ligne, service web sans API, signature manuscrite scannée).
+Un second circuit existe donc, qui **n'appelle aucune API de signature** et se décrit dans
+`src/lib/externe.js` :
+
+1. le **rédacteur** « envoie à signature » — ce qui veut dire **télécharger** le document
+   prêt à signer (une page A4 précédée d'un **bordereau de remise** : référence, objet,
+   entité, trame, date, empreinte du document remis, marche à suivre) ;
+2. le signataire signe **hors de l'application** ;
+3. le rédacteur **rentre la version signée** — « Ajouter la version signée », un **PDF**
+   (contrôle du type, empreinte SHA-256 calculée dans le navigateur, fichier déposé par
+   `upload-plugin`) —, et l'acte passe à `signee` ;
+4. le **réviseur** compétent **certifie la conformité** de la **pièce signée** avec la
+   version numérique qui sera publiée ; son contrôle ne porte donc plus sur le texte
+   *avant* signature, mais sur le document *signé* — c'est ce qui garantit que ce qui est
+   publié est bien ce qui a été signé ;
+5. la publication dépose la version en ligne **et** le PDF signé, qui devient l'« original »
+   sur le recueil public.
+
+**Réglage, à deux niveaux.** Le circuit se règle **globalement** (`config.signature.mode`,
+Administration › Signature : `electronique` — défaut, comportement historique —, `simple`,
+ou `externe`) et **par trame** (`trame.signature`, onglet « Trame » de l'éditeur) :
+
+| `trame.signature` | Effet |
+|---|---|
+| `""` (défaut) | suit le réglage général |
+| `externe_impose` | circuit externe, sans choix possible |
+| `externe_autorise` | le rédacteur choisit, **acte par acte**, le circuit externe |
+| `simple_impose` | signature simple imposée (dans l'application) |
+| `simple_autorise` | le rédacteur choisit, **acte par acte**, la signature simple |
+| `electronique` | circuit électronique imposé pour cette trame |
+
+`circuitPour(config, trame)` rend le circuit retenu, `circuitsDisponibles(config, trame)` la
+liste de ceux entre lesquels le rédacteur peut réellement trancher, et
+`modeSignature(config, trame, acte)` celui de l'acte, en tenant compte de son choix
+(`acte.signatureMode`) quand la trame l'autorise. **Un acte déjà engagé dans un circuit y
+reste** : `acte.externe` ouvert, `acte.signatureSimple` donnée, ou `acte.api` déposé — avec
+`acte.signatureMode === "simple"` ou `acte.api.niveau === "simple"`, puisque le circuit simple
+dépose lui aussi l'acte au service (c'est le même dossier, seul le niveau demandé diffère).
+
+**Le dossier sur l'acte** (`acte.externe`) : `statut` (`a_signer`, `signe_depose`,
+`certifie`, `refuse`), la trace de la remise (`demandeLe`, `demandeParNom`, `document` avec
+son empreinte), la version signée (`signe` : `url`, `sha256`, `nom`, `taille`, `deposeLe`,
+`deposeParNom`), la certification (`certification` : `statut`, `par`, `parNom`, `le`,
+`empreinte`, `sha256Signe`, `points`, `remarque`, `motif`) et `certificationRequise` —
+`true` dès lors qu'un réviseur est compétent pour l'acte.
+
+**Côté service**, c'est lui qui tient l'ordre « version signée → conformité certifiée →
+publié » : `hPublier` refuse par `409 version_signee_absente` tant que la pièce manque, et
+par `409 conformite_non_certifiee` si `certificationRequise` est vrai et que la
+certification n'est pas `conforme`. `hSignatureExterne` **annule** la certification
+précédente à chaque nouvelle version signée (elle portait sur l'ancienne pièce), et
+`hConformite` refuse une certification dont l'empreinte signée ne correspond pas à la
+pièce déposée (`409 certification_incoherente`). Un refus de conformité repasse l'acte au
+statut `depose` : il attend une version signée conforme.
+
+**Sur le recueil public**, l'« original » d'un acte du circuit externe n'est plus le paquet
+JSON du prestataire, mais la **version signée elle-même** : la page publique affiche le PDF
+dans un cadre de lecture, avec son empreinte, sa date de dépôt, et l'attestation de
+conformité du réviseur — c'est la pièce **telle qu'elle a été mise en ligne** qui fait foi,
+le texte en ligne n'en étant qu'une lecture pratique. La **fiche de l'acte** et l'onglet
+« Original signé » de la publication montrent la même pièce, et l'**onglet « Révision »**
+gagne une file « **Certifications (signature externe)** » : c'est là que le réviseur trouve
+les pièces à certifier. Un acte dont la version signée attend certification est **ouvert
+aux réviseurs compétents même hors de leur périmètre** (comme l'est un acte soumis à
+révision) : sans quoi leur contrôle ne pourrait pas s'exercer.
+
+**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **soixante-six
+actes** sur **vingt et une trames**, dont **quarante-neuf rédigés et posés comme signés** (document
+compilé depuis sa trame, exporté en Akoma Ntoso, signé par `buildSignedPackage` — certificat,
+ECDSA P-256, horodatage, donc vérifiables), quatorze prêts à signer, trois brouillons incomplets, un
+acte **en attente de révision** et un acte **rejeté** en révision, revenu en brouillon avec son
+motif. Un acte signé porte en outre la trace d'une **révision validée** (avec correction du
+réviseur), et un autre la trace d'un **recours contentieux** introduit. Deux de ces actes sont des
+**actes individuels non publiables** (trame `tpl-revalorisation`, `publishable: false`), l'un signé
+et l'autre prêt à signer. **Sept** forment le cas de l'**annexe** : un document adopté par un autre
+acte (trame de nature `annexe`) — le règlement intérieur du conseil, le règlement d'accès à la
+restauration scolaire, la grille tarifaire des services municipaux, la charte de la participation
+citoyenne, et les documents joints à une manifestation (plan de circulation et de stationnement,
+programme de la fête du village, stationnement et déroulé de la cérémonie du 11 novembre). L'annexe
+porte le visa de son acte d'adoption, l'acte l'annonce en fin de dispositif, et **l'original signé
+de l'acte est suivi du texte de l'annexe** : l'annexe ne se signe ni ne se publie pour elle-même.
+**Quinze** actes sont publiés au recueil (voir `src/ui/demo-publications.js`), dont quatre **à la
+une** : le règlement de la restauration scolaire, la grille tarifaire, la fête du village et le
+marché de Noël — deux annexes, deux événements. Leurs
+**transmissions au
 contrôle de légalité** portent leur **certificat** (`certificatTransmission`, mêmes
 mentions et même sceau que le service). Ils ne sont posés que sur un registre de
 démonstration vide (`SEED_VERSION`, identifiants `acte-demo-*`) : jamais sur un registre
 réel.
+
+#### 2.6 quater La signature électronique simple, et l'original à deux parts
+
+Deuxième alternative au prestataire, le circuit **simple** fait signer **dans l'application**,
+avec le **compte** du signataire — sans prestataire, sans papier. C'est la réponse au cas
+ordinaire d'une collectivité qui n'a ni API de signature branchée, ni envie de faire circuler
+des pièces.
+
+**Le geste.** Depuis « Ma signature » (« **Vérifier et signer** ») comme depuis le circuit de
+l'acte, `engagerSignatureSimple` franchit les mêmes portes que le circuit électronique
+(parapheur, puis révision), **dépose** l'acte au service (`POST /v1/actes`, `signatureMode:
+"simple"`), **ouvre** le circuit (`POST /v1/actes/{id}/signature`, `niveau: "simple"`), puis
+ouvre la **fenêtre de signature** (`fenetreSignatureSimple`) : le document sous les yeux,
+l'identité du signataire (nom, fonction, adresse électronique, compte), l'empreinte du texte, et
+une **déclaration à cocher** — « Je déclare avoir vérifié le document ci-dessus et j'engage ma
+signature sur son contenu. » Le bouton de signature reste **désactivé** tant que la déclaration
+n'est pas cochée.
+
+**La signature.** `signerSimple` produit le même paquet que le circuit électronique
+(`buildSignedPackage` : ECDSA P-256 + SHA-256, certificat par navigateur, horodatage signé par une
+seconde clé), mais avec `prestataire: null` — il n'y a pas de tiers — et avec la **part interne**
+(`dossierSignatureInterne`). Le paquet part au service par `POST /v1/webhooks/signature`, qui
+**recalcule l'empreinte** et la compare à celle du document déposé (`409 empreinte_divergente`
+sinon) : la vérification ne dépend pas du circuit. L'acte passe à `signee`, puis la publication
+suit (`publierApresSignature`), comme pour tout autre circuit.
+
+**Ce qui est conservé, et où.** La signature simple est celle qui porte le plus de mentions
+nominatives — c'est dans la nature du procédé. Elles sont donc **partitionnées** :
+
+| Part | Contenu | Diffusion |
+|---|---|---|
+| **Publique** | nom, fonction, date de signature, empreinte, valeur de signature, certificat, horodatage | recueil public, `GET /v1/publications/{cle}`, export JSON de l'original, `GET /v1/signatures/{id}/document-signe` |
+| **Interne** | nom, fonction, **adresse électronique**, `personId`, `compteId`, compte de signature, moyen d'authentification, poste, adresse réseau, horodatage, **courriels** | registre du service (`rec.originalInterne`, jamais servi par une route publique) ; en clair pour qui peut lire l'acte — « Dossier de signature (interne)… » dans l'application, ou `GET /v1/actes/{id}/dossier-signature` (protégée par le jeton) |
+
+`partiePublique(pack)` (pure, `src/lib/signature.js`) est ce qui **retire** : elle supprime la clé
+`interne` du paquet et, dans chaque signature, l'adresse électronique, `personId`, `compteId`,
+`compteOutil` et l'état de rapprochement. Elle s'applique **aussi au circuit électronique** : un
+signataire du prestataire voit sa part publique réduite de la même façon. `dossierInterne(pack)`
+et `originalInterneDe(acte)` composent la part interne au moment de la publication.
+
+Le champ `niveau` de la signature (`simple` / `avancee`) dit le procédé employé ; il voyage dans
+la publication (`signature.niveau`) et sur l'acte (`acte.signatureSimple.niveau`).
+
+#### 2.6 quinquies Les notifications par courriel, et le serveur SMTP
+
+Scribae **n'envoie pas** de courriel : il **demande** au service de le faire
+(`POST /v1/courriel/envoi`), et c'est le service qui parle au **serveur SMTP** de la
+collectivité. La séparation est nette, et volontaire : l'application n'a **jamais** accès au
+mot de passe SMTP, et `GET /v1/courriel` ne rend que l'**état** de la chaîne (hôte, port,
+chiffrement, adresse d'expédition, authentifié ou non, disponible ou non).
+
+**La politique** est une donnée du référentiel (`config.courriel`, Administration ›
+**Courriel**, lue par `courrielSettings`) : activation générale, nom d'expéditeur, adresse de
+réponse, **copie systématique**, et six **événements** activables — `demande_signature` (au
+signataire désigné), `signature_donnee`, `acte_publie` (au rédacteur et aux éditeurs),
+`acte_a_valider` (à l'agent dont c'est l'étape), `acte_a_reviser` (aux réviseurs compétents),
+`notification_interesse` (aux destinataires désignés). `envoyerNotification(evenement, ctx)`
+(`src/lib/courriel.js`) résout les destinataires (par compte, par rôle, adresses valides,
+**déduplication** par adresse), écarte ceux qui ont **déjà** été notifiés pour cet acte et cet
+événement (les envois réussis seuls comptent comme tels), et **ne lève jamais** : un courriel
+qui ne part pas rend une **trace** `{ evenement, destinataires, envoye: false, motif }`.
+
+**Les traces.** Chaque envoi est journalisé (`courriel.envoye` / `courriel.non_envoye`) et
+**consigné sur l'acte** (`acte.courriels`), qu'il soit parti ou non : c'est la piste de qui a
+été prévenu et quand, elle alimente le **dossier interne** de l'original, et l'écran
+« Dossier de signature (interne)… » la montre (les envois manqués en rouge, avec leur motif).
+
+**Le moteur SMTP** (`src/server/mysql/smtp.mjs`) est écrit pour l'occasion, sans dépendance :
+RFC 5321 (EHLO, capacités annoncées, `STARTTLS`, `AUTH LOGIN` et `AUTH PLAIN`, `MAIL FROM` /
+`RCPT TO` / `DATA` avec le doublement des points), RFC 2047 (encodage du sujet) et RFC 2045
+(MIME `multipart/alternative`, base64 par lignes de 76). Il prend un **transport injecté**
+(`lireReponse`, `ecrire`, `demarrerTls`, `fermer`), ce qui le rend testable sans réseau.
+`src/server/mysql/courriel.mjs` le branche : lecture des `SMTP_*` du `.env`, choix du
+chiffrement (`ssl`, `starttls`, ou aucun — déduit du port à défaut de réglage), transport
+`net`/`tls`, et l'état rendu sans secret. Le service journalise les envois dans **`sb_courriel`**
+(table du schéma) et les expose dans « Derniers envois ».
+
+**En démonstration**, le service embarqué n'a pas de serveur SMTP : `GET /v1/courriel` répond
+`disponible: false` avec son motif, `/v1/courriel/envoi` et `/v1/courriel/test` répondent `503`
+`courriel_indisponible`, et chaque notification est **tracée « non envoyée »** — l'application
+reste entièrement utilisable, et la chaîne se vérifie au premier déploiement. Sur le **service auto-hébergé**, la même route
+rend `200` quand le message est remis au serveur SMTP et `502 envoi_refuse` quand celui-ci le
+refuse (le motif est rendu tel quel, et l'écran d'administration le montre) ; chaque tentative,
+réussie ou non, est consignée dans `sb_courriel`.
 
 #### 2.6 bis Le recueil public des actes
 
@@ -602,6 +1165,15 @@ qu'aucune session n'est ouverte — la porte de l'atelier, vue de la rue —, **
 l'application »** quand une session l'est, et **« Mon accès »** pour un visiteur authentifié sans
 rôle. La session ne change rien au recueil lui-même : un agent connecté y lit exactement ce que
 lit un passant.
+
+**C'est également la page d'accueil du logiciel** : une adresse sans route — ni ancre, ni
+paramètre — ouvre le recueil, jamais l'atelier. La route par défaut de l'application est donc
+`recueil` (`src/ui/state.js`), et **une adresse inconnue y ramène** (`normaliserRoute`,
+`src/ui/app.js`) : une ancre mal recopiée, ou un écran qui n'existe plus, ne doit pas ouvrir
+l'atelier — et encore moins l'écran de connexion. L'atelier s'ouvre par la porte **« Se
+connecter »** du recueil, ou par l'ancre `#/trames` — que l'application n'écrit jamais
+elle-même : elle n'écrit dans l'adresse que les paramètres du recueil (`?acte=`, `?recueil=1`),
+parce que ce sont eux qui donnent à un acte publié une adresse citable.
 
 **La page d'accueil du recueil** — la « page d'accueil de l'interface publique » — n'est pas un
 registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
@@ -670,6 +1242,73 @@ registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
   (adresses **absolues**, `perchance.org/<générateur>?acte=<clé>`) à **citer et partager** l'acte —
   et, sur un déploiement serveur, `/recueil` et `/recueil/<clé>` (§ 2.6 ter).
 
+- **Le recueil renvoie vers les recueils qu'il ne gère pas.** Une collectivité arrive rarement
+  vierge : elle a tenu, avant Scribae, d'**autres recueils**. Le recueil public le dit donc au
+  lecteur, à **deux endroits** — en **bas de page** de l'espace public (`pied`) et **au bout des
+  résultats de recherche** (`zoneResultats`, dès qu'un filtre est posé ou que la recherche ne donne
+  rien) —, sous le titre **« Vous ne trouvez pas ce que vous recherchez ? »**. Le bloc
+  (`blocAilleurs`/`groupeAilleurs`/`itemAilleurs`, `views/recueil-public.js`) liste les renvois en
+  deux groupes : **« Autres recueils »** et **« Sites de référence »**. Il n'est **jamais montré
+  deux fois sur la même page** : quand le lecteur est dans une recherche, `peindreResultats` masque
+  celui du pied de page (attribut `hidden`) — le pied n'étant pas redessiné au fil de la frappe.
+  Les renvois sont des **données du référentiel** (`config.publication.recueilsExternes`, voir
+  ci-dessous) ; le bloc n'apparaît que s'il en existe **au moins un pourvu d'une adresse**
+  (`recueilsExternes(config)` — une entrée à moitié remplie ne s'imprime pas), et l'adresse est
+  complétée d'un schéma si l'administration a saisi « www.exemple.fr » (`urlRecueilExterne`).
+
+- **Trois natures de renvoi** (`TYPES_RECUEIL_EXTERNE`, `src/lib/recueil.js`), parce que les trois
+  ne se lisent pas de la même façon : un recueil **« bis »** (`bis`) — un recueil parallèle, tenu
+  hors de Scribae pour une raison technique (une entité autonome, un périmètre séparé) ; un recueil
+  **inactif** (`inactif`) — un recueil qui n'est plus alimenté —, qui porte sa **période**
+  (`du`/`au`, toutes deux facultatives) rendue par `periodeRecueil` (« actes publiés du … au … ») :
+  c'est ce qui distingue **deux recueils successifs** quand un changement de logiciel en a laissé
+  plusieurs derrière lui ; et un **site de référence** (`ressource`) — Légifrance, service-public.gouv.fr
+  ou tout autre site utile au lecteur, qui ne contient pas les actes de la collectivité mais les
+  textes et les démarches qui les entourent. Le libellé d'un renvoi se pose aussi en **précision**
+  facultative (`note`), qui explique au lecteur pourquoi ce recueil existe ou pourquoi il s'est
+  arrêté.
+
+- **Ces renvois se règlent** dans Administration › **Publication**, sous la carte **« Recueils
+  extérieurs et renvois »** (`recueilsExternesBloc`, `views/referentiel.js`) : libellé, adresse,
+  nature, période pour un inactif, précision. On les **ajoute**, les **ordonne** (montée/descente),
+  les **retire**. Le modèle et la fabrique vivent dans `src/lib/recueil.js` (`newRecueilExterne`,
+  `RENVOIS_RECOMMANDES`) ; Légifrance et service-public.gouv.fr sont livrés comme **entrées ordinaires**
+  de la liste — modifiables, retirables —, et un bouton **« Rétablir les renvois livrés »** les fait
+  revenir d'un clic. La migration additive `migrateRecueilsExternes` (`src/lib/store.js`) pose une
+  **liste vide** sur un référentiel réel et les renvois livrés sur le jeu de démonstration.
+
+**Mentions du pied de page.** L'espace public se termine par ses **mentions** : les **mentions
+légales** — qui rappellent à quelles conditions un acte publié est exécutoire et opposable (publication
+et transmission au représentant de l'État, article L. 2131-1 du CGCT ; délai de recours de deux mois,
+article R. 421-1 du CJA) — et les **mentions d'accessibilité** (article 47 de la loi n° 2005-102 du
+11 février 2005, RGAA, déclaration d'accessibilité et voie de recours devant le Défenseur des droits).
+Elles suivent le même régime que les renvois : ce sont des **données du référentiel**
+(`config.publication.mentions`, voir `src/lib/recueil.js`, `MENTIONS_PUBLIQUES` / `MENTIONS_DEFAUT` /
+`mentionsPubliques`), que l'administration écrit, remplace ou éteint.
+
+Chaque mention se présente de **trois façons** (`mode`) : **`texte`** — le texte du référentiel
+s'affiche dans un bloc **replié sous son titre** (`<details>`, `blocMentions`) : présent dans la page,
+donc trouvable par un moteur comme lisible par un agent, sans noyer le pied de page ; **`lien`** — le
+pied de page ne porte qu'un **renvoi** vers la page de la collectivité (les mentions légales du site
+principal, la déclaration d'accessibilité, par exemple) ; **`aucune`** — la mention ne s'affiche pas.
+Une mention **à moitié remplie ne s'imprime pas** : un lien sans adresse, un texte vide et une mention
+éteinte ne rendent rien (`mentionPublique` renvoie `null`) — mieux vaut une mention absente qu'une
+rubrique vide ou un lien mort. L'adresse est complétée d'un schéma si l'administration a saisi
+« www.exemple.fr » (`urlAvecSchema`, employé aussi par les renvois du recueil). Le texte se découpe en
+**blocs** (`blocsMention`) selon deux règles qu'on devine sans les apprendre : une **ligne vide** sépare
+deux paragraphes, une ligne qui commence par **« - »** (ou « • », « * », « 1. ») devient une **puce**.
+Le rendu habille ces blocs (`.recueil-mention__texte`, `.recueil-mention__liste`, `src/css/app.css`).
+
+Ces mentions se règlent dans Administration › **Publication**, sous la carte **« Mentions du recueil
+public »** (`mentionsPubliquesBloc`, `views/referentiel.js`) : présentation (texte / lien / aucune),
+titre, texte, libellé et adresse du lien — et un bouton **« Rétablir le texte livré »** par mention, le
+texte livré n'étant jamais perdu, seulement recouvert. La migration additive `migrateMentionsPubliques`
+(`src/lib/store.js`) pose les mentions **actives** sur un référentiel antérieur — elles rappellent des
+règles qui valent pour toute collectivité —, et les textes de la fiction sur le jeu de démonstration :
+les mentions légales de la Ville de Valmont-sur-Loire y sont **écrites** (éditeur, directeur de la
+publication, tribunal administratif d'Orléans), et l'accessibilité y est un **lien** vers la déclaration
+publiée sur le site principal — les deux formes à l'écran.
+
 **Amorçage de la démonstration.** Un service neuf ne contient aucune publication, donc le recueil
 serait vide : `src/ui/demo-publications.js` (`amorcerRecueil`, appelé en fin d'amorçage par
 `app.js`) publie au premier démarrage les actes que la fiction déclare publiés — ceux qui portent
@@ -722,13 +1361,19 @@ d'être des routes décrites ici.
   `retirerMetaRecueil` les efface quand on quitte le recueil, pour rendre à l'atelier son propre
   titre.
 - **Le recueil ouvert se donne à copier** : `blocDonneesPubliques` (`views/acte-publie.js`) replie,
-  sous le texte de l'acte, l'adresse de référence et les adresses de chaque format, chacune avec son
-  bouton « Copier ». Il est montré au public comme à l'administration.
+  sous le texte de l'acte, l'**adresse de l'identifiant ELI**, l'adresse de référence et les adresses
+  de chaque format, chacune avec son bouton « Copier ». Il est montré au public comme à
+  l'administration.
 - **L'URL suit la page, jamais l'inverse** : `majUrlRecherche` (`src/ui/state.js`) tient l'adresse
   de la page d'accord avec l'écran affiché, en ne touchant qu'aux clés du recueil (`acte`, `format`,
-  `recueil`) et en conservant les paramètres de la plateforme et le fragment de l'éditeur. La
+  `recueil`, `eli`) et en conservant les paramètres de la plateforme et le fragment de l'éditeur. La
   navigation interne ne recharge pas la page : un clic intercepté (`views/recueil-public.js`) suit
-  l'adresse du recueil sans quitter l'application.
+  l'adresse du recueil sans quitter l'application — `?acte=<clé>` comme `?eli=<identifiant>`, et
+  depuis n'importe quel écran (un acte publié se cite aussi depuis l'atelier).
+- **L'identifiant ELI est une adresse** : `resoudreLiensEli` (`src/lib/recueil.js`) traduit les liens
+  ELI portés par un document publié — un visa d'adoption, un renvoi à l'acte modificatif — en
+  l'adresse de l'acte visé dans l'instance, et la page accepte `?eli=…` (ou `/eli/<code>/<année>/<n°>/<entité>`
+  sur un déploiement auto-hébergé) : voir § 2.6 sexies.
 
  (`config.publication.auto`, Administration › Publication,
 **vrai par défaut**). Éteinte, `publierApresSignature` (`views/signature.js`) **s'arrête au retour
@@ -748,12 +1393,66 @@ obligatoire** (le service refuse un motif absent, `422 motif_absent`) et **conse
 **signé** (il redevient publiable) et laisse une trace sur sa fiche. La permission
 `publications.depublier` est accordée au seul rôle **administrateur**.
 
+**Épingler un acte : la bande « À la une ».** L'onglet **Actes** porte, sur chaque acte
+publiable, un bouton **punaise** (permission `publications.epingler`, rôles administrateur et
+éditeur) qui met l'acte **en avant** sur la page d'accueil du recueil public, dans sa bande
+**« À la une »** — au-dessus du carrousel des derniers actes, qui ne les répète pas. C'est la
+place d'un **règlement intérieur**, d'une charte, du document qu'un visiteur vient chercher ;
+à l'inverse d'un acte parmi les derniers publiés, il ne dépend pas de sa date. La bande ne
+montre que les versions **en vigueur** et **s'efface** dès qu'une recherche ou un filtre est
+posé : le lecteur est alors dans ses résultats, et une mise en avant n'y répond pas.
+
+Le drapeau vit d'abord sur l'**acte** (`acte.epingle`) : on peut donc l'épingler **avant** sa
+publication — le dépôt emporte le drapeau avec la version en ligne (`epingle: true` dans
+`POST /v1/actes/{id}/publication`), et un acte non publiable ou une annexe n'offre pas le
+bouton. Il suit ensuite l'**ACTE** — son identifiant ELI — et non la version déposée :
+`POST /v1/publications/{cle}/epingle` le pose sur **toutes** les versions publiées sous cet
+identifiant, et une version publiée plus tard l'**hérite** (`hPublier`). Un acte **modifié ou
+consolidé reste ainsi à la une**. Le geste est réversible (`epingle: false`), ne touche pas au
+texte publié, et s'inscrit au **journal** (`publication.epingle` / `publication.desepingle`).
+
 **Amorçage de la démonstration.** Un service neuf ne contient aucune publication, donc le recueil
 serait vide : `src/ui/demo-publications.js` (`amorcerRecueil`, appelé en fin d'amorçage par
 `app.js`) publie au premier démarrage les actes que la fiction déclare publiés — ceux qui portent
 une constatation de publication —, par le **même chemin** que l'écran de signature
 (`publierActeDuSeed`), de sorte que le registre local et le service racontent la même chose.
 Idempotent, silencieux, et réservé au jeu de démonstration intact (`acte-demo-*`, `tpl-*`).
+Il porte ensuite la **mise à la une** des actes que la fiction déclare épinglés
+(`POST /v1/publications/{cle}/epingle`, reposé à chaque amorçage : le service a pu être remis à
+zéro) — la délibération qui adopte le règlement intérieur, dans le jeu livré.
+
+#### 2.6 sexies L'identifiant ELI comme adresse, dans l'instance
+
+Un acte publié **cite** d'autres actes par leur **identifiant ELI** : c'est le **visa d'adoption**
+d'une annexe (« Vu l'arrêté n°2026-464-VSL du 28 octobre 2026, qui l'adopte ; »), le visa qui
+rappelle l'acte **modificatif** dont le texte est consolidé, et la liste des documents annexés. Le
+document publié porte donc des liens de la forme `eli:/fr/arr/2026/0464/vsl` (`compile.js`,
+`amend.js`, `annexes.js` : le champ `lien` d'un visa).
+
+Or un identifiant n'est **pas une adresse** : aucun navigateur ne sait l'ouvrir. C'est à
+l'**instance** de le traduire — elle seule connaît ses actes publiés :
+
+- **Dans la page (recueil et consultation)** : `resoudreLiensEli` (`src/lib/recueil.js`) remplace,
+  à l'affichage, l'identifiant par l'adresse de l'acte visé (`hrefActe`), et la mention écrite ne
+  change pas : seul le lien devient réel. L'identifiant désigne l'**acte**, jamais une version
+  (`indexEli`/`publicationParEli`) : deux versions publiées sous le même identifiant ne désignent
+  qu'un acte, et c'est la version **en vigueur** qui est atteinte. Un identifiant que le recueil
+  **ne connaît pas** reste une **mention**, sans lien (`.recueil-lien-eli--hors`) : un lien qui ne
+  mène nulle part vaut moins que pas de lien. La liste des publications qui permet la traduction est
+  posée par les vues (`setListePublications`) ; à défaut, elle est demandée une fois au service et
+  la résolution est **différée** jusque-là — jamais tranchée à tort.
+- **Dans la page servie par un déploiement auto-hébergé** (`pageActe`,
+  `src/server/mysql/actes.mjs`) : le service fait la même traduction côté serveur, parce qu'il
+  détient les publications et que la page est servie en HTML **sans JavaScript**.
+
+L'identifiant s'ouvre **aussi comme une adresse**, pour qui l'a sous les yeux sans être dans la
+page : sur un déploiement auto-hébergé, `/eli/<code>/<année>/<n°>/<entité>` **redirige** (302) vers
+la page de l'acte en vigueur (nginx route `/eli` vers l'API, comme `/recueil`) ; ailleurs, l'adresse
+passe par la page (`?eli=…`, clé `eli` de `CLES_PUBLIQUES`, lue par `parseRoute` et traitée par
+`views/recueil-public.js`). Un identifiant inconnu le **dit** (« Aucun acte ne porte cet
+identifiant »), au lieu d'échouer en silence. Le bloc **« Recueil ouvert »** de chaque acte
+(`blocDonneesPubliques`) porte cette adresse (`adresseEli`/`hrefEli`), à côté de l'adresse de
+référence et des représentations lisibles par machine.
 
 ### 2.7 Comptes et rôles
 
@@ -782,7 +1481,7 @@ réviseur, ou celle de signataire, à un rédacteur ne le transforme pas en « p
 Le contrôle d'accès repose sur des **permissions** nommées (`trames.voir`, `trames.gerer`,
 `trames.styles`, `actes.rediger`, `actes.gerer`, `actes.tous`, `actes.valider`, `actes.reviser`,
 `actes.signer`, `signature.gerer`, `delegations.gerer`, `publications.depublier`,
-`referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`), chacune
+`publications.epingler`, `referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`), chacune
 accordée à un ensemble de rôles. **Signer** (`actes.signer`) et **publier** (`signature.gerer`)
 sont deux permissions distinctes : la première ouvre l'écran de signature et les gestes qui
 engagent la signature — un signataire peut donc signer sans pouvoir conduire la publication.
@@ -859,6 +1558,11 @@ limite à ses actes, et le registre de tout compte se limite à son périmètre.
 >
 > Le référentiel peut **brancher l'annuaire de la collectivité** (OpenID Connect) : voir
 > § 2.7 bis. Le brancher **désactive automatiquement les comptes de démonstration**.
+>
+> Une installation **auto-hébergée sans annuaire** peut à la place tenir ses **comptes locaux**
+> (identifiant et mot de passe) : c'est le **déploiement** qui l'active, dans le `.env` du
+> service (`AUTH_MODE=password`), avec un **compte d'administration** créé depuis le `.env`
+> (`ADMIN_LOGIN` / `ADMIN_PASSWORD`) : voir § 2.7 bis.1.
 
 ### 2.7.2 Qualités, accord en genre et délégations de signature
 
@@ -1094,6 +1798,53 @@ signent, ou dont la signature est engagée (l'adjoint, le chef du bureau Urbanis
 du CCAS, la directrice générale de l'office) ; leurs actes non encore rapprochés affichent
 l'avertissement et le geste de rapprochement.
 
+#### 2.7.2 quater L'acte qui émane d'une assemblée
+
+Tout acte n'émane pas d'une **personne**. Un **conseil municipal** délibère, un **conseil
+d'administration** d'établissement public approuve : la **ligne d'autorité** de l'acte est alors
+celle de l'**assemblée** — « Le conseil municipal de Valmont-sur-Loire », « Le conseil
+d'administration de l'office public de l'habitat du Valmont » — tandis que l'acte est **signé par
+le président de cette assemblée** : le **maire** pour un conseil municipal, le **président du
+conseil d'administration** pour un établissement public. L'autorité et le signataire ne se
+confondent donc plus : l'une est un **organe collégial**, l'autre une **personne** — et c'est la
+délibération elle-même qui est le plus souvent régie ainsi.
+
+**L'assemblée est une donnée du référentiel** (`config.councils`, onglet **Administration ›
+Assemblées**, `src/ui/views/referentiel.js`). Chaque conseil se décrit par : son **entité de
+rattachement** (`entityId` — le conseil municipal est celui de la commune) ; sa **formule
+d'autorité** (`authorityFormula`, la ligne d'en-tête de l'acte) ; la **qualité qui signe**
+(`signerRoleId`, un **rôle du référentiel** — `maire`, `president-ca`…) ; et un état **actif**.
+Séparer la qualité qui signe du rôle porté par les personnes est ce qui rend le dispositif
+**configurable conseil par conseil** : un même établissement peut faire signer son assemblée par
+son président, sans toucher au code, et chaque conseil a la sienne. `src/lib/conseils.js` porte le
+modèle — `newConseil`, `conseilsActifs`, `conseilsDe`, `conseilPourActe` (l'assemblée retenue pour
+un acte : celle qu'on désigne explicitement, sinon la **première assemblée active de l'entité**),
+`qualiteSignataireConseil` (la qualité accordée en **genre**, « Le président » / « La présidente »)
+et `enrichirConseil` (la formule et la qualité prêtes à l'affichage, avec article et majuscule).
+
+**Une trame déclare qu'elle produit un acte d'assemblée** (`trame.assemblee`, case « Acte
+d'assemblée — délibération » dans l'éditeur de trame). À la compilation, `buildContext`
+(`src/lib/compile.js`) résout alors `ctx.conseil` — l'assemblée désignée par `values.__conseilId`,
+à défaut `extra.conseilId` ou `trame.conseilId`, à défaut la première de l'entité — et pose
+`ctx.autorite` sur la **formule de l'assemblée** au lieu de celle de l'entité. La **qualité du
+signataire** que l'assemblée appelle est croisée avec le **signataire de la trame** : c'est bien
+une personne qui signe, sous la qualité du conseil, et la chaîne de délégations reste applicable.
+Les exported `AUTO_TOKENS_CONSEIL` (`src/lib/auto-tokens.js`) exposent dans l'éditeur les jetons
+propres à l'assemblée — `{{conseil.name}}`, `{{conseil.authorityFormula}}`, `{{conseil.signerQualite}}`
+— en plus du jeton transversal `{{autorite}}`, qui est **le** point de bascule : dans une trame de
+personne il rend la formule d'autorité de l'entité, dans une trame d'assemblée celle du conseil.
+
+**La conformité veille sur le couple.** Un contrôle (`src/lib/conformite.js`, `assemblee` — « Acte
+d'assemblée ») confirme que la ligne d'autorité est bien celle de l'assemblée, et un second
+(`assemblee-signataire`) vérifie que le **signataire — ou un délégataire de sa chaîne — porte
+bien le rôle** que l'assemblée appelle ; s'il ne le porte pas, l'acte est **signalé** à l'attention
+de l'écran de révision, car la signature n'aurait pas la qualité annoncée.
+
+**Le jeu de démonstration** montre les deux cas : le **conseil municipal** de la commune
+(`csl-vsl-cm`, signé par le maire) avec la trame `tpl-deliberation`, et le **conseil
+d'administration** de l'office public de l'habitat (`csl-oph-ca`, signé par le président) avec la
+trame `tpl-deliberation-ca`.
+
 ### 2.7.3 L'identité reconnue sans rôle : le visiteur
 
 **Le recueil public est l'interface de l'installation pour qui n'a pas de compte** (§ 2.6 bis) :
@@ -1177,6 +1928,43 @@ fournisseur (`ui/oidc.js`), écran « pas d'accès » du visiteur (`views/sans-a
 onglet **Administration › Annuaire (OIDC)** (mode, fournisseur,
 correspondance des groupes, porte de secours), **Comptes et rôles** (provenance des comptes,
 actions masquées quand l'annuaire est branché).
+
+#### 2.7 bis.1 Comptes locaux (mot de passe), activés par le déploiement
+
+Une collectivité qui **n'a pas d'annuaire** — une petite commune, une installation d'essai
+autonome — peut faire tenir à l'application ses **propres comptes**, protégés par un **mot de
+passe**. C'est le mode `password`, et il ne se règle **pas** comme les deux autres : il dépend de
+ce que le **service** sait faire, pas du contenu de l'application. Il vit donc dans le `.env` du
+déploiement (`AUTH_MODE=password`, voir `src/server/README.md`), et le service l'annonce au
+navigateur (`window.__SCRIBA_AUTH__`, puis `GET /v1/auth/config`) : le déploiement est plus fort
+que le référentiel, et `authConfig()` (`src/lib/auth.js`) applique son mode **par-dessus**
+`config.auth`, où que la configuration soit lue.
+
+**Le compte d'administration vient du `.env`.** `ADMIN_LOGIN` et `ADMIN_PASSWORD` (et
+`ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY`) décrivent l'administrateur initial : au démarrage du
+service, `amorcerAdmin()` (`src/server/mysql/server.mjs`) le **crée** s'il n'existe pas — rôle
+`administrateur`, mot de passe haché —, ou lui **repose** son mot de passe s'il existe déjà. Un
+`ADMIN_PASSWORD` trop faible (moins de `MDP_MIN_LONGUEUR`, ou égal à l'identifiant) est **refusé**
+avec son motif. C'est ensuite ce compte qui, depuis **Comptes et rôles**, crée les autres — et
+qui peut changer son mot de passe pour ne plus dépendre du `.env` (recommandé : `ADMIN_PASSWORD`
+se retire alors du fichier). Le mode démonstration se commande de la même façon : `DEMO_ACCOUNTS`
+(défaut **`false`** en mode mot de passe) laisse ou non le raccourci « choisir un compte » de
+l'écran de connexion — réglage du déploiement, jamais du référentiel.
+
+**Ce qui protège vraiment.** Le mot de passe est vérifié par le **service** : jamais le
+navigateur ne détient de secret, et le référentiel ne conserve **pas** le mot de passe mais son
+**empreinte scrypt** (`scrypt$N$r$p$sel$empreinte`, paramètre `SCRYPT_N` réglable) — la
+vérification est à **temps constant**. Une session ouvre un **cookie `HttpOnly`** (jeton
+aléatoire ; seul son **SHA-256** est en base) dont la durée se règle (`SESSION_DAYS`), et les
+écritures passent par un jeton **anti-CSRF** (double envoi). Les tentatives sont **comptées** :
+cinq échecs bloquent le compte le temps que le délai croît (plafonné). `COOKIE_SECURE` (défaut
+vrai) impose HTTPS — à laisser tel quel en service. Le mode mot de passe est le seul où le
+service **refuse** toute lecture ou écriture sans session ouverte ; c'est lui, et non
+l'interface, qui fait alors autorité.
+
+Le domaine est un module pur, sans dépendance : `src/server/mysql/comptes.mjs` (politiques,
+hachage, sessions, routes `/v1/auth/*`), éprouvé par `src/server/mysql/comptes.test.mjs`. Le
+client l'appelle par `src/lib/motdepasse.js`.
 
 
 
@@ -1503,19 +2291,42 @@ l'atelier ne *peut pas* voir un acte — aucune fonction ne le lui donne, et la 
 construite à partir du seul guide, qui est public.
 
 **Moteur interchangeable** (`Administration › Assistants`) :
-`auto` (défaut — le moteur intégré s'il existe, l'adresse personnalisée sinon),
+`auto` (défaut — le moteur intégré s'il existe, l'adresse personnalisée sinon, le repli
+documentaire à défaut),
 `integre` (le plugin `ai-text` de Perchance, via `hostGenerateText`),
 `personnalise` (API de la collectivité). Deux protocoles sont acceptés : **complétions de
 conversation** (`messages` rôle/contenu, flux SSE ou réponse JSON — OpenAI, Mistral, Groq,
 OpenRouter, Ollama, vLLM, LM Studio…) et **appel simple** (`{ prompt } → { texte }`). Le
 **relais sans CORS** de la plateforme est proposé en option pour un service qui n'autorise
 pas l'origine de l'application. Sans moteur disponible — c'est le cas d'une page servie en
-statique tant qu'aucune adresse n'est réglée —, l'assistant ne lève pas : il **explique
-pourquoi** et renvoie à l'Administration.
+statique, et d'un déploiement sans API —, l'assistant ne lève pas : il **explique pourquoi**
+et renvoie à l'Administration.
+
+**Repli documentaire.** Faute de moteur de langage, l'assistant répond quand même, par
+**recherche dans ce qu'il sait** — et sans le moindre appel réseau : `moteurDe` rend alors
+`{ type: "repli" }`, et `repondre` court-circuite la composition de l'invite. Plume classe les
+chapitres du guide avec `chapitresPertinents` — la fonction même qui choisit la connaissance
+d'un moteur — et met le meilleur **mis à plat** (`chapitreEnTexte`), tronqué sur une fin de ligne
+(`suiteTronquee`) pour que son lien reste entier. Comme une question est souvent ambiguë
+(« envoyer un acte » : par courriel ? en signature ? à la révision ?), il **nomme les trois
+chapitres** retenus, chacun avec son titre et son résumé — un titre bien choisi dit mieux ce que
+contient un chapitre que le classement le plus savant — et donne l'extrait du premier ;
+`chapitreEnTexte` écrit pour un modèle, ses repères (« [attention] », les illustrations) sont
+donc traduits ou retirés avant d'être montrés (`pourLecture`). Faute de chapitre, il renvoie au
+chapitre de l'écran courant ou au sommaire. Publia classe les actes publiés (`scoreActe` : métadonnées comptées trois fois, texte
+une fois) et rend la fiche d'un acte (`ficheLisible` — nature, numéro, objet, autorité, dates,
+ELI, état de rédaction, début du texte, lien) ; l'acte consulté l'emporte à égalité, et faute de
+correspondance elle liste les derniers actes publiés. Ce sont des **extraits, pas des réponses
+rédigées** : l'écran le dit dans une note (`fr-alert--info`) qui laisse la saisie ouverte —
+là où un moteur réclamé mais absent (`aucun`) ferme la saisie et affiche une alerte. C'est ce
+qui donne un assistant utile à GitHub Pages, sans clé d'API, sans service à installer, et sans
+qu'un mot de la question sorte du navigateur.
 
 **Budget de connaissance.** La fenêtre utile du moteur intégré est de 6 000 jetons ; le guide
-entier en ferait 21 000. `chapitresPertinents()` (mots pondérés par leur rareté, titre et
-mots-clés comptés davantage que le corps) classe les chapitres ; `contexteAtelier` joint les
+entier en ferait 21 000. `chapitresPertinents()` classe les chapitres : ses quatre CHAMPS sont
+pondérés (titre ×10, résumé et mots-clés ×7, corps ×1) et chaque mot est pondéré par sa rareté
+*dans ce champ* — un mot présent dans tous les titres (« acte ») ne désigne personne, un mot qui
+ne vit que dans un seul titre pèse son poids plein. `contexteAtelier` joint les
 trois premiers, ceux de l'écran courant, puis un socle, **tronqués plutôt qu'écartés**, avec la
 table des matières complète sous les yeux du modèle. Le budget est lu du moteur lui-même
 (`getMetaObject().countTokens`) quand il est disponible, estimé sinon.
@@ -1657,7 +2468,17 @@ seul son état change de support. Conséquences à retenir :
 - `window.__SCRIBA_FORCE_STATIC__ = true` avant chargement force ce mode depuis n'importe
   quel hébergement — c'est ainsi qu'on le relit depuis l'éditeur ;
 - signature (`crypto.subtle`, donc contexte sécurisé : HTTPS), empreinte, publication, ELI
-  et opposabilité sont inchangés.
+  et opposabilité sont inchangés ;
+- la feuille de style reprend la règle `[hidden] { display: none !important; }` que la
+  plateforme injecte : tout le code écrit `el.hidden = true`, et sans cette règle une classe
+  qui pose `display: flex` l'emporterait sur le `display: none` du navigateur (sélecteur
+  d'attribut 0,1,0 contre sélecteur de type 0,0,1) — un panneau fermé resterait ouvert, un
+  bouton sans objet resterait visible ;
+- l'assistant n'a **aucun moteur de langage** (le moteur intégré n'existe que sur Perchance) :
+  `moteurDe` rend `{ type: "repli" }`, et Plume comme Publia répondent par **recherche
+  documentaire** (voir 2.8.5) — sans clé, sans service à installer, et sans qu'un mot de la
+  question sorte du navigateur. Un administrateur qui veut des réponses rédigées renseigne
+  l'adresse d'une API (Administration › Assistants).
 
 ## 3. Compilation et exports
 
@@ -1711,8 +2532,14 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    le référentiel : elle vaut pour le poste, pas pour la collectivité. Le **papier des actes
    reste blanc** — seul l'habillage de l'application change. (tous les comptes)
 2. **Trames** — liste **filtrée par le périmètre du compte**, création (avec choix du service
-   gestionnaire et, au besoin, du bureau), duplication, statut (brouillon/publiée/archivée),
-   export JSON.
+   gestionnaire et, au besoin, du bureau), duplication, **import d'un document Word (.docx) ou
+   LibreOffice (.odt)** en trame, **mise à disposition** des services (brouillon / mise à
+   disposition / archivée), export JSON. L'import d'un document **n'enregistre rien** : la trame
+   proposée s'ouvre dans l'éditeur (adresse réservée `trame/__import__`), avec ses « points à
+   vérifier », et l'éditeur décide de l'enregistrer ou de l'abandonner. Une trame reste en
+   **brouillon** — invisible des services — tant qu'un éditeur ne l'a pas **mise à disposition** ;
+   le geste inverse (retirer) la referme sans toucher aux actes déjà rédigés, et les deux sont
+   journalisés.
 3. **Éditeur de trame** (administrateurs et éditeurs) — 3 volets : plan / page WYSIWYG /
    inspecteur. Édition inline ; **réserve d'éléments** sous le plan (champs, informations
    remplies automatiquement, blocs) d'où partent tous les gestes : on **glisse** un champ dans
@@ -1725,15 +2552,20 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    immédiat. Commentaires et règles
    sont **signés du service** du compte qui les a saisis (l'auteur n'est pas saisi à la main).
 4. **Rédiger** (services) — l'onglet ouvre d'abord le **choix de l'acte à rédiger** : la
-   rédaction en cours, un acte enregistré encore modifiable, ou une trame du référentiel
-   (liste filtrée par le périmètre, avec recherche). Le **document est ensuite le
+   rédaction en cours, un acte enregistré encore modifiable, ou une trame **mise à disposition**
+   (liste filtrée par le périmètre **et par la disponibilité**, avec recherche : un modèle en
+   brouillon n'est pas proposé, et son ouverture directe est refusée — sauf à un éditeur, ou
+   pour une rédaction déjà commencée). Le **document est ensuite le
    formulaire** : page A4 éditable en place,
    pastilles de champs cliquables, saisie possible aussi depuis le panneau de droite
    (« À compléter » / « Contrôle & écarts »). Le **numéro** se réserve de là — bouton
    « Réserver le prochain numéro », ou **« Demander le numéro »** quand la collectivité le fait
    attribuer par un service externe (§ 2.1 bis). Le texte du modèle peut être réécrit : les
    réécritures deviennent des **écarts « hors trame »** (conservés, signalés, non
-   bloquants, visibles des administrateurs). Export bloqué seulement par un contrôle
+   bloquants, visibles des administrateurs). Les **blocs du document se déplacent** — deux
+   flèches sur le bloc, ou un glisser par la poignée ⠿ ou par le numéro de l'article/division —
+   et l'ordre choisi renumérote le dispositif, sans rien changer à la trame (§ 2.4.1). Export
+   bloqué seulement par un contrôle
    bloquant de la trame. Si le parapheur est actif, l'en-tête indique **où en est l'acte dans
    son circuit de validation** (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la
    fiche de l'acte porte la carte du parapheur ; éteint, rien de tout cela n'apparaît.
@@ -1794,7 +2626,21 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    consolidée, qui **supplante** l'acte initial, lequel demeure accessible via l'historique
    des modifications. Un acte peut aussi **prévoir, dans son propre texte, l'abrogation d'un
    autre acte ou de l'un de ses articles** — onglet « Abrogations » de la rédaction (voir
-   2.5 bis).
+   2.5 bis). Sur une **annexe** (un règlement intérieur), l'écran ouvre son régime propre :
+   l'acte modificatif **adopte la nouvelle rédaction** de l'annexe, en suivi des
+   modifications — la case « Modification par adoption » se décoche pour une modification
+   classique, article par article (voir 2.2.4).
+6 bis. **Annexes** — une trame peut être de nature **Annexe** (onglet « Trame » de l'éditeur) :
+   le document est **adopté par un autre** : l'annexe ne se signe ni ne se publie pour
+   elle-même, et **son texte suit l'original signé de l'acte qui l'adopte**, à la suite de la
+   signature. À la rédaction, on **désigne l'acte d'adoption** (carte « Annexe »), et l'acte qui
+   adopte **annonce ses annexes** (carte « Annexes », bouton « Joindre une annexe ») — il en
+   affiche alors le texte en lecture seule sous le document. Le visa d'adoption vient en tête des
+   visas de l'annexe, la liste des annexes ferme le dispositif de l'acte adoptant, et les fiches
+   renvoient de l'un à l'autre (voir 2.2.4 et 2.5). Une annexe déclarée **Règlement**
+   (`trame.reglement`, case « C'est un RÈGLEMENT ») est en outre **publiée à part au recueil**, à
+   titre informatif, sous un identifiant stable — c'est un texte normatif qu'on consulte pour
+   lui-même, comme un code (voir 2.2.4 ter et 8 bis).
 7. **Signature & publication** — l'application est cliente de l'API REST du service :
    dépôt de l'acte finalisé, ouverture du circuit auprès du prestataire de signature
    (écran distinct), retour de l'acte signé par notification, suivi du circuit. Un
@@ -1813,6 +2659,15 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    recherche, un **carrousel des derniers actes publiés** (le thème mis en avant sur chaque carte),
    les **thèmes** en grille — la matière de chaque acte, par laquelle on accède à ses actes —, puis
    la liste complète groupée par année. Chaque acte s'y lit dans la page, avec ses métadonnées.
+   **Dès qu'une recherche est en cours** — on frappe dans l'entrée, ou l'on choisit un thème —, le
+   carrousel et la grille des thèmes **s'effacent** au profit des seuls résultats ; ils reviennent
+   quand on efface la recherche ou les filtres. Les **règlements** publiés à titre informatif
+   (2.2.4 ter) comptent parmi les publications du recueil : ils se cherchent, se classent par thème,
+   et leur identifiant s'ouvre directement.
+   Le **bas de page** (et le bout de ses résultats de recherche) renvoie vers les recueils qu'il ne
+   gère pas — recueils « bis », recueils inactifs avec leur période — et vers les sites de
+   référence (Légifrance, service-public.gouv.fr), sous le titre « Vous ne trouvez pas ce que vous
+   recherchez ? » ; ces renvois se règlent dans Administration › Publication.
    Rien de l'administration n'y figure,
    seulement la structure et le titre du recueil (voir 2.6 bis). Le **recueil ouvert** (2.6 ter)
    ajoute ce que lisent les moteurs et les agents : une adresse stable par acte, ses
@@ -1842,7 +2697,7 @@ autonome à transmettre aux collègues.
 |---|---|---|
 | Bienvenue | à quoi sert l'application, ce qu'elle ne fait pas | tous |
 | Ouvrir l'application | adresse, favori, les entrées du menu | tous |
-| Écrire un acte, pas à pas | choisir l'acte à rédiger, compléter le document : pastilles, réécritures, enregistrement, export | tous |
+| Écrire un acte, pas à pas | choisir l'acte à rédiger, compléter le document : pastilles, réécritures, déplacement des blocs, divisions, annexes, enregistrement, export | tous |
 | Contrôle & écarts | comprendre les messages et les passages réécrits | tous |
 | Enregistrer, imprimer, envoyer | où arrive le fichier, comment le joindre à un courriel | tous |
 | Faire valider un acte (le parapheur) | le circuit de validation avant la signature | tous |
@@ -1851,7 +2706,8 @@ autonome à transmettre aux collègues.
 | Faire signer un acte | le circuit de signature, le prestataire, l'original signé | tous |
 | Publier l'acte (ELI et opposabilité) | version en ligne, identifiant ELI, dates, recueil public | tous |
 | Modifier un acte déjà écrit | acte modificatif, version consolidée, import | tous |
-| Préparer une trame | l'éditeur de trame, champs, règles, commentaires signés de leur service | administrateurs et éditeurs |
+| Adopter une annexe (un règlement, un tableau…) | le document adopté par un autre, qui ne se signe ni ne se publie pour lui-même — son texte suit l'acte qui l'adopte : le désigner, le rattacher, le modifier par adoption d'une nouvelle rédaction, et, s'il est déclaré **règlement**, sa publication informative à part au recueil | tous |
+| Préparer une trame | l'éditeur de trame, champs, règles, commentaires signés de leur service, divisions (livre, titre, section…) et trames d'annexe | administrateurs et éditeurs |
 | Qui peut faire quoi : les comptes et les rôles | se connecter, les six rôles (dont le réviseur et le signataire, cumulables, et le visiteur, sans accès), ce que chacun débloque | tous |
 | Glossaire | tous les termes, en une phrase | tous |
 | Dépannage | les petits ennuis et leur solution | tous |
@@ -1878,11 +2734,16 @@ dont les positions sont calculées à partir des éléments de l'interface (voir
   **champs** ; la structure (articles, clauses, conditions) reste du ressort des
   administrateurs, via l'éditeur de trame et le flux « Modifier un acte ».
 - Bordereau SEDA / versement VITAM.
-- Assistant de rédaction (ai-text-plugin).
+- **Assistant de rédaction.** Les deux assistants (Plume, dans l'atelier, et Publia, sur le
+  recueil public) sont **livrés** et actifs (voir 2.8 et `src/lib/assistant.js`) : ils
+  interrogent un moteur de langage — le moteur intégré de la plateforme, ou celui que
+  l'administrateur branche (clé conservée sur le poste, jamais dans le référentiel). Restent
+  hors périmètre : la **rédaction automatique du texte d'un acte** par l'assistant, et la
+  fourniture d'un moteur par l'application elle-même.
 - **Parapheur et exécution — suite.** Le circuit de validation, l'échéancier des formalités,
   la corbeille, le journal d'audit, la recherche globale et la collaboration sont livrés
   (voir 2.8). Restent hors périmètre : la **suppléance** nominative d'un valideur (vacances,
-  intérim, délégation temporaire), l'**envoi réel** des notifications (courriel) et leur
+  intérim, délégation temporaire), le **résumé quotidien** des notifications (courriel) et leur
   résumé quotidien, l'**export et la rétention** du journal d'audit, la lecture du journal
   technique `sb_journal` depuis l'application, et le **verrou de rédaction exclusif** (le
   verrou actuel avertit, il n'empêche pas).

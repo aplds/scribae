@@ -20,8 +20,15 @@ export { errorMessage };
 
 export const id = "service";
 
-export function create({ baseUrl = "", token = "", transport = "socket", label = "Service de données" } = {}) {
+export function create({
+  baseUrl = "", token = "", transport = "socket", label = "Service de données",
+  // Mode « comptes locaux (mot de passe) » : la porte est la session du service,
+  // dans un cookie — donc `credentials: "include"` — et les écritures portent
+  // l'en-tête anti-CSRF, relu du cookie à chaque appel (voir src/lib/motdepasse.js).
+  credentials = "same-origin", csrf = null,
+} = {}) {
   const base = String(baseUrl || "").replace(/\/+$/, "");
+  const entetesCsrf = () => (typeof csrf === "function" ? csrf() : (csrf || {}));
 
   async function request(method, path, body) {
     const payload = body === undefined ? null : body;
@@ -43,9 +50,11 @@ export function create({ baseUrl = "", token = "", transport = "socket", label =
     try {
       res = await fetch(base + path, {
         method,
+        credentials,
         headers: {
           "content-type": "application/json",
           ...(token ? { authorization: "Bearer " + token } : {}),
+          ...(method === "GET" ? {} : entetesCsrf()),
         },
         body: payload === null ? undefined : JSON.stringify(payload),
       });

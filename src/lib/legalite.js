@@ -51,22 +51,30 @@ export function dateHeureFr(iso) {
 
 export const mentionDeTransmission = (iso) => `Transmis au contrôle de légalité le ${dateHeureFr(iso)}`;
 
+// Une transmission SIMULÉE — aucun appel sortant n'a eu lieu (démonstration, ou
+// service qui n'a pas d'accès réel à l'API @ctes) — ne porte pas la même
+// mention qu'une transmission réelle : la mention est QUALIFIÉE, pour qu'un
+// lecteur ne prenne pas l'accusé de réception fabriqué pour un certificat
+// opposable. Voir NC-IV-004 et P-19.
+export const mentionDeTransmissionSimulee = (iso) => `Transmis au contrôle de légalité le ${dateHeureFr(iso)} (mention de démonstration — transmission simulée, sans appel sortant)`;
+
 // L'accusé de réception, tel que le service de contrôle de légalité le délivre.
 // Le « sceau » est l'empreinte des mentions du certificat rapprochée de celle
 // du document transmis : il scelle le certificat sur l'acte, et se recalcule.
-export async function certificatTransmission({ reference, recuLe, destinataire, empreinte }) {
+export async function certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration = false }) {
   const d = destinataire || CONTROLE_LEGALITE.destinataire;
   const r = recuLe || new Date().toISOString();
   return {
-    nature: "Accusé de réception de télétransmission",
-    emisPar: "Contrôle de légalité — télétransmission @ctes",
+    nature: demonstration ? "Simulation d'accusé de réception de télétransmission" : "Accusé de réception de télétransmission",
+    emisPar: demonstration ? "Simulation locale (aucun appel à l'API @ctes)" : "Contrôle de légalité — télétransmission @ctes",
     emisLe: r,
     destinataire: d,
     reference: String(reference || ""),
     empreinte: String(empreinte || ""),
     algorithme: "SHA-256",
+    demonstration: !!demonstration,
     sceau: await sha256Hex([reference, r, d, empreinte].join("|")),
-    mention: mentionDeTransmission(r),
+    mention: demonstration ? mentionDeTransmissionSimulee(r) : mentionDeTransmission(r),
   };
 }
 

@@ -26,7 +26,9 @@
 // par l'éditeur (`ui/views/amend-editor.js`) et lue ici.
 // ============================================================================
 import { clone, normalizeSpace } from "./util.js";
-import { newAmend, articleKey, planAmendments } from "./amend.js";
+import { newAmend, articleKey, planAmendments, flatNodes } from "./amend.js";
+
+export { flatNodes };
 
 const norm = (s) => normalizeSpace(s).replace(/\s+/g, " ");
 
@@ -246,7 +248,10 @@ export function insertedBlocks(session, ins) {
 //   • les articles insérés sont rattachés à l'article voisin.
 export function deriveAmendments(baseDoc, session) {
   const amends = [];
-  (baseDoc.nodes || []).forEach((node, i) => {
+  // Les articles sont visités dans l'ordre IMPRIMÉ, divisions comprises : c'est
+  // le même parcours que celui de l'éditeur, donc le même rang `i` que celui de
+  // leurs adresses de saisie (`n3`…).
+  flatNodes(baseDoc).forEach((node, i) => {
     if (node.type !== "article") return;
     const key = articleKey(node);
     if (isRemoved(session, key)) {
@@ -314,22 +319,21 @@ export function revertArticleByEId(session, baseDoc, eId) {
 // qui sera complété par la nouvelle consolidation.
 export function cleanDoc(doc) {
   if (!doc) return doc;
-  const nodes = [];
-  for (const n of doc.nodes || []) {
+  const cleanList = (list) => (list || []).flatMap((n) => {
+    if (n.type === "division") return [{ ...n, change: null, blocks: cleanList(n.blocks) }];
     if (n.type === "article") {
-      if (n.change?.action === "abrogate") continue;
+      if (n.change?.action === "abrogate") return [];
       const blocks = (n.blocks || [])
         .filter((b) => b.change?.kind !== "del")
         .map((b) => ({ ...b, change: null }));
-      nodes.push({ ...n, change: null, blocks });
-    } else {
-      nodes.push({ ...n, change: null });
+      return [{ ...n, change: null, blocks }];
     }
-  }
+    return [{ ...n, change: null }];
+  });
   return {
     ...doc,
     kind: "original",
-    nodes,
+    nodes: cleanList(doc.nodes),
     consolidationNotice: undefined,
     meta: { ...doc.meta, consolidated: undefined },
   };

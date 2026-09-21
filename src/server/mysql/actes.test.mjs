@@ -177,3 +177,97 @@ test("la capacité de l'état est respectée", () => {
   const res = call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON });
   assert.equal(res.status, 507);
 });
+
+// Le repère d'une carte mise à la une SUR LA PAGE du recueil (le CSS porte aussi
+// `.carte--une` : on compte donc la classe complète, pas le seul suffixe).
+const CARTE_UNE = 'class="carte carte--une"';
+
+// Dépose, signe (webhook) et publie un acte — le trajet complet, en trois appels.
+function publier(call, { numero, eliUri, dateDocument, datePublication, html = "<html>x</html>" }) {
+  const akn = `<akomaNtoso><body>Acte ${numero} du ${dateDocument}</body></akomaNtoso>`;
+  const a = call("POST", "/v1/actes", { akn, numero, dateSignature: dateDocument }, { authorization: JETON }).body;
+  const s = call("POST", `/v1/actes/${a.id}/signature`, {}, { authorization: JETON }).body;
+  call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: { document: { akn }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  });
+  return call("POST", `/v1/actes/${a.id}/publication`, {
+    html, akn, eliUri, datePublication,
+    original: { document: { sha256: sha256(akn) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  }, { authorization: JETON });
+}
+
+test("épingler un acte : le drapeau suit l'ACTE, et le recueil le montre", () => {
+  const { call } = banc();
+  const p1 = publier(call, { numero: "2026-501", eliUri: "eli:/fr/del/2026/0501/iam", dateDocument: "2026-03-10", datePublication: "2026-03-11" });
+  assert.equal(p1.status, 201);
+  const cle = p1.body.cle;
+  assert.equal(p1.body.epingle, false, "un acte n'est pas à la une par défaut");
+
+  // Écrire sans jeton est refusé ; une publication inconnue aussi.
+  assert.equal(call("POST", `/v1/publications/${encodeURIComponent(cle)}/epingle`, { epingle: true }).status, 401);
+  assert.equal(call("POST", "/v1/publications/inconnue%40x/epingle", { epingle: true }, { authorization: JETON }).status, 404);
+
+  const pose = call("POST", `/v1/publications/${encodeURIComponent(cle)}/epingle`, { epingle: true, auteur: "Yann Dubois" }, { authorization: JETON });
+  assert.equal(pose.status, 200);
+  assert.equal(pose.body.epingle, true);
+  assert.equal(pose.body.versions, 1);
+
+  // Le drapeau paraît dans la liste publique, dans les données ouvertes et sur la
+  // page du recueil — c'est par là que le visiteur le voit.
+  assert.equal(call("GET", "/v1/publications").body.publications.find((p) => p.cle === cle).epingle, true);
+  assert.equal(JSON.parse(call("GET", "/recueil.json").body).actes.find((a) => a.cle === cle).epingle, true);
+  const page = call("GET", "/recueil");
+  assert.ok(page.body.includes("À la une"), "la bande « À la une » doit être rendue");
+  assert.equal((page.body.match(new RegExp(CARTE_UNE, "g")) || []).length, 1);
+
+  // Une NOUVELLE VERSION du même acte hérite du drapeau : l'acte reste à la une.
+  const p2 = publier(call, { numero: "2026-501", eliUri: "eli:/fr/del/2026/0501/iam", dateDocument: "2026-04-01", datePublication: "2026-04-02" });
+  assert.equal(p2.status, 201);
+  assert.notEqual(p2.body.cle, cle);
+  assert.equal(p2.body.epingle, true, "la version publiée plus tard hérite de la une");
+  assert.equal(call("GET", "/v1/publications").body.publications.filter((p) => p.epingle === true).length, 2, "le drapeau vaut pour toutes les versions de l'acte");
+  // La bande « À la une » n'en montre qu'UNE (la version en vigueur), et l'acte
+  // n'est pas répété dans les « derniers actes publiés » juste en dessous.
+  assert.equal((call("GET", "/recueil").body.match(new RegExp(CARTE_UNE, "g")) || []).length, 1);
+
+  // Le retrait vaut pour l'ACTE entier — d'un seul geste, sur n'importe quelle version.
+  const retire = call("POST", `/v1/publications/${encodeURIComponent(p2.body.cle)}/epingle`, { epingle: false }, { authorization: JETON });
+  assert.equal(retire.status, 200);
+  assert.equal(retire.body.epingle, false);
+  assert.equal(call("GET", "/v1/publications").body.publications.some((p) => p.epingle === true), false);
+  assert.equal(call("GET", "/recueil").body.includes(CARTE_UNE), false);
+});
+
+test("les liens par l'identifiant ELI mènent à l'acte, dans l'instance", () => {
+  const { call } = banc();
+  // L'acte cité, publié au recueil : c'est lui que le lien doit atteindre.
+  const cite = publier(call, { numero: "2026-401", eliUri: "eli:/fr/arr/2026/0401/iam", dateDocument: "2026-03-10", datePublication: "2026-03-11" });
+  assert.equal(cite.status, 201);
+  // L'acte qui le cite par son identifiant ELI — le cas d'un visa d'adoption, ou
+  // d'une annexe —, et qui cite aussi un identifiant que le recueil ne connaît
+  // pas : celui-là doit rester une mention, sans lien.
+  const html = `<html><body><div class="doc"><ul class="doc-visas">`
+    + `<li><a class="doc-visas-link" href="eli:/fr/arr/2026/0401/iam" target="_blank" rel="noopener noreferrer" title="eli:/fr/arr/2026/0401/iam">l'arrêté n°2026-401, qui l'adopte ;</a></li>`
+    + `<li><a class="doc-visas-link" href="eli:/fr/arr/2026/9999/zzz" target="_blank" rel="noopener noreferrer" title="eli:/fr/arr/2026/9999/zzz">un acte absent du recueil ;</a></li>`
+    + `<li><a class="doc-visas-link" href="https://www.exemple.fr/delib.pdf" target="_blank" rel="noopener noreferrer">une source externe ;</a></li>`
+    + `</ul></div></body></html>`;
+  const porteur = publier(call, { numero: "2026-402", eliUri: "eli:/fr/arr/2026/0402/iam", dateDocument: "2026-03-10", datePublication: "2026-03-11", html });
+
+  // La page servie ne porte plus AUCUN identifiant en guise d'adresse : celui du
+  // recueil est devenu l'adresse de l'acte cité, l'autre est resté du TEXTE, et
+  // la source externe n'a pas été touchée.
+  const page = call("GET", "/recueil/" + encodeURIComponent(porteur.body.cle), null, { host: "recueil.exemple.fr" });
+  assert.equal(page.status, 200);
+  assert.equal(String(page.body).includes('href="eli:'), false);
+  assert.ok(String(page.body).includes(`href="https://recueil.exemple.fr/recueil/${encodeURIComponent(cite.body.cle)}"`), "le lien ELI doit mener à l'acte cité");
+  assert.ok(String(page.body).includes('data-eli="eli:/fr/arr/2026/0401/iam"'));
+  assert.equal((String(page.body).match(/recueil-lien-eli--hors/g) || []).length, 1, "l'identifiant inconnu reste une mention, sans lien");
+  assert.ok(String(page.body).includes('href="https://www.exemple.fr/delib.pdf"'), "une adresse externe n'est pas touchée");
+
+  // L'identifiant ELI comme ADRESSE : il mène à l'acte, et à sa version en vigueur.
+  const redirection = call("GET", "/eli/arr/2026/0401/iam", null, { host: "recueil.exemple.fr" });
+  assert.equal(redirection.status, 302);
+  assert.equal(redirection.headers.location, `https://recueil.exemple.fr/recueil/${encodeURIComponent(cite.body.cle)}`);
+  assert.equal(call("GET", "/eli/arr/2026/9999/zzz", null, { host: "recueil.exemple.fr" }).status, 404);
+});

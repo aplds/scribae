@@ -14,16 +14,56 @@
 // ============================================================================
 import { h, clear, button, toast, modal } from "../dom.js";
 import { state, navigate } from "../state.js";
+import { get } from "../../lib/remote.js";
 import { formatDate, download, copyText } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
+import { assainirHtml } from "../../lib/sanitize.js";
 import { verifySignedPackage } from "../../lib/signature.js";
 import { extraireVersion, CSS_DOCUMENT_WEB, lienRecueil, mentionDeTransmission,
   adresseActe, adresseFichier, urlFormat, hrefActe, hrefFormat, autoHeberge,
+  adresseEli, hrefEli, estEliUri, resoudreLiensEli,
   themeLabel,
   FORMATS_OUVERTS, FICHIERS_OUVERTS, texteDePublication, markdownDePublication } from "../../lib/recueil.js";
 
+// -------------------------------------------------------- les identifiants ELI
+// Un document publié cite un autre acte par son identifiant ELI (voir
+// src/lib/recueil.js, « liens par l'identifiant ELI »). Pour le traduire en
+// adresse, il faut la liste des actes publiés : le recueil et le registre la
+// détiennent, et la posent ici (`setListePublications`) ; à défaut — une page
+// ouverte directement sur un acte — la liste est demandée au service, une fois,
+// comme le ferait n'importe quel lecteur du recueil.
+let listeEli = null;
+let demandeListe = null;
+
+export function setListePublications(liste) {
+  if (Array.isArray(liste)) listeEli = liste;
+}
+
+function listePourEli() {
+  if (Array.isArray(listeEli)) return Promise.resolve(listeEli);
+  if (!demandeListe) {
+    demandeListe = get("/v1/publications", { label: "Recueil public", source: "lecture" })
+      .then((r) => {
+        listeEli = (r.ok && r.body && r.body.publications) || [];
+        return listeEli;
+      })
+      .catch(() => { demandeListe = null; return null; });
+  }
+  return demandeListe;
+}
+
+// Résout les liens ELI d'un bloc de document publié. Sans liste, la résolution
+// est différée : elle repasse quand la liste arrive — l'acte cité existe
+// peut-être, et rien ne sert de le déclarer absent avant de le savoir.
+function lierEli(box) {
+  if (!resoudreLiensEli(box, { liste: listeEli }).differe) return;
+  listePourEli().then((liste) => { if (liste) resoudreLiensEli(box, { liste }); });
+}
+
 export const kindLong = (kind) => (kind === "consolidee" ? "Version consolidée"
-  : kind === "modificative" ? "Version modificative" : "Version initiale");
+  : kind === "modificative" ? "Version modificative"
+  : kind === "informative" ? "Texte informatif"
+  : "Version initiale");
 
 export const nomFichier = (rec) => String(rec.numero || rec.cle || "acte").replace(/[^\w-]+/g, "_");
 
@@ -83,14 +123,24 @@ export function themeLabelDePublication(rec) {
 
 // Ce qu'un recueil officiel met en tête : le titre de l'acte, ses marques
 // (nature, version), et son bloc de métadonnées — ELI, dates, recueil.
+//
+// Un RÈGLEMENT (publication informative — voir `kindLong`) se présente à part :
+// sa place au recueil n'est pas celle d'un acte opposable, et sa notice le dit.
+// Elle ne mentionne donc NI LA PUBLICATION AU RECUEIL (« Publié le », « Recueil »,
+// « Entrée en vigueur »), qui ne le concerne pas — il n'est pas publié pour être
+// opposable —, ni son AUTORITÉ (le document, lui, ne porte plus la formule
+// d'autorité : voir src/lib/compile.js). Elle donne ce qui l'identifie et le
+// rattache à sa décision d'adoption : sa nature, son identifiant, sa date, et
+// l'acte qui l'adopte.
 export function notice(rec, v) {
+  const informative = rec.informative === true;
   const titre = (v && v.docTitre) || rec.objet || rec.titre || rec.numero || "Acte";
   const theme = themeLabelDePublication(rec);
   const marques = h("div", { class: "recueil-notice__marques" },
     theme ? h("span", { class: "recueil-badge recueil-badge--theme", "data-theme-id": themeDePublication(rec), text: theme }) : null,
     rec.nature ? h("span", { class: "recueil-badge recueil-badge--nature", text: natureLabel(rec.nature) }) : null,
     h("span", { class: "recueil-badge recueil-badge--version", text: kindLong(rec.kind) }),
-    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? "version en vigueur" : "version antérieure" }));
+    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (informative ? "texte en vigueur" : "version en vigueur") : "version antérieure" }));
 
   const meta = h("dl", { class: "recueil-meta" });
   const champ = (label, valeur, cls) => {
@@ -102,16 +152,26 @@ export function notice(rec, v) {
   champ("Numéro", rec.numero);
   champ("Identifiant ELI", rec.eliUri ? h("code", { text: rec.eliUri }) : "", "recueil-meta__eli");
   champ("Nature", natureLabel(rec.nature));
-  champ("Date de l'acte", formatDate(rec.dateDocument));
-  champ("Publié le", formatDate(rec.datePublication));
-  champ("Entrée en vigueur", formatDate(rec.dateOpposabilite));
-  champ("Recueil", rec.recueil);
+  if (informative) {
+    // Le règlement n'a pas de « publication » à lui : il n'a qu'une ADOPTION.
+    const a = rec.adoption || {};
+    champ("Texte adopté par", [a.designation, a.numero ? "n° " + a.numero : "", a.date ? "du " + formatDate(a.date) : ""].filter(Boolean).join(" "));
+    champ("Date du texte", formatDate(rec.dateDocument));
+  } else {
+    champ("Date de l'acte", formatDate(rec.dateDocument));
+    champ("Publié le", formatDate(rec.datePublication));
+    champ("Entrée en vigueur", formatDate(rec.dateOpposabilite));
+    champ("Recueil", rec.recueil);
+  }
 
   return h("header", { class: "recueil-notice" },
     marques,
     h("h1", { class: "recueil-notice__titre", text: titre }),
-    [rec.entityName, rec.auteur].filter(Boolean).join(" · ")
-      ? h("p", { class: "recueil-notice__sous", text: [rec.entityName, rec.auteur].filter(Boolean).join(" · ") }) : null,
+    [rec.entityName, informative ? "" : rec.auteur].filter(Boolean).join(" · ")
+      ? h("p", { class: "recueil-notice__sous", text: [rec.entityName, informative ? "" : rec.auteur].filter(Boolean).join(" · ") }) : null,
+    informative
+      ? h("p", { class: "recueil-notice__info", text: "Texte publié à titre informatif. Il n'est pas signé et ne se publie pas pour lui-même : seule la décision qui l'adopte fait foi, et son texte suit l'original signé de cette décision." })
+      : null,
     meta);
 }
 
@@ -124,19 +184,27 @@ export function lecture(rec, v) {
   const box = h("div", { class: "recueil-acte" });
   box.appendChild(h("style", { text: CSS_DOCUMENT_WEB }));
   const doc = h("div", { class: "recueil-doc" });
-  doc.innerHTML = v.html || "<p>Le texte de cet acte n'est pas disponible.</p>";
+  // Le texte publié vient du recueil, donc d'une donnée que cette page n'a pas
+  // produite : il est ASSAINI avant d'être posé (voir src/lib/sanitize.js). Un
+  // HTML sans script, sans gestionnaire d'événement et sans adresse
+  // `javascript:` — sinon un client pourrait faire exécuter son code au
+  // visiteur du recueil public.
+  doc.innerHTML = assainirHtml(v.html) || "<p>Le texte de cet acte n'est pas disponible.</p>";
   box.appendChild(doc);
   // Le certificat de transmission accompagne la version publiée ; s'il manque
   // au document (publication antérieure), on le repose ici.
   if (v.transmis) {
     const t = h("div", { class: "recueil-transmis" });
-    t.innerHTML = v.transmis;
+    t.innerHTML = assainirHtml(v.transmis);
     box.appendChild(t);
   } else if (mentionDeTransmission(rec.transmission)) {
     box.appendChild(h("div", { class: "transmis" },
       h("strong", { text: "Contrôle de légalité" }),
       h("span", { text: mentionDeTransmission(rec.transmission) })));
   }
+  // L'acte publié cite ses fondements par leur identifiant ELI : c'est ici
+  // qu'ils deviennent des liens, et qu'ils mènent à l'acte visé DANS l'instance.
+  lierEli(box);
   return box;
 }
 
@@ -166,6 +234,11 @@ export function blocPieces(rec, { admin = false } = {}) {
   ajouter("JSON-LD (ELI)", "download", () => download(nomFichier(rec) + ".jsonld", rec.formats.jsonld, "application/ld+json"));
   ajouter("Markdown (.md)", "download", () => download(nomFichier(rec) + ".md", markdownDePublication(rec), "text/markdown"));
   ajouter("Texte seul (.txt)", "download", () => download(nomFichier(rec) + ".txt", texteDePublication(rec), "text/plain"));
+  if (rec.originalExterne && rec.originalExterne.url) {
+    const ext = rec.originalExterne;
+    box.appendChild(h("a", { class: "fr-btn fr-btn--secondary", href: ext.url, target: "_blank", rel: "noopener" }, "Version signée (PDF)"));
+    ajouter("Télécharger la version signée", "download", () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); });
+  }
   if (rec.original) {
     ajouter("Original signé (JSON)", "lock", () => download(nomFichier(rec) + "-original-signe.json",
       JSON.stringify({ ...rec.original, document: { akn: rec.formats.akn, sha256: rec.original.sha256 } }, null, 2), "application/json"));
@@ -184,6 +257,14 @@ export function blocDonneesPubliques(rec) {
   const box = h("details", { class: "recueil-donnees" },
     h("summary", { class: "recueil-donnees__resume", text: "Adresses et formats lisibles par machine" }),
     h("p", { class: "fr-small fr-muted", text: "Chaque acte publié a une adresse de référence et des représentations que les moteurs de recherche et les agents savent lire. Ces adresses sont stables : sous cet identifiant ELI, elles désignent toujours la version en vigueur." }),
+    // L'identifiant ELI a DEUX formes, et on ne les confond pas (voir P-18) :
+    // l'identifiant (« eli:/fr/… »), clé stable qui ne se résout pas telle
+    // quelle ; et l'ADRESSE HTTP qui en dérive, celle qui se cite et s'ouvre.
+    estEliUri(rec.eliUri) ? ligneAdresse("Adresse ELI (HTTP) — l'acte par son identifiant, version en vigueur", adresseEli(rec.eliUri), hrefEli(rec.eliUri), cle, "", rec.eliUri) : null,
+    estEliUri(rec.eliUri) ? h("div", { class: "recueil-adresse" },
+      h("code", { class: "recueil-adresse__url", text: rec.eliUri }),
+      h("span", { class: "recueil-adresse__label", text: "Identifiant ELI (forme « eli:/fr/… », non résoluble tel quel)" }),
+    ) : null,
     ligneAdresse("Adresse de référence", adresseActe(cle), hrefActe(cle), cle),
     ...FORMATS_OUVERTS.map((f) => ligneAdresse(f.label + " — " + f.hint, urlFormat(cle, f.ext), hrefFormat(cle, f.ext), cle, f.ext)));
 
@@ -203,10 +284,14 @@ export function blocDonneesPubliques(rec) {
 }
 
 // Une adresse du recueil ouvert : elle se copie, et elle se suit dans la page —
-// le recueil est une application, ses liens ne doivent pas la recharger.
-function ligneAdresse(label, url, href, cle, ext) {
+// le recueil est une application, ses liens ne doivent pas la recharger. Une
+// adresse ELI n'a pas de gestionnaire propre : c'est l'intercepteur du recueil
+// qui la reconnaît (« ?eli=… ») et ouvre l'acte — comme le ferait le service
+// sur un déploiement auto-hébergé (« /eli/… »).
+function ligneAdresse(label, url, href, cle, ext, eli) {
   const a = h("a", { class: "recueil-adresse__url", href, text: url });
-  a.addEventListener("click", (e) => {
+  if (eli) a.dataset.eli = eli;
+  else a.addEventListener("click", (e) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     navigate("recueil/" + encodeURIComponent(cle), ext ? { format: ext } : {});
@@ -221,18 +306,49 @@ function boutonCopier(url) {
   } });
 }
 
-// L'ORIGINAL SIGNÉ, à la demande — la pièce de référence : le texte tel qu'il a
-// été signé, suivi du bloc de signature (identité, certificat, empreinte,
-// horodatage). C'est elle qui fait foi ; la version en ligne lue dans la page
-// n'en est qu'une lecture. Le recueil ne la déploie pas d'office : on l'ouvre
-// d'un bouton, dans une fenêtre, et on l'y imprime ou l'enregistre en PDF.
+// L'ORIGINAL. Deux cas, et le recueil montre dans les deux ce qui fait foi :
+//
+//   • circuit ÉLECTRONIQUE — l'original est le paquet signé (document gelé +
+//     signature + horodatage) ; il ne se déploie pas d'office, on l'ouvre d'un
+//     bouton, dans une fenêtre, pour le lire ou l'imprimer ;
+//   • circuit EXTERNE (papier ou outil tiers) — l'original est la VERSION
+//     SIGNÉE déposée, un PDF. C'est lui qui est « mis en ligne » : le recueil
+//     l'affiche tel quel, avec l'attestation de conformité du réviseur.
 export function blocOriginal(rec) {
+  const ext = rec.originalExterne;
+  if (ext && ext.url) return blocOriginalExterne(rec, ext);
   const html = rec.original && rec.original.pageHtml;
   if (!html) return null;
   return bloc("Original signé",
     h("p", { class: "recueil-side__note", text: "L'original signé est la pièce de référence : c'est lui qui fait foi, avec sa signature et son horodatage. La version en ligne lue ci-dessus n'en est qu'une lecture pratique. Ouvrez-le pour le lire, l'imprimer ou l'enregistrer en PDF." }),
     h("div", { class: "recueil-pieces" },
       button("Voir l'original signé", { variant: "secondary", icon: "eye", onClick: () => ouvrirOriginalSigne(html, rec.numero) })));
+}
+
+// La version signée d'un acte du circuit externe, montrée telle qu'elle a été
+// mise en ligne : le PDF, dans la page. C'est la pièce que le lecteur doit
+// pouvoir ouvrir et comparer au texte.
+function blocOriginalExterne(rec, ext) {
+  const cert = ext.certification || {};
+  const conforme = cert.statut === "conforme";
+  return bloc("Original signé — version signée (PDF)",
+    h("p", { class: "recueil-side__note", text: "Cet acte a été signé hors de l'application (signature manuscrite, ou outil tiers). Le document ci-dessous est la VERSION SIGNÉE telle qu'elle a été déposée et mise en ligne : c'est elle qui fait foi. La version en ligne lue ci-dessus n'en est qu'une lecture pratique." }),
+    conforme
+      ? h("p", { class: "recueil-verif is-ok", text: "✓ Conformité certifiée par le réviseur" + (cert.parNom ? " (" + cert.parNom + ")" : "") + (cert.le ? " le " + formatDate(String(cert.le).slice(0, 10)) : "") + " : la pièce signée est conforme à la version numérique publiée." })
+      : null,
+    h("div", { class: "recueil-pdf" },
+      h("iframe", { class: "recueil-pdf__frame", src: ext.url, title: "Version signée (PDF)" }),
+      h("p", { class: "recueil-side__note" },
+        h("a", { class: "recueil-lien", href: ext.url, target: "_blank", rel: "noopener" }, "Ouvrir le PDF dans un onglet"),
+        h("span", { text: " — si le document ne s'affiche pas ici, c'est qu'il est à télécharger." }))),
+    h("dl", { class: "recueil-dl" },
+      h("dt", { text: "Fichier" }), h("dd", { text: ext.nom || "version signée.pdf" }),
+      ext.deposeLe ? h("dt", { text: "Déposé le" }) : null, ext.deposeLe ? h("dd", { text: new Date(ext.deposeLe).toLocaleString("fr-FR") }) : null,
+      ext.sha256 ? h("dt", { text: "Empreinte SHA-256" }) : null, ext.sha256 ? h("dd", { class: "fr-mono", text: ext.sha256 }) : null,
+      conforme && cert.empreinte ? h("dt", { text: "Empreinte du texte (version numérique)" }) : null,
+      conforme && cert.empreinte ? h("dd", { class: "fr-mono", text: cert.empreinte }) : null),
+    h("div", { class: "recueil-pieces" },
+      button("Télécharger la version signée", { variant: "secondary", icon: "download", onClick: () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); } })));
 }
 
 // L'original signé se consulte dans une fenêtre : le document garde sa page A4,
@@ -252,6 +368,15 @@ function ouvrirOriginalSigne(html, numero) {
 }
 
 export function blocSignature(rec) {
+  // Un RÈGLEMENT (publication informative) n'a pas de signature propre : c'est
+  // l'acte qui l'adopte qui est signé, et sa signature qui lui donne son
+  // autorité — le recueil le dit sur la page du règlement, pas ici.
+  if (rec.informative === true) return null;
+  // Circuit externe : la signature est manuscrite (ou apposée par un outil
+  // tiers). Il n'y a pas de certificat à vérifier — ce qui se vérifie, c'est la
+  // certification de conformité du réviseur, qui atteste que la pièce signée
+  // correspond à la version numérique publiée.
+  if (rec.originalExterne && rec.originalExterne.url) return blocSignatureExterne(rec);
   const s = rec.signature || {};
   const dl = h("dl", { class: "recueil-dl" });
   const ligne = (k, v) => { if (v === undefined || v === null || v === "") return; dl.appendChild(h("dt", { text: k })); dl.appendChild(h("dd", { text: String(v) })); };
@@ -282,6 +407,49 @@ export function blocSignature(rec) {
       })));
   return bloc("Signature électronique", dl, box, resultat);
 }
+
+// La signature d'un acte du circuit externe : manuscrite, ou apposée par un
+// outil tiers. La page dit ce qui a été signé, par qui, et rappelle
+// l'attestation du réviseur — puisque c'est elle, et non une signature
+// cryptographique, qui engage la conformité de la pièce publiée.
+function blocSignatureExterne(rec) {
+  const ext = rec.originalExterne || {};
+  const cert = ext.certification || {};
+  const s = rec.signature || {};
+  const dl = h("dl", { class: "recueil-dl" });
+  const ligne = (k, v) => { if (v === undefined || v === null || v === "") return; dl.appendChild(h("dt", { text: k })); dl.appendChild(h("dd", { text: String(v) })); };
+  ligne("Signataire", (s.signataires || []).map((x) => [x.nom, x.fonction].filter(Boolean).join(" — ")).filter(Boolean).join(", ") || "—");
+  ligne("Signé hors application", s.signeLe ? new Date(s.signeLe).toLocaleString("fr-FR") : "—");
+  ligne("Mode de signature", "Signature manuscrite ou outil tiers (circuit externe, sans API)");
+  ligne("Empreinte de la pièce signée", ext.sha256 || "—");
+  ligne("Fichier déposé", ext.nom || "—");
+  ligne("Déposé le", ext.deposeLe ? new Date(ext.deposeLe).toLocaleString("fr-FR") : "—");
+
+  const certBox = (cert && cert.statut)
+    ? h("div", { class: "recueil-certif" },
+      h("h3", { class: "recueil-certif__titre", text: "Certification de conformité" }),
+      h("p", { class: "recueil-certif__statut recueil-verif " + (cert.statut === "conforme" ? "is-ok" : "is-ko"), text: cert.statut === "conforme"
+        ? "✓ La pièce signée a été certifiée conforme à la version numérique publiée."
+        : "✗ La conformité de la pièce signée a été refusée." }),
+      h("p", { class: "fr-small fr-muted", text: [cert.parNom ? "Par " + cert.parNom : "", cert.le ? "le " + new Date(cert.le).toLocaleString("fr-FR") : ""].filter(Boolean).join(" · ") }),
+      cert.empreinte ? h("p", { class: "recueil-side__note" }, h("span", { text: "Empreinte du texte certifié : " }), h("code", { text: cert.empreinte })) : null,
+      (cert.points || []).length ? h("ul", { class: "recueil-certif__points" }, ...cert.points.map((p) => h("li", { text: POINTS_CERTIFICATION[p] || p }))) : null,
+      cert.remarque ? h("p", { class: "recueil-side__note", text: "Observation : " + cert.remarque }) : null)
+    : null;
+
+  return bloc("Signature (circuit externe)", dl,
+    h("p", { class: "recueil-side__note", text: "L'acte a été signé hors de l'application. La signature est donc vérifiée par comparaison : c'est la pièce signée, montrée ci-dessus comme l'original, qui fait foi." }),
+    certBox);
+}
+
+// Les points de contrôle de la certification, tels que le réviseur les a
+// cochés : la traduction affichée sur le recueil public.
+const POINTS_CERTIFICATION = {
+  signataire: "La pièce signée porte la signature du signataire désigné, avec sa qualité apparente.",
+  texte: "Le texte signé est identique, au fond et à la forme, à la version numérique publiée.",
+  complet: "Le document est complet : toutes les pages sont présentes, sans rature ni surcharge.",
+  date: "La date de signature portée sur la pièce est cohérente avec l'acte.",
+};
 
 export function blocVersions(rec, { href }) {
   const box = h("div", { class: "recueil-versions" });

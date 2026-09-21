@@ -214,7 +214,10 @@ export function emptyState(message, action) {
 }
 
 export function statusBadge(status) {
-  const map = { draft: ["Brouillon", "warning"], published: ["Publiée", "success"], archived: ["Archivée", "info"] };
+  // Le seul objet qui porte ce badge est la TRAME : « publiée » y veut dire
+  // « mise à disposition des services », et le mot doit le dire — c'est la
+  // nuance entre un document qu'on range et un modèle qu'on ouvre aux autres.
+  const map = { draft: ["Brouillon", "warning"], published: ["Mise à disposition", "success"], archived: ["Archivée", "info"] };
   const [label, color] = map[status] || map.draft;
   return h("span", { class: "fr-badge fr-badge--" + color, text: label });
 }

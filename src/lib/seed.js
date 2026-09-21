@@ -1,6 +1,7 @@
 import { emptyConfig, newNode, newField, newRule, newNote, newTrame } from "./schema.js";
 import { seedStyles } from "./styles.js";
 import { EXTERNE_DEFAUT } from "./numbering.js";
+import { RENVOIS_RECOMMANDES, mentionsParDefaut } from "./recueil.js";
 
 // ============================================================================
 // Jeu de données initial. RIEN ici n'est utilisé par la logique applicative :
@@ -16,17 +17,40 @@ import { EXTERNE_DEFAUT } from "./numbering.js";
 // de capture d'écran (guide imprimable, vignettes) ne savent pas résoudre un
 // chemin relatif dans leur copie du document, alors qu'une data URL est
 // auto-suffisante.
+//
+// Le dessin : l'écu français, en trois plans — un ciel clair, un soleil d'or à
+// huit rais, et la Loire qui baigne deux monts. Le champ est découpé par le
+// tracé même de l'écu (`clipPath`) : les monts et l'eau s'arrêtent net sur le
+// galon, sans bavure. Deux détails de mise au point, appris en regardant le
+// rendu : les rais du soleil sont courts et proches du disque (un rai long le
+// fait paraître décentré, et son extrémité vient mordre le chef) ; et les cimes
+// enneigées comme les bandes d'eau portent un liseré de LEUR PROPRE couleur,
+// car deux aplats voisins qui partagent un bord laissent, à l'anticrénelage,
+// un filet clair que le liseré recouvre.
 export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="Ville de Valmont-sur-Loire">
-  <defs><clipPath id="ecu"><path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z"/></clipPath></defs>
-  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="#eef3fb"/>
-  <g clip-path="url(#ecu)">
-    <path d="M4 30c9-7 15 3 24-1s17-8 28-3v14c-11-4-19 1-28 5S13 50 4 45Z" fill="#2b6fb3" opacity=".9"/>
-    <path d="M4 41c9-6 15 3 24-1s17-8 28-3v6c-11-4-19 1-28 5S13 60 4 55Z" fill="#1b4b7d"/>
-    <path d="M4 12c10 5 18 1 28-2s20-2 28 3v9c-9-6-17-1-28 3S13 32 4 27Z" fill="#1f7a44"/>
-    <circle cx="44" cy="13" r="6" fill="#f0c419"/>
-    <path d="M23 27 32 12l9 15Z" fill="#0f3d2e" opacity=".55"/>
+  <defs>
+    <clipPath id="vsl-ecu"><path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z"/></clipPath>
+    <linearGradient id="vsl-ciel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7fbff"/><stop offset="1" stop-color="#cbdff6"/>
+    </linearGradient>
+    <linearGradient id="vsl-eau" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b91d3"/><stop offset="1" stop-color="#1b5c92"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="url(#vsl-ciel)"/>
+  <g clip-path="url(#vsl-ecu)">
+    <g stroke="#f0bd35" stroke-width="2.4" stroke-linecap="round" fill="none">
+      <path d="M32 8.9L32 6.3M32 23.9L32 26.5M24.6 16.4L22 16.4M39.4 16.4L42 16.4M26.7 11.1L24.9 9.3M37.3 21.7L39.1 23.5M37.3 11.1L39.1 9.3M26.7 21.7L24.9 23.5"/>
+    </g>
+    <circle cx="32" cy="16.4" r="6.5" fill="#f0bd35"/>
+    <path d="M5 51 21.5 23.5 38 51Z" fill="#1e7a45"/>
+    <path d="M21.5 24.2 15.9 33.6 18.6 31.9 21.5 34.4 24.4 31.9 27.1 33.6Z" fill="#f4f9ff" stroke="#f4f9ff" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M28.5 51 43.5 27.5 58 51Z" fill="#16613a"/>
+    <path d="M43.5 28.2 38.1 37.3 40.7 35.6 43.5 38 46.3 35.6 48.9 37.3Z" fill="#dbe7f5" stroke="#dbe7f5" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M4 48.4C11 44.9 17.5 50.4 25 47.6c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v26H4Z" fill="url(#vsl-eau)" stroke="url(#vsl-eau)" stroke-width="0.7"/>
+    <path d="M4 58.2C11 54.7 17.5 60.2 25 57.4c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v20H4Z" fill="#1a4f82" stroke="#1a4f82" stroke-width="0.7"/>
   </g>
-  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="none" stroke="#12335c" stroke-width="3"/>
+  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="none" stroke="#12335c" stroke-width="3.4" stroke-linejoin="round"/>
 </svg>`;
 
 const LOGO_DATA_URL = "data:image/svg+xml;base64," + btoa(LOGO_SVG.trim());
@@ -69,6 +93,8 @@ export function seedConfig() {
     { id: "decision", label: "Décision", aknElement: "act" },
     { id: "deliberation", label: "Délibération", aknElement: "act" },
     { id: "reglement", label: "Règlement", aknElement: "act" },
+    { id: "convention", label: "Convention", aknElement: "act" },
+    { id: "charte", label: "Charte", aknElement: "act" },
   ];
 
   // Chaque rôle porte ses DEUX formes : `m` et `f`. C'est d'elles que vient
@@ -138,6 +164,29 @@ export function seedConfig() {
     },
   ];
 
+  // ASSEMBLÉES DÉLIBÉRANTES. Un acte d'assemblée — une délibération — émane
+  // d'un conseil : sa ligne d'autorité est celle de l'assemblée, et il est signé
+  // par le président de celle-ci. La commune a son conseil municipal, présidé par
+  // le maire ; l'office a son conseil d'administration, présidé par son
+  // président. Le choix de la qualité qui signe est propre à chaque assemblée.
+  // Voir src/lib/conseils.js.
+  c.councils = [
+    {
+      id: "csl-vsl-cm", code: "CM", entityId: "ent-vsl",
+      name: "Conseil municipal de Valmont-sur-Loire",
+      authorityFormula: "Le conseil municipal de Valmont-sur-Loire",
+      signerRoleId: "maire",
+      actif: true,
+    },
+    {
+      id: "csl-oph-ca", code: "CA", entityId: "ent-oph",
+      name: "Conseil d'administration de l'office public de l'habitat du Valmont",
+      authorityFormula: "Le conseil d'administration de l'office public de l'habitat du Valmont",
+      signerRoleId: "president-ca",
+      actif: true,
+    },
+  ];
+
   c.services = [
     {
       id: "svc-dgs", code: "DGS", name: "Direction générale des services", entityId: "ent-vsl",
@@ -202,6 +251,55 @@ export function seedConfig() {
         { id: "bur-urb-voirie", name: "Voirie et espaces publics" },
       ],
     },
+    // Les services de la vie quotidienne : école et restauration, fêtes et vie
+    // associative, cadre de vie et environnement, police municipale, finances et
+    // commande publique. Une collectivité de la taille de Valmont les réunit
+    // tous ; c'est ce qui donne à la démonstration la variété de ses actes.
+    {
+      id: "svc-education", code: "EDU", name: "Éducation, enfance et jeunesse", entityId: "ent-vsl",
+      bureaux: [
+        { id: "bur-edu-restauration", name: "Restauration scolaire" },
+        { id: "bur-edu-periscolaire", name: "Accueils périscolaires" },
+        { id: "bur-edu-jeunesse", name: "Jeunesse et animations" },
+      ],
+    },
+    {
+      id: "svc-culture", code: "CUL", name: "Culture, fêtes et vie associative", entityId: "ent-vsl",
+      bureaux: [
+        { id: "bur-cul-fetes", name: "Fêtes et cérémonies" },
+        { id: "bur-cul-associations", name: "Vie associative" },
+        { id: "bur-cul-bibliotheque", name: "Bibliothèque municipale" },
+      ],
+    },
+    {
+      id: "svc-environnement", code: "ENV", name: "Cadre de vie et environnement", entityId: "ent-vsl",
+      bureaux: [
+        { id: "bur-env-proprete", name: "Propreté urbaine" },
+        { id: "bur-env-espaces", name: "Espaces verts" },
+        { id: "bur-env-eau", name: "Eau et assainissement" },
+      ],
+    },
+    {
+      id: "svc-police", code: "PM", name: "Police municipale et prévention", entityId: "ent-vsl",
+      bureaux: [
+        { id: "bur-pol-police", name: "Police municipale" },
+        { id: "bur-pol-administratif", name: "Police administrative" },
+      ],
+    },
+    {
+      id: "svc-finances", code: "FIN", name: "Finances et commande publique", entityId: "ent-vsl",
+      bureaux: [
+        { id: "bur-fin-budget", name: "Budget et comptabilité" },
+        { id: "bur-fin-marches", name: "Commande publique" },
+      ],
+    },
+    {
+      id: "svc-cde", code: "CDE", name: "Caisse des écoles — services", entityId: "ent-cde",
+      bureaux: [
+        { id: "bur-cde-restauration", name: "Restauration scolaire" },
+        { id: "bur-cde-administration", name: "Administration et comptabilité" },
+      ],
+    },
     {
       id: "svc-social", code: "AS", name: "Action sociale", entityId: "ent-ccas",
       bureaux: [
@@ -237,6 +335,33 @@ export function seedConfig() {
     { id: "p-lambert", civility: "Monsieur", firstName: "Pascal", lastName: "LAMBERT", entityId: "ent-oph", roles: ["president-ca"], refs: [] },
     { id: "p-marchand", civility: "Madame", firstName: "Nadia", lastName: "MARCHAND", entityId: "ent-oph", roles: ["directeur-general"], refs: [] },
     { id: "p-roy", civility: "Monsieur", firstName: "Lucas", lastName: "ROY", entityId: "ent-oph", roles: ["agent"], serviceId: "svc-oph", bureauId: "bur-oph-patrimoine", refs: [] },
+
+    // Les adjoints au maire et les agents des services de la vie quotidienne.
+    // Chaque adjoint a son domaine, et donc sa propre délégation de signature
+    // (voir `c.delegations`) : un acte pris dans sa matière porte sa qualité, et
+    // le maire reste l'autorité dont la chaîne descend.
+    { id: "p-morel", civility: "Monsieur", firstName: "Antoine", lastName: "MOREL", entityId: "ent-vsl", roles: ["adjoint"], refs: [] },
+    { id: "p-masson", civility: "Madame", firstName: "Chantal", lastName: "MASSON", entityId: "ent-vsl", roles: ["adjoint"], refs: [] },
+    { id: "p-rolland", civility: "Madame", firstName: "Isabelle", lastName: "ROLLAND", entityId: "ent-vsl", roles: ["adjoint"], refs: [] },
+    { id: "p-vidal", civility: "Monsieur", firstName: "Hugo", lastName: "VIDAL", entityId: "ent-vsl", roles: ["adjoint"], refs: [] },
+    { id: "p-petit", civility: "Madame", firstName: "Nathalie", lastName: "PETIT", entityId: "ent-vsl", roles: ["directeur-service"], serviceId: "svc-education", bureauId: "bur-edu-restauration", refs: [] },
+    { id: "p-girard", civility: "Monsieur", firstName: "Serge", lastName: "GIRARD", entityId: "ent-vsl", roles: ["chef-de-bureau"], serviceId: "svc-education", bureauId: "bur-edu-restauration", refs: [] },
+    { id: "p-fontaine", civility: "Madame", firstName: "Chloé", lastName: "FONTAINE", entityId: "ent-vsl", roles: ["agent"], serviceId: "svc-education", bureauId: "bur-edu-restauration", refs: [] },
+    { id: "p-pages", civility: "Madame", firstName: "Léa", lastName: "PAGES", entityId: "ent-vsl", roles: ["agent"], serviceId: "svc-education", bureauId: "bur-edu-periscolaire", refs: [] },
+    { id: "p-baron", civility: "Madame", firstName: "Laure", lastName: "BARON", entityId: "ent-vsl", roles: ["directeur-service"], serviceId: "svc-culture", bureauId: "bur-cul-fetes", refs: [] },
+    { id: "p-arnaud", civility: "Monsieur", firstName: "Damien", lastName: "ARNAUD", entityId: "ent-vsl", roles: ["chef-de-bureau"], serviceId: "svc-culture", bureauId: "bur-cul-fetes", refs: [] },
+    { id: "p-fournier", civility: "Monsieur", firstName: "Louis", lastName: "FOURNIER", entityId: "ent-vsl", roles: ["directeur-service"], serviceId: "svc-environnement", bureauId: "bur-env-espaces", refs: [] },
+    { id: "p-guerin", civility: "Monsieur", firstName: "Marc", lastName: "GUÉRIN", entityId: "ent-vsl", roles: ["chef-de-bureau"], serviceId: "svc-police", bureauId: "bur-pol-police", refs: [] },
+    { id: "p-leroy", civility: "Madame", firstName: "Anne", lastName: "LEROY", entityId: "ent-vsl", roles: ["directeur-service"], serviceId: "svc-finances", bureauId: "bur-fin-budget", refs: [] },
+    { id: "p-delacroix", civility: "Monsieur", firstName: "Pierre", lastName: "DELACROIX", entityId: "ent-vsl", roles: ["chef-de-bureau"], serviceId: "svc-finances", bureauId: "bur-fin-marches", refs: [] },
+    { id: "p-lefevre", civility: "Madame", firstName: "Christine", lastName: "LEFÈVRE", entityId: "ent-cde", roles: ["president"], refs: [] },
+    // Des administrés : pétitionnaires d'urbanisme, preneurs d'une concession
+    // funéraire, organisateurs d'une manifestation. Ils ne signent rien — ils
+    // sont la partie nommée dans l'acte.
+    { id: "p-chauvet", civility: "Monsieur", firstName: "Rémi", lastName: "CHAUVET", entityId: "ent-vsl", roles: [], refs: [] },
+    { id: "p-bertin", civility: "Madame", firstName: "Sylvie", lastName: "BERTIN", entityId: "ent-vsl", roles: [], refs: [] },
+    { id: "p-aubert", civility: "Monsieur", firstName: "Denis", lastName: "AUBERT", entityId: "ent-vsl", roles: [], refs: [] },
+    { id: "p-michel", civility: "Monsieur", firstName: "Franck", lastName: "MICHEL", entityId: "ent-vsl", roles: [], refs: [] },
   ];
 
   // Délégations de signature : maire → adjoint à l'urbanisme → chef du bureau
@@ -318,6 +443,89 @@ export function seedConfig() {
       du: "2026-01-15", au: "2027-01-15",
       active: true,
     },
+
+    // Quatre chaînes parallèles, une par domaine : le maire délègue à ses
+    // adjoints, et chacun signe les actes de SA matière. La décision de
+    // délégation est la même pour tous (l'arrêté du 10 avril 2026 portant
+    // délégation de signature aux adjoints) ; seule la nomination change, une
+    // par adjoint. C'est ce qui fait qu'un arrêté scolaire porte la qualité de
+    // l'adjoint aux affaires scolaires, et une fête celle de l'adjoint à la vie
+    // associative — sans que le rédacteur ait rien à choisir.
+    {
+      // La délégation la plus générale : celle du maire à son directeur général
+      // des services, pour les actes de gestion courante. Elle ne nomme ni
+      // famille ni type d'acte — c'est ce qui la fait choisir en DERNIER recours,
+      // quand aucune délégation de domaine ne s'applique (voir `scoreDelegation`,
+      // src/lib/delegations.js).
+      id: "del-dgs-gestion",
+      fromId: "p-faure", toId: "p-mercier",
+      qualiteM: "directeur général des services",
+      qualiteF: "directrice générale des services",
+      matieres: "actes de gestion courante et de fonctionnement des services",
+      familyId: "", actTypeId: "",
+      acteRefId: "ref-deleg-dgs",
+      acte: "arrêté du maire du 12 avril 2026 portant délégation de signature au directeur général des services",
+      nomination: "l'arrêté du maire du 2 janvier 2026 portant nomination de Julien MERCIER en qualité de directeur général des services",
+      nominationUrl: "https://www.valmont-sur-loire.fr/actes/2026-arr-0102-nomination-directeur-general.pdf",
+      du: "2026-04-12", au: "2027-04-12",
+      active: true,
+    },
+    {
+      id: "del-ecoles-adjoint",
+      fromId: "p-faure", toId: "p-morel",
+      qualiteM: "adjoint au maire en charge des affaires scolaires",
+      qualiteF: "adjointe au maire en charge des affaires scolaires",
+      matieres: "affaires scolaires, restauration scolaire et accueils périscolaires",
+      familyId: "fam-scolarite", actTypeId: "",
+      acteRefId: "ref-deleg-VSL",
+      acte: "arrêté du maire du 10 avril 2026 portant délégation de signature aux adjoints",
+      nomination: "l'arrêté du maire du 2 avril 2026 portant nomination d'Antoine MOREL en qualité d'adjoint au maire en charge des affaires scolaires",
+      nominationUrl: "https://www.valmont-sur-loire.fr/actes/2026-arr-0402-nomination-adjoint-ecoles.pdf",
+      du: "2026-04-10", au: "2027-04-10",
+      active: true,
+    },
+    {
+      id: "del-vie-locale-adjoint",
+      fromId: "p-faure", toId: "p-masson",
+      qualiteM: "adjoint au maire en charge de la vie associative et des festivités",
+      qualiteF: "adjointe au maire en charge de la vie associative et des festivités",
+      matieres: "fêtes, cérémonies, vie associative et manifestations",
+      familyId: "fam-vie-locale", actTypeId: "",
+      acteRefId: "ref-deleg-VSL",
+      acte: "arrêté du maire du 10 avril 2026 portant délégation de signature aux adjoints",
+      nomination: "l'arrêté du maire du 2 avril 2026 portant nomination de Chantal MASSON en qualité d'adjointe au maire en charge de la vie associative et des festivités",
+      nominationUrl: "https://www.valmont-sur-loire.fr/actes/2026-arr-0402-nomination-adjointe-vie-associative.pdf",
+      du: "2026-04-10", au: "2027-04-10",
+      active: true,
+    },
+    {
+      id: "del-environnement-adjoint",
+      fromId: "p-faure", toId: "p-rolland",
+      qualiteM: "adjoint au maire en charge de l'environnement et du cadre de vie",
+      qualiteF: "adjointe au maire en charge de l'environnement et du cadre de vie",
+      matieres: "propreté, espaces verts, eau, assainissement et nuisances",
+      familyId: "fam-environnement", actTypeId: "",
+      acteRefId: "ref-deleg-VSL",
+      acte: "arrêté du maire du 10 avril 2026 portant délégation de signature aux adjoints",
+      nomination: "l'arrêté du maire du 2 avril 2026 portant nomination d'Isabelle ROLLAND en qualité d'adjointe au maire en charge de l'environnement et du cadre de vie",
+      nominationUrl: "https://www.valmont-sur-loire.fr/actes/2026-arr-0402-nomination-adjointe-environnement.pdf",
+      du: "2026-04-10", au: "2027-04-10",
+      active: true,
+    },
+    {
+      id: "del-finances-adjoint",
+      fromId: "p-faure", toId: "p-vidal",
+      qualiteM: "adjoint au maire en charge des finances",
+      qualiteF: "adjointe au maire en charge des finances",
+      matieres: "budget, commande publique et engagements de dépense",
+      familyId: "fam-finances", actTypeId: "",
+      acteRefId: "ref-deleg-VSL",
+      acte: "arrêté du maire du 10 avril 2026 portant délégation de signature aux adjoints",
+      nomination: "l'arrêté du maire du 2 avril 2026 portant nomination d'Hugo VIDAL en qualité d'adjoint au maire en charge des finances",
+      nominationUrl: "https://www.valmont-sur-loire.fr/actes/2026-arr-0402-nomination-adjoint-finances.pdf",
+      du: "2026-04-10", au: "2027-04-10",
+      active: true,
+    },
   ];
 
   c.refs = [
@@ -330,6 +538,29 @@ export function seedConfig() {
     { id: "ref-delib-delegation", kind: "deliberation", label: "la délibération du conseil municipal n°2026-014 du 3 avril 2026 donnant délégation au maire", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/deliberations/2026-014.pdf" },
     { id: "ref-delib-budget", kind: "deliberation", label: "la délibération du conseil municipal n°2026-021 du 9 avril 2026 portant vote du budget primitif 2026", scope: "all", active: true },
     { id: "ref-ri-conseil", kind: "reglement", label: "le règlement intérieur du conseil municipal", scope: "all", active: true },
+    // Les codes qui fondent les actes de la vie quotidienne : police de la
+    // circulation, sécurité des manifestations, urbanisme, école, hygiène
+    // alimentaire, environnement. Une trame vise ceux de sa matière.
+    { id: "ref-code-route", kind: "code", label: "le code de la route, notamment ses articles R. 411-1 et suivants", scope: "all", active: true },
+    { id: "ref-csi", kind: "code", label: "le code de la sécurité intérieure, notamment son article L. 211-1", scope: "all", active: true },
+    { id: "ref-code-urbanisme", kind: "code", label: "le code de l'urbanisme", scope: "all", active: true },
+    { id: "ref-code-education", kind: "code", label: "le code de l'éducation", scope: "all", active: true },
+    { id: "ref-code-environnement", kind: "code", label: "le code de l'environnement", scope: "all", active: true },
+    { id: "ref-code-sante-publique", kind: "code", label: "le code de la santé publique, notamment ses articles L. 1321-1 et suivants", scope: "all", active: true },
+    { id: "ref-code-securite-civile", kind: "code", label: "le code de la sécurité civile", scope: "all", active: true },
+    { id: "ref-cg3p", kind: "code", label: "le code général de la propriété des personnes publiques", scope: "all", active: true },
+    // Les délibérations de l'assemblée dont les actes se réclament : le programme
+    // des festivités, les tarifs de l'année, le budget. Ce sont des textes du
+    // référentiel, avec leur adresse de source — comme les décisions de
+    // délégation.
+    { id: "ref-delib-festivites", kind: "deliberation", label: "la délibération du conseil municipal n° 2026-031 du 9 avril 2026 portant approbation du programme des festivités 2026", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/deliberations/2026-031.pdf" },
+    { id: "ref-delib-tarifs", kind: "deliberation", label: "la délibération du conseil municipal n° 2026-038 du 18 juin 2026 portant fixation des tarifs municipaux", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/deliberations/2026-038.pdf" },
+    { id: "ref-delib-cantine", kind: "deliberation", label: "la délibération du conseil municipal n° 2024-022 du 12 juillet 2024 portant adoption du précédent règlement de la restauration scolaire", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/deliberations/2024-022.pdf" },
+    // Les marchés de la commune, visés par les actes qui les font vivre
+    // (avenants, décisions d'attribution).
+    { id: "ref-deleg-dgs", kind: "arrete-delegation", entityId: "ent-vsl", scope: "entity", active: true, label: "l'arrêté du maire du 12 avril 2026 portant délégation de signature au directeur général des services", source: "https://www.valmont-sur-loire.fr/actes/2026-arr-0412-delegation-directeur-general.pdf" },
+    { id: "ref-marche-voirie", kind: "marche", label: "le marché public n° 2026-022 du 4 mai 2026 portant réfection de la voirie communale", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/marches/2026-022.pdf" },
+    { id: "ref-marche-energie", kind: "marche", label: "le marché public n° 2025-041 du 3 novembre 2025 portant fourniture d'électricité et de gaz", scope: "all", active: true, source: "https://www.valmont-sur-loire.fr/marches/2025-041.pdf" },
   ];
 
   // Références propres à l'office public de l'habitat : une entité autonome a
@@ -390,6 +621,23 @@ export function seedConfig() {
       label: "Voies et délais de recours (notification)",
       text: "Conformément à l'article R.421-1 du code de justice administrative, le présent arrêté peut faire l'objet d'un recours gracieux ou, à défaut, d'un recours contentieux auprès du tribunal administratif de {{entity.tribunal}} dans un délai de deux mois à compter de sa notification.",
     },
+    // Un arrêté de police ne s'affiche pas comme un acte de gestion : il se
+    // PUBLICITÉ sur le terrain même où il s'applique, par la signalisation et
+    // par l'affichage. C'est cette mention-là que portent les actes de police.
+    {
+      id: "men-affichage",
+      kind: "publication",
+      label: "Publication, affichage et signalisation",
+      text: "Le présent arrêté est publié au recueil des actes administratifs de {{entity.nameWithArt}} et affiché en mairie. Sa mise en œuvre sur la voie publique est assurée par la signalisation réglementaire mise en place par les services de la commune.",
+    },
+    // La manifestation : l'arrêté est notifié à l'organisateur, qui en tire ses
+    // obligations, et publié pour les tiers.
+    {
+      id: "men-organisateur",
+      kind: "notification",
+      label: "Notification à l'organisateur",
+      text: "Le présent arrêté est notifié à l'organisateur de la manifestation, qui est chargé d'en faire connaître les prescriptions aux personnes participant à l'événement.",
+    },
   ];
 
   // Les familles de trames : ce sont elles que le recueil public présente comme
@@ -408,6 +656,10 @@ export function seedConfig() {
     { id: "fam-rh", label: "Ressources humaines", description: "Décisions individuelles et collectives relatives au personnel." },
     { id: "fam-associations", label: "Associations et subventions", description: "Conventions, subventions et soutien aux associations et structures locales." },
     { id: "fam-regies", label: "Régies", description: "Création, organisation et tarifs des régies de la collectivité." },
+    { id: "fam-scolarite", label: "Écoles, enfance et jeunesse", description: "Restauration scolaire, accueils périscolaires, jeunesse et éducation." },
+    { id: "fam-vie-locale", label: "Vie locale et événements", description: "Fêtes, cérémonies, marchés, jumelages et animations de la commune." },
+    { id: "fam-environnement", label: "Environnement et cadre de vie", description: "Propreté, espaces verts, eau, nuisances et qualité de la vie quotidienne." },
+    { id: "fam-domaine-public", label: "Domaine public", description: "Occupations du domaine public, terrasses, emprises et mobilier communal." },
     { id: "fam-individuels", label: "Actes individuels (non publiables)", description: "Décisions individuelles qui ne sont pas publiées au recueil (elles se notifient)." },
   ];
   // Les feuilles de style de la démonstration (voir src/lib/styles.js) : une
@@ -506,6 +758,57 @@ export function seedConfig() {
       ],
     },
   ];
+
+  // Recueils extérieurs et renvois du recueil public (voir src/lib/recueil.js,
+  // `recueilsExternes`). La démonstration montre les trois natures : un recueil
+  // « bis » — tenu à part, par exemple pour une entité autonome —, DEUX recueils
+  // inactifs qui se succèdent (un changement de logiciel en 2024), chacun avec
+  // la période qu'il couvre, et les deux sites de référence livrés avec
+  // l'application (Légifrance et service-public.gouv.fr). Ils s'affichent en bas de
+  // page de l'espace public et à la fin des résultats de recherche.
+  c.publication.recueilsExternes = [
+    {
+      id: "rex-bis-ccas", type: "bis",
+      label: "Recueil des actes du CCAS de Valmont-sur-Loire (recueil « bis »)",
+      url: "https://www.valmont-sur-loire.fr/ccas/recueil-des-actes",
+      note: "Les actes du centre communal d'action sociale sont tenus dans un recueil à part.",
+      du: "", au: "",
+    },
+    {
+      id: "rex-inactif-2009", type: "inactif",
+      label: "Recueil des actes — ancien système (2009-2018)",
+      url: "https://archives.valmont-sur-loire.fr/actes-2009-2018",
+      note: "Consultable aux archives municipales.",
+      du: "2009-01-01", au: "2018-12-31",
+    },
+    {
+      id: "rex-inactif-2019", type: "inactif",
+      label: "Recueil des actes — système précédent (2019-2023)",
+      url: "https://www.valmont-sur-loire.fr/recueil-2019-2023",
+      note: "N'a plus été alimenté après le changement de logiciel de 2024.",
+      du: "2019-01-01", au: "2023-12-31",
+    },
+    ...RENVOIS_RECOMMANDES.map((r) => ({ ...r })),
+  ];
+
+  // Mentions du pied de page du recueil public (voir src/lib/recueil.js,
+  // `mentionsPubliques`). La démonstration les montre DANS LES DEUX FORMES que
+  // l'écran de réglage propose : les mentions légales s'affichent comme un texte
+  // — celui d'une commune qui rappelle ses obligations, avec ses propres
+  // références (l'éditeur, le directeur de la publication, le tribunal
+  // administratif de rattachement) —, tandis que l'accessibilité renvoie à la
+  // déclaration publiée sur le site principal de la ville : c'est le geste le
+  // plus courant, et il montre à quoi ressemble un renvoi.
+  c.publication.mentions = mentionsParDefaut();
+  c.publication.mentions.legales.texte = [
+    "Le présent recueil des actes administratifs est édité par la Ville de Valmont-sur-Loire (Hôtel de ville, place de la République, 45210 Valmont-sur-Loire). Son directeur de la publication est le maire, autorité territoriale de la commune.",
+    "Publication et opposabilité. Les actes pris par les autorités de la commune sont exécutoires de plein droit dès qu'il a été procédé à leur publication ou à leur affichage, ainsi qu'à leur transmission au représentant de l'État dans le département (article L. 2131-1 du code général des collectivités territoriales). Une fois ces formalités accomplies, ils sont opposables aux tiers. La date à laquelle chaque acte devient exécutoire figure sur la page qui le diffuse, sous la rubrique « Opposabilité ».",
+    "Recours. Les délais et voies de recours applicables sont rappelés sur la page de chaque acte. À défaut de mention contraire, un recours gracieux peut être adressé à Monsieur le Maire de Valmont-sur-Loire, et un recours contentieux au tribunal administratif d'Orléans, dans un délai de deux mois à compter de la publication (article R. 421-1 du code de justice administrative). Le recours gracieux formé dans ce délai l'interrompt : un nouveau délai de deux mois court à compter de la réponse de la commune.",
+    "Conservation des originaux. Les actes signés sont conservés par la Ville et peuvent être consultés sur demande adressée au service des affaires générales (Hôtel de ville, place de la République, 45210 Valmont-sur-Loire). La version diffusée dans ce recueil ne se substitue pas au document signé, qui seul peut être opposé ou invoqué.",
+  ].join("\n\n");
+  c.publication.mentions.accessibilite.mode = "lien";
+  c.publication.mentions.accessibilite.lien = "https://www.valmont-sur-loire.fr/accessibilite";
+  c.publication.mentions.accessibilite.lienLabel = "Accessibilité — la déclaration d'accessibilité du site de la Ville";
   return c;
 }
 
@@ -520,7 +823,13 @@ const visaSelf = (refKind, when = "") => ({ id: "it-" + Math.random().toString(3
 const visaChaine = () => ({ id: "it-" + Math.random().toString(36).slice(2, 7), refId: "", text: "", when: "", chaine: true });
 
 export function seedTrames() {
-  return [nominationTrame(), delegationTrame(), permisTrame(), marcheTrame(), regieTrame(), subventionTrame(), revalorisationTrame()];
+  return [
+    nominationTrame(), delegationTrame(), permisTrame(), marcheTrame(), regieTrame(), subventionTrame(), revalorisationTrame(),
+    reglementTrame(), deliberationTrame(), deliberationCATrame(),
+    policeTrame(), environnementTrame(), evenementTrame(), periscolaireTrame(),
+    cantineTrame(), grilleTarifaireTrame(), annexeTrame(),
+    conventionTrame(), avenantTrame(), achatTrame(), occupationTrame(), concessionTrame(),
+  ];
 }
 
 function commonHeader(extraFields = [], { fonction = "" } = {}) {
@@ -1141,6 +1450,1082 @@ function revalorisationTrame() {
       newNode("signature", { place: "{{entity.seatCity}}" }),
       newNode("mention", { mentionId: "men-recours-notification" }),
       newNode("mention", { mentionId: "men-notification" }),
+    ],
+  });
+}
+
+// ============================================================================
+// Le RÈGLEMENT INTÉRIEUR : une ANNEXE, un texte LONG, et un RÈGLEMENT.
+//
+// Trois choses s'y montrent d'un coup. D'abord sa NATURE : `nature: "annexe"` —
+// c'est un document ADOPTÉ par un autre (la délibération ci-dessous), auquel il
+// est annexé : son texte suit l'original signé de l'acte qui l'adopte (voir
+// src/lib/annexe-docs.js). Le visa de son adoption lui est ajouté en tête de ses
+// visas par la compilation, et l'acte qui l'adopte annonce ses annexes à la fin
+// de son dispositif (voir src/lib/annexes.js). Ensuite sa FORME : un règlement se
+// range en Titres et Chapitres, non en une suite d'articles — d'où l'échelle
+// `divisions` de cette trame (Titre en chiffres romains, Chapitre en chiffres
+// arabes) et ses nœuds `division` imbriqués (voir SPEC § 2.2.3). Enfin sa QUALITÉ
+// de RÈGLEMENT : `reglement: true` en fait un texte NORMATIF, publié À PART au
+// recueil à titre informatif (voir `nature: "reglement"` dans SPEC § 2.2.4 ter).
+//
+// L'annexe n'a ni AUTORITÉ ni MENTION DE PUBLICATION AU RECUEIL : ces blocs
+// appartiennent à l'acte qui l'adopte, et la compilation les écarte pour toute
+// annexe (voir src/lib/compile.js). Elle garde ses VISAS — un règlement se fonde
+// sur des textes, et le visa d'adoption le rattache à sa délibération.
+// ============================================================================
+function reglementTrame() {
+  const art = (heading, text) => newNode("article", { numMode: "auto", heading, blocks: [newNode("para", { text })] });
+  const div = (level, heading, blocks) => newNode("division", { level, numMode: "auto", heading, blocks });
+  return newTrame({
+    id: "tpl-reglement-int",
+    name: "Règlement intérieur du conseil (annexe)",
+    version: "26.01",
+    familyId: "fam-organisation",
+    actTypeId: "reglement",
+    status: "published",
+    nature: "annexe",
+    // Un RÈGLEMENT : le recueil en donne une publication informative autonome,
+    // à côté de sa place dans la délibération qui l'adopte (voir SPEC § 2.2.4 ter).
+    reglement: true,
+    // L'échelle de CETTE trame : deux échelons, numérotés librement.
+    divisions: [
+      { level: 1, label: "Titre", num: "roman" },
+      { level: 2, label: "Chapitre", num: "decimal" },
+    ],
+    owner: "Secrétariat général",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    description: "Règlement intérieur du conseil municipal : un document adopté par une délibération, dont le texte suit la délibération qui l'adopte. Range son texte en Titres et Chapitres.",
+    // Une annexe ne se signe pas : son « signataire » est celui de l'acte qui
+    // l'adopte, et son texte ne porte pas de bloc de signature (voir
+    // src/lib/compile.js). Le champ n'a donc pas lieu d'être ici, et le champ de
+    // date porte la date de l'acte qui l'adopte.
+    // Elle n'a pas non plus de NUMÉRO propre : elle s'identifie par la décision
+    // qui l'adopte, et le champ « Numéro de l'acte » n'a rien à y faire (voir
+    // src/lib/annexes.js).
+    fields: commonHeader([])
+      .filter((f) => f.type !== "signataire" && f.id !== "numero")
+      .map((f) => (f.id === "dateSignature"
+        ? { ...f, label: "Date d'adoption", help: "La date de l'acte qui adopte ce document : elle figure sur son identité au registre et dans son intitulé." }
+        : f)),
+    rules: [
+      newRule({
+        id: "r-reglement-1", level: "warning", expr: "!exists(dateEffet) || !exists(dateSignature) || diff_days(dateEffet, dateSignature) >= 0",
+        message: "La date d'effet d'un règlement ne peut pas précéder sa date d'adoption.",
+        ref: "principes généraux du droit", author: "Secrétariat général", date: "2026-01-05",
+      }),
+    ],
+    body: [
+      newNode("title", { text: "Règlement intérieur de {{entity.nameWithArt}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-cgfp")] }),
+      newNode("considerants"),
+      div(1, "La tenue des séances", [
+        div(2, "Les séances ordinaires", [
+          art("Périodicité", "Le conseil municipal se réunit en séance ordinaire au moins une fois par trimestre, sur convocation de son maire."),
+          art("Convocation et ordre du jour", "La convocation, accompagnée de l'ordre du jour et des pièces nécessaires, est adressée aux conseillers trois jours francs au moins avant la séance. Dans les cas d'urgence, ce délai est réduit à un jour franc."),
+        ]),
+        div(2, "La police de l'assemblée", [
+          art("Présidence", "Le maire ouvre et clôt la séance, dirige les débats et en assure la police. En cas d'absence, il est remplacé par un adjoint dans l'ordre du tableau."),
+          art("Compte rendu", "Le compte rendu de la séance est affiché à la mairie dans les huit jours qui suivent la séance et tenu à la disposition du public."),
+        ]),
+      ]),
+      div(1, "Les droits et obligations des conseillers", [
+        div(2, "La participation aux travaux", [
+          art("Commissions", "Chaque conseiller est membre de droit de la commission qu'il a choisi de présider, et peut assister aux travaux de toute autre commission avec voix consultative."),
+          art("Questions orales", "Les conseillers peuvent poser des questions orales au maire en fin de séance. Une réponse est apportée au plus tard à la séance suivante."),
+        ]),
+        div(2, "La déontologie", [
+          art("Abstention", "Tout conseiller intéressé à une affaire soumise au conseil doit s'abstenir de participer au vote et quitter la salle au moment du débat et du vote."),
+        ]),
+      ]),
+    ],
+  });
+}
+
+// ============================================================================
+// LES DÉLIBÉRATIONS — les ACTES D'ASSEMBLÉE.
+//
+// Une délibération émane d'une ASSEMBLÉE, non d'une personne : sa ligne
+// d'autorité est celle du conseil (« Le conseil municipal de … », « Le conseil
+// d'administration de … »), et elle est signée par le PRÉSIDENT de cette
+// assemblée — le maire, pour un conseil municipal ; le président du conseil
+// d'administration, pour un établissement public. Le réglage `assemblee: true`
+// de la trame est ce qui appelle l'assemblée ; le jeton `{{autorite}}` en rend
+// la formule telle qu'elle est réglée dans Administration › Assemblées, et la
+// qualité qui signe s'y choisit assemblée par assemblée (voir src/lib/conseils.js).
+//
+// La délibération municipale ADOPTE ici un document annexé (le règlement
+// intérieur) : le lien se noue à la RÉDACTION (carte « Annexes », bouton
+// « Joindre une annexe »), qui remplit `values.__annexes` — c'est ce qui fait
+// annoncer le document à la fin du dispositif, et suivre son texte après la
+// signature (voir src/lib/annexe-docs.js).
+// ============================================================================
+function deliberationTrame() {
+  return newTrame({
+    id: "tpl-deliberation",
+    name: "Délibération du conseil municipal",
+    version: "26.01",
+    familyId: "fam-organisation",
+    actTypeId: "deliberation",
+    status: "published",
+    owner: "Secrétariat général",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    assemblee: true,
+    description: "Délibération de l'assemblée : elle peut adopter un règlement ou une charte, et le document adopté lui est annexé.",
+    fields: commonHeader([]),
+    body: [
+      newNode("title", { text: "Délibération n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{autorite}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "DÉLIBÈRE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", { text: "Le conseil municipal adopte le document annexé à la présente délibération ; son texte suit la présente délibération dans l'original signé." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Entrée en vigueur",
+        blocks: [newNode("para", { text: "La présente délibération prend effet {{dateEffet ? \"le \" + dateEffet : \"au lendemain de sa publication au recueil des actes administratifs\"}}." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le maire de {{entity.nameWithArt}} est chargé de l'exécution de la présente délibération." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      ...recoursAndPublication(),
+    ],
+  });
+}
+
+// La délibération d'un CONSEIL D'ADMINISTRATION d'établissement public : même
+// mécanique, autre assemblée. C'est le président du conseil d'administration
+// qui signe, et l'assemblée délibère pour l'établissement. Le texte renvoie à
+// l'assemblée par le jeton, non par un mot en dur : la même trame servirait un
+// autre établissement, avec son propre conseil.
+function deliberationCATrame() {
+  return newTrame({
+    id: "tpl-deliberation-ca",
+    name: "Délibération du conseil d'administration",
+    version: "26.01",
+    familyId: "fam-organisation",
+    actTypeId: "deliberation",
+    status: "published",
+    owner: "Direction de l'office",
+    entityIds: ["ent-oph"],
+    assemblee: true,
+    description: "Délibération d'un conseil d'administration d'établissement public : elle émane de l'assemblée, et c'est son président qui la signe.",
+    fields: commonHeader([]),
+    body: [
+      newNode("title", { text: "Délibération n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{autorite}}" }),
+      newNode("visas", { items: [visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "DÉLIBÈRE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", { text: "Le conseil d'administration approuve les dispositions qui font l'objet de la présente délibération." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Entrée en vigueur",
+        blocks: [newNode("para", { text: "La présente délibération prend effet {{dateEffet ? \"le \" + dateEffet : \"au lendemain de sa publication\"}}." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le président du conseil d'administration de {{entity.nameWithArt}} est chargé de l'exécution de la présente délibération." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      ...recoursAndPublication(),
+    ],
+  });
+}
+
+// ============================================================================
+// LA POLICE ADMINISTRATIVE.
+//
+// L'arrêté de police est l'acte le plus courant d'une mairie : circulation,
+// stationnement, sécurité, salubrité. Il a une particularité que la trame
+// traduit : la police administrative appartient au MAIRE et ne se délègue pas à
+// un agent — d'où la fonction imposée au champ « signataire » (`role:maire`),
+// qui laisse au rédacteur le choix de la personne, non de la qualité. Une seule
+// trame sert à tous les motifs : le motif, la voie et les mesures sont des
+// VALEURS, et le dispositif s'y adapte.
+// ============================================================================
+function policeTrame() {
+  return newTrame({
+    id: "tpl-police",
+    name: "Arrêté — police administrative (circulation, sécurité, salubrité)",
+    version: "26.14",
+    familyId: "fam-police",
+    actTypeId: "arrete",
+    status: "published",
+    owner: "Police municipale et prévention",
+    serviceId: "svc-police",
+    bureauId: "bur-pol-administratif",
+    description: "Mesure de police du maire : circulation, stationnement, sécurité ou salubrité sur la voie publique. Le maire en est l'autorité, sans délégation possible.",
+    fields: [
+      ...commonHeader([
+        newField({
+          id: "motif", label: "Motif de la mesure", type: "choice", group: "Objet de l'acte",
+          options: ["travaux", "securite", "salubrite", "stationnement", "environnement", "manifestation"],
+          help: "Le motif commande les visas de l'arrêté (code de la route, code de la sécurité intérieure, code de l'environnement).",
+        }),
+        newField({ id: "voie", label: "Voie ou emplacement concerné", type: "text", group: "Objet de l'acte", help: "Formule introduite par une préposition : « rue des Tilleuls, entre la place du Marché et le pont »." }),
+        newField({ id: "dateDebut", label: "Début de la mesure", type: "date", group: "Objet de l'acte" }),
+        newField({ id: "dateFin", label: "Fin de la mesure", type: "date", required: false, group: "Objet de l'acte", help: "Vide : la mesure est permanente, jusqu'à son abrogation." }),
+        newField({ id: "mesures", label: "Mesures prescrites", type: "textarea", group: "Dispositif", help: "Le texte de l'article 1er : une phrase par prescription." }),
+        newField({ id: "derogations", label: "Dérogations", type: "textarea", required: false, group: "Dispositif", help: "Vide : l'article des dérogations n'est pas imprimé." }),
+      ], { fonction: "role:maire" }),
+    ],
+    rules: [
+      newRule({ id: "r-police-1", level: "blocking", expr: "exists(voie) && exists(mesures)", message: "La voie concernée et les mesures prescrites sont obligatoires.", author: "Police municipale et prévention", date: "2026-05-01" }),
+      newRule({ id: "r-police-2", level: "blocking", expr: "!exists(dateFin) || !exists(dateDebut) || diff_days(dateFin, dateDebut) >= 0", message: "La fin de la mesure ne peut pas précéder son début.", author: "Police municipale et prévention", date: "2026-05-01" }),
+      newRule({ id: "r-police-3", level: "warning", expr: "motif != 'manifestation' || (exists(dateDebut) && exists(dateFin))", message: "Une mesure prise pour une manifestation porte ses dates de début et de fin.", author: "Police municipale et prévention", date: "2026-05-01" }),
+      newRule({ id: "r-police-4", level: "warning", expr: "!contains(mesures, 'interdite') || exists(derogations)", message: "Une interdiction générale gagne à prévoir ses dérogations : les véhicules de secours, les riverains, les livraisons.", author: "Police municipale et prévention", date: "2026-05-01" }),
+    ],
+    body: [
+      ...headerNodes(),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", { text: "{{mesures}}" })],
+        notes: [
+          newNote({ kind: "legal", author: "Police municipale et prévention", text: "La mesure de police doit être nécessaire et proportionnée au trouble qu'elle prévient : c'est le contrôle que le juge administratif exerce sur l'arrêté." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Champ d'application et durée",
+        blocks: [
+          newNode("para", { text: "Les dispositions du présent arrêté s'appliquent {{voie}}." }),
+          newNode("para", { text: "Elles prennent effet {{dateDebut ? \"le \" + dateDebut : \"à compter de sa publication\"}}{{dateFin ? \" et sont applicables jusqu'au \" + dateFin : \" jusqu'à leur abrogation\"}}.", when: "exists(dateDebut) || exists(dateFin)" }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Dérogations",
+        when: "exists(derogations)",
+        blocks: [newNode("para", { text: "Sont toutefois autorisés, dans les conditions fixées par le service : {{derogations}}", when: "exists(derogations)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur de la police municipale et le directeur général des services de {{entity.nameWithArt}} sont chargés, chacun en ce qui le concerne, de l'exécution du présent arrêté." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-recours" }),
+      newNode("mention", { mentionId: "men-affichage" }),
+    ],
+  });
+}
+
+// Le CADRE DE VIE : déchets, eau, nuisances, espaces publics. Ces mesures sont,
+// elles aussi, des mesures de police du maire — la trame est donc DÉRIVÉE de
+// celle de la police administrative, dont elle change seulement l'identité, le
+// service, la matière (le thème du recueil) et les textes visés. La dériver
+// plutôt que la recopier évite que les deux s'écartent à la première correction.
+function environnementTrame() {
+  const t = policeTrame();
+  t.id = "tpl-environnement";
+  t.name = "Arrêté — police du cadre de vie (déchets, eau, nuisances)";
+  t.version = "26.24";
+  t.familyId = "fam-environnement";
+  t.serviceId = "svc-environnement";
+  t.bureauId = "bur-env-proprete";
+  t.owner = "Cadre de vie et environnement";
+  t.description = "Mesure de police du maire en matière de cadre de vie : déchets et propreté, eau, nuisances, espaces publics. Le maire en est l'autorité, sans délégation possible.";
+  const motif = t.fields.find((f) => f.id === "motif");
+  if (motif) {
+    motif.options = ["dechets", "eau", "nuisances", "proprete", "espaces-verts"];
+    motif.help = "Le motif commande les visas de l'arrêté : code de l'environnement, code de la santé publique, code général des collectivités territoriales.";
+  }
+  const visas = t.body.find((n) => n.type === "visas");
+  if (visas) {
+    visas.items = [visa("ref-cgct"), visa("ref-code-environnement"), visa("ref-code-sante-publique"), visaChaine()];
+  }
+  const execution = t.body.find((n) => n.type === "article" && n.heading === "Exécution");
+  if (execution) {
+    execution.blocks = [newNode("para", { text: "Le directeur général des services et le responsable du service du cadre de vie de {{entity.nameWithArt}} sont chargés, chacun en ce qui le concerne, de l'exécution du présent arrêté." })];
+  }
+  const notes = t.body.find((n) => n.type === "article" && n.numMode === "auto" && !n.heading);
+  if (notes && notes.notes && notes.notes[0]) {
+    notes.notes[0] = newNote({ kind: "legal", author: "Cadre de vie et environnement", text: "La mesure doit être nécessaire et proportionnée au trouble qu'elle prévient ; les prescriptions doivent pouvoir être exécutées avec les moyens du service." });
+  }
+  return t;
+}
+
+// L'ACCUEIL PÉRISCOLAIRE : l'organisation des temps d'accueil du matin, du soir,
+// du mercredi et des vacances. Un acte d'organisation, pris chaque année avant
+// la rentrée, qui décrit des services OUVERTES ou non — chaque service retenu
+// ajoute sa ligne à l'article d'organisation.
+function periscolaireTrame() {
+  return newTrame({
+    id: "tpl-periscolaire",
+    name: "Arrêté — organisation des accueils périscolaires",
+    version: "26.25",
+    familyId: "fam-scolarite",
+    actTypeId: "arrete",
+    status: "published",
+    owner: "Éducation, enfance et jeunesse",
+    serviceId: "svc-education",
+    bureauId: "bur-edu-periscolaire",
+    description: "Organisation de l'accueil du matin, du soir, du mercredi et des vacances : services ouverts, horaires, lieux, encadrement et modalités d'inscription.",
+    fields: commonHeader([
+      newField({ id: "anneeScolaire", label: "Année scolaire", type: "text", group: "Objet de l'acte", help: "Ex. « 2026-2027 »." }),
+      newField({ id: "dateRentree", label: "Date de rentrée", type: "date", group: "Objet de l'acte" }),
+      newField({
+        id: "services", label: "Services ouverts", type: "multichoice", group: "Dispositif",
+        options: ["matin", "soir", "mercredi", "vacances"],
+        help: "Chaque service retenu ajoute sa ligne à l'article d'organisation.",
+      }),
+      newField({ id: "lieuAccueil", label: "Lieu d'accueil", type: "text", group: "Dispositif", help: "Ex. « le groupe scolaire Jean-Moulin »." }),
+      newField({ id: "encadrement", label: "Encadrement", type: "textarea", required: false, group: "Dispositif", help: "Vide : l'article de l'encadrement n'est pas imprimé." }),
+      newField({ id: "horaires", label: "Dispositions particulières", type: "textarea", required: false, group: "Dispositif" }),
+    ]),
+    rules: [
+      newRule({ id: "r-peri-1", level: "blocking", expr: "exists(anneeScolaire) && exists(dateRentree) && count(services) > 0", message: "L'année scolaire, la date de rentrée et au moins un service ouvert sont obligatoires.", author: "Éducation, enfance et jeunesse", date: "2026-06-01" }),
+      newRule({ id: "r-peri-2", level: "warning", expr: "!contains(services, 'mercredi') || exists(encadrement)", message: "L'accueil du mercredi suppose un encadrement qualifié : décrivez-le.", author: "Éducation, enfance et jeunesse", date: "2026-06-01" }),
+      newRule({ id: "r-peri-3", level: "warning", expr: "!exists(dateEffet) || diff_days(dateEffet, dateRentree) >= 0", message: "L'organisation doit prendre effet au plus tôt à la rentrée, pour que les familles aient l'information à temps.", author: "Éducation, enfance et jeunesse", date: "2026-06-01" }),
+    ],
+    body: [
+      ...headerNodes(),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", { text: "Les accueils périscolaires de {{entity.nameWithArt}} sont organisés, pour l'année scolaire {{anneeScolaire}}, à compter du {{dateRentree}}, dans les conditions fixées par le présent arrêté." })],
+        notes: [
+          newNote({ kind: "instruction", author: "Éducation, enfance et jeunesse", text: "Adresser l'arrêté aux directeurs des écoles et aux représentants des parents avant la fin de l'année scolaire : les familles en ont besoin pour organiser leur rentrée." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Services ouverts",
+        blocks: [newNode("list", {
+          items: [
+            { id: "p1", text: "l'accueil du matin, de 7 h 30 à 8 h 20, dans les locaux de {{lieuAccueil}} ;", when: "contains(services, 'matin')" },
+            { id: "p2", text: "l'accueil du soir, de 16 h 30 à 18 h 30, avec une étude surveillée de 16 h 30 à 17 h 30 ;", when: "contains(services, 'soir')" },
+            { id: "p3", text: "l'accueil du mercredi après-midi, de 13 h 30 à 18 heures, pour les enfants des écoles élémentaires ;", when: "contains(services, 'mercredi')" },
+            { id: "p4", text: "l'accueil de loisirs sans hébergement pendant les vacances scolaires, du lundi au vendredi, de 7 h 30 à 18 h 30.", when: "contains(services, 'vacances')" },
+          ],
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Encadrement",
+        when: "exists(encadrement)",
+        blocks: [newNode("para", { text: "{{encadrement}}", when: "exists(encadrement)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Inscriptions",
+        blocks: [newNode("para", { text: "Les enfants sont inscrits par leurs représentants légaux auprès du service de l'éducation, au plus tard le 10 juillet pour la rentrée de septembre. L'inscription est renouvelée à chaque année scolaire et vaut pour l'ensemble des services ouverts." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Tarifs et facturation",
+        blocks: [newNode("para", { text: "Les tarifs des accueils périscolaires sont ceux fixés par la délibération tarifaire du conseil municipal. La facturation est mensuelle et établie sur la base des présences enregistrées." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Dispositions particulières",
+        when: "exists(horaires)",
+        blocks: [newNode("para", { text: "{{horaires}}", when: "exists(horaires)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Entrée en vigueur",
+        blocks: [newNode("para", { text: "Le présent arrêté prend effet {{dateEffet ? \"le \" + dateEffet : \"à compter de sa publication\"}}." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur général des services et la directrice de l'éducation, de l'enfance et de la jeunesse de {{entity.nameWithArt}} sont chargés, chacun en ce qui le concerne, de l'exécution du présent arrêté." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      ...recoursAndPublication(),
+    ],
+  });
+}
+
+// ============================================================================
+// LA MANIFESTATION ET L'ÉVÉNEMENT.
+//
+// Une fête de village, un marché de Noël, un carnaval : l'arrêté qui les
+// organise autorise l'occupation du domaine public ET règle les suites de
+// l'événement — circulation détournée, stationnement réservé, sonorisation
+// contenue, buvette autorisée, secours prévus. Les mesures sont des CHOIX
+// (`multichoice`) : chaque case cochée ajoute l'article correspondant, et
+// l'arrêté ne porte donc que les prescriptions de l'événement qu'il organise.
+// C'est la trame de la fête du village.
+// ============================================================================
+function evenementTrame() {
+  return newTrame({
+    id: "tpl-evenement",
+    name: "Arrêté — organisation d'une manifestation ou d'un événement",
+    version: "26.15",
+    familyId: "fam-vie-locale",
+    actTypeId: "arrete",
+    status: "published",
+    owner: "Culture, fêtes et vie associative",
+    serviceId: "svc-culture",
+    bureauId: "bur-cul-fetes",
+    description: "Autorisation et organisation d'une manifestation : emprise sur le domaine public, circulation, stationnement, sécurité, sonorisation, débit de boissons.",
+    fields: commonHeader([
+      newField({ id: "nomEvenement", label: "Nom de l'événement", type: "text", group: "Objet de l'acte" }),
+      newField({ id: "organisateur", label: "Organisateur", type: "text", group: "Objet de l'acte", help: "La personne ou l'association qui porte l'événement." }),
+      newField({ id: "dateDebut", label: "Début de l'événement", type: "date", group: "Objet de l'acte" }),
+      newField({ id: "dateFin", label: "Fin de l'événement", type: "date", required: false, group: "Objet de l'acte", help: "Vide : l'événement tient en une journée." }),
+      newField({ id: "lieu", label: "Lieu", type: "text", group: "Objet de l'acte", help: "Formule introduite par « sur » ou « à »." }),
+      newField({ id: "emprise", label: "Emprise sur le domaine public", type: "textarea", required: false, group: "Dispositif", help: "Vide : l'article de l'occupation n'est pas imprimé." }),
+      newField({
+        id: "mesures", label: "Mesures de police à prévoir", type: "multichoice", group: "Dispositif",
+        options: ["circulation", "stationnement", "sonorisation", "buvette", "restauration", "secours", "pyrotechnie"],
+        help: "Chaque mesure retenue ajoute l'article correspondant au dispositif.",
+      }),
+      newField({ id: "securite", label: "Dispositif de sécurité", type: "textarea", required: false, group: "Dispositif" }),
+      newField({ id: "obligations", label: "Obligations particulières de l'organisateur", type: "textarea", required: false, group: "Dispositif" }),
+    ]),
+    rules: [
+      newRule({ id: "r-evenement-1", level: "blocking", expr: "exists(nomEvenement) && exists(organisateur) && exists(dateDebut)", message: "Le nom de l'événement, son organisateur et sa date de début sont obligatoires.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+      newRule({ id: "r-evenement-2", level: "blocking", expr: "!exists(dateFin) || diff_days(dateFin, dateDebut) >= 0", message: "La fin de l'événement ne peut pas précéder son début.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+      newRule({ id: "r-evenement-3", level: "warning", expr: "!contains(mesures, 'pyrotechnie') || exists(securite)", message: "Un spectacle pyrotechnique suppose un dispositif de sécurité décrit : renseignez-le.", ref: "code de la sécurité civile", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+      newRule({ id: "r-evenement-4", level: "warning", expr: "!contains(mesures, 'buvette') || !contains(mesures, 'restauration')", message: "Buvette et restauration relèvent de régimes différents : vérifier le classement de l'établissement temporaire.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Arrêté n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", {
+        items: [
+          visa("ref-cgct"), visa("ref-code-route"), visa("ref-csi"), visa("ref-code-securite-civile"),
+          visa("ref-delib-festivites"), visaChaine(),
+        ],
+      }),
+      newNode("considerants"),
+      newNode("enact", { text: "ARRÊTE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", {
+          text: "{{organisateur}} est autorisé(e) à organiser {{nomEvenement}} {{lieu}}{{dateDebut ? \" le \" + dateDebut : \"\"}}{{dateFin ? \" et le \" + dateFin : \"\"}}.",
+        })],
+        notes: [
+          newNote({ kind: "instruction", author: "Culture, fêtes et vie associative", text: "Joindre au dossier la demande de l'organisateur, le programme et le plan des installations : l'annexe de la fête suit l'arrêté signé." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Occupation du domaine public",
+        when: "exists(emprise)",
+        blocks: [newNode("para", { text: "L'occupation du domaine public est autorisée dans les conditions suivantes : {{emprise}}", when: "exists(emprise)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Circulation et stationnement",
+        when: "contains(mesures, 'circulation') || contains(mesures, 'stationnement')",
+        blocks: [newNode("para", {
+          text: "Pendant toute la durée de la manifestation, la circulation est réglementée sur les voies concernées et le stationnement y est {{contains(mesures, 'stationnement') ? \"interdit, à l'exception des véhicules de secours et de service\" : \"maintenu dans les conditions habituelles\"}}.",
+          when: "contains(mesures, 'circulation') || contains(mesures, 'stationnement')",
+        })],
+        notes: [
+          newNote({ kind: "legal", author: "Culture, fêtes et vie associative", text: "Le détournement des voies et l'interdiction de stationner relèvent de l'arrêté de police du maire : la mesure est prise ici dans le même acte que l'autorisation, ce qui est l'usage pour une fête." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Sécurité et secours",
+        when: "contains(mesures, 'secours') || exists(securite)",
+        blocks: [
+          newNode("para", { text: "Un dispositif de sécurité et de secours est mis en place par l'organisateur, en liaison avec la police municipale et le service départemental d'incendie et de secours.", when: "contains(mesures, 'secours')" }),
+          newNode("para", { text: "{{securite}}", when: "exists(securite)" }),
+        ],
+        notes: [
+          newNote({ kind: "watch", author: "Culture, fêtes et vie associative", text: "La commission de sécurité doit rendre son avis pour toute installation recevant du public : l'avis est joint au dossier." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Sonorisation",
+        when: "contains(mesures, 'sonorisation')",
+        blocks: [newNode("para", {
+          text: "La sonorisation est autorisée de 10 heures à minuit. Les niveaux sonores sont réglés de manière à ne pas troubler la tranquillité du voisinage ; le maire peut ordonner la réduction du niveau sonore ou l'arrêt de la sonorisation en cas de trouble constaté.",
+          when: "contains(mesures, 'sonorisation')",
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Débit de boissons et restauration",
+        when: "contains(mesures, 'buvette') || contains(mesures, 'restauration')",
+        blocks: [newNode("para", {
+          text: "{{contains(mesures, 'buvette') && contains(mesures, 'restauration') ? \"La vente de boissons et la restauration temporaire sont autorisées\" : (contains(mesures, 'buvette') ? \"La vente de boissons est autorisée\" : \"La restauration temporaire est autorisée\")}} dans le cadre de la manifestation, aux emplacements réservés à cet effet.",
+          when: "contains(mesures, 'buvette') || contains(mesures, 'restauration')",
+        })],
+        notes: [
+          newNote({ kind: "legal", author: "Culture, fêtes et vie associative", text: "La buvette d'une association peut bénéficier d'une licence temporaire ; la restauration relève des règles d'hygiène alimentaire." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Spectacle pyrotechnique",
+        when: "contains(mesures, 'pyrotechnie')",
+        blocks: [newNode("para", {
+          text: "Le spectacle pyrotechnique est autorisé sous réserve que le tir soit réalisé par un artificier titulaire du certificat de qualification et que la zone de sécurité soit interdite au public. Le dispositif est déclaré en préfecture par l'organisateur.",
+          when: "contains(mesures, 'pyrotechnie')",
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Obligations de l'organisateur",
+        blocks: [newNode("list", {
+          items: [
+            { id: "o1", text: "souscrire une assurance de responsabilité civile couvrant l'ensemble de la manifestation et en justifier avant sa tenue ;", when: "" },
+            { id: "o2", text: "assurer la surveillance des installations et des accès, et respecter les consignes de la commission de sécurité ;", when: "" },
+            { id: "o3", text: "installer la signalisation temporaire prescrite par le service de la voirie ;", when: "" },
+            { id: "o4", text: "laisser l'emprise libre de tout obstacle à l'issue de la manifestation et remettre les lieux en état ;", when: "" },
+          ],
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Obligations particulières",
+        when: "exists(obligations)",
+        blocks: [newNode("para", { text: "{{obligations}}", when: "exists(obligations)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur de la police municipale, le directeur général des services et le directeur du service des fêtes de {{entity.nameWithArt}} sont chargés, chacun en ce qui le concerne, de l'exécution du présent arrêté." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-organisateur" }),
+      newNode("mention", { mentionId: "men-affichage" }),
+    ],
+  });
+}
+
+// ============================================================================
+// LES ANNEXES.
+//
+// Une annexe ne se signe pas : c'est la délibération qui l'adopte qui est
+// signée, et son texte suit l'original signé (voir src/lib/annexes.js et
+// src/lib/annexe-docs.js). C'est pourquoi ces trames n'ont ni champ « Numéro »
+// ni champ « Signataire », et que leur date s'appelle « Date d'adoption ».
+// ============================================================================
+
+// Un document ADOPTÉ, qu'on dépose à part : le règlement de la restauration
+// scolaire, tenu en Titres et Chapitres. C'est le document que le recueil public
+// met en avant par la délibération qui l'adopte.
+function cantineTrame() {
+  const art = (heading, text) => newNode("article", { numMode: "auto", heading, blocks: [newNode("para", { text })] });
+  const div = (level, heading, blocks) => newNode("division", { level, numMode: "auto", heading, blocks });
+  return newTrame({
+    id: "tpl-reglement-cantine",
+    name: "Règlement de la restauration scolaire (annexe)",
+    version: "26.16",
+    familyId: "fam-scolarite",
+    actTypeId: "reglement",
+    status: "published",
+    nature: "annexe",
+    // Un RÈGLEMENT, lui aussi : un texte normatif que le recueil publie pour
+    // lui-même, à titre informatif (voir SPEC § 2.2.4 ter).
+    reglement: true,
+    serviceId: "svc-education",
+    bureauId: "bur-edu-restauration",
+    owner: "Éducation, enfance et jeunesse",
+    divisions: [
+      { level: 1, label: "Titre", num: "roman" },
+      { level: 2, label: "Chapitre", num: "decimal" },
+    ],
+    description: "Le règlement d'accès au service de restauration scolaire : inscriptions, régimes particuliers, tarifs, facturation, discipline. Adopté par une délibération, son texte suit l'acte qui l'adopte.",
+    fields: commonHeader([])
+      .filter((f) => f.type !== "signataire" && f.id !== "numero")
+      .map((f) => (f.id === "dateSignature"
+        ? { ...f, label: "Date d'adoption", help: "La date de l'acte qui adopte le règlement : elle figure sur son identité au registre et dans son intitulé." }
+        : f)),
+    rules: [
+      newRule({ id: "r-cantine-1", level: "warning", expr: "!exists(dateEffet) || !exists(dateSignature) || diff_days(dateEffet, dateSignature) >= 0", message: "Le règlement ne peut pas avoir d'effet avant son adoption.", ref: "principes généraux du droit", author: "Éducation, enfance et jeunesse", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Règlement de la restauration scolaire de {{entity.nameWithArt}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-code-education"), visa("ref-code-sante-publique"), visa("ref-delib-cantine")] }),
+      newNode("considerants"),
+      div(1, "L'accès au service de restauration", [
+        div(2, "Les élèves bénéficiaires", [
+          art("Principe", "Le service de restauration scolaire est accessible, dans la limite des places disponibles, à tout élève inscrit dans une école publique de la commune."),
+          art("Élèves de passage", "Les élèves scolarisés hors de la commune et accueillis temporairement dans une classe peuvent être admis au service, sur décision du service de l'éducation et pour la seule durée de leur accueil."),
+          art("Enfants porteurs d'un handicap", "L'accès au service est garanti aux enfants en situation de handicap. Les adaptations nécessaires — aide au repas, régime adapté, accompagnement — sont organisées avec la famille et le service de l'éducation."),
+        ]),
+        div(2, "Les inscriptions et les radiations", [
+          art("Dossier d'inscription", "L'inscription est annuelle. Elle suppose un dossier complet : fiche d'inscription signée par le représentant légal, fiche sanitaire, attestation d'assurance scolaire et, le cas échéant, les justificatifs ouvrant droit au tarif réduit."),
+          art("Période d'inscription", "Les inscriptions sont reçues du 15 juin au 10 juillet pour l'année scolaire suivante. Les demandes parvenues après cette période sont satisfaites dans la limite des places disponibles."),
+          art("Radiation", "L'inscription prend fin à la radiation de l'élève de l'école, à son départ de la commune, sur demande écrite du représentant légal, ou lorsque l'élève cesse de fréquenter le service sans motif pendant plus d'un mois."),
+        ]),
+      ]),
+      div(1, "Le fonctionnement du service", [
+        div(2, "Les repas", [
+          art("Composition des repas", "Chaque repas comprend une entrée, un plat garni, un produit laitier et un dessert. Les menus sont affichés dans chaque école et publiés sur le site de la commune."),
+          art("Régimes particuliers", "Les enfants présentant une allergie alimentaire ou une intolérance attestée par un certificat médical bénéficient d'un repas adapté. Le certificat est renouvelé chaque année scolaire."),
+          art("Qualité et traçabilité", "La commune met en œuvre les principes de la maîtrise sanitaire — traçabilité des denrées, chaîne du froid, plan de maîtrise sanitaire — et privilégie, à qualité égale, les produits locaux et de saison."),
+        ]),
+        div(2, "Les horaires et l'encadrement", [
+          art("Horaires", "Le service fonctionne les jours d'école, de 11 h 45 à 13 h 30. Les élèves y accèdent à l'issue de la classe du matin et rejoignent leur classe à l'enseignement de l'après-midi."),
+          art("Encadrement", "L'encadrement est assuré par des agents communaux, dans les conditions d'effectifs prévues par la réglementation. Les élèves accèdent au restaurant scolaire dans le calme, sous la conduite de leur enseignant."),
+          art("Comportement des convives", "Les convives sont tenus à la politesse, au respect des autres et du personnel, et à la propreté. Le calme est de rigueur pendant le service."),
+        ]),
+      ]),
+      div(1, "La tarification et la facturation", [
+        div(2, "Les tarifs", [
+          art("Fixation des tarifs", "Les tarifs du service sont fixés chaque année par le conseil municipal. Ils distinguent le tarif de droit commun du tarif réduit, dont l'attribution tient compte du quotient familial."),
+          art("Tarif réduit", "Le tarif réduit est accordé sur présentation de l'attestation de quotient familial de la Caisse d'allocations familiales ou, à défaut, des justificatifs de ressources de la famille."),
+        ]),
+        div(2, "La facturation et le recouvrement", [
+          art("Facturation", "La facturation est mensuelle et établie à terme échu, sur la base des repas effectivement pris par l'élève."),
+          art("Absences", "Toute absence de plus de deux jours consécutifs est signalée au service. Un repas non annulé au moins quarante-huit heures à l'avance reste dû."),
+          art("Impayés", "En cas d'impayé persistant, le maire adresse au représentant légal une mise en demeure. À défaut de régularisation, l'élève peut être suspendu de l'accès au service sur décision du maire, sans préjudice du recouvrement de la créance."),
+        ]),
+      ]),
+      div(1, "La sécurité, l'hygiène et la protection des données", [
+        div(2, "La sécurité alimentaire", [
+          art("Contrôle sanitaire", "Les services de contrôle de l'État ont libre accès aux locaux de restauration et aux documents de traçabilité. Les prélèvements et analyses ordonnés dans ce cadre sont conservés au dossier."),
+          art("Traitement des incidents", "Tout incident — intoxication suspectée, corps étranger, rupture de la chaîne du froid — est déclaré le jour même au service de l'éducation, qui en informe le maire et les autorités sanitaires."),
+        ]),
+        div(2, "Les données personnelles", [
+          art("Données collectées", "Les données des élèves et de leurs représentants sont collectées pour la seule gestion du service : inscription, facturation, suivi des régimes particuliers. Elles ne sont communiquées qu'aux personnes habilitées."),
+          art("Conservation", "Les données sont conservées pendant la durée de la scolarité et, pour les pièces de facturation, pendant la durée légale de conservation des pièces comptables."),
+        ]),
+      ]),
+    ],
+  });
+}
+
+// Le TABLEAU des tarifs, adopté lui aussi par une délibération : une annexe faite
+// d'une grille, comme il s'en pratique pour tous les tarifs municipaux d'un
+// exercice. Le tableau est un bloc du document (voir NODE_TYPES › « table »).
+function grilleTarifaireTrame() {
+  return newTrame({
+    id: "tpl-grille-tarifaire",
+    name: "Grille tarifaire (annexe)",
+    version: "26.17",
+    familyId: "fam-finances",
+    actTypeId: "deliberation",
+    status: "published",
+    nature: "annexe",
+    serviceId: "svc-finances",
+    bureauId: "bur-fin-budget",
+    owner: "Finances et commande publique",
+    description: "Le tableau des tarifs municipaux de l'exercice, adopté par une délibération : il suit l'acte qui l'adopte.",
+    fields: [
+      ...commonHeader([])
+        .filter((f) => f.type !== "signataire" && f.id !== "numero")
+        .map((f) => (f.id === "dateSignature" ? { ...f, label: "Date d'adoption", help: "La date de la délibération qui adopte la grille." } : f)),
+      newField({ id: "intitule", label: "Intitulé de la grille", type: "text", group: "Identification", help: "Ex. « Grille tarifaire des services municipaux — exercice 2026-2027 »." }),
+    ],
+    rules: [
+      newRule({ id: "r-grille-1", level: "warning", expr: "exists(intitule)", message: "Sans intitulé, la grille ne peut pas être nommée dans la liste des annexes.", author: "Finances et commande publique", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "{{intitule}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-delib-tarifs")] }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [
+          newNode("para", { text: "Les tarifs des services municipaux applicables à compter du 1er septembre 2026 sont fixés conformément au tableau ci-après." }),
+          newNode("table", {
+            caption: "{{intitule}}",
+            layout: "rows",
+            align: "left",
+            columns: ["Prestation", "Tarif — Valmontois", "Tarif — hors commune"],
+            rows: [
+              ["Restauration scolaire — repas", "3,90 €", "7,20 €"],
+              ["Accueil périscolaire du matin", "1,50 €", "3,00 €"],
+              ["Accueil périscolaire du soir", "2,20 €", "4,40 €"],
+              ["Accueil de loisirs sans hébergement — journée", "8,50 €", "16,00 €"],
+              ["Cantine des personnels municipaux — repas", "6,30 €", "—"],
+              ["Location de la salle des fêtes — week-end", "180,00 €", "330,00 €"],
+              ["Location du barnum communal — journée", "45,00 €", "90,00 €"],
+              ["Droit de place au marché — mètre linéaire et par jour", "2,40 €", "2,40 €"],
+              ["Concession funéraire quinzennaire — case de deux places", "420,00 €", "—"],
+              ["Reproduction de documents d'urbanisme — par page A3", "1,20 €", "1,20 €"],
+            ],
+          }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Entrée en vigueur",
+        blocks: [newNode("para", { text: "La présente grille prend effet le 1er septembre 2026. Elle s'applique jusqu'au 31 août 2027." })],
+      }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// Le document JOINT, au cas par cas : un plan de circulation, un programme, un
+// plan de sécurité, une liste d'emplacements. C'est l'annexe fourre-tout de la
+// démonstration — trois paragraphes, pour que le texte ait de la place, et trois
+// champs vides qui n'impriment rien.
+function annexeTrame() {
+  return newTrame({
+    id: "tpl-annexe-joint",
+    name: "Annexe — document joint à un acte",
+    version: "26.18",
+    familyId: "fam-organisation",
+    actTypeId: "arrete",
+    status: "published",
+    nature: "annexe",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    owner: "Secrétariat général",
+    description: "Annexe générique : un document joint à un acte (plan de circulation, programme, plan de sécurité, liste). Son texte suit l'acte qui l'adopte.",
+    fields: [
+      ...commonHeader([])
+        .filter((f) => f.type !== "signataire" && f.id !== "numero")
+        .map((f) => (f.id === "dateSignature" ? { ...f, label: "Date d'adoption", help: "La date de l'acte auquel le document est annexé." } : f)),
+      newField({ id: "intitule", label: "Intitulé du document", type: "text", group: "Identification", help: "Ex. « Plan de circulation et de stationnement ». L'intitulé paraît seul sur une page." }),
+      newField({ id: "chapeau", label: "Chapeau", type: "textarea", required: false, group: "Contenu" }),
+      newField({ id: "partie1", label: "Texte — première partie", type: "textarea", required: false, group: "Contenu" }),
+      newField({ id: "partie2", label: "Texte — deuxième partie", type: "textarea", required: false, group: "Contenu", help: "Vide : le paragraphe n'est pas imprimé." }),
+      newField({ id: "partie3", label: "Texte — troisième partie", type: "textarea", required: false, group: "Contenu", help: "Vide : le paragraphe n'est pas imprimé." }),
+    ],
+    rules: [
+      newRule({ id: "r-annexe-1", level: "blocking", expr: "exists(intitule)", message: "L'intitulé du document est obligatoire : c'est lui qui l'annonce dans la liste des annexes.", author: "Secrétariat général", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "{{intitule}}" }),
+      newNode("para", { text: "{{chapeau}}", when: "exists(chapeau)" }),
+      newNode("para", { text: "{{partie1}}", when: "exists(partie1)" }),
+      newNode("para", { text: "{{partie2}}", when: "exists(partie2)" }),
+      newNode("para", { text: "{{partie3}}", when: "exists(partie3)" }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// La CONVENTION : le document par lequel la commune s'engage avec un autre. Sa
+// structure n'est pas celle d'un acte unilatéral — « entre … et …, il a été
+// convenu ce qui suit » — mais l'application la traite comme un acte : elle est
+// rédigée, signée, publiée et citée au recueil comme les autres.
+function conventionTrame() {
+  return newTrame({
+    id: "tpl-convention",
+    name: "Convention — coopération, partenariat et jumelage",
+    version: "26.19",
+    familyId: "fam-vie-locale",
+    actTypeId: "convention",
+    status: "published",
+    owner: "Culture, fêtes et vie associative",
+    serviceId: "svc-culture",
+    bureauId: "bur-cul-associations",
+    description: "Convention entre la commune et un partenaire : objets de coopération, engagements réciproques, durée, suivi.",
+    fields: commonHeader([
+      newField({ id: "partenaire", label: "Partie signataire", type: "text", group: "Objet de l'acte", help: "Ex. « la commune de Saint-Aubin-sur-Rive »." }),
+      newField({ id: "objetConvention", label: "Objet de la convention", type: "text", group: "Objet de l'acte", help: "Formule complète : elle suit « portant »." }),
+      newField({
+        id: "domaines", label: "Domaines de coopération", type: "multichoice", group: "Dispositif",
+        options: ["echanges-scolaires", "manifestations-culturelles", "vie-associative", "sport", "patrimoine", "cooperation-technique"],
+        help: "Chaque domaine retenu ajoute l'engagement correspondant à la convention.",
+      }),
+      newField({ id: "duree", label: "Durée", type: "text", group: "Dispositif", required: false, help: "Ex. « cinq ans à compter de sa signature »." }),
+      newField({ id: "contribution", label: "Contribution financière de la commune", type: "money", group: "Dispositif", required: false }),
+      newField({ id: "renouvellement", label: "Renouvellement", type: "choice", group: "Dispositif", required: false, options: ["tacite", "express"] }),
+    ], { fonction: "role:maire" }),
+    rules: [
+      newRule({ id: "r-convention-1", level: "blocking", expr: "exists(partenaire) && exists(objetConvention)", message: "La partie signataire et l'objet de la convention sont obligatoires.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+      newRule({ id: "r-convention-2", level: "warning", expr: "count(domaines) > 0", message: "Aucun domaine de coopération n'est retenu : la convention n'a pas d'engagement.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+      newRule({ id: "r-convention-3", level: "warning", expr: "!exists(contribution) || contribution <= 50000", message: "Au-delà de 50 000 €, la convention relève d'une délibération préalable de l'assemblée.", author: "Culture, fêtes et vie associative", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Convention n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-delib-festivites"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("para", { text: "Entre {{entity.nameWithArt}}, représentée par son maire, d'une part, et {{partenaire}}, d'autre part, il a été convenu ce qui suit :" }),
+      newNode("enact", { text: "IL A ÉTÉ CONVENU CE QUI SUIT" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "Objet",
+        blocks: [newNode("para", { text: "La présente convention a pour objet {{objetConvention}}." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Engagements réciproques",
+        blocks: [newNode("list", {
+          items: [
+            { id: "e1", text: "organiser chaque année des échanges entre les écoles des deux communes ;", when: "contains(domaines, 'echanges-scolaires')" },
+            { id: "e2", text: "se tenir mutuellement informées de leurs manifestations culturelles et y associer leurs habitants ;", when: "contains(domaines, 'manifestations-culturelles')" },
+            { id: "e3", text: "faciliter les rencontres entre les associations locales et la circulation de leurs initiatives ;", when: "contains(domaines, 'vie-associative')" },
+            { id: "e4", text: "soutenir les rencontres sportives entre les clubs et les écoles des deux communes ;", when: "contains(domaines, 'sport')" },
+            { id: "e5", text: "coopérer à la connaissance et à la mise en valeur de leur patrimoine ;", when: "contains(domaines, 'patrimoine')" },
+            { id: "e6", text: "échanger leurs bonnes pratiques et leurs agents sur les sujets d'intérêt commun.", when: "contains(domaines, 'cooperation-technique')" },
+          ],
+        })],
+        notes: [
+          newNote({ kind: "instruction", author: "Culture, fêtes et vie associative", text: "Les engagements retenus seront suivis par le comité prévu à l'article du suivi : tenir la liste à jour, elle sert de programme de travail." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Suivi de la convention",
+        blocks: [newNode("para", { text: "Un comité de suivi, composé de représentants de chacune des parties, se réunit au moins une fois par an pour dresser le bilan des actions conduites et arrêter celles de l'année à venir." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Contribution financière",
+        when: "exists(contribution)",
+        blocks: [newNode("para", { text: "La commune prend à sa charge les frais de sa participation à hauteur de {{contribution|money}}, imputés sur son budget de fonctionnement.", when: "exists(contribution)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Durée, révision et résiliation",
+        blocks: [
+          newNode("para", { text: "La convention est conclue {{duree ? \"pour une durée de \" + duree : \"pour une durée de trois ans à compter de sa signature\"}}. Elle peut être révisée par avenant signé des deux parties." }),
+          newNode("para", { text: "Elle est renouvelable {{renouvellement == 'express' ? \"par accord exprès des parties\" : \"par tacite reconduction pour une durée égale\"}} et peut être résiliée à tout moment par l'une des parties, avec un préavis de trois mois notifié par écrit." }),
+        ],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// L'AVENANT : la vie d'un marché après sa signature. La trame conduit la
+// décision qui le conclut, selon la nature de l'avenant — prolongation,
+// modification technique ou variation du montant.
+function avenantTrame() {
+  return newTrame({
+    id: "tpl-avenant",
+    name: "Décision — avenant à un marché public",
+    version: "26.20",
+    familyId: "fam-marches",
+    actTypeId: "decision",
+    status: "published",
+    owner: "Finances et commande publique",
+    serviceId: "svc-finances",
+    bureauId: "bur-fin-marches",
+    description: "Avenant à un marché en cours : prolongation de délai, modification technique ou variation du montant.",
+    fields: commonHeader([
+      newField({ id: "marche", label: "Marché concerné", type: "ref", group: "Objet de l'acte", help: "Le marché visé au référentiel ; son intitulé complet est repris au visa." }),
+      newField({ id: "titulaire", label: "Titulaire", type: "text", group: "Objet de l'acte" }),
+      newField({ id: "objetAvenant", label: "Objet de l'avenant", type: "text", group: "Objet de l'acte", help: "Formule complète : elle suit « l'avenant » dans l'article 1er." }),
+      newField({ id: "natureAvenant", label: "Nature de l'avenant", type: "choice", group: "Objet de l'acte", options: ["prolongation", "modification-technique", "variation-montant"] }),
+      newField({ id: "montantAvenant", label: "Montant de l'avenant (HT)", type: "money", group: "Dispositif", required: false }),
+      newField({ id: "nouveauMontant", label: "Nouveau montant du marché (HT)", type: "money", group: "Dispositif", required: false }),
+      newField({ id: "prolongation", label: "Prolongation du délai", type: "text", group: "Dispositif", required: false, help: "Ex. « trois mois à compter de la date d'achèvement contractuelle »." }),
+    ]),
+    rules: [
+      newRule({ id: "r-avenant-1", level: "blocking", expr: "exists(titulaire) && exists(objetAvenant) && exists(natureAvenant)", message: "Le titulaire, l'objet et la nature de l'avenant sont obligatoires.", author: "Finances et commande publique", date: "2026-05-01" }),
+      newRule({ id: "r-avenant-2", level: "warning", expr: "!exists(montantAvenant) || !exists(nouveauMontant) || nouveauMontant >= montantAvenant", message: "Le nouveau montant du marché ne peut pas être inférieur au montant de l'avenant : vérifier les montants.", author: "Finances et commande publique", date: "2026-05-01" }),
+      newRule({ id: "r-avenant-3", level: "warning", expr: "natureAvenant != 'prolongation' || exists(prolongation)", message: "Un avenant de prolongation doit dire la durée qu'il ajoute.", ref: "code de la commande publique", author: "Finances et commande publique", date: "2026-05-01" }),
+      newRule({ id: "r-avenant-4", level: "warning", expr: "!exists(montantAvenant) || montantAvenant <= 200000", message: "Une variation de cette ampleur peut bouleverser l'économie du marché : vérifier le seuil.", ref: "code de la commande publique", author: "Finances et commande publique", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Décision n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-ccp"), visa("ref-marche-voirie"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "DÉCIDE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", {
+          text: "Est approuvé l'avenant au marché portant {{marche}} conclu avec {{titulaire}}, ayant pour objet {{objetAvenant}}.",
+        })],
+        notes: [
+          newNote({ kind: "instruction", author: "Finances et commande publique", text: "Vérifier que la modification ne bouleverse pas l'économie du marché : au-delà, une nouvelle procédure est nécessaire." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Montants",
+        when: "exists(montantAvenant) || exists(nouveauMontant)",
+        blocks: [
+          newNode("para", { text: "Le montant de l'avenant est de {{montantAvenant|money}} hors taxes.", when: "exists(montantAvenant)" }),
+          newNode("para", { text: "Le montant du marché, avenant compris, est porté à {{nouveauMontant|money}} hors taxes.", when: "exists(nouveauMontant)" }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Délai d'exécution",
+        when: "exists(prolongation)",
+        blocks: [newNode("para", { text: "Le délai d'exécution du marché est prolongé de {{prolongation}}.", when: "exists(prolongation)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Effets et exécution",
+        blocks: [
+          newNode("para", { text: "Les autres clauses du marché demeurent inchangées. La présente décision prend effet à compter de sa notification au titulaire." }),
+          newNode("para", { text: "Le directeur général des services de {{entity.nameWithArt}} est chargé de l'exécution de la présente décision." }),
+        ],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-recours" }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// L'ENGAGEMENT DE DÉPENSE : l'achat courant, la dépense de fonctionnement que la
+// collectivité engage et impute. C'est le plus modeste des actes financiers, et
+// l'un des plus nombreux.
+function achatTrame() {
+  return newTrame({
+    id: "tpl-decision-achat",
+    name: "Décision — engagement d'une dépense",
+    version: "26.21",
+    familyId: "fam-finances",
+    actTypeId: "decision",
+    status: "published",
+    owner: "Finances et commande publique",
+    serviceId: "svc-finances",
+    bureauId: "bur-fin-budget",
+    description: "Engagement d'une dépense d'achat courant : fournisseur, objet, montant et imputation budgétaire.",
+    fields: commonHeader([
+      newField({ id: "fournisseur", label: "Fournisseur", type: "text", group: "Objet de l'acte" }),
+      newField({ id: "objetAchat", label: "Objet de l'achat", type: "text", group: "Objet de l'acte", help: "Formule complète : elle suit « pour » dans l'article 1er." }),
+      newField({ id: "montant", label: "Montant (HT)", type: "money", group: "Objet de l'acte" }),
+      newField({ id: "imputation", label: "Imputation budgétaire", type: "text", group: "Objet de l'acte", help: "Chapitre et ligne, ex. « 60623 — alimentation »." }),
+      newField({ id: "procedure", label: "Procédure", type: "choice", group: "Objet de l'acte", options: ["achat-direct", "bon-de-commande", "mapa"] }),
+    ]),
+    rules: [
+      newRule({ id: "r-achat-1", level: "blocking", expr: "exists(fournisseur) && exists(objetAchat) && exists(montant)", message: "Le fournisseur, l'objet et le montant de l'achat sont obligatoires.", author: "Finances et commande publique", date: "2026-05-01" }),
+      newRule({ id: "r-achat-2", level: "warning", expr: "montant <= 40000", message: "Au-delà de 40 000 €, une procédure formalisée est nécessaire : vérifier le classement de l'achat.", ref: "code de la commande publique", author: "Finances et commande publique", date: "2026-05-01" }),
+      newRule({ id: "r-achat-3", level: "blocking", expr: "exists(imputation)", message: "L'imputation budgétaire est obligatoire : sans elle, la dépense ne peut pas être mandatée.", author: "Finances et commande publique", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Décision n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-decret-gbcp"), visa("ref-delib-budget"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "DÉCIDE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", { text: "Est engagée une dépense de {{montant|money}} hors taxes auprès de {{fournisseur}}, pour {{objetAchat}}." })],
+        notes: [
+          newNote({ kind: "instruction", author: "Finances et commande publique", text: "Vérifier que le crédit est disponible sur la ligne d'imputation avant l'engagement, et que le fournisseur a produit ses pièces (attestation de vigilance, extrait d'immatriculation)." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Imputation",
+        blocks: [newNode("para", { text: "La dépense est imputée sur le budget de {{entity.nameWithArt}}, à la ligne « {{imputation}} »." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur général des services de {{entity.nameWithArt}} est chargé de l'exécution de la présente décision et de la liquidation de la dépense." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-recours" }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// L'OCCUPATION DU DOMAINE PUBLIC : la terrasse du café, l'emprise du chantier,
+// l'étalage du marché. L'acte autorise, fixe l'emplacement, la durée et la
+// redevance.
+function occupationTrame() {
+  return newTrame({
+    id: "tpl-occupation",
+    name: "Arrêté — occupation temporaire du domaine public",
+    version: "26.22",
+    familyId: "fam-domaine-public",
+    actTypeId: "arrete",
+    status: "published",
+    owner: "Aménagement et urbanisme",
+    serviceId: "svc-urb",
+    bureauId: "bur-urb-voirie",
+    description: "Autorisation d'occuper le domaine public : terrasse, étalage, emprise de chantier, mobilier. L'acte fixe l'emplacement, la durée et la redevance.",
+    fields: commonHeader([
+      newField({ id: "beneficiaire", label: "Bénéficiaire", type: "text", group: "Objet de l'acte", help: "La personne ou l'entreprise autorisée." }),
+      newField({ id: "natureOccupation", label: "Nature de l'occupation", type: "choice", group: "Objet de l'acte", options: ["terrasse", "etalage", "chantier", "mobilier", "manifestation"] }),
+      newField({ id: "emplacement", label: "Emplacement", type: "text", group: "Objet de l'acte", help: "Formule introduite par une préposition : « sur la place du Marché, devant le n° 12 »." }),
+      newField({ id: "superficie", label: "Superficie occupée (m²)", type: "money", required: false, group: "Objet de l'acte" }),
+      newField({ id: "dateDebut", label: "Début de l'occupation", type: "date", group: "Objet de l'acte" }),
+      newField({ id: "dateFin", label: "Fin de l'occupation", type: "date", required: false, group: "Objet de l'acte" }),
+      newField({ id: "redevance", label: "Redevance annuelle", type: "money", required: false, group: "Dispositif" }),
+      newField({ id: "conditions", label: "Conditions particulières", type: "textarea", required: false, group: "Dispositif" }),
+    ], { fonction: "role:maire" }),
+    rules: [
+      newRule({ id: "r-occupation-1", level: "blocking", expr: "exists(beneficiaire) && exists(emplacement) && exists(dateDebut)", message: "Le bénéficiaire, l'emplacement et la date de début sont obligatoires.", author: "Aménagement et urbanisme", date: "2026-05-01" }),
+      newRule({ id: "r-occupation-2", level: "blocking", expr: "!exists(dateFin) || diff_days(dateFin, dateDebut) >= 0", message: "La fin de l'occupation ne peut pas précéder son début.", author: "Aménagement et urbanisme", date: "2026-05-01" }),
+      newRule({ id: "r-occupation-3", level: "warning", expr: "!exists(superficie) || superficie <= 50", message: "Au-delà de 50 m², l'occupation peut relever d'une autorisation d'urbanisme : vérifier le dossier.", author: "Aménagement et urbanisme", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Arrêté n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visa("ref-cg3p"), visa("ref-ri-conseil"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "ARRÊTE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", {
+          text: "{{beneficiaire}} est autorisé(e) à occuper le domaine public {{emplacement}}, pour {{natureOccupation == 'terrasse' ? \"l'installation d'une terrasse\" : (natureOccupation == 'etalage' ? \"l'installation d'un étalage\" : (natureOccupation == 'chantier' ? \"l'emprise d'un chantier\" : (natureOccupation == 'mobilier' ? \"l'installation d'un mobilier\" : \"l'organisation d'une manifestation\")))}}{{superficie ? ', sur une superficie de ' + superficie + ' m²' : ''}}.",
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Durée",
+        blocks: [newNode("para", { text: "L'autorisation est accordée du {{dateDebut|date-long}}{{dateFin ? \" au \" + dateFin : \" jusqu'à son retrait\"}}." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Redevance",
+        when: "exists(redevance)",
+        blocks: [newNode("para", { text: "L'occupation donne lieu au paiement d'une redevance annuelle de {{redevance|money}}, exigible d'avance.", when: "exists(redevance)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Conditions particulières",
+        when: "exists(conditions)",
+        blocks: [newNode("para", { text: "{{conditions}}", when: "exists(conditions)" })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Obligations du bénéficiaire",
+        blocks: [newNode("list", {
+          items: [
+            { id: "b1", text: "maintenir libre un passage d'au moins 1,40 mètre pour les piétons et ne rien entreposer sur la chaussée ;", when: "" },
+            { id: "b2", text: "respecter l'aspect et l'implantation autorisés, ainsi que les prescriptions d'accessibilité ;", when: "" },
+            { id: "b3", text: "remettre les lieux en leur état primitif à la fin de l'autorisation, à ses frais.", when: "" },
+          ],
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur général des services de {{entity.nameWithArt}} est chargé de l'exécution du présent arrêté, qui vaut titre d'occupation du domaine public." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-recours" }),
+      newNode("mention", { mentionId: "men-publication" }),
+    ],
+  });
+}
+
+// LA CONCESSION FUNÉRAIRE : un acte d'état civil et de gestion du cimetière,
+// comme une commune en signe chaque semaine.
+function concessionTrame() {
+  return newTrame({
+    id: "tpl-concession",
+    name: "Décision — concession funéraire",
+    version: "26.23",
+    familyId: "fam-etat-civil",
+    actTypeId: "decision",
+    status: "published",
+    owner: "Accueil de la mairie",
+    serviceId: "svc-accueil",
+    bureauId: "bur-acc-physique",
+    description: "Délivrance d'une concession funéraire dans le cimetière communal : emplacement, type, durée et tarif acquitté.",
+    fields: commonHeader([
+      newField({ id: "concessionnaire", label: "Concessionnaire", type: "person", group: "Objet de l'acte" }),
+      newField({ id: "emplacement", label: "Emplacement", type: "text", group: "Objet de l'acte", help: "Ex. « carré C, rangée 4, case 12 »." }),
+      newField({ id: "typeConcession", label: "Type de concession", type: "choice", group: "Objet de l'acte", options: ["pleine-terre", "caveau", "columbarium"] }),
+      newField({ id: "dureeConcession", label: "Durée de la concession", type: "choice", group: "Objet de l'acte", options: ["cinq-ans", "quinze-ans", "trente-ans", "cinquante-ans"] }),
+      newField({ id: "montant", label: "Montant acquitté", type: "money", group: "Objet de l'acte" }),
+    ]),
+    rules: [
+      newRule({ id: "r-concession-1", level: "blocking", expr: "exists(concessionnaire) && exists(emplacement) && exists(montant)", message: "Le concessionnaire, l'emplacement et le montant acquitté sont obligatoires.", author: "Accueil de la mairie", date: "2026-05-01" }),
+      newRule({ id: "r-concession-2", level: "warning", expr: "typeConcession != 'columbarium' || dureeConcession != 'cinquante-ans'", message: "La durée de cinquante ans est réservée aux concessions de plein droit ; vérifier la durée applicable au columbarium.", ref: "code général des collectivités territoriales", author: "Accueil de la mairie", date: "2026-05-01" }),
+    ],
+    body: [
+      newNode("title", { text: "Décision n°{{numero}} du {{dateSignature|date-long}} portant {{objet}}" }),
+      newNode("authority", { text: "{{entity.authorityFormula}}" }),
+      newNode("visas", { items: [visa("ref-cgct"), visaChaine()] }),
+      newNode("considerants"),
+      newNode("enact", { text: "DÉCIDE" }),
+      newNode("article", {
+        numMode: "auto", num: "1er", heading: "",
+        blocks: [newNode("para", {
+          text: "Il est délivré à {{concessionnaire.civility}} {{concessionnaire.firstName}} {{concessionnaire.lastName}} une concession {{typeConcession == 'caveau' ? 'de caveau' : (typeConcession == 'columbarium' ? 'de columbarium' : 'de pleine terre')}} portant sur l'emplacement {{emplacement}} du cimetière communal, pour une durée de {{dureeConcession == 'cinq-ans' ? 'cinq ans' : (dureeConcession == 'quinze-ans' ? 'quinze ans' : (dureeConcession == 'trente-ans' ? 'trente ans' : 'cinquante ans'))}}.",
+        })],
+        notes: [
+          newNote({ kind: "instruction", author: "Accueil de la mairie", text: "Vérifier que l'emplacement est libre au registre du cimetière, et que le montant de la concession a bien été encaissé avant la délivrance du titre." }),
+        ],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Redevance",
+        blocks: [newNode("para", { text: "Le concessionnaire a acquitté la somme de {{montant|money}} au titre de la concession. Le renouvellement pourra être sollicité dans l'année précédant son expiration." })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Obligations du concessionnaire",
+        blocks: [newNode("list", {
+          items: [
+            { id: "c1", text: "entretenir l'emplacement et les constructions qui y sont édifiées, et le maintenir en bon état de propreté ;", when: "" },
+            { id: "c2", text: "faire connaître au service de l'état civil tout changement d'adresse ou de titulaire ;", when: "" },
+            { id: "c3", text: "respecter le règlement intérieur du cimetière et les prescriptions de l'autorité municipale.", when: "" },
+          ],
+        })],
+      }),
+      newNode("article", {
+        numMode: "auto", heading: "Exécution",
+        blocks: [newNode("para", { text: "Le directeur général des services de {{entity.nameWithArt}} est chargé de l'exécution de la présente décision." })],
+      }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+      newNode("mention", { mentionId: "men-recours" }),
+      newNode("mention", { mentionId: "men-publication" }),
     ],
   });
 }

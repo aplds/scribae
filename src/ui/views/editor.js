@@ -1,8 +1,8 @@
-import { state, touch, navigate, redrawView, parapheurActif } from "../state.js";
+import { state, touch, navigate, redrawView, parapheurActif, can } from "../state.js";
 import { h, clear, button, icon, toast, modal, badge, textInput, fitPaper } from "../dom.js";
-import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, newNode, newField, newRule, newNote, tramePublishable } from "../../lib/schema.js";
+import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { compile, buildContext, interpolate, nextNumero } from "../../lib/compile.js";
-import { renderDocument, applyPaper } from "../../lib/render.js";
+import { renderDocument, applyPaper, MARQUE_STYLE } from "../../lib/render.js";
 import { stylesOf } from "../../lib/styles.js";
 import { checkExpr, safeEval } from "../../lib/expr.js";
 import { download, debounce, slug } from "../../lib/util.js";
@@ -10,10 +10,17 @@ import { glissable, deposable, moitie, rangeDans, insererAuRange } from "../dnd.
 import { confirmDialog, promptDialog, sectionHeader, statusBadge, textField, selectField, choiceField, orgFields } from "../components.js";
 import { targetLabel, authorLabel } from "../../lib/scope.js";
 import { helpLink } from "../components.js";
+import {
+  countNotes, notesIndex, annotationStrip, noteComposer,
+  armSelectionComment, flashBlock,
+} from "../annotations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown } from "../../lib/export.js";
 import { circuitFor } from "../../lib/validation.js";
+import { MODES_TRAME, trameModeLabel, circuitPour, modeLabel } from "../../lib/externe.js";
 import { DISPENSES } from "../../lib/execution.js";
 import { ecartsOfActe } from "./modifier.js";
+import { IMPORT_ID, trameImportee, enregistrerImport, abandonnerImport } from "../import-trame.js";
+import { boutonDisponibilite, mettreADisposition, retirerMiseADisposition, trameEstDisponible } from "../mise-a-disposition.js";
 import { fonctionsDeSignature, libelleFonction, champFonction, fonctionParCle } from "../../lib/fonctions.js";
 
 // ------------------------------------------------------------------ helpers
@@ -58,10 +65,15 @@ function nodeTitle(node, config, counter) {
     case "visas": return `Visas (${(node.items || []).length})`;
     case "considerants": return `Considérants (${(node.items || []).length})`;
     case "enact": return "Formule d'édiction";
+    case "division": return (node.heading || "Division sans intitulé") + (node.level ? ` · échelon ${node.level}` : "");
     case "article": return `Article ${node.numMode === "auto" ? (counter ?? "") : (node.num || "?")}${node.heading ? " — " + node.heading : ""}`;
     case "para": return (node.text || "").slice(0, 40) || "Paragraphe vide";
     case "list": return `Liste ${node.ordered ? "numérotée" : "à puces"} (${(node.items || []).length})`;
-    case "table": return "Tableau";
+    case "table": {
+      const c = (node.columns || []).length, r = (node.rows || []).length;
+      const resume = node.caption ? node.caption : `${c} × ${r}`;
+      return `Tableau — ${resume}`;
+    }
     case "signature": return "Signature";
     case "mention": return "Mention";
     case "raw": return "Bloc libre";
@@ -154,19 +166,20 @@ export function blurGuard(redraw) {
 
 // Informations que l'application remplit seule (elles viennent du référentiel et
 // de l'acte en cours de rédaction) : elles ne font pas partie du formulaire.
-export const AUTO_TOKENS = [
-  { token: "entity.name", label: "Nom de la collectivité" },
-  { token: "entity.seatCity", label: "Ville du siège" },
-  { token: "entity.code", label: "Code de l'entité" },
-  { token: "signataire.fonction", label: "Fonction du signataire" },
-  { token: "signataire.qualite", label: "Qualité du signataire (accordée en genre)" },
-  { token: "signataire.autorite.qualiteArticleMaj", label: "L'autorité, avec article (« Le maire » / « La maire »)" },
-  { token: "signataire.civility", label: "Civilité du signataire" },
-  { token: "signataire.firstName", label: "Prénom du signataire" },
-  { token: "signataire.lastName", label: "Nom du signataire" },
-  { token: "numero", label: "Numéro de l'acte" },
-  { token: "dateSignature|date-long", label: "Date de signature, en toutes lettres" },
-];
+// La liste est partagée avec l'atelier de rédaction — voir lib/auto-tokens.js.
+import { AUTO_TOKENS, AUTO_TOKENS_CONSEIL } from "../../lib/auto-tokens.js";
+export { AUTO_TOKENS };
+
+// Les jetons automatiques utiles à CETTE trame : une ANNEXE n'a pas de numéro
+// propre, le jeton « numero » n'a donc rien à y faire — il s'imprimerait vide
+// (voir src/lib/annexes.js). Une trame d'ASSEMBLÉE reçoit, en plus, les jetons
+// de l'assemblée délibérante (voir src/lib/conseils.js).
+const autoTokensDe = (trame) => {
+  const base = natureDe(trame) === "annexe"
+    ? AUTO_TOKENS.filter((t) => t.token !== "numero")
+    : AUTO_TOKENS;
+  return trame?.assemblee ? base.concat(AUTO_TOKENS_CONSEIL) : base;
+};
 
 // Libellés d'usage des types de champ : le vocabulaire du schéma (« Choix
 // unique », « Personne (référentiel) ») est celui du code, pas celui d'un
@@ -243,6 +256,7 @@ function typeCards(f, softSave, redraw) {
 // parcourt du regard, sans lire.
 const NODE_ICON = {
   title: "doc", authority: "lock", visas: "list", considerants: "list", enact: "check",
+  division: "list",
   article: "doc", para: "note", list: "list", table: "grid", signature: "lock",
   mention: "info", raw: "code",
 };
@@ -300,8 +314,14 @@ function deplacerBloc(trame, fromPath, listPath, index, redraw) {
   const from = listAt(trame, fromPath);
   const vers = listByPath(trame, listPath);
   if (!from || !vers) return false;
+  // L'adresse de la source est relue au moment du dépôt : si l'arbre a changé
+  // entre la saisie et le lâcher, elle peut désigner une place vide. On refuse
+  // alors le dépôt — une place vide insérée dans la trame la corromprait, et le
+  // document ne saurait plus se peindre.
+  const node = from.list[from.index];
+  if (!node) return false;
   if (listPath.startsWith(fromPath + ".")) return false;
-  const [node] = from.list.splice(from.index, 1);
+  from.list.splice(from.index, 1);
   let i = Number(index);
   if (from.list === vers && from.index < i) i -= 1;   // le retrait a décalé la cible
   vers.splice(Math.max(0, Math.min(i, vers.length)), 0, node);
@@ -389,7 +409,7 @@ function paletteEl(trame, ed, redraw) {
     ]);
 
   groupe("Rempli automatiquement", "La collectivité, le signataire, la date : l'application les connaît déjà.",
-    AUTO_TOKENS.map((t) => puce("auto", t.label, "{{" + t.token + "}}", "check",
+    autoTokensDe(trame).map((t) => puce("auto", t.label, "{{" + t.token + "}}", "check",
       () => armer(ed, redraw, { kind: "auto", token: "{{" + t.token + "}}", label: t.label }))));
 
   groupe("Ajouter un bloc", "Glissez un bloc dans le document, ou cliquez-le : il s'ajoute après le bloc sélectionné.",
@@ -405,7 +425,19 @@ function paletteEl(trame, ed, redraw) {
 
 // ------------------------------------------------------------------ éditeur
 export function renderEditor(root, params) {
-  const trame = state.trames.find((t) => t.id === params.id);
+  // Deux façons d'ouvrir l'éditeur : une trame du registre, ou la trame qu'un
+  // import vient de proposer (elle n'a pas encore d'identifiant — voir
+  // ui/import-trame.js). L'adresse réservée dit laquelle.
+  const importee = params.id === IMPORT_ID ? trameImportee() : null;
+  if (params.id === IMPORT_ID && !importee) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "Aucun import en cours" }),
+      h("p", { class: "fr-small", text: "Cet écran ouvre la trame proposée par un import de document, le temps de décider si on la garde. Il n'y a pas d'import en cours." }),
+      h("div", { style: { marginTop: "8px" } },
+        button("Retour aux trames", { variant: "primary", onClick: () => navigate("trames") }))));
+    return;
+  }
+  const trame = importee || state.trames.find((t) => t.id === params.id);
   if (!trame) {
     root.appendChild(h("div", { class: "fr-alert fr-alert--error" },
       h("p", { class: "fr-alert__title", text: "Trame introuvable" }),
@@ -423,6 +455,16 @@ export function renderEditor(root, params) {
   const redraw = () => redrawView();
   const softSave = () => touch("trames", { rerender: false });
 
+  const nbNotes = countNotes(trame.body);
+
+  // ------------------------------------------------------------- bannière
+  // Ce que l'écran ne peut pas montrer de lui-même : que la trame n'est pas au
+  // registre (import en cours), ou qu'elle n'est pas encore entre les mains des
+  // services (brouillon, archivée). Les deux disent « personne d'autre ne la
+  // voit » ; ce qui les distingue, c'est le geste qui en fait sortir.
+  if (importee) root.appendChild(banniereImport(state.trameImport));
+  else if (!trameEstDisponible(trame)) root.appendChild(banniereDisponibilite(trame));
+
   // ------------------------------------------------------------- en-tête
   root.appendChild(h("div", { class: "fr-row", style: { padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg)" } },
     button("", { variant: "tertiary", icon: "x", title: "Retour", onClick: () => navigate("trames") }),
@@ -432,14 +474,26 @@ export function renderEditor(root, params) {
         statusBadge(trame.status),
         h("span", { class: "fr-badge", text: "v" + trame.version }),
       ),
-      h("div", { class: "fr-small fr-muted", text: `${(trame.fields || []).length} champs · ${(trame.rules || []).length} règles · ${countNotes(trame)} commentaires` }),
+      // Les compteurs sont cliquables : « N commentaires » ouvre la liste, pour
+      // qu'un commentaire ne reste jamais invisible faute de savoir où regarder.
+      h("button", {
+        class: "editor__counts" + (nbNotes ? " is-on" : ""), type: "button",
+        title: nbNotes ? "Voir tous les commentaires de la trame" : "Aucun commentaire pour l'instant — sélectionnez un passage dans la page, ou ouvrez l'onglet « Commentaires ».",
+        onClick: () => { ed.tab = "commentaires"; redraw(); },
+      }, `${(trame.fields || []).length} champs · ${(trame.rules || []).length} règles · ${nbNotes} commentaire${nbNotes > 1 ? "s" : ""}`),
     ),
     h("div", { class: "fr-row" },
       h("div", { class: "fr-choices" },
         h("button", { class: "fr-choice" + (ed.mode === "edit" ? " is-on" : ""), text: "Édition", onClick: () => { ed.mode = "edit"; redraw(); } }),
         h("button", { class: "fr-choice" + (ed.mode === "preview" ? " is-on" : ""), text: "Aperçu", onClick: () => { ed.mode = "preview"; redraw(); } }),
       ),
-      button("Rédiger", { variant: "secondary", onClick: () => navigate("rediger/" + trame.id) }),
+      // Le retour en arrière de la bannière, réduit à sa plus simple expression :
+      // une trame mise à disposition se retire d'ici. Un brouillon, lui, a déjà
+      // son bouton dans la bannière — on ne le répète pas.
+      !importee && can("trames.gerer") && trameEstDisponible(trame) ? boutonDisponibilite(trame, { variant: "tertiary", court: true, size: "sm" }) : null,
+      // Rédiger suppose une trame AU REGISTRE : la trame d'un import n'a pas
+      // encore d'existence, on ne part pas d'elle pour rédiger un acte.
+      !importee ? button("Rédiger", { variant: "secondary", onClick: () => navigate("rediger/" + trame.id) }) : null,
       helpLink("administrateurs", "Aide"),
       button("Exporter…", { variant: "primary", icon: "download", onClick: () => exportMenu(trame) }),
     ),
@@ -482,7 +536,7 @@ export function renderEditor(root, params) {
       on: { click: () => { ed.selPath = path; if (ed.tab !== "bloc") ed.tab = "bloc"; redraw(); } },
     }, h("span", { class: "fr-icon", style: sub ? { opacity: .5 } : null }, icon(NODE_ICON[node.type] || "doc", sub ? 12 : 14)),
        h("span", { class: "outline__label", text: label }));
-    glissable(item, { kind: "deplacement", path, label }, { onDebut: (e) => e.dataTransfer.setDragImage(item, 24, 14) });
+    glissable(item, { kind: "deplacement", path, label });
     deposable(item, {
       accepte: (c) => c.kind === "deplacement" || c.kind === "bloc",
       halo: (el, c, e) => { const m = moitie(el, e); el.classList.toggle("dnd-avant", m === "avant"); el.classList.toggle("dnd-apres", m === "apres"); },
@@ -490,15 +544,20 @@ export function renderEditor(root, params) {
     });
     return item;
   };
+  // Peint une ligne du plan, puis son contenu (les blocs d'un article, comme
+  // les divisions d'une division), en rendant le compteur d'articles.
+  const peindrePlan = (node, path, depth, compteur) => {
+    let c = compteur;
+    if (!node) return c;
+    if (node.type === "article") c += 1;
+    outlineBox.appendChild(lignePlan(node, path, nodeTitle(node, state.config, c), depth > 0));
+    (node.blocks || []).forEach((b, j) => { c = peindrePlan(b, `${path}.blocks.${j}`, depth + 1, c); });
+    return c;
+  };
   (trame.body || []).forEach((node, i) => {
-    const path = `body.${i}`;
-    if (node.type === "article") artCounter++;
-    outlineBox.appendChild(lignePlan(node, path, nodeTitle(node, state.config, artCounter), false));
-    if (node.type === "article") {
-      (node.blocks || []).forEach((b, j) => {
-        outlineBox.appendChild(lignePlan(b, `${path}.blocks.${j}`, nodeTitle(b), true));
-      });
-    }
+    // Le plan descend dans les articles ET dans les divisions (Livre, Titre,
+    // Chapitre, Section) : la hiérarchie du document s'y lit d'un coup d'œil.
+    artCounter = peindrePlan(node, `body.${i}`, 0, artCounter);
   });
   outline.appendChild(h("div", { style: { marginTop: "10px" } },
     button("Ajouter un bloc", { variant: "secondary", icon: "plus", size: "sm", onClick: (e) => addBlockMenu(e.currentTarget, trame, "body", (trame.body || []).length, redraw) })));
@@ -535,7 +594,9 @@ export function renderEditor(root, params) {
     const values = sampleValues(trame);
     const doc = compile(trame, values, state.config, { markMissing: true });
     applyPaper(paper, doc, state.config);
-    paper.appendChild(renderDocument(doc, state.config, {}));
+    // `showNotes` : l'aperçu compilé porte, à la fin, les commentaires de
+    // préparation — jamais publiés, mais jamais perdus non plus.
+    paper.appendChild(renderDocument(doc, state.config, { showNotes: true }));
     if (doc.issues.length) {
       paper.appendChild(h("div", { style: { marginTop: "18px" } },
         h("p", { class: "fr-small fr-muted", text: "Contrôles sur ces valeurs de démonstration :" }),
@@ -546,29 +607,81 @@ export function renderEditor(root, params) {
     // La charte de la trame donne ses marges à la feuille, même en édition.
     applyPaper(paper, compile(trame, sampleValues(trame), state.config), state.config);
     renderEditableBody(paper, trame, ed, redraw, softSave, ctxSample);
+    // Sélectionner un passage dans la page propose aussitôt de le commenter.
+    armSelectionComment(paper, {
+      onComment: ({ path, quote }) => {
+        const node = nodeAt(trame, path);
+        if (node) openCommentComposer(node, -1, quote);
+      },
+    });
   }
   requestAnimationFrame(() => fitPaper(canvas, paper));
 
   // ---- volet droit : inspecteur
   right.appendChild(h("div", { class: "editor__colhead" }, icon("gear", 14), "Inspecteur"));
   const tabs = h("div", { class: "fr-tabs", style: { padding: "0 8px" } });
-  for (const [id, label] of [["bloc", "Ce bloc"], ["champs", "Questions"], ["regles", "Contrôles"], ["trame", "Trame"]]) {
+  for (const [id, label] of [
+    ["bloc", "Ce bloc"],
+    ["commentaires", nbNotes ? `Commentaires (${nbNotes})` : "Commentaires"],
+    ["champs", "Questions"],
+    ["regles", "Contrôles"],
+    ["trame", "Trame"],
+  ]) {
     tabs.appendChild(h("button", { class: "fr-tab" + (ed.tab === id ? " fr-tab--active" : ""), text: label, on: { click: () => { ed.tab = id; redraw(); } } }));
   }
   right.appendChild(tabs);
   const inspector = h("div", { class: "editor__scroll", style: { padding: "0" } });
   right.appendChild(inspector);
   if (ed.tab === "bloc") renderBlockInspector(inspector, trame, ed, redraw, softSave, ctxSample);
+  else if (ed.tab === "commentaires") renderCommentsInspector(inspector, trame, ed, redraw, softSave, paper);
   else if (ed.tab === "champs") renderFieldsInspector(inspector, trame, ed, redraw, softSave);
   else if (ed.tab === "regles") renderRulesInspector(inspector, trame, redraw, softSave, ctxSample);
   else renderTrameInspector(inspector, trame, redraw, softSave);
 }
 
-function countNotes(trame) {
-  let n = 0;
-  const walk = (nodes) => (nodes || []).forEach((x) => { n += (x.notes || []).length; walk(x.blocks); });
-  walk(trame.body);
-  return n;
+// ============================================================================
+// Les deux bannières de tête de l'éditeur.
+// ============================================================================
+
+// IMPORT EN COURS : la trame proposée n'existe que dans cette fenêtre, et il faut
+// le voir à chaque instant — c'est aussi de là que partent les deux seuls gestes
+// possibles, garder ou jeter. Rien n'est écrit tant que « Enregistrer » n'a pas
+// été cliqué (voir ui/import-trame.js).
+function banniereImport(imp) {
+  return h("div", { class: "fr-alert fr-alert--info editor__banniere" },
+    h("p", { class: "fr-alert__title", text: "Trame importée de « " + imp.fichier + " » — rien n'est encore enregistré" }),
+    h("p", { class: "fr-small", text: "L'application a relu le document et en a proposé une trame. Corrigez-la ici autant qu'il faut : elle n'existe que dans cette fenêtre. « Enregistrer » l'ajoute au registre en brouillon — les services ne la verront qu'une fois mise à disposition. « Abandonner » la jette, sans laisser de trace." }),
+    h("div", { class: "fr-row", style: { marginTop: "8px" } },
+      button("Enregistrer la trame", { variant: "primary", icon: "check", onClick: () => {
+        const t = enregistrerImport();
+        if (!t) return;
+        // Naviguer d'abord : la trame est au registre, l'adresse est la sienne.
+        navigate("trame/" + t.id);
+        touch("trames");
+        toast("Trame enregistrée en brouillon — mettez-la à disposition quand elle sera prête", "success");
+      } }),
+      button("Abandonner l'import", { variant: "secondary", icon: "trash", onClick: () => {
+        abandonnerImport();
+        navigate("trames");
+        toast("Import abandonné — rien n'a été enregistré");
+      } }),
+    ),
+  );
+}
+
+// BROUILLON (ou archivée) : la trame est bien au registre, mais hors de portée
+// des services. Un éditeur qui l'oublie croit avoir publié — la bannière est là
+// pour ça, avec le bouton qui la met à disposition.
+function banniereDisponibilite(trame) {
+  const archivee = trame.status === "archived";
+  return h("div", { class: "fr-alert fr-alert--warning editor__banniere" },
+    h("p", { class: "fr-alert__title", text: archivee ? "Trame archivée — proposée à personne" : "Brouillon — les services ne la voient pas" }),
+    h("p", { class: "fr-small", text: archivee
+      ? "Une trame archivée n'est proposée ni aux services, ni comme modèle à qui que ce soit. Retirez-la des archives pour la remettre à disposition."
+      : "Tant qu'elle n'est pas mise à disposition, cette trame reste à l'atelier : aucun service ne peut rédiger à partir d'elle. C'est le moment de la relire — texte, questions, contrôles, commentaires — puis de l'ouvrir aux services." }),
+    h("div", { class: "fr-row", style: { marginTop: "8px" } },
+      can("trames.gerer") ? boutonDisponibilite(trame, { variant: "primary" }) : null),
+  );
 }
 
 function sampleValues(trame) {
@@ -594,7 +707,9 @@ function sampleValues(trame) {
   // attribuer par un service externe (Administration › Numérotation), l'exemple
   // garde le point de suspension des champs à compléter : c'est exactement ce
   // que verra le rédacteur avant de demander le numéro.
-  values.numero = nextNumero(state.config, state.config.entities?.[0]) || "…";
+  // Une annexe n'en a pas : l'exemple le dit en le laissant vide (voir
+  // src/lib/annexes.js).
+  values.numero = natureDe(trame) === "annexe" ? "" : (nextNumero(state.config, state.config.entities?.[0]) || "…");
   return values;
 }
 
@@ -620,21 +735,39 @@ function renderEditableBody(paper, trame, ed, redraw, softSave, ctxSample) {
     container.appendChild(makeInsertBar(container, listPath, (nodes || []).length));
   };
 
+  // Les blocs éditables vivent dans un conteneur `.doc`, comme le document
+  // compilé (voir `renderDocument`, lib/render.js). Les réglages de bloc
+  // s'écrivent sous ce préfixe (`app.css` : `.doc .doc-p--boxed`,
+  // `.doc .doc-table--rows`…) pour l'emporter sur la feuille de style ; sans ce
+  // conteneur, régler un paragraphe encadré ou une liste « 1° » ne se verrait
+  // pas ici, alors que le code pose déjà les bonnes classes.
+  const corps = h("div", { class: "doc" });
+  paper.appendChild(corps);
+
   // les blocs de niveau corps sont rendus dans l'ordre
   (trame.body || []).forEach((node, i) => {
-    paper.appendChild(makeInsertBar(paper, "body", i));
-    paper.appendChild(renderBlock(node, `body.${i}`, ed, redraw, softSave, trame));
+    corps.appendChild(makeInsertBar(corps, "body", i));
+    corps.appendChild(renderBlock(node, `body.${i}`, ed, redraw, softSave, trame));
   });
-  paper.appendChild(makeInsertBar(paper, "body", (trame.body || []).length));
+  corps.appendChild(makeInsertBar(corps, "body", (trame.body || []).length));
 }
 
 function renderBlock(node, path, ed, redraw, softSave, trame) {
+  // Une place vide (une adresse périmée, une trame abîmée) ne se peint pas :
+  // mieux vaut un trou invisible qu'un éditeur qui refuse de s'ouvrir.
+  if (!node) return h("span", { hidden: true });
   const selected = ed.selPath === path;
   const wrapper = h("div", {
     class: "blk" + (selected ? " blk--sel" : ""),
     "data-path": path,
     on: { click: (e) => { if (selected) return; ed.selPath = path; if (ed.tab !== "bloc") ed.tab = "bloc"; redraw(); } },
   });
+
+  // Le bloc ENTIER se saisit pour être déplacé — pas seulement sa poignée : on
+  // attrape « cet article-là » par son intitulé, sa marge, sa barre d'outils.
+  // La règle est dans ui/dnd.js : un appui DANS une zone de texte éditable ne
+  // déplace pas le bloc, il y place le curseur — le texte reste sélectionnable.
+  glissable(wrapper, { kind: "deplacement", path, label: nodeTitle(node, state.config) });
 
   // Cible de dépôt : un bloc glissé (neuf, ou déplacé depuis le plan ou le
   // document) se range avant ou après celui-ci, selon la moitié survolée.
@@ -644,13 +777,21 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
     onDepot: (c, e) => deposerSurBloc(c, e, wrapper, path, trame, ed, redraw),
   });
 
-  // poignée de déplacement : c'est par elle qu'on saisit le bloc (la rendre
-  // draggable sur tout le bloc empêcherait de sélectionner le texte à la souris)
+  // poignée de déplacement : le repère visible du glisser — et la prise qui
+  // répond au doigt (le bloc entier, lui, laisse le doigt faire défiler).
   const poignee = glissable(
     h("span", { class: "blk__grip", title: "Glisser pour déplacer ce bloc", text: "⠿", "aria-hidden": "true" }),
     { kind: "deplacement", path, label: nodeTitle(node, state.config) },
-    { onDebut: (e) => e.dataTransfer.setDragImage(wrapper, 30, 16) },
+    { auDoigt: true },
   );
+  // … et l'on peut aussi saisir le bloc PAR SON INTITULÉ : c'est la prise
+  // naturelle quand on pense « cet article-là » — et le titre d'un article ou
+  // d'une division ne contient pas de texte qu'on voudrait sélectionner.
+  const armerPrise = (headEl) => {
+    if (!headEl) return;
+    headEl.title = "Glisser pour déplacer ce bloc — ou le déplacer aux flèches";
+    headEl.classList.add("blk__prise-cible");
+  };
 
   // barre d'outils du bloc
   const tools = h("div", { class: "blk__tools" },
@@ -659,12 +800,33 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
     button("", { variant: "tertiary", icon: "down", title: "Descendre", onClick: (e) => { e.stopPropagation(); moveNode(trame, path, 1, redraw); } }),
     button("", { variant: "tertiary", icon: "plus", title: "Ajouter", onClick: (e) => { e.stopPropagation(); addBlockMenu(e.currentTarget, trame, parentPath(path), listAt(trame, path).index + 1, redraw); } }),
     button("", { variant: "tertiary", icon: "trash", title: "Supprimer", onClick: async (e) => { e.stopPropagation(); const ok = await confirmDialog("Supprimer le bloc", "Ce bloc sera retiré de la trame.", { confirmLabel: "Supprimer", danger: true }); if (ok) { listAt(trame, path).list.splice(listAt(trame, path).index, 1); touch("trames", { rerender: false }); redraw(); } } }),
-    (node.notes || []).length ? h("span", { class: "note-mark", title: (node.notes || []).map((n) => n.text).join(" | "), text: String(node.notes.length) }) : null,
+    // Commenter CE bloc — l'article sur lequel on travaille, le paragraphe qu'on
+    // vient d'écrire. Le bouton ne dort pas dans l'inspecteur : il est sur le
+    // bloc, et rappelle le nombre de commentaires déjà posés.
+    h("button", {
+      class: "blk__note" + ((node.notes || []).length ? " is-on" : ""), type: "button",
+      title: (node.notes || []).length
+        ? `Commenter ce bloc (${node.notes.length} commentaire${node.notes.length > 1 ? "s" : ""} déjà posé${node.notes.length > 1 ? "s" : ""})`
+        : "Commenter ce bloc",
+      onClick: (e) => { e.stopPropagation(); openCommentComposer(node, -1, ""); },
+    }, icon("note", 14), (node.notes || []).length ? h("span", { class: "blk__note-count", text: String(node.notes.length) }) : null),
   );
   wrapper.appendChild(tools);
 
-  const editable = (cls, text, onInput) => {
-    const el = h("div", { class: cls, contenteditable: "true", spellcheck: "true" });
+  // Repère de marge : un bloc commenté le dit au premier regard, même quand la
+  // bande posée sous lui est loin (un commentaire sur un article se lit à la fin
+  // de l'article). C'est le signal qu'on ne peut pas manquer — et il vit dans la
+  // marge, sans jamais recouvrir le texte (voir `.blk__annot-flag`).
+  if ((node.notes || []).length) {
+    wrapper.appendChild(h("button", {
+      class: "blk__annot-flag", type: "button",
+      title: (node.notes.length === 1 ? "Un commentaire sur ce bloc" : node.notes.length + " commentaires sur ce bloc") + " — cliquez pour les ouvrir",
+      onClick: (e) => { e.stopPropagation(); ed.selPath = path; ed.tab = "commentaires"; redraw(); },
+    }, String(node.notes.length)));
+  }
+
+  const editable = (cls, text, onInput, tag = "div") => {
+    const el = h(tag, { class: cls, contenteditable: "true", spellcheck: "true" });
     el.appendChild(textToNodes(text || "", state.config, trame.fields));
     el.addEventListener("input", () => onInput(serializeEditable(el)));
     el.addEventListener("blur", blurGuard(redraw));
@@ -686,6 +848,26 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
     return el;
   };
 
+  // Les réglages du bloc (voir `paramsBloc`, lib/schema.js) : l'aperçu de
+  // l'éditeur montre ce que la compilation produira — encadré, alinéa, liste
+  // « 1° », légende au-dessous, ligne d'en-tête ou non. Ce qui se voit ici est
+  // ce qui s'imprime.
+  const reglages = paramsBloc(node);
+
+  // Un élément de liste (un considérant, un item) : son texte, et les deux
+  // gestes qui le concernent — en ajouter un juste après, le retirer. Les mêmes
+  // gestes que dans l'atelier de rédaction, aux mêmes boutons (`.piece__tools`).
+  const nouvelItem = () => ({ id: "it-" + Math.random().toString(36).slice(2, 7), text: "", when: "" });
+  const outilsItem = (i) => h("span", { class: "piece__tools", contenteditable: "false" },
+    h("button", { class: "piece__btn", type: "button", title: "Ajouter un élément après celui-ci",
+      onClick: (e) => { e.stopPropagation(); node.items.splice(i + 1, 0, nouvelItem()); touch("trames", { rerender: false }); redraw(); } }, icon("plus", 12)),
+    h("button", { class: "piece__btn piece__btn--danger", type: "button", title: "Retirer cet élément",
+      onClick: (e) => { e.stopPropagation(); node.items.splice(i, 1); touch("trames", { rerender: false }); redraw(); } }, icon("trash", 12)));
+
+  // Une cellule de tableau : le texte se réécrit en place, comme partout dans
+  // le document.
+  const cellule = (tag, text, onInput) => h(tag, {}, editable("", text, onInput));
+
   switch (node.type) {
     case "title":
       wrapper.appendChild(editable("doc-title", node.text, (v) => { node.text = v; softSave(); }));
@@ -696,6 +878,19 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
     case "enact":
       wrapper.appendChild(editable("doc-enact", node.text, (v) => { node.text = v; softSave(); }));
       break;
+    case "para":
+    case "raw": {
+      const p = editable("doc-p", node.text, (v) => { node.text = v; softSave(); });
+      if (node.type === "para") {
+        // Mêmes classes que le document compilé (voir lib/render.js) : ce que
+        // règle l'inspecteur se voit ici, tout de suite.
+        if (reglages.align) p.style.textAlign = reglages.align;
+        if (reglages.indent) p.classList.add("doc-p--indent-" + reglages.indent);
+        if (reglages.boxed) p.classList.add("doc-p--boxed");
+      }
+      wrapper.appendChild(p);
+      break;
+    }
     case "visas": {
       const ul = h("ul", { class: "doc-visas" });
       (node.items || []).forEach((it, i) => {
@@ -714,20 +909,54 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
       break;
     }
     case "considerants": case "list": {
-      const box = node.type === "considerants" ? h("div", { class: "doc-recitals" }) : h(node.ordered ? "ol" : "ul", { class: "doc-list" });
-      (node.items || []).forEach((it) => {
-        if (node.type === "considerants") {
-          const el = h("p", { class: "doc-p" });
-          el.appendChild(editable("", it.text, (v) => { it.text = v; softSave(); }));
-          if (it.when) el.appendChild(h("span", { class: "fr-badge fr-badge--warning", style: { marginLeft: "6px" }, text: "si " + it.when }));
-          box.appendChild(el);
-        } else {
-          const el = h("li");
-          el.appendChild(editable("", it.text, (v) => { it.text = v; softSave(); }));
-          if (it.when) el.appendChild(h("span", { class: "fr-badge fr-badge--warning", style: { marginLeft: "6px" }, text: "si " + it.when }));
-          box.appendChild(el);
+      // Une LISTE : sa marque (puces ou numérotation) telle que la feuille ou le
+      // bloc l'ont réglée, ses éléments éditables, et les deux gestes d'élément.
+      const box = node.type === "considerants"
+        ? h("div", { class: "doc-recitals" + (reglages.inline ? " doc-recitals--inline" : "") })
+        : h(node.ordered ? "ol" : "ul", { class: "doc-list" });
+      if (node.type === "list") {
+        const marque = node.ordered ? reglages.numbering : reglages.marker;
+        if (marque) box.style.listStyleType = MARQUE_STYLE[marque] || marque;
+        if (node.ordered && Number(reglages.start) > 1) box.setAttribute("start", String(Number(reglages.start)));
+      }
+      const elements = [];
+      (node.items || []).forEach((it, i) => {
+        const el = node.type === "considerants" ? h("p", { class: "doc-p" }) : h("li");
+        // La formule du bloc s'affiche comme le compilateur l'ajoutera — et
+        // n'est pas écrite une seconde fois quand le texte la porte déjà.
+        if (node.type === "considerants" && reglages.formule && appliquerFormule(reglages.formule, it.text) !== it.text) {
+          el.appendChild(h("span", { class: "doc-recitals__formule", contenteditable: "false", text: reglages.formule + " " }));
         }
+        el.appendChild(editable("", it.text, (v) => { it.text = v; softSave(); }, "span"));
+        // La ponctuation de fin du bloc, elle aussi ajoutée à la compilation :
+        // montrée après le texte, jamais écrite — le pendant de la formule.
+        // Même règle que `finir` (lib/compile.js) : pas de doublon si le texte
+        // porte déjà sa ponctuation.
+        if (node.type === "considerants" && reglages.fin && String(it.text || "").trim() && !/[.;,:]$/.test(String(it.text).trim())) {
+          el.appendChild(h("span", { class: "doc-recitals__fin", contenteditable: "false", text: reglages.fin }));
+        }
+        if (it.when) el.appendChild(h("span", { class: "fr-badge fr-badge--warning", style: { marginLeft: "6px" }, text: "si " + it.when }));
+        el.appendChild(outilsItem(i));
+        elements.push(el);
       });
+      // « En un seul alinéa » : les considérants se suivent dans le même
+      // paragraphe, comme à la compilation. On garde un élément par considérant
+      // pour pouvoir les éditer, mais ils se présentent à la suite.
+      if (node.type === "considerants" && reglages.inline) {
+        for (let i = 1; i < elements.length; i++) elements[i].style.marginTop = "0";
+      }
+      for (const el of elements) box.appendChild(el);
+      if (node.type === "list") {
+        box.appendChild(h("li", { class: "piece--ajout" }, h("button", {
+          class: "piece__add", type: "button", title: "Ajouter un élément à la fin de la liste",
+          onClick: (e) => { e.stopPropagation(); node.items.push(nouvelItem()); touch("trames", { rerender: false }); redraw(); },
+        }, icon("plus", 12), h("span", { text: "Ajouter un élément" }))));
+      } else {
+        box.appendChild(h("p", { class: "doc-p piece--ajout" }, h("button", {
+          class: "piece__add", type: "button", title: "Ajouter un considérant",
+          onClick: (e) => { e.stopPropagation(); node.items.push(nouvelItem()); touch("trames", { rerender: false }); redraw(); },
+        }, icon("plus", 12), h("span", { text: "Ajouter un considérant" }))));
+      }
       wrapper.appendChild(box);
       break;
     }
@@ -736,6 +965,7 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
       const head = h("h2", { class: "doc-article-head" },
         h("span", { class: "doc-article-num", text: node.numMode === "auto" ? "(numérotation automatique)" : node.num }),
         node.heading ? h("span", { text: " — " + node.heading }) : null);
+      armerPrise(head);
       sec.appendChild(head);
       const sub = h("div");
       (node.blocks || []).forEach((b, j) => {
@@ -747,24 +977,120 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
       wrapper.appendChild(sec);
       break;
     }
+    case "division": {
+      // Une division (Livre, Titre, Chapitre, Section…) : son intitulé et sa
+      // place dans la hiérarchie, puis son contenu — articles et divisions —
+      // rendu de la même façon, récursivement.
+      const niveau = Math.max(1, Number(node.level) || 1);
+      const sec = h("section", { class: `doc-division doc-division--n${niveau}` });
+      const head = h(["h2", "h3", "h4", "h5"][Math.min(niveau, 4) - 1], { class: "doc-division-head" },
+        h("span", { class: "doc-division-num", text: (node.numMode === "manual" ? (node.num || "(numéro)") : "(numérotation automatique)") + " · " + niveauDe(trame, niveau).label }),
+        node.heading ? h("span", { class: "doc-division-heading", text: " — " + node.heading }) : null);
+      armerPrise(head);
+      sec.appendChild(head);
+      const sub = h("div");
+      (node.blocks || []).forEach((b, j) => {
+        sub.appendChild(h("div", { class: "insert-bar" }, h("button", { class: "insert-bar__btn", text: "+", onClick: (e) => { e.stopPropagation(); addBlockMenu(e.currentTarget, trame, `${path}.blocks`, j, redraw); } })));
+        sub.appendChild(renderBlock(b, `${path}.blocks.${j}`, ed, redraw, softSave, trame));
+      });
+      sub.appendChild(h("div", { class: "insert-bar" },
+        h("button", { class: "insert-bar__btn", text: "+", onClick: (e) => { e.stopPropagation(); addBlockMenu(e.currentTarget, trame, `${path}.blocks`, (node.blocks || []).length, redraw); } }),
+        h("span", { class: "insert-bar__hint", text: "article, paragraphe, division…" })));
+      sec.appendChild(sub);
+      wrapper.appendChild(sec);
+      break;
+    }
     case "table": {
-      wrapper.appendChild(h("div", { class: "doc-table-wrap" },
-        node.caption ? h("p", { class: "doc-table-caption", text: node.caption }) : null,
-        (() => {
-          const t = h("table", { class: "doc-table" });
-          const trh = h("tr");
-          for (const c of node.columns || []) trh.appendChild(h("th", { text: String(c).split("|")[0] }));
-          t.appendChild(h("thead", {}, trh));
-          const tb = h("tbody");
-          for (const r of node.rows || []) {
-            const tr = h("tr");
-            for (let i = 0; i < (node.columns || []).length; i++) tr.appendChild(h("td", { text: r[i] ?? "" }));
-            tb.appendChild(tr);
-          }
-          t.appendChild(tb);
-          return t;
-        })(),
-      ));
+      // Un TABLEAU s'édite ici comme un tableau de traitement de texte :
+      // chaque case se réécrit sur place, une colonne ou une ligne s'insère et
+      // se retire au bouton. Les commandes sont posées dans une gouttière
+      // (`.tbl-tools*`), jamais imprimée — même dispositif que l'éditeur de
+      // modification (`.amend-th__tools`, voir views/amend-editor.js).
+      const md = paramsBloc(node);
+      const wrap = h("div", { class: "doc-table-wrap" });
+      const legende = () => (node.caption
+        ? editable("doc-table-caption", node.caption, (v) => { node.caption = v; softSave(); })
+        : null);
+      if (md.captionPos !== "bottom" && legende()) wrap.appendChild(legende());
+
+      const geste = (icone, titre, onClick) => h("button", {
+        class: "tbl__geste", type: "button", title: titre, "aria-label": titre,
+        onClick: (e) => { e.stopPropagation(); onClick(); },
+      }, icon(icone, 11));
+      const barreGeste = (label, titre, onClick) => h("button", {
+        class: "tbl__btn", type: "button", title: titre,
+        onClick: (e) => { e.stopPropagation(); onClick(); },
+      }, icon("plus", 12), h("span", { text: label }));
+
+      // La ligne des intitulés de colonnes. `tag` vaut `th` quand le bloc a une
+      // ligne d'en-tête, `td` sinon (les intitulés sont alors la première ligne
+      // de données) : au rendu comme ici, la même règle (voir lib/render.js).
+      const ligneColonnes = (tag) => {
+        const tr = h("tr");
+        (node.columns || []).forEach((c, j) => {
+          const cell = h(tag, {}, editable("", c, (v) => { node.columns[j] = v; softSave(); }));
+          cell.appendChild(h("span", { class: "tbl-tools", contenteditable: "false" },
+            geste("plus", "Insérer une colonne après celle-ci", () => {
+              node.columns.splice(j + 1, 0, "");
+              node.rows.forEach((r) => r.splice(j + 1, 0, ""));
+              touch("trames", { rerender: false }); redraw();
+            }),
+            geste("trash", (node.columns || []).length > 1 ? "Retirer cette colonne" : "Un tableau garde au moins une colonne", () => {
+              if ((node.columns || []).length <= 1) return;
+              node.columns.splice(j, 1);
+              node.rows.forEach((r) => r.splice(j, 1));
+              touch("trames", { rerender: false }); redraw();
+            })));
+          tr.appendChild(cell);
+        });
+        return tr;
+      };
+      const ligneDonnees = (r, i) => {
+        const tr = h("tr");
+        (node.columns || []).forEach((_, ci) => {
+          tr.appendChild(cellule("td", r[ci] ?? "", (v) => { while (r.length <= ci) r.push(""); r[ci] = v; softSave(); }));
+        });
+        tr.appendChild(h("td", { class: "tbl-tools-td", contenteditable: "false" },
+          geste("plus", "Insérer une ligne après celle-ci", () => {
+            node.rows.splice(i + 1, 0, (node.columns || []).map(() => ""));
+            touch("trames", { rerender: false }); redraw();
+          }),
+          geste("trash", "Retirer cette ligne", () => {
+            node.rows.splice(i, 1);
+            touch("trames", { rerender: false }); redraw();
+          })));
+        return tr;
+      };
+
+      const t = h("table", { class: "doc-table"
+        + (node.layout ? " doc-table--" + node.layout : "")
+        + (node.align ? " doc-table--" + node.align : "") });
+      const tb = h("tbody");
+      if (md.head !== false) t.appendChild(h("thead", {}, ligneColonnes("th")));
+      else tb.appendChild(ligneColonnes("td"));
+      (node.rows || []).forEach((r, i) => tb.appendChild(ligneDonnees(r, i)));
+      t.appendChild(tb);
+      wrap.appendChild(t);
+      // La légende « au-dessous » vient JUSTE après le tableau (la feuille lui
+      // donne alors sa marge haute) ; la barre de gestes, elle, reste au bas de
+      // l'ensemble.
+      if (md.captionPos === "bottom" && legende()) wrap.appendChild(legende());
+
+      // La barre de gestes du tableau : ajouter une colonne, une ligne — les
+      // deux manques qu'un tableau neuf laisse toujours deviner.
+      wrap.appendChild(h("div", { class: "tbl__bar", contenteditable: "false" },
+        barreGeste("Colonne", "Ajouter une colonne à la fin du tableau", () => {
+          node.columns.push("");
+          node.rows.forEach((r) => r.push(""));
+          touch("trames", { rerender: false }); redraw();
+        }),
+        barreGeste("Ligne", "Ajouter une ligne à la fin du tableau", () => {
+          node.rows.push((node.columns || []).map(() => ""));
+          touch("trames", { rerender: false }); redraw();
+        }),
+        h("span", { class: "tbl__hint", text: (node.columns || []).length + " colonne" + ((node.columns || []).length > 1 ? "s" : "") + " · " + (node.rows || []).length + " ligne" + ((node.rows || []).length > 1 ? "s" : "") })));
+
+      wrapper.appendChild(wrap);
       break;
     }
     case "signature": {
@@ -799,7 +1125,118 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
     default:
       wrapper.appendChild(editable("doc-p", node.text, (v) => { node.text = v; softSave(); }));
   }
+
+  // Les commentaires ne se cachent pas : ils s'affichent ici, sous le bloc
+  // qu'ils visent, dans la page elle-même (voir ui/annotations.js). C'est ce
+  // qui les rend impossibles à manquer — contrairement à un commentaire Word,
+  // qui attend dans une marge.
+  if ((node.notes || []).length) {
+    wrapper.appendChild(annotationStrip({
+      notes: node.notes,
+      editable: true,
+      onEdit: (nt, i) => openCommentComposer(node, i, ""),
+      onDelete: (nt, i) => supprimerCommentaire(node, i, redraw),
+      onAdd: () => openCommentComposer(node, -1, ""),
+    }));
+  }
   return wrapper;
+}
+
+// --------------------------------------------------------------- commentaires
+// Écrire un commentaire sur CE bloc — celui qu'on vient de cliquer, ou celui qui
+// portait le passage sélectionné. (Le commentaire est signé du service du
+// compte connecté : voir `authorOf`.)
+function openCommentComposer(node, index, quote) {
+  const editing = index >= 0;
+  const nt = editing ? node.notes[index] : null;
+  if (editing && !nt) return;
+  noteComposer({
+    note: nt,
+    quote: quote || nt?.quote || "",
+    author: authorOf(),
+    date: todayIso(),
+    context: "Sur : " + nodeTitle(node, state.config),
+    onDelete: editing ? () => {
+      node.notes.splice(index, 1);
+      touch("trames", { rerender: false });
+      toast("Commentaire supprimé", "info");
+      redrawView();
+    } : null,
+    onSave: (data) => {
+      if (editing) {
+        nt.kind = data.kind;
+        nt.text = data.text;
+        nt.quote = data.quote || "";
+      } else {
+        node.notes = node.notes || [];
+        node.notes.push(newNote({
+          kind: data.kind, text: data.text, quote: data.quote || "",
+          author: authorOf(), date: todayIso(),
+        }));
+      }
+      touch("trames", { rerender: false });
+      toast(editing ? "Commentaire modifié" : "Commentaire ajouté au bloc", "success");
+      redrawView();
+    },
+  });
+}
+
+function supprimerCommentaire(node, index, redraw) {
+  node.notes.splice(index, 1);
+  touch("trames", { rerender: false });
+  toast("Commentaire supprimé", "info");
+  redraw();
+}
+
+// L'onglet « Commentaires » : tous ceux de la trame, rangés par bloc, dans
+// l'ordre du document. C'est la vue d'ensemble — et l'endroit où l'on écrit.
+function renderCommentsInspector(root, trame, ed, redraw, softSave, paper) {
+  const groups = notesIndex(trame.body || [], (n, c) => nodeTitle(n, state.config, c));
+  const total = groups.reduce((n, g) => n + g.notes.length, 0);
+  const sel = nodeAt(trame, ed.selPath);
+
+  root.appendChild(h("div", { class: "inspector__sec" },
+    h("p", { class: "fr-small fr-muted", style: { marginTop: 0 },
+      text: `Un commentaire est signé du service de son auteur — ici : ${authorOf()}. Il accompagne la préparation du document, reste dans l'acte et part dans les exports ; il n'est jamais publié.` }),
+    sel ? button("Commenter « " + resume(nodeTitle(sel, state.config), 34) + " »", {
+      variant: "primary", size: "sm", icon: "note",
+      onClick: () => openCommentComposer(sel, -1, ""),
+    }) : null,
+    h("p", { class: "fr-small fr-muted", style: { marginTop: "8px" },
+      text: "Pour viser un passage précis, sélectionnez-le dans la page : la pastille « Commenter » vous proposera de le citer." }),
+  ));
+
+  if (!total) {
+    root.appendChild(h("div", { class: "inspector__sec" },
+      h("p", { class: "fr-small fr-muted", style: { margin: 0 } },
+        "Aucun commentaire pour l'instant. Sélectionnez un article (ou un passage) dans la page, puis cliquez « Commenter » : une consigne juridique, une explication, un point à arbitrer, une veille — ils resteront dans le document au lieu de se perdre.")));
+    return;
+  }
+
+  for (const g of groups) {
+    const card = h("div", { class: "cmt-group" + (g.path === ed.selPath ? " is-open" : "") });
+    card.appendChild(h("div", { class: "cmt-group__head" },
+      h("button", {
+        class: "cmt-group__jump", type: "button", title: "Voir ce bloc dans la page",
+        onClick: (e) => {
+          e.stopPropagation();
+          ed.selPath = g.path;
+          if (!flashBlock(paper, g.path)) redraw();
+        },
+      }, icon("eye", 13), h("span", { class: "cmt-group__label", text: g.label })),
+      h("span", { class: "fr-badge fr-badge--info", text: String(g.notes.length) }),
+      button("", { variant: "tertiary", icon: "plus", size: "sm", title: "Ajouter un commentaire à ce bloc", onClick: () => openCommentComposer(g.node, -1, "") }),
+    ));
+    const body = h("div", { class: "cmt-group__body" });
+    for (let i = 0; i < g.notes.length; i++) body.appendChild(noteEditor(g.notes[i], i, g.node, redraw, softSave));
+    card.appendChild(body);
+    root.appendChild(card);
+  }
+}
+
+function resume(text, max) {
+  const t = String(text || "");
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
 
 function resolveVisa(it, config, trame) {
@@ -835,6 +1272,7 @@ function addBlockMenu(anchor, trame, listPath, index, redraw) {
 }
 
 export function insertAt(trame, listPath, index, node) {
+  if (!node) return false;
   const parts = pathParts(listPath);
   let arr = trame;
   for (const p of parts) arr = arr[/^\d+$/.test(p) ? Number(p) : p];
@@ -844,10 +1282,13 @@ export function insertAt(trame, listPath, index, node) {
 }
 
 function moveNode(trame, path, dir, redraw) {
-  const { list, index } = listAt(trame, path);
+  const at = listAt(trame, path);
+  if (!at) return;
+  const { list, index } = at;
   const to = index + dir;
   if (to < 0 || to >= list.length) return;
   const [n] = list.splice(index, 1);
+  if (!n) return;
   list.splice(to, 0, n);
   touch("trames", { rerender: false });
   redraw();
@@ -864,6 +1305,88 @@ function refreshPaperNow(trame, ed, redraw, softSave, ctxSample) {
 const refreshPaper = debounce((trame, ed, redraw, softSave, ctxSample) => refreshPaperNow(trame, ed, redraw, softSave, ctxSample), 260);
 
 // -------------------------------------------------------------- inspecteur
+// La grille d'un tableau dans l'inspecteur : une case par cellule, un bouton par
+// geste. C'est le pendant « panneau » de l'édition en place dans le document —
+// les deux écrivent le même tableau, et l'un rattrape l'autre (on agrandit la
+// grille ici quand elle est large, on corrige une cellule là-bas en la lisant
+// dans son contexte). Voir `case "table"` de `renderBlock`.
+function tableGridEditor(node, redraw, softSave, rafraichir) {
+  const colonnes = node.columns || (node.columns = []);
+  const lignes = node.rows || (node.rows = []);
+  const N = colonnes.length;
+  const ecrire = () => { softSave(); rafraichir(); };
+  const structure = () => { touch("trames", { rerender: false }); redraw(); };
+  const outil = (icone, titre, actif, onClick) => {
+    const b = button("", { variant: "tertiary", icon: icone, size: "sm", title: titre, onClick });
+    if (!actif) { b.disabled = true; b.style.opacity = ".32"; }
+    return b;
+  };
+  const bouger = (arr, i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= arr.length) return;
+    const [x] = arr.splice(i, 1);
+    arr.splice(j, 0, x);
+  };
+
+  const grille = h("div", { class: "tbl-edit" });
+  grille.style.gridTemplateColumns = `auto repeat(${Math.max(1, N)}, minmax(0, 1fr)) auto`;
+
+  const champ = (valeur, onChange) => h("input", {
+    class: "fr-input tbl-edit__case", value: valeur ?? "",
+    on: { input: (e) => onChange(e.target.value) },
+  });
+
+  // -- ligne des intitulés de colonnes
+  grille.appendChild(h("span", { class: "tbl-edit__coin", text: "Colonnes" }));
+  colonnes.forEach((c, j) => {
+    grille.appendChild(h("div", { class: "tbl-edit__entete" },
+      champ(c, (v) => { colonnes[j] = v; ecrire(); }),
+      h("span", { class: "tbl-edit__outils" },
+        outil("left", "Déplacer cette colonne vers la gauche", j > 0, () => {
+          bouger(colonnes, j, -1);
+          for (const r of lignes) { while (r.length < N) r.push(""); bouger(r, j, -1); }
+          structure();
+        }),
+        outil("right", "Déplacer cette colonne vers la droite", j < N - 1, () => {
+          bouger(colonnes, j, 1);
+          for (const r of lignes) { while (r.length < N) r.push(""); bouger(r, j, 1); }
+          structure();
+        }),
+        outil("trash", N > 1 ? "Retirer cette colonne" : "Un tableau garde au moins une colonne", N > 1, () => {
+          colonnes.splice(j, 1);
+          for (const r of lignes) r.splice(j, 1);
+          structure();
+        }))));
+  });
+  grille.appendChild(h("button", {
+    class: "tbl-edit__geste", type: "button", title: "Ajouter une colonne à la fin",
+    onClick: () => { colonnes.push(""); for (const r of lignes) r.push(""); structure(); },
+  }, icon("plus", 12), h("span", { text: "Colonne" })));
+
+  // -- les lignes, une case par cellule
+  lignes.forEach((r, ri) => {
+    while (r.length < N) r.push("");
+    grille.appendChild(h("span", { class: "tbl-edit__num", text: String(ri + 1) }));
+    for (let ci = 0; ci < N; ci++) {
+      grille.appendChild(champ(r[ci], (v) => { while (r.length <= ci) r.push(""); r[ci] = v; ecrire(); }));
+    }
+    grille.appendChild(h("span", { class: "tbl-edit__outils" },
+      outil("up", "Monter cette ligne", ri > 0, () => { bouger(lignes, ri, -1); structure(); }),
+      outil("down", "Descendre cette ligne", ri < lignes.length - 1, () => { bouger(lignes, ri, 1); structure(); }),
+      outil("trash", "Retirer cette ligne", true, () => { lignes.splice(ri, 1); structure(); })));
+  });
+
+  // -- ajouter une ligne
+  grille.appendChild(h("span"));
+  grille.appendChild(h("div", { class: "tbl-edit__pied", style: { gridColumn: `span ${Math.max(1, N)}` } },
+    h("button", {
+      class: "tbl-edit__geste", type: "button", title: "Ajouter une ligne à la fin",
+      onClick: () => { lignes.push(colonnes.map(() => "")); structure(); },
+    }, icon("plus", 12), h("span", { text: "Ligne" }))));
+  grille.appendChild(h("span"));
+  return grille;
+}
+
 function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
   const node = nodeAt(trame, ed.selPath);
   if (!node) {
@@ -902,6 +1425,28 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
     ]));
   }
 
+  // Une division : son ÉCHELON dans la hiérarchie, sa numérotation, son
+  // intitulé. L'échelle elle-même (le mot de chaque échelon, sa numérotation)
+  // est un réglage de la TRAME — onglet « Trame », rubrique « Hiérarchie ».
+  if (node.type === "division") {
+    root.appendChild(sec([
+      h("span", { class: "inspector__label", text: "Échelon dans la hiérarchie" }),
+      choiceField({
+        label: "", value: String(node.level || 1),
+        options: ladderOf(trame).map((n) => ({ value: String(n.level), label: `${n.label} — échelon ${n.level}` })),
+        onChange: (v) => { node.level = Number(v); softSave(); redraw(); },
+      }),
+      h("p", { class: "fr-small fr-muted", text: "L'échelle des échelons se règle dans l'onglet « Trame », rubrique « Hiérarchie du document »." }),
+      h("span", { class: "inspector__label", text: "Numérotation" }),
+      choiceField({
+        label: "", value: node.numMode || "auto", options: [{ value: "auto", label: "Automatique" }, { value: "manual", label: "Manuelle" }],
+        onChange: (v) => { node.numMode = v; softSave(); redraw(); },
+      }),
+      node.numMode === "manual" ? textField({ label: "Texte du numéro", value: node.num || "", onChange: (v) => { node.num = v; softSave(); } }) : null,
+      textField({ label: "Intitulé de la division", value: node.heading || "", onChange: (v) => { node.heading = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); } }),
+    ]));
+  }
+
   if (node.type === "visas") {
     root.appendChild(sec([
       sectionHeader("Visas", button("Ajouter", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { node.items = node.items || []; node.items.push({ id: "it-" + Math.random().toString(36).slice(2, 7), refId: "", text: "", when: "" }); touch("trames", { rerender: false }); redraw(); } })),
@@ -909,35 +1454,151 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
     ]));
   }
 
-  if (node.type === "list") {
+  // Un PARAGRAPHE : son texte (plus haut), puis sa MISE EN FORME — alignement,
+  // retrait, encadré. Chaque réglage peut rester « comme la feuille de style » :
+  // c'est alors la charte de la collectivité qui décide, et le bloc n'impose
+  // rien. Un choix explicite ne vaut que pour ce paragraphe-là.
+  if (node.type === "para") {
+    const md = paramsBloc(node);
     root.appendChild(sec([
-      h("span", { class: "inspector__label", text: "Type de liste" }),
+      h("span", { class: "inspector__label", text: "Mise en forme" }),
+      selectField({
+        label: "Alignement", value: md.align, options: choixDe(PARA_ALIGNS),
+        onChange: (v) => { node.align = v; softSave(); redraw(); },
+      }),
+      selectField({
+        label: "Retrait", value: md.indent, options: choixDe(PARA_INDENTS),
+        onChange: (v) => { node.indent = v; softSave(); redraw(); },
+      }),
+      choiceField({
+        label: "Encadré", value: !!md.boxed,
+        options: [{ value: false, label: "Non" }, { value: true, label: "Oui" }],
+        onChange: (v) => { node.boxed = v; softSave(); redraw(); },
+      }),
+      h("p", { class: "fr-small fr-muted", text: "« Comme la feuille de style » laisse la charte décider. Un choix explicite ne s'applique qu'à ce paragraphe." }),
+    ]));
+  }
+
+  if (node.type === "list") {
+    const md = paramsBloc(node);
+    root.appendChild(sec([
+      h("span", { class: "inspector__label", text: "Genre de liste" }),
       choiceField({
         label: "", value: !!node.ordered,
         options: [{ value: false, label: "À puces" }, { value: true, label: "Numérotée" }],
         onChange: (v) => { node.ordered = v; softSave(); redraw(); },
       }),
-      h("p", { class: "palette__aide", text: "Le genre de la liste se choisit ici ; son apparence (la puce, la numérotation — 1°, a), i… —) se règle dans les Feuilles de style, rubrique « Listes »." }),
+      node.ordered
+        ? selectField({
+          label: "Numérotation", value: md.numbering, options: choixDe(LIST_NUMBERINGS),
+          onChange: (v) => { node.numbering = v; softSave(); redraw(); },
+        })
+        : selectField({
+          label: "Marqueur", value: md.marker, options: choixDe(LIST_MARKERS),
+          onChange: (v) => { node.marker = v; softSave(); redraw(); },
+        }),
+      node.ordered ? textField({
+        label: "Numéro de départ", type: "number", value: md.start,
+        onChange: (v) => { node.start = Math.max(1, Number(v) || 1); softSave(); redraw(); },
+      }) : null,
+      h("p", { class: "fr-small fr-muted", text: "Les valeurs par défaut sont celles de la feuille de style (écran « Feuilles de style », rubrique « Listes »). Chaque liste peut s'en écarter séparément — « 1° » ici, « a) » là." }),
     ]));
   }
 
   if (node.type === "considerants" || node.type === "list") {
+    const md = paramsBloc(node);
+    const deplacer = (i, d) => {
+      const j = i + d;
+      if (j < 0 || j >= node.items.length) return;
+      const [it] = node.items.splice(i, 1);
+      node.items.splice(j, 0, it);
+      touch("trames", { rerender: false }); redraw();
+    };
     root.appendChild(sec([
-      sectionHeader("Éléments", button("Ajouter", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { node.items = node.items || []; node.items.push({ id: "it-" + Math.random().toString(36).slice(2, 7), text: node.type === "considerants" ? "Considérant que …" : "Nouvel élément", when: "" }); touch("trames", { rerender: false }); redraw(); } })),
+      sectionHeader("Éléments", button("Ajouter", {
+        variant: "secondary", size: "sm", icon: "plus",
+        onClick: () => {
+          // Un considérant neuf n'écrit que sa substance : la formule est un
+          // réglage du bloc (voir `formule`, plus bas).
+          node.items = node.items || [];
+          node.items.push({ id: "it-" + Math.random().toString(36).slice(2, 7), text: "", when: "" });
+          touch("trames", { rerender: false }); redraw();
+        },
+      })),
+      node.type === "considerants"
+        ? h("p", { class: "fr-small fr-muted", text: md.formule
+          ? "La formule « " + md.formule + " » est placée devant chaque considérant au moment de la compilation : écrivez ici la substance, elle n'est pas répétée si elle est déjà écrite."
+          : "Écrivez chaque considérant en entier (« Considérant que… ») — ou réglez une formule plus bas, qui sera placée devant chacun." })
+        : null,
       ...(node.items || []).map((it, i) => h("div", { class: "note-card", style: { borderLeftColor: "var(--border-strong)" } },
-        h("div", { class: "fr-row" }, h("strong", { class: "fr-small", text: "#" + (i + 1) }), h("div", { class: "fr-spacer" }),
-          button("", { variant: "tertiary", icon: "trash", size: "sm", onClick: () => { node.items.splice(i, 1); touch("trames", { rerender: false }); redraw(); } })),
+        h("div", { class: "fr-row" },
+          h("strong", { class: "fr-small", text: "#" + (i + 1) }),
+          h("div", { class: "fr-spacer" }),
+          button("", { variant: "tertiary", icon: "up", size: "sm", title: "Monter cet élément", onClick: () => deplacer(i, -1) }),
+          button("", { variant: "tertiary", icon: "down", size: "sm", title: "Descendre cet élément", onClick: () => deplacer(i, 1) }),
+          button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Retirer cet élément", onClick: () => { node.items.splice(i, 1); touch("trames", { rerender: false }); redraw(); } })),
         (() => { const ta = h("textarea", { class: "fr-textarea", rows: 3 }); ta.value = it.text || ""; ta.addEventListener("input", () => { it.text = ta.value; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); }); ta.addEventListener("blur", blurGuard(redraw)); return ta; })(),
         h("div", { style: { marginTop: "6px" } }, condInput(it, softSave, redraw)),
       )),
     ]));
+
+    // Les réglages propres aux CONSIDÉRANTS : la formule répétée devant chacun,
+    // leur ponctuation finale, et le choix de les lire d'un seul alinéa.
+    if (node.type === "considerants") {
+      root.appendChild(sec([
+        h("span", { class: "inspector__label", text: "Considérants" }),
+        textField({
+          label: "Formule placée devant chaque considérant", value: md.formule, placeholder: "Considérant que",
+          onChange: (v) => { node.formule = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); },
+        }),
+        selectField({
+          label: "Ponctuation finale", value: md.fin, options: choixDe(RECITAL_FINS),
+          onChange: (v) => { node.fin = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); },
+        }),
+        choiceField({
+          label: "En un seul alinéa", value: !!md.inline,
+          options: [{ value: false, label: "Un par paragraphe" }, { value: true, label: "Tous suivis" }],
+          onChange: (v) => { node.inline = v; softSave(); redraw(); },
+        }),
+        h("p", { class: "fr-small fr-muted", text: "La ponctuation est ajoutée seulement si le considérant ne la porte pas déjà. La formule n'est pas répétée quand le texte la commence déjà." }),
+      ]));
+    }
   }
 
+  // Un TABLEAU : sa légende, ses réglages de présentation, puis SA GRILLE — une
+  // case par cellule, un bouton par geste (insérer, retirer, déplacer). La même
+  // grille se réécrit en place dans le document ; les deux chemins écrivent le
+  // même tableau.
   if (node.type === "table") {
+    const md = paramsBloc(node);
     root.appendChild(sec([
-      textField({ label: "Titre du tableau", value: node.caption || "", onChange: (v) => { node.caption = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); } }),
-      textField({ label: "Colonnes (une par ligne)", value: (node.columns || []).join("\n"), rows: 4, onChange: (v) => { node.columns = v.split("\n").map((s) => s.trim()).filter(Boolean); softSave(); } }),
-      textField({ label: "Lignes (cellules séparées par |)", value: (node.rows || []).map((r) => r.join(" | ")).join("\n"), rows: 6, onChange: (v) => { node.rows = v.split("\n").filter((l) => l.trim()).map((l) => l.split("|").map((c) => c.trim())); softSave(); } }),
+      h("span", { class: "inspector__label", text: "Tableau" }),
+      textField({
+        label: "Légende du tableau", value: node.caption || "",
+        onChange: (v) => { node.caption = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); },
+      }),
+      selectField({
+        label: "Position de la légende", value: md.captionPos, options: choixDe(TABLE_CAPTION_POS),
+        onChange: (v) => { node.captionPos = v; softSave(); redraw(); },
+      }),
+      choiceField({
+        label: "Ligne d'en-tête", value: md.head !== false,
+        options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
+        onChange: (v) => { node.head = v; softSave(); redraw(); },
+      }),
+      selectField({
+        label: "Disposition", value: md.layout, options: choixDe(TABLE_LAYOUTS),
+        onChange: (v) => { node.layout = v; softSave(); redraw(); },
+      }),
+      selectField({
+        label: "Alignement des cellules", value: md.align, options: choixDe(TABLE_ALIGNS),
+        onChange: (v) => { node.align = v; softSave(); redraw(); },
+      }),
+      h("p", { class: "fr-small fr-muted", text: "« Comme la feuille de style » laisse la charte décider ; un choix explicite ne s'applique qu'à ce tableau." }),
+    ]));
+    root.appendChild(sec([
+      sectionHeader("Lignes et colonnes", h("span", { class: "fr-small fr-muted", text: (node.columns || []).length + " × " + (node.rows || []).length })),
+      tableGridEditor(node, redraw, softSave, () => refreshPaper(trame, ed, redraw, softSave, ctxSample)),
     ]));
   }
 
@@ -965,12 +1626,16 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
     h("p", { class: "fr-small fr-muted", text: "Exemples : contains(perimetres, 'immobilier') · dateEffet == '' · entity.code == 'IAM'" }),
   ]));
 
-  // commentaires
+  // Les commentaires ont leur propre onglet (« Commentaires ») : ils portent sur
+  // toute la trame, pas seulement sur ce bloc, et ils doivent rester visibles.
+  // On indique ici où les retrouver, plutôt que de les répéter.
   root.appendChild(sec([
-    sectionHeader("Commentaires", button("Ajouter", { variant: "secondary", size: "sm", icon: "note", onClick: () => { node.notes = node.notes || []; node.notes.push(newNote({ author: authorOf(), date: todayIso() })); touch("trames", { rerender: false }); redraw(); } })),
-    h("p", { class: "fr-small fr-muted", text: `Administrateurs et éditeurs peuvent commenter. Un commentaire est signé du service de son auteur — ici : ${authorOf()}.` }),
-    ...(node.notes || []).map((nt, i) => noteEditor(nt, i, node, redraw, softSave)),
-    !(node.notes || []).length ? h("p", { class: "fr-small fr-muted", text: "Aucun commentaire. Les commentaires sont conservés dans l'acte et exportés (contrairement aux commentaires Word)." }) : null,
+    sectionHeader("Commentaires", (node.notes || []).length
+      ? button("Voir (" + node.notes.length + ")", { variant: "secondary", size: "sm", icon: "note", onClick: () => { ed.tab = "commentaires"; redraw(); } })
+      : button("Commenter", { variant: "secondary", size: "sm", icon: "note", onClick: () => openCommentComposer(node, -1, "") })),
+    h("p", { class: "fr-small fr-muted", text: (node.notes || []).length
+      ? "Ce bloc porte " + (node.notes.length === 1 ? "un commentaire" : node.notes.length + " commentaires") + ", affiché" + (node.notes.length === 1 ? "" : "s") + " sous lui dans la page et repris dans l'onglet « Commentaires »."
+      : "Aucun commentaire sur ce bloc. Sélectionnez un passage dans la page pour le citer, ou cliquez « Commenter »." }),
   ]));
 }
 
@@ -979,7 +1644,7 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
 function pucesChamps(trame, onPick) {
   const liste = (trame.fields || []).map((f) => puce("champ", f.label || f.id, "{{" + f.id + "}}", "doc", () => onPick("{{" + f.id + "}}")));
   if (!liste.length) liste.push(h("span", { class: "palette__aide", text: "Aucun champ pour l'instant : créez-en un dans la réserve, à gauche." }));
-  return [...liste, ...AUTO_TOKENS.map((t) => puce("auto", t.label, "{{" + t.token + "}}", "check", () => onPick("{{" + t.token + "}}")))];
+  return [...liste, ...autoTokensDe(trame).map((t) => puce("auto", t.label, "{{" + t.token + "}}", "check", () => onPick("{{" + t.token + "}}")))];
 }
 
 // Range un champ dans la liste du formulaire (glisser par la poignée).
@@ -1061,8 +1726,12 @@ function noteEditor(nt, i, node, redraw, softSave) {
   });
   const ta = h("textarea", { class: "fr-textarea", rows: 3 });
   ta.value = nt.text || "";
-  ta.addEventListener("input", () => { nt.text = ta.value; softSave(); });
+  // La zone grandit avec le texte : un commentaire long reste lisible d'un coup
+  // d'œil, sans barre de défilement (on le relit, on ne le saisit pas au clavier).
+  const autosize = () => { ta.style.height = "auto"; ta.style.height = Math.max(52, ta.scrollHeight + 2) + "px"; };
+  ta.addEventListener("input", () => { nt.text = ta.value; softSave(); autosize(); });
   ta.addEventListener("blur", blurGuard(redraw));
+  requestAnimationFrame(autosize);
   const authorIn = h("div", {
     class: "fr-small fr-muted",
     style: { marginTop: "6px" },
@@ -1072,6 +1741,7 @@ function noteEditor(nt, i, node, redraw, softSave) {
   return h("div", { class: "note-card note-card--" + (nt.kind || "info") },
     h("div", { class: "note-card__head" }, kindSel, h("div", { class: "fr-spacer" }),
       button("", { variant: "tertiary", icon: "trash", size: "sm", onClick: () => { node.notes.splice(i, 1); touch("trames", { rerender: false }); redraw(); } })),
+    nt.quote ? h("p", { class: "note-quote", text: nt.quote }) : null,
     ta,
     h("div", { style: { marginTop: "6px" } }, authorIn),
   );
@@ -1128,6 +1798,7 @@ function renderFieldsInspector(root, trame, ed, redraw, softSave) {
     const poignee = glissable(
       h("span", { class: "blk__grip", title: "Glisser pour changer l'ordre des questions", text: "⠿", "aria-hidden": "true" }),
       { kind: "rangement", index: i, label: f.label || f.id },
+      { auDoigt: true },
     );
     const nom = h("span", { class: "fcard__nom", text: f.label || f.id });
     const det = h("details", { class: "fcard", open: ouverts.has(f.id) },
@@ -1227,6 +1898,66 @@ function renderRulesInspector(root, trame, redraw, softSave, ctx) {
   });
 }
 
+// L'ÉCHELLE des divisions d'une trame. C'est une donnée de la trame, non du
+// logiciel : l'éditeur en fixe les mots (« Livre », « Titre », « Partie »…),
+// l'ordre (l'échelon 1 est le plus haut) et la numérotation de chacun. Tant
+// qu'on n'y touche pas, la trame suit l'échelle livrée.
+function echelleEditor(trame, redraw, softSave) {
+  const box = h("div", { class: "fr-stack" });
+  const poser = (list) => {
+    trame.divisions = list.map((n, i) => ({ level: i + 1, label: n.label || "Division", num: n.num || "decimal" }));
+    touch("trames", { rerender: false });
+  };
+  const list = ladderOf(trame);
+  list.forEach((n, i) => {
+    const changer = (patch) => {
+      const suivante = list.map((x, k) => (k === i ? { ...x, ...patch } : { ...x }));
+      poser(suivante);
+      softSave();
+    };
+    box.appendChild(h("div", { class: "note-card", style: { borderLeftColor: "var(--brand)" } },
+      h("div", { class: "fr-row" },
+        h("strong", { class: "fr-small", text: "Échelon " + n.level }),
+        h("div", { class: "fr-spacer" }),
+        button("", { variant: "tertiary", icon: "up", size: "sm", title: "Monter cet échelon", onClick: () => {
+          if (i === 0) return;
+          const s = list.map((x) => ({ ...x }));
+          [s[i - 1], s[i]] = [s[i], s[i - 1]];
+          poser(s); softSave(); redraw();
+        } }),
+        button("", { variant: "tertiary", icon: "down", size: "sm", title: "Descendre cet échelon", onClick: () => {
+          if (i >= list.length - 1) return;
+          const s = list.map((x) => ({ ...x }));
+          [s[i + 1], s[i]] = [s[i], s[i + 1]];
+          poser(s); softSave(); redraw();
+        } }),
+        button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Retirer cet échelon", onClick: () => {
+          poser(list.filter((_, k) => k !== i));
+          softSave(); redraw();
+        } }),
+      ),
+      textField({
+        label: "Mot imprimé", value: n.label,
+        help: "Ce qui s'écrit devant le numéro : « Livre », « Titre », « Partie », « Chapitre », « Section », « Annexe »…",
+        onChange: (v) => changer({ label: v }),
+      }),
+      selectField({
+        label: "Numérotation", value: n.num,
+        options: NUM_STYLES.map((s) => ({ value: s.id, label: s.label })),
+        onChange: (v) => { changer({ num: v }); redraw(); },
+      }),
+    ));
+  });
+  box.appendChild(button("Ajouter un échelon", {
+    variant: "secondary", size: "sm", icon: "plus",
+    onClick: () => { poser([...list, { label: "Section", num: "decimal" }]); softSave(); redraw(); },
+  }));
+  if (!(trame.divisions || []).length) {
+    box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: 0 }, text: "Cette trame suit l'échelle livrée. La première modification ci-dessus la fixera pour elle seule." }));
+  }
+  return box;
+}
+
 function renderTrameInspector(root, trame, redraw, softSave) {
   root.appendChild(h("div", { class: "inspector__section" },
     h("span", { class: "inspector__label", text: "Identité de la trame" }),
@@ -1234,11 +1965,50 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     textField({ label: "Version", value: trame.version, onChange: (v) => { trame.version = v; softSave(); } }),
     choiceField({
       label: "Statut", value: trame.status,
-      options: [{ value: "draft", label: "Brouillon" }, { value: "published", label: "Publiée" }, { value: "archived", label: "Archivée" }],
-      onChange: (v) => { trame.status = v; softSave(); redraw(); },
+      options: [{ value: "draft", label: "Brouillon" }, { value: "published", label: "Mise à disposition" }, { value: "archived", label: "Archivée" }],
+      help: "« Mise à disposition » est le statut qui ouvre la trame aux services : c'est le même geste que le bouton du même nom, sur la carte de la trame et en tête de cet écran. Tant que la trame n'est pas mise à disposition, elle reste à l'atelier.",
+      onChange: (v) => {
+        if (v === trame.status) return;
+        // Les deux passages qui engagent (ouvrir aux services, refermer) passent
+        // par les mêmes gestes que le bouton — journalisés, avec confirmation.
+        if (v === "published") { mettreADisposition(trame, { redraw }); return; }
+        if (v === "draft" && trameEstDisponible(trame)) { retirerMiseADisposition(trame, { redraw }); return; }
+        trame.status = v; softSave(); redraw();
+      },
     }),
     selectField({ label: "Famille", value: trame.familyId, placeholder: "—", options: (state.config.families || []).map((f) => ({ value: f.id, label: f.label })), onChange: (v) => { trame.familyId = v; softSave(); } }),
     selectField({ label: "Type d'acte", value: trame.actTypeId, options: (state.config.actTypes || []).map((a) => ({ value: a.id, label: a.label })), onChange: (v) => { trame.actTypeId = v; softSave(); } }),
+    choiceField({
+      label: "Nature du document", value: natureDe(trame),
+      options: ACTE_NATURES.map((n) => ({ value: n.id, label: n.label })),
+      help: "Une ANNEXE est un document adopté par un autre : un règlement intérieur adopté par une délibération, un tableau tarifaire adopté par une décision. Elle ne se signe ni ne se publie pour elle-même — c'est l'acte qui l'adopte qui est signé, et son texte suit cet acte. Les actes issus d'une trame d'annexe ne sont pas modifiés comme les autres — voir la fiche de l'acte, « Modifier l'annexe ».",
+      onChange: (v) => { trame.nature = v; softSave(); redraw(); },
+    }),
+    h("label", { class: "fr-check" }, (() => {
+      const c = h("input", { type: "checkbox", checked: trame.assemblee === true });
+      c.addEventListener("change", () => { trame.assemblee = c.checked; softSave(); redraw(); });
+      return c;
+    })(), "Acte d'assemblée — délibération"),
+    trame.assemblee
+      ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "L'acte émane d'une ASSEMBLÉE délibérante (conseil municipal, conseil d'administration) : sa ligne d'autorité est celle de l'assemblée (« Le conseil municipal de … »), non celle d'une personne, tandis qu'il est signé par le président de cette assemblée — le maire, ou le président du conseil d'administration. Le jeton {{autorite}} rend la formule de l'assemblée. Les assemblées et leur signataire se règlent dans Administration › Assemblées." })
+      : null,
+    natureDe(trame) === "annexe"
+      ? h("label", { class: "fr-check" }, (() => {
+        const c = h("input", { type: "checkbox", checked: trame.adoptionVisa !== false });
+        c.addEventListener("change", () => { trame.adoptionVisa = c.checked; softSave(); redraw(); });
+        return c;
+      })(), "Rappeler l'acte d'adoption dans les visas")
+      : null,
+    natureDe(trame) === "annexe"
+      ? h("label", { class: "fr-check" }, (() => {
+        const c = h("input", { type: "checkbox", checked: trame.reglement === true });
+        c.addEventListener("change", () => { trame.reglement = c.checked; softSave(); redraw(); });
+        return c;
+      })(), "C'est un RÈGLEMENT : le publier aussi à part, au recueil")
+      : null,
+    natureDe(trame) === "annexe" && trame.reglement === true
+      ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Un règlement est un texte NORMATIF : le recueil en donne une publication informative autonome — son texte en vigueur s'y consulte pour lui-même, comme un code, sous son propre identifiant —, en plus de sa place dans l'acte qui l'adopte. Les actes qui l'adoptent ou le modifient en publient les versions successives. Une annexe qui n'est pas un règlement (un tableau, une grille) ne reçoit rien de tel." })
+      : null,
     selectField({
       label: "Feuille de style", value: trame.styleId || "",
       placeholder: "— Automatique (entité, puis famille) —",
@@ -1256,6 +2026,22 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: tramePublishable(trame)
       ? "Les actes issus de cette trame sont signés puis publiés : le service leur attribue un identifiant ELI et ils deviennent opposables à leur entrée en vigueur."
       : "Trame non publiable : les actes issus de cette trame (actes individuels — revalorisation d'un traitement, sanction, etc.) sont rédigés, signés et conservés au registre, mais jamais déposés au recueil." }),
+    h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Signature" }),
+    selectField({
+      label: "Circuit de signature", value: trame.signature || "",
+      options: MODES_TRAME.map((m) => ({ value: m.id, label: m.label })),
+      help: "Trois circuits (voir Administration › Signature). ÉLECTRONIQUE : signé dans l'outil du prestataire. SIMPLE : signé dans l'application, par le signataire, avec son compte — les mentions nominatives restent dans l'original interne, jamais diffusées. EXTERNE : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée (PDF) est déposée, et le réviseur certifie sa conformité avec la version numérique avant publication. « Imposé » l'exige pour cette trame ; « autorisé » le laisse au choix du rédacteur, acte par acte.",
+      onChange: (v) => { trame.signature = v; redraw(); softSave(); },
+    }),
+    h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: (() => {
+      const c = circuitPour(state.config, trame);
+      return (c.source === "trame" ? trameModeLabel(trame.signature || "") + " — " : "Suivant le réglage général — ")
+        + "circuit retenu : " + modeLabel(c.mode) + (c.choix ? ", au choix du rédacteur pour chaque acte." : ".")
+        + (c.mode === "externe" ? " Le réviseur certifiera la conformité de la pièce signée." : "");
+    })() }),
+    h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Hiérarchie du document" }),
+    h("p", { class: "fr-small fr-muted", style: { margin: "0" }, text: "Un texte long ne se compose pas seulement d'articles : il se range en livres, titres, chapitres, sections… L'échelle ci-dessous est celle de CETTE trame : les mots et la numérotation sont libres. Dans le document, une « Division » prend l'un de ces échelons ; l'échelon 1 est le plus haut." }),
+    echelleEditor(trame, redraw, softSave),
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Validation et formalités" }),
     // Le parapheur est une fonction expérimentale : éteint, la trame n'a pas de
     // circuit à choisir (voir Administration › Expérimentale).
