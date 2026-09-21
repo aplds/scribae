@@ -22,9 +22,10 @@ ouverts et normés (Akoma Ntoso, Schematron, JSON-LD/ELI, HTML imprimable).
 formats d'export, périmètre.
 
 👉 **Exploitation / auto-hébergement** : `docs/ADMINISTRATION.md` (administrateurs,
-exploitants) et `server/README.md` (installation Docker). La démonstration est servie **en
-statique, depuis GitHub Pages** ; pour un service de production, le dossier `server/` fournit
-la pile complète (nginx + service Node + MySQL/MariaDB) et l'édition web de l'application.
+exploitants) et `server/README.md` (installation Docker). La démonstration publique est servie
+**en statique, depuis GitHub Pages** — **<https://aplds.github.io/scribae>** ; pour un service de
+production, le dossier `server/` fournit la pile complète (nginx + service Node + MySQL/MariaDB)
+et l'édition web de l'application.
 
 ## Flux de travail : Perchance ↔ GitHub
 

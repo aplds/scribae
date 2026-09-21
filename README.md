@@ -19,7 +19,7 @@ A4), Word, Markdown.
 
 ## Essayer, sans rien installer
 
-<https://aplds.github.io/scribae>
+**<https://aplds.github.io/scribae>** — la démonstration est publiée par **GitHub Pages**.
 
 L'application s'ouvre sur le **recueil public** — les actes publiés, consultables par tout le monde,
 **sans compte**, avec leur identifiant ELI et leur texte. Pour entrer dans l'atelier, cliquez sur
@@ -121,7 +121,7 @@ accèdent aussi : chaque acte publié a une **adresse de référence** et des **
 lisibles par machine (JSON, Markdown, texte brut, Akoma Ntoso, `&format=…`). Un déploiement
 **hébergé sur votre serveur** (voir `ADMINISTRATION.md`, et `../server/README.md` pour la pile) les sert en vraies pages — `/recueil`,
 `/recueil/<clé>`, `/recueil/<clé>.json` — et publie `/llms.txt`, `/recueil.json`, `/sitemap.xml`
-et `/robots.txt` ; un déploiement statique (GitHub Pages, plateforme) les rend dans la page, pour
+et `/robots.txt` ; un déploiement statique (GitHub Pages) les rend dans la page, pour
 les lecteurs qui exécutent le JavaScript.
 
 Tout le reste est réglable sans toucher au logiciel : entités, services, personnes, rôles, types
@@ -173,8 +173,8 @@ Ces deux documents s'adressent à votre service informatique.
 
 - **Aucun compte en ligne n'est nécessaire.** En revanche, deux mécanismes peuvent sortir de la
   page : les **assistants** (Plume, Publia), qui transmettent la question — et rien du contenu de
-  vos actes — au moteur de langage réglé (le moteur intégré de la plateforme, ou celui que vous
-  branchez) ; et la **notification par courriel**, quand un service SMTP est configuré sur un
+  vos actes — au moteur de langage réglé (un moteur intégré quand il est disponible, ou celui que
+  vous branchez) ; et la **notification par courriel**, quand un service SMTP est configuré sur un
   déploiement auto-hébergé. Tout le reste travaille en local.
 - Par défaut, tout est enregistré **dans le navigateur** : c'est ce qui rend la démonstration
   immédiate, mais aussi ce qui la rend **propre à un poste**.

@@ -822,6 +822,13 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
   publication » réservée aux actes **non publiés** : on ne lit plus qu'un acte publié serait épinglé
   « dès sa publication ».
 
+- **La démonstration publique est servie en statique, sur GitHub Pages —
+  <https://aplds.github.io/scribae>.** Sans serveur applicatif, tout y travaille dans le
+  **navigateur du visiteur** : rien n'y est **partagé entre visiteurs**, et ce qui y est conservé
+  peut disparaître (effacement des données du site, capacité bornée du service embarqué). Le
+  README du dépôt et `docs/ADMINISTRATION.md` (§ 7.6) le disent désormais, et n'envoient plus vers
+  l'espace d'édition.
+
 ## [1.2.0] — 2026-09-20 — Signer par délégation
 
 Cette livraison fait de la **signature** une qualité à part entière : elle **découle d'une

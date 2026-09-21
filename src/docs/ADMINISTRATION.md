@@ -1173,24 +1173,31 @@ connaître : 40 publications conservées et 80 circuits de signature (les plus a
 > d'archivage, NF Z42-013) relève de sa politique d'archivage et se traite **en dehors** de
 > Scribae : d'où l'export permanent des actes, de leurs originaux signés et du journal.
 
-### 7.6 La plateforme de démonstration n'est pas un service
+### 7.6 La démonstration publique n'est pas un service
 
-L'édition en ligne (`perchance.org/scribae`, la même que l'atelier d'édition) est une
-**démonstration**. Trois choses, en particulier, y diffèrent d'un service :
+La démonstration publique (<https://aplds.github.io/scribae>) est une **édition statique** :
+la page est servie par **GitHub Pages**, sans aucun serveur applicatif. Les deux services que
+l'application attend sont alors fournis **dans le navigateur** (`src/pages/host.js`) — un
+stockage `IndexedDB`, et le service de signature et de publication **embarqué**, relu depuis
+`index.html` et exécuté dans l'onglet. Trois choses, en particulier, y diffèrent d'un service :
 
-1. **Ce qui y est déposé est partagé** et lisible par les autres visiteurs — le recueil
-   public de la démonstration est commun. On n'y dépose **aucune donnée réelle** ;
-2. **ce qui y est conservé peut disparaître** : l'état durable de ce service a une capacité
-   bornée, et le plus ancien est **évincé** à mesure (`MAX_ACTES`, `MAX_PUBLIES`,
+1. **tout reste dans le navigateur du visiteur.** Rien n'est déposé chez un tiers, et rien
+   n'est **partagé entre visiteurs** : le recueil public de la démonstration est celui de
+   chacun, et les fonctions dites « partagées » du service ne le sont qu'entre les **onglets
+   d'un même poste** (le libellé du mode le dit dans l'application). C'est ce qui rend la
+   démonstration sûre à essayer — mais un **registre commun** y est impossible, et une
+   collectivité qui produit des actes **réels** installe le service (§ 1) ou branche la base
+   de son organisation (§ 5) ;
+2. **ce qui y est conservé peut disparaître** : le stockage du navigateur peut être vidé
+   (navigation privée, effacement des données du site), et l'état du service embarqué a une
+   capacité **bornée**, le plus ancien étant **évincé** à mesure (`MAX_ACTES`, `MAX_PUBLIES`,
    `MAX_SIGNATURES` dans `index.html`). Une publication peut donc quitter le recueil par
    simple pression, sans intervention. **Ce n'est pas un mode de conservation**, et il n'y
    existe **ni sauvegarde ni restauration** (elles existent, elles, ci-dessus, § 8) ;
 3. **il n'y a pas d'accès SMTP** : les notifications par courriel y sont constatées « non
    envoyées », avec leur motif.
 
-Une collectivité qui produit des actes **réels** installe le service (§ 1) ou branche sa
-propre base (§ 5). La démonstration sert à essayer, à montrer et à former — jamais à
-conserver.
+La démonstration sert à essayer, à montrer et à former — jamais à conserver.
 
 ---
 
