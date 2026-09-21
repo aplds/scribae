@@ -19,7 +19,7 @@ A4), Word, Markdown.
 
 ## Essayer, sans rien installer
 
-<https://perchance.org/scribae>
+<https://aplds.github.io/scribae>
 
 L'application s'ouvre sur le **recueil public** — les actes publiés, consultables par tout le monde,
 **sans compte**, avec leur identifiant ELI et leur texte. Pour entrer dans l'atelier, cliquez sur
