@@ -155,7 +155,29 @@ import * as db from "./db/index.js";
 // quand elle est éteinte ; une installation de démonstration doit donc repasser
 // par l'amorçage pour recevoir le MIROIR `brand.demo` et laisser le reste à
 // l'identique — d'où l'incrément.
-export const SEED_VERSION = 50;
+//
+// La 51 enrichit le jeu livré de ce que l'ORGANIGRAMME a besoin de montrer : le
+// SIGNATAIRE PRINCIPAL de chaque entité (le maire pour la commune, la directrice
+// pour le CCAS, la présidente pour la caisse des écoles, le président du conseil
+// d'administration pour l'office), le drapeau `autonome`, et une entité
+// RATTACHÉE — la régie du cinéma municipal, sans personnalité morale propre,
+// avec son directeur, son service et ses deux bureaux (voir
+// src/lib/organigramme.js). Le référentiel de démonstration doit donc être
+// regénéré pour que l'écran ait quoi montrer.
+// La 52 change le vocabulaire des ÉTAPES du parapheur : les natures
+// « vérification », « visa » et « signature » remplacent l'ancien couple
+// « bon pour accord / avis », et le circuit général s'ouvre désormais par la
+// vérification du réviseur (voir src/lib/validation.js). Les actes de
+// démonstration portent leur passage au circuit avec les libellés des étapes :
+// le jeu doit donc être regénéré pour que l'écran du parapheur montre le
+// nouveau trajet.
+// La 53 ajoute les DOCUMENTS D'ASSEMBLÉE QUI NE FONT PAS DROIT : trois trames
+// (`tpl-verbatim`, `tpl-declaration`, `tpl-voeu`) et trois actes — un verbatim
+// de séance et un vœu publiés au recueil, une déclaration en attente de
+// publication. Le recueil public montre ainsi des « documents » à côté des
+// actes, et l'écran de publication a de quoi illustrer une publication sans
+// opposabilité (voir src/lib/schema.js, ACTE_NATURES).
+export const SEED_VERSION = 53;
 
 // Migration du vocabulaire de modification. Les gabarits par défaut d'origine
 // accordaient mal le nom de l'acte (« la présente arrêté », « confiée à le
@@ -243,6 +265,21 @@ function migrateDemoStyles(config) {
   return true;
 }
 
+// L'emblème du thème sombre (`brand.logoUrlDark`) : réglage introduit après coup
+// (voir `brandLogoUrl`, src/lib/theme.js). Purement additif et volontairement
+// étroit — seul un référentiel de démonstration qui porte encore l'emblème LIVRÉ
+// reçoit sa variante sombre. Un emblème choisi par l'administrateur n'est jamais
+// touché, et un référentiel réel non plus : c'est à lui de décider s'il lui faut
+// un second dessin pour le fond sombre.
+function migrateDemoLogoDark(config) {
+  if (!config || !config.brand || !demoActif(config)) return false;
+  if (config.brand.logoUrlDark) return false;
+  const seed = seedConfig().brand;
+  if (config.brand.logoUrl !== seed.logoUrl) return false;
+  config.brand.logoUrlDark = seed.logoUrlDark;
+  return true;
+}
+
 // Réglages de charte ajoutés APRÈS la première livraison : les feuilles de
 // démonstration en reçoivent quelques-uns, pour que les nouvelles possibilités
 // (marges de page, cadre, numéros d'article, capitales, filets d'intitulé…) se
@@ -276,6 +313,62 @@ function migrateCircuits(config) {
   if (!Array.isArray(config.circuits)) {
     config.circuits = demoActif(config) ? seedConfig().circuits : [];
     changed = true;
+  }
+  return changed;
+}
+
+// Les NATURES d'étape (vérification, visa, signature) remplacent l'ancien
+// couple « bon pour accord / avis » (1.5.0). Le moteur lit les circuits anciens
+// sans broncher (`natureEtape` les ramène au visa), mais le jeu de déMONSTRATION
+// doit montrer le nouveau vocabulaire : ses étapes livrées y sont donc ramenées,
+// et seulement elles. Une étape dont la nature a déjà été choisie parmi les
+// trois nouvelles — ou une étape ajoutée par l'administrateur — n'est jamais
+// touchée. Le drapeau `experimental.parapheur` suit : toujours vrai.
+const NATURES_DEMO = {
+  "etp-chef-service": {
+    kind: "verification", role: "reviseur", serviceScoped: false, optional: false,
+    label: "Vérification du dossier",
+    help: "Le réviseur — le service des affaires juridiques, ici — contrôle que le dossier est complet, l'acte conforme et les visas réunis, avant tout engagement.",
+  },
+  "etp-ccas-chef": { kind: "visa", label: "Visa du responsable de service" },
+  "etp-direction": { kind: "visa" },
+  "etp-ccas-avis": {
+    kind: "verification", role: "administrateur", serviceScoped: false, optional: true,
+    label: "Vérification du secrétariat général",
+    help: "Vérification facultative : elle n'empêche pas la signature, mais elle est conservée au dossier.",
+  },
+  "etp-individuel": {
+    kind: "verification", role: "editeur", serviceScoped: true, optional: false,
+    label: "Vérification du responsable des ressources humaines",
+    help: "Vérification de l'habilitation, du grade et du montant avant signature.",
+  },
+  "etp-oph-service": { kind: "visa", label: "Visa du responsable de service" },
+  "etp-oph-direction": {
+    kind: "signature", role: "signataire", serviceScoped: false, optional: false,
+    label: "Signature de l'acte",
+    help: "Le signataire de l'office marque son accord pour signer : le circuit est alors achevé, et l'acte passe à la signature.",
+  },
+};
+
+function migrateCircuitsNatures(config) {
+  if (!config) return false;
+  let changed = false;
+  if (config.experimental && config.experimental.parapheur !== true) {
+    config.experimental.parapheur = true;
+    changed = true;
+  }
+  if (!demoActif(config)) return changed;
+  for (const c of config.circuits || []) {
+    for (const s of (c && c.steps) || []) {
+      const patch = NATURES_DEMO[s.id];
+      if (!patch) continue;
+      // Seules les étapes livrées restées sur l'ancien vocabulaire sont reprises.
+      if (s.kind !== "accord" && s.kind !== "avis") continue;
+      if (patch.kind && s.kind !== patch.kind) { s.kind = patch.kind; changed = true; }
+      for (const k of ["role", "label", "help", "serviceScoped", "optional"]) {
+        if (patch[k] !== undefined && s[k] !== patch[k]) { s[k] = patch[k]; changed = true; }
+      }
+    }
   }
   return changed;
 }
@@ -376,6 +469,49 @@ function migrateDemoServiceRevision(config) {
     if (s.reviseur) continue;
     const f = (fresh.services || []).find((x) => x.id === s.id);
     if (f?.reviseur) { s.reviseur = { ...f.reviseur, bureaux: [...(f.reviseur.bureaux || [])] }; changed = true; }
+  }
+  return changed;
+}
+
+// L'ORGANIGRAMME : le SIGNATAIRE PRINCIPAL de chaque entité, son drapeau
+// « autonome », et les entités RATTACHÉES du jeu de démonstration (la régie du
+// cinéma, sans personnalité morale propre, mais avec son directeur, son service
+// et ses bureaux). Purement additif, et réservé à un référentiel de
+// démonstration : une entité qui porte DÉJÀ un signataire, ou dont le drapeau
+// est posé — même éteint par l'administrateur — n'est pas touchée, et une
+// entité rattachée déjà supprimée n'est pas ressuscitée (elle est cherchée par
+// son identifiant avant d'être ajoutée).
+function migrateDemoOrganigramme(config) {
+  if (!config || !demoActif(config)) return false;
+  const fresh = seedConfig();
+  let changed = false;
+  const entites = (config.entities = Array.isArray(config.entities) ? config.entities : []);
+  const services = (config.services = Array.isArray(config.services) ? config.services : []);
+  const people = (config.people = Array.isArray(config.people) ? config.people : []);
+
+  for (const e of entites) {
+    const f = (fresh.entities || []).find((x) => x.id === e.id);
+    if (!f) continue;
+    if (e.autonome === undefined && f.autonome !== undefined) { e.autonome = f.autonome; changed = true; }
+    if (e.signerPersonId === undefined && f.signerPersonId) { e.signerPersonId = f.signerPersonId; changed = true; }
+    if (e.signerRoleId === undefined && f.signerRoleId) { e.signerRoleId = f.signerRoleId; changed = true; }
+  }
+
+  // Les entités rattachées livrées : ajoutées, avec ce qui leur appartient, si
+  // et seulement si leur identifiant est encore inconnu de ce référentiel.
+  const rattachees = (fresh.entities || []).filter((e) => e.autonome === false).map((e) => e.id);
+  const connues = new Set(entites.map((e) => e.id));
+  for (const id of rattachees) {
+    if (connues.has(id)) continue;
+    const f = fresh.entities.find((e) => e.id === id);
+    entites.push({ ...f });
+    for (const s of fresh.services || []) {
+      if (s.entityId === id) services.push({ ...s, bureaux: (s.bureaux || []).map((b) => ({ ...b })) });
+    }
+    for (const pers of fresh.people || []) {
+      if (pers.entityId === id) people.push({ ...pers });
+    }
+    changed = true;
   }
   return changed;
 }
@@ -573,8 +709,11 @@ export async function bootstrap() {
   // actes individuels, feuilles de style : `|` (et non `||`) pour toutes les
   // tenter — chacune est idempotente.
   const migrated = migrateAmendmentVocab(config) | migrateDemoNonPublishable(config) | migrateDemoStyles(config)
+    | migrateDemoLogoDark(config)
     | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
-    | migrateDemoServiceRevision(config) | migrateFamilyDescriptions(config) | migrateAssistants(config)
+    | migrateCircuitsNatures(config)
+    | migrateDemoServiceRevision(config) | migrateDemoOrganigramme(config)
+    | migrateFamilyDescriptions(config) | migrateAssistants(config)
     | migrateRecueilsExternes(config) | migrateMentionsPubliques(config);
   if (migrated || configTouched) await saveConfig(config);
 
@@ -590,9 +729,9 @@ export async function bootstrap() {
       // donc le jeu livré — de la même façon que les trames et les actes qu'on
       // régénère ici (le commutateur de démonstration, lui, est celui du
       // déploiement : voir src/lib/demo.js).
-      const embleme = seedConfig().brand.logoUrl;
-      if (config.brand?.logoUrl !== embleme) {
-        config.brand = { ...(config.brand || {}), logoUrl: embleme };
+      const embleme = seedConfig().brand;
+      if (config.brand?.logoUrl !== embleme.logoUrl || config.brand?.logoUrlDark !== embleme.logoUrlDark) {
+        config.brand = { ...(config.brand || {}), logoUrl: embleme.logoUrl, logoUrlDark: embleme.logoUrlDark };
       }
       actes = await seedActes(config, trames);
       await saveActes(actes);
@@ -658,8 +797,14 @@ export async function bootstrap() {
   return { config, trames, actes, users, session, firstRun };
 }
 
-export async function clearAll() {
-  return db.clearAll();
+// Remise à zéro de toutes les collections. `garderComptes` épargne la collection
+// des comptes : sur un service qui tient les mots de passe (comptes locaux,
+// annuaire), les comptes ne sont PAS des données du référentiel — les effacer ne
+// les supprime pas côté service, et l'installation pouvait s'en trouver sans
+// personne pour se connecter, le compte d'administration compris. On les garde
+// donc dans ce cas (voir `comptesDuDeploiement`, src/lib/auth.js).
+export async function clearAll({ garderComptes = false } = {}) {
+  return db.clearAll({ garder: garderComptes ? ["users"] : [] });
 }
 
 export { db };

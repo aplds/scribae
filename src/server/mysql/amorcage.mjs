@@ -6,6 +6,15 @@
 // plus (changer le mot de passe se fait dans l'application, ou par la commande
 // `--mot-de-passe`).
 //
+// UNE RÉPARATION, au démarrage : si le compte d'administration a DISPARU du
+// référentiel alors que le service garde encore son mot de passe (table
+// `sb_motdepasse`, hors référentiel), le compte est rétabli — même identifiant,
+// rôle administrateur, mot de passe conservé. Sans cela, une remise à zéro des
+// collections enfermait l'installation dehors : plus personne ne pouvait se
+// connecter, et `ADMIN_PASSWORD` avait souvent été retiré du `.env` (c'est ce
+// que recommande la documentation, une fois le mot de passe changé depuis
+// l'application). Voir la note de version 1.3.2p.
+//
 // Ce module est PUR : il ne connaît ni la base, ni le réseau, ni les journaux.
 // On lui passe un « port » `comptes` (celui de comptes.mjs) et les valeurs du
 // `.env`, il rend un VERDICT — `{ ok, motif, avertissement, message, panne }`.
@@ -53,8 +62,43 @@ export async function amorcerAdministrateur({
   }
 
   if (!compte) {
+    // Le compte a pu DISPARAÎTRE du référentiel sans que son mot de passe
+    // disparaisse : le mot de passe vit chez le service (table `sb_motdepasse`),
+    // HORS du référentiel. Une remise à zéro des collections, un import de
+    // données sans les comptes, ou le bouton « Repartir d'un référentiel
+    // vierge » suffisaient donc à laisser l'installation sans personne pour se
+    // connecter — et rien dans `.env` ne pouvait la réparer si `ADMIN_PASSWORD`
+    // en avait été retiré, comme la documentation le recommande une fois le mot
+    // de passe changé depuis l'application. Le compte est donc RÉTABLI ici :
+    // même identifiant, même rôle, et le mot de passe DÉJÀ POSÉ est conservé —
+    // cette réparation ne remplace jamais un mot de passe.
+    //
+    // L'identifiant cherché est celui que ce module attribue lui-même (`u-` +
+    // slug du login) : c'est celui du compte d'administration créé depuis `.env`.
+    const id = "u-" + (slug(login) || "admin");
+    let motDePasseOrphelin = false;
+    try {
+      const etats = await comptes.etatComptes();
+      motDePasseOrphelin = etats.some((c) => c && String(c.userId) === id);
+    } catch (e) {
+      return { ok: false, compte: null, motif: "Le référentiel des comptes est injoignable : " + e.message, avertissement: "", message: "", panne: e };
+    }
+    if (motDePasseOrphelin) {
+      const nom = nomDe(adminNom);
+      compte = {
+        id, civility: "", firstName: nom.firstName, lastName: nom.lastName,
+        login, email: adminEmail, role: "administrateur", roles: ["administrateur"],
+        entityId: adminEntity, service: "", personId: "", memberships: [],
+        active: true, source: "local",
+        createdAt: new Date().toISOString(), lastLogin: "",
+      };
+      await comptes.ecrireCompte(compte);
+      return succes(compte,
+        `Compte d'administration « ${login} » RÉTABLI : il manquait au référentiel, et son mot de passe — gardé par le service, hors du référentiel — reste valable (il n'a pas été remplacé).`,
+        "Le compte avait disparu du référentiel (remise à zéro, ou import de données sans les comptes). Vérifiez « Comptes et rôles » : c'est le seul compte rétabli ainsi.");
+    }
     if (!adminPassword) {
-      return refus(`Aucun compte « ${login} » au référentiel, et ADMIN_PASSWORD n'est pas renseigné : rien n'a été créé. Renseignez ADMIN_PASSWORD dans .env (au moins ${mdpMin} caractères), ou créez le compte depuis l'application.`);
+      return refus(`Aucun compte « ${login} » au référentiel, et ADMIN_PASSWORD n'est pas renseigné : rien n'a été créé. Renseignez ADMIN_PASSWORD dans .env (au moins ${mdpMin} caractères), puis RECRÉEZ le conteneur du service (« docker compose up -d », et non « restart » : un conteneur ne relit pas son .env) — le compte sera créé au démarrage suivant. À défaut, la commande de secours crée le compte : printf '%s' "$MDP" | node server.mjs --mot-de-passe ${login}`);
     }
     const faible = motDePasseFaible(login, adminPassword, mdpMin);
     if (faible) return refus("ADMIN_PASSWORD refusé : " + faible);

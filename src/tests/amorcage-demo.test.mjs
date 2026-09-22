@@ -45,6 +45,7 @@ test("démonstration éteinte : l'amorçage ne sème rien", async (t) => {
   assert.equal(config.brand.demo, false);
   assert.equal(String(config.brand.name || "").includes("Valmont"), false);
   assert.equal(config.brand.logoUrl || "", "", "aucun blason sur un référentiel vierge");
+  assert.equal(config.brand.logoUrlDark || "", "", "aucun blason sombre non plus");
 
   // Rien n'a été construit.
   for (const cle of ["entities", "councils", "services", "people", "roles", "refs", "families", "styles"]) {
@@ -71,6 +72,10 @@ test("démonstration active : le jeu livré est installé", async (t) => {
   const { config, trames, actes, users } = await store.bootstrap();
 
   assert.equal(config.brand.demo, true);
+  assert.ok(String(config.brand.logoUrl || "").startsWith("data:"), "le blason livré est semé");
+  assert.ok(String(config.brand.logoUrlDark || "").startsWith("data:"),
+    "sa variante pour le thème sombre aussi, et les deux diffèrent");
+  assert.notEqual(config.brand.logoUrl, config.brand.logoUrlDark);
   assert.ok((config.entities || []).length > 0, "le référentiel de démonstration est semé");
   assert.ok(trames.length > 0, "les trames de démonstration sont semées");
   assert.ok(users.length > 0, "les comptes de démonstration sont semés");

@@ -17,7 +17,7 @@ import {
 } from "../../lib/signataires.js";
 import { scopeLabel, coversAllServices, primaryServiceName, membershipFor, bureauxOf, servicesOf, allServicesMemberships } from "../../lib/scope.js";
 import { newCompetence, competenceLabel, estReviseur, competencesDe } from "../../lib/revision.js";
-import { isOidc, isPassword, demoAccountsDisabled, authConfig, issuerLabel, isTestProvider } from "../../lib/auth.js";
+import { isOidc, accesLocal, demoAccountsDisabled, authConfig, issuerLabel, isTestProvider } from "../../lib/auth.js";
 import { dialogueMotDePasseCompte, etatsMotDePasse, libelleEtatMotDePasse } from "../mot-de-passe.js";
 
 export function renderComptes(root) {
@@ -25,7 +25,7 @@ export function renderComptes(root) {
   const oidc = isOidc(state.config);
   // Mode « comptes locaux (mot de passe) » : les mots de passe sont tenus par le
   // SERVICE (voir src/server/mysql/comptes.mjs), et l'écran les administre.
-  const mdp = isPassword(state.config);
+  const mdp = accesLocal(state.config);
   const users = state.users.slice().sort((a, b) => {
     const r = ROLE_ORDER.indexOf(primaryRoleId(b)) - ROLE_ORDER.indexOf(primaryRoleId(a));
     return r !== 0 ? r : sortName(a).localeCompare(sortName(b));
@@ -50,7 +50,7 @@ export function renderComptes(root) {
 
   if (mdp) {
     root.appendChild(h("div", { class: "fr-alert fr-alert--info" },
-      h("p", { class: "fr-alert__title", text: "Connexion par mot de passe — les mots de passe sont tenus par le service" }),
+      h("p", { class: "fr-alert__title", text: (oidc ? "Comptes locaux — " : "Connexion par mot de passe — ") + "les mots de passe sont tenus par le service" }),
       h("p", { text: "Le service de la collectivité garde les mots de passe (hors de l'application) : il les vérifie à la connexion et ouvre une session. Ici, on crée les comptes, on règle leur rôle, et l'on pose ou retire leur mot de passe. Un compte sans mot de passe ne peut pas se connecter. Le compte d'administration, lui, est créé au premier démarrage à partir du fichier .env du déploiement (ADMIN_LOGIN, ADMIN_PASSWORD) — et il ne le réécrit pas ensuite." }),
       mdp && demoAccountsDisabled(state.config)
         ? h("p", { text: "Les comptes de démonstration sont fermés sur ce déploiement (DEMO_ACCOUNTS=false) : ils ne peuvent pas ouvrir de session." })
@@ -470,7 +470,7 @@ function signatureEditor(u) {
 
 function editUser(existing) {
   const oidc = isOidc(state.config);
-  const mdp = isPassword(state.config);
+  const mdp = accesLocal(state.config);
   const u = existing ? { ...existing } : newUser({ entityId: state.config.entities?.[0]?.id || "" });
   let loginTouched = !!existing;
 

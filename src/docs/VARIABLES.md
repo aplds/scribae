@@ -30,6 +30,7 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SCRIBA_IDENTITE_COULEUR` | référentiel | **Couleur principale** — Couleur d'accent de l'interface et des documents produits. | couleur |  | #000091 |
 | `SCRIBA_IDENTITE_COULEUR_SOMBRE` | référentiel | **Couleur principale (survol)** — Variante employée pour les états survolés et les contrastes. | couleur |  | #1212ff |
 | `SCRIBA_IDENTITE_EMBLEME` | référentiel | **Emblème** — Adresse de l'emblème, ou data URL. Vide : aucun emblème n'est affiché. | texte |  | https://www.exemple.fr/blason.svg |
+| `SCRIBA_IDENTITE_EMBLEME_SOMBRE` | référentiel | **Emblème (thème sombre)** — Emblème de rechange, employé quand le poste de travail est en thème sombre. Vide : l'emblème ordinaire sert dans les deux thèmes. | texte |  | https://www.exemple.fr/blason-clair.svg |
 | `SCRIBA_IDENTITE_POLICE_INTERFACE` | référentiel | **Police de l'interface** — Famille de caractères de l'application (interface). | texte |  | system-ui, Arial, sans-serif |
 | `SCRIBA_IDENTITE_POLICE_DOCUMENT` | référentiel | **Police des documents** — Famille de caractères des actes compilés et imprimés. | texte |  | Georgia, 'Times New Roman', serif |
 | `SCRIBA_SUPPORT_NOM` | référentiel | **Service de contact** — Le service auquel un lecteur s'adresse (pied de page du recueil). | texte |  | Service des affaires générales |
@@ -84,11 +85,26 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 |---|---|---|---|---|---|
 | `SCRIBA_SIGNATURE_MODE` | référentiel | **Circuit de signature** — « electronique » : prestataire par API. « simple » : signature dans l'application. « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement. | choix : electronique ou simple ou externe |  | electronique |
 
+## Signature — API
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_SIGNATURE_API_TRANSPORT` | référentiel | **Transport du circuit électronique** — « service » : c'est le service de la collectivité qui appelle le prestataire — seul moyen de garder la clé d'API côté serveur. « demonstration » : le circuit est simulé localement (aucun appel sortant). | choix : service ou demonstration |  | service |
+| `SCRIBA_SIGNATURE_API_URL` | référentiel | **Adresse de base du prestataire** — Racine de l'API du prestataire de signature. Vide, le circuit électronique reste en simulation : rien ne sort de la collectivité. | url |  | https://signature.exemple.fr/api/v1 |
+| `SCRIBA_SIGNATURE_API_PRESTATAIRE` | référentiel | **Identifiant du prestataire** — Nom technique du prestataire (il sert aux en-têtes et au journal). | texte |  | esup-signature |
+| `SCRIBA_SIGNATURE_API_NIVEAU` | référentiel | **Niveau de signature demandé** — Niveau demandé au prestataire pour les actes de la collectivité : signature simple, avancée (certificat), ou qualifiée (eIDAS). | choix : simple ou avancee ou qualifiee |  | avancee |
+| `SCRIBA_SIGNATURE_API_NOTIFICATION` | référentiel | **Adresse de notification (webhook)** — L'adresse que le prestataire appellera une fois l'acte signé. Vide : l'adresse du service, suivie de /v1/webhooks/signature. | texte |  | https://actes.exemple.fr/v1/webhooks/signature |
+| `SCRIBA_SIGNATURE_API_TIMEOUT` | référentiel | **Délai d'attente du prestataire (ms)** — Temps maximal accordé à un appel au prestataire avant abandon. | entier (min 1000, max 120000) |  | 20000 |
+| `SCRIBA_SIGNATURE_API_CHEMIN_DOCUMENT` | référentiel | **Chemin — dépôt du document** — Point de terminaison qui reçoit le document à signer, relatif à l'adresse de base. Aucun jeton. | texte |  | /documents |
+| `SCRIBA_SIGNATURE_API_CHEMIN_SIGNATAIRES` | référentiel | **Chemin — ajout d'un signataire** — Point de terminaison qui reçoit les signataires. Jeton {document} : l'identifiant rendu au dépôt. | texte |  | /documents/{document}/signataires |
+| `SCRIBA_SIGNATURE_API_CHEMIN_DEMARRER` | référentiel | **Chemin — démarrage du circuit** — Point de terminaison qui lance le circuit de signature. Jeton {document}. | texte |  | /documents/{document}/demarrer |
+| `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | référentiel | **Chemin — suivi du circuit** — Point de terminaison interrogé pour relire le statut d'un circuit. Jeton {document}. | texte |  | /documents/{document} |
+| `SCRIBA_SIGNATURE_API_CLE` | service | **Clé d'API du prestataire de signature** — La clé que le service présente au prestataire (en-tête Authorization). Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, le service n'appelle pas le prestataire en production. SECRET. | texte |  | (secret) |
+
 ## Fonctions
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
 |---|---|---|---|---|---|
-| `SCRIBA_PARAPHEUR` | référentiel | **Parapheur (circuit de validation)** — Active le circuit de validation avant signature. Éteint par défaut. | booleen |  | false |
 | `SCRIBA_CONTROLE_LEGALITE` | référentiel | **Contrôle de légalité** — Active la transmission de l'acte signé au représentant de l'État par API. Éteint par défaut. | booleen |  | false |
 | `SCRIBA_ASSISTANT_ATELIER` | référentiel | **Assistant de l'atelier (« Plume »)** — Allumé, l'assistant d'aide à l'atelier est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
 | `SCRIBA_ASSISTANT_PUBLIC` | référentiel | **Assistant du recueil (« Publia »)** — Allumé, l'assistant du recueil public est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
@@ -110,7 +126,7 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
 |---|---|---|---|---|---|
-| `AUTH_MODE` | service | **Mode d'authentification** — « password » : vrais comptes locaux (mot de passe vérifié par le service, session par cookie). « demo » : comptes choisis dans une liste, sans mot de passe — essai seulement. | choix : password ou demo | password | password |
+| `AUTH_MODE` | service | **Mode d'authentification** — « password » : vrais comptes locaux (mot de passe vérifié par le service, session par cookie). « oidc » : l'annuaire de la collectivité (OpenID Connect) — MAIS les comptes locaux restent ouverts, et c'est ce qui donne accès au compte d'administration déclaré ici : les deux portes coexistent. « demo » : comptes choisis dans une liste, sans mot de passe — essai seulement. | choix : password ou oidc ou demo | password | password |
 | `DEMO` | service | **Commutateur de démonstration** — Allumé, le jeu fictif complet est installé et le bandeau « Démonstration » s'affiche. Éteint, l'outil est une page vierge. Vide : AUTH_MODE=demo ou DEMO_ACCOUNTS=true l'allument. | booleen |  | false |
 | `DEMO_ACCOUNTS` | service | **Comptes de démonstration** — Laisse le raccourci « choisir un compte » ouvert en mode `password`. À laisser à false en service. | booleen |  | false |
 | `ADMIN_LOGIN` | service | **Identifiant d'administration** — Identifiant du compte d'administration créé au premier démarrage (mode `password`). | texte | admin | admin |

@@ -15,6 +15,7 @@
 import { state, can, navigate, majUrlRecherche } from "../state.js";
 import { h, clear, button, icon } from "../dom.js";
 import { estVisiteur } from "../../lib/users.js";
+import { brandLogoUrl } from "../../lib/theme.js";
 import { demoNotice } from "../notice.js";
 import { get, bodyOf } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
@@ -325,8 +326,12 @@ function porteApplication() {
 function entete() {
   const brand = state.config?.brand || {};
   const settings = publicationSettings(state.config);
-  const marque = brand.logoUrl
-    ? h("img", { class: "recueil-ident__logo", src: brand.logoUrl, alt: "" })
+  // L'emblème de la structure qui publie — dans la variante du thème courant :
+  // le recueil suit le thème du poste (et celui du système, tant que le choix
+  // d'apparence est « Automatique »), donc il se redessine avec lui.
+  const logo = brandLogoUrl(brand);
+  const marque = logo
+    ? h("img", { class: "recueil-ident__logo", src: logo, alt: "" })
     : h("span", { class: "recueil-ident__logo recueil-ident__logo--mark", text: (brand.shortName || brand.name || "?").slice(0, 3).toUpperCase() });
   return h("header", { class: "recueil-header" },
     // Le lien d'évitement est le PREMIER élément focusable de la page : au

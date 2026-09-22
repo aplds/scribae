@@ -135,3 +135,43 @@ test("un compte sans le rôle administrateur est signalé par un avertissement",
   assert.equal(r.ok, true);
   assert.match(r.avertissement, /rôle administrateur/);
 });
+
+// ---------------------------- la réparation : le compte a disparu, le mot de passe est resté
+// Le cas qui a enfermé une installation dehors (note 1.3.2p) : « Repartir d'un
+// référentiel vierge » effaçait les comptes de la collection `users`, mais pas
+// leurs mots de passe — ceux-ci vivent chez le service, dans `sb_motdepasse`,
+// hors du référentiel. Le compte d'administration disparaissait, son mot de
+// passe restait orphelin, et `ADMIN_PASSWORD` ayant été retiré du `.env` (comme
+// le recommande la documentation une fois le mot de passe changé depuis
+// l'application), plus personne ne pouvait se connecter.
+test("un compte disparu du référentiel est RÉTABLI si son mot de passe est resté", async () => {
+  const comptes = fauxComptes({ existants: [], etats: [{ userId: "u-jmercier", defini: true }] });
+  const r = await amorcerAdministrateur({ ...base, adminPassword: "", comptes });
+  assert.equal(r.ok, true);
+  assert.equal(r.compte.id, "u-jmercier");
+  assert.equal(r.compte.login, "j.mercier");
+  assert.deepEqual(r.compte.roles, ["administrateur"]);
+  assert.equal(comptes.appels.ecrire.length, 1, "le compte est réécrit au référentiel");
+  assert.deepEqual(comptes.appels.motDePasse, [], "le mot de passe existant n'est PAS remplacé");
+  assert.match(r.message, /RÉTABLI/);
+  assert.match(r.avertissement, /Comptes et rôles/);
+});
+
+test("un mot de passe resté sous un AUTRE identifiant ne rétablit rien", async () => {
+  // L'identifiant du compte d'un `.env` est « u- » + slug du login : un mot de
+  // passe orphelin rangé sous un autre identifiant n'est pas celui de ce compte,
+  // et l'amorçage ne doit pas inventer un compte avec.
+  const comptes = fauxComptes({ existants: [], etats: [{ userId: "u-autre", defini: true }] });
+  const r = await amorcerAdministrateur({ ...base, adminPassword: "", comptes });
+  assert.equal(r.ok, false);
+  assert.match(r.motif, /ADMIN_PASSWORD n'est pas renseigné/);
+  assert.deepEqual(comptes.appels.ecrire, []);
+});
+
+test("le refus d'un compte absent dit les DEUX gestes qui le réparent", async () => {
+  const comptes = fauxComptes({ existants: [], etats: [] });
+  const r = await amorcerAdministrateur({ ...base, adminPassword: "", comptes });
+  assert.match(r.motif, /ADMIN_PASSWORD/, "poser le mot de passe dans le .env");
+  assert.match(r.motif, /up -d/, "recréer le conteneur — un simple redémarrage ne relit pas le .env");
+  assert.match(r.motif, /--mot-de-passe/, "ou la commande de secours");
+});

@@ -123,11 +123,16 @@ services:
       # Sans objet en mode `password` : l'application n'a alors que son cookie de
       # session.
       API_TOKEN: ${API_TOKEN:-}
-      # Mode d'authentification, tel que l'annonce au NAVIGATEUR (voir
-      # web/config.js.template et web/host.js). Le mode du service
-      # (GET /v1/auth/config) reste autoritaire ; celui-ci n'évite qu'un
-      # aller-retour et un clignotement de l'écran de connexion.
-      AUTH_MODE: ${AUTH_MODE:-}
+      # Mode d'authentification, tel qu'il est annoncé au NAVIGATEUR (voir
+      # web/config.js.template et web/host.js) — c'est lui qui apprend à
+      # l'application, AVANT son premier appel, que la porte est une session et
+      # non un jeton. Le mode du service (GET /v1/auth/config) reste
+      # autoritaire ; celui-ci n'évite qu'un aller-retour. Il doit valoir le
+      # DÉFAUT DU SERVICE (`password`, voir le service `api` ci-dessus) : sans
+      # cela, un `.env` qui ne dit rien laisserait le navigateur croire à un
+      # jeton, et ses écritures seraient refusées (403, anti-CSRF absent) alors
+      # que les lectures passeraient.
+      AUTH_MODE: ${AUTH_MODE:-password}
       DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-}
       # Le commutateur de démonstration (`DEMO`), tel qu'il est annoncé au
       # navigateur (voir web/config.js.template et web/host.js). Vide = présage

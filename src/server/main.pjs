@@ -1,0 +1,55 @@
+// ============================================================================
+// Scribae — trames, rédaction et publication des actes administratifs.
+//
+// FLUX DE TRAVAIL (consigne permanente, détaillée dans src/README.md,
+// section « Flux de travail : Perchance ↔ GitHub ») :
+//   • le développement se fait ICI, sur Perchance : main.pjs + index.html + src/ ;
+//   • les versions finalisées sont déposées sur GitHub, qui est la référence
+//     publiée ;
+//   • quand l'utilisateur fournit un lien GitHub : COMPARER avant de coder, en
+//     lisant APP_VERSION (src/lib/version.js) et la première entrée datée de
+//     src/CHANGELOG.md ; si GitHub est plus récent, reporter D'ABORD GitHub dans
+//     Perchance, à l'identique, et vérifier que l'application tourne ;
+//   • toute version figée : incrémenter APP_VERSION et ajouter son entrée datée
+//     dans src/CHANGELOG.md (lisible dans l'application : Documentation
+//     technique › Journal des versions).
+// ============================================================================
+
+$meta
+  title = Scribae — trames, rédaction et publication des actes administratifs
+  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. La page d'accueil est le recueil public des actes publiés — consultable par tous, sans compte, avec leur identifiant ELI et leur texte ; l'atelier s'ouvre par « Se connecter ». L'application peut être déployée en auto-hébergement sur la base de la collectivité (le jeu de démonstration, entièrement fictif, s'active alors par le réglage DEMO) ; à défaut, cet aperçu présente la démonstration.
+  image = https://user.uploads.dev/file/06d748c1bac8b420d52e7572cc6d66f0.jpg
+  tags = actes administratifs, akoma ntoso, legalxml, trames, eli, open data, guide
+
+// Persistance : le stockage du navigateur (IndexedDB) sert de pilote « local »
+// — c'est le mode de démonstration. L'application peut aussi être branchée sur
+// une base partagée (service de démonstration, ou serveur MySQL/MariaDB) :
+// voir src/lib/db/ et src/server/mysql/.
+kv = {import:kv-plugin}
+
+// Service de signature et de publication (API REST) — voir index.html pour le
+// code du service lui-même. Sans lui, l'écran « Signature & publication » et la
+// consultation des publications restent inaccessibles.
+createServerSocket = {import:server-plugin}
+
+// Relais HTTP sans CORS, utilisé par la numérotation externe (Administration ›
+// Numérotation) : un nombre croissant de collectivités prennent leur numéro
+// d'acte dans un outil tiers (Grist, tableur en ligne, référentiel interne) où
+// la création d'une ligne attribue le numéro. Le navigateur ne peut pas appeler
+// ces services directement (CORS), le relais s'en charge. Voir
+// src/lib/numbering.js.
+superFetch = {import:super-fetch-plugin}
+
+// Hébergement de fichiers, utilisé par le circuit de signature externe : quand
+// le rédacteur rentre dans la base la version signée sur papier (ou via un
+// outil tiers), le PDF est déposé ici et l'acte ne conserve que son URL. Voir
+// src/lib/externe.js et src/ui/views/signature.js.
+uploadPlugin = {import:upload-plugin}
+
+// Moteur de langage des deux assistants (Administration › Assistants) : celui
+// de l'atelier, qui explique le mode d'emploi de l'outil, et celui du recueil
+// public, qui répond sur les actes publiés. Les prompts envoyés à ce moteur ne
+// contiennent JAMAIS le contenu des actes — voir src/lib/assistant.js. Une
+// collectivité peut brancher son propre moteur à la place (Administration ›
+// Assistants), et l'application s'en passe proprement quand il n'y en a pas.
+generateText = {import:ai-text-plugin}

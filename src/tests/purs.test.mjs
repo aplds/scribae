@@ -194,3 +194,142 @@ test("legalite : une transmission simulée porte une mention qualifiée", async 
   assert.equal(v.ok, true);
 });
 
+// ------------------------------------------------------------------ apparence
+test("theme : l'emblème du thème sombre, et le repli sur l'emblème ordinaire", async (t) => {
+  const theme = await charger("../lib/theme.js");
+  if (!theme) return t.skip("module indisponible hors navigateur");
+  const brand = { logoUrl: "clair.png", logoUrlDark: "sombre.png" };
+  assert.equal(theme.brandLogoUrl(brand, { dark: false }), "clair.png");
+  assert.equal(theme.brandLogoUrl(brand, { dark: true }), "sombre.png", "le thème sombre prend la variante");
+  assert.equal(theme.brandLogoUrl({ logoUrl: "clair.png" }, { dark: true }), "clair.png",
+    "sans variante, l'emblème ordinaire sert dans les deux thèmes");
+  assert.equal(theme.brandLogoUrl({ logoUrlDark: "sombre.png" }, { dark: false }), "",
+    "la variante ne s'emploie jamais sur le thème clair");
+  assert.equal(theme.brandLogoUrl({}), "");
+  assert.equal(theme.brandLogoUrl(null), "");
+});
+
+// ------------------------------------------------------------------ comptes
+// Ce que la remise à zéro du référentiel a le droit d'emporter : les comptes du
+// jeu de démonstration, jamais ceux du déploiement (note 1.3.2p).
+test("auth : les comptes appartiennent-ils au déploiement ?", async (t) => {
+  const auth = await charger("../lib/auth.js");
+  if (!auth) return t.skip("module indisponible hors navigateur");
+  auth.setDeploiementAuth({ mode: "password", demo: true, demoJeu: true });
+  assert.equal(auth.comptesDuDeploiement(), true, "comptes locaux : ils ne partent pas avec le référentiel");
+  auth.setDeploiementAuth({ mode: "oidc", demo: false, demoJeu: false });
+  assert.equal(auth.comptesDuDeploiement(), true, "annuaire : les comptes non plus");
+  auth.setDeploiementAuth({ mode: "demo", demo: true, demoJeu: true });
+  assert.equal(auth.comptesDuDeploiement(), false, "en démonstration, les comptes sont ceux du jeu fictif");
+  auth.setDeploiementAuth(null);
+  assert.equal(auth.comptesDuDeploiement(), false, "sans déploiement (aperçu, page statique) : rien à épargner");
+});
+
+// ------------------------------------------------------ séquence de numérotation
+// Le chrono ne distribue jamais deux fois le même numéro : la réservation enjambe
+// les rangs déjà portés par un acte, ou annulés. Sans cette garde, un compteur
+// resté en arrière (numéros attribués hors de l'application, reprise d'un autre
+// outil, passage d'année) proposerait un numéro déjà pris.
+// Voir src/lib/sequence.js et src/lib/numbering.js.
+test("sequence : le prochain numéro enjambe les rangs déjà pris", async (t) => {
+  const seq = await charger("../lib/sequence.js");
+  if (!seq) return t.skip("module indisponible hors navigateur");
+  const config = { numbering: { seq: 10, pad: 3, year: 2026, pattern: "{year}-{seq}-{entityCode}" } };
+  const entity = { code: "VSL" };
+
+  assert.equal(seq.sequenceCourante(config, { entity }), 10);
+  assert.equal(seq.nextNumero(config, entity), "2026-010-VSL");
+  assert.equal(seq.prochainNumeroLibre(config, { entity, actes: [] }).numero, "2026-010-VSL");
+
+  // Trois rangs déjà pris (dont un lu dans les valeurs du brouillon).
+  const actes = [
+    { numero: "2026-010-VSL" },
+    { numero: "2026-011-VSL" },
+    { values: { numero: "2026-012-VSL" } },
+  ];
+  const libre = seq.prochainNumeroLibre(config, { entity, actes });
+  assert.equal(libre.numero, "2026-013-VSL");
+  assert.equal(libre.seq, 13);
+  assert.equal(libre.sautes, 3);
+
+  // Le compteur se fixe APRÈS le rang réservé, et ne recule jamais.
+  assert.equal(seq.fixerSequence(config, libre.seq, { entity }), 14);
+  assert.equal(seq.fixerSequence(config, 2, { entity }), 14);
+  assert.equal(seq.sequenceCourante(config, { entity }), 14);
+
+  // Un numéro annulé n'est pas réattribué à l'aveugle.
+  const c2 = { numbering: { seq: 1, pad: 3, year: 2026, annules: [{ numero: "2026-001-VSL", motif: "erreur de saisie" }] } };
+  assert.equal(seq.prochainNumeroLibre(c2, { entity, actes: [] }).numero, "2026-002-VSL");
+});
+
+test("sequence : la portée tient un compteur par entité ou par type d'acte", async (t) => {
+  const seq = await charger("../lib/sequence.js");
+  if (!seq) return t.skip("module indisponible hors navigateur");
+  const base = { seq: 7, pad: 3, year: 2026, pattern: "{year}-{seq}-{entityCode}" };
+
+  const parEntite = { numbering: { ...base, portee: "entite" } };
+  const vsl = { code: "VSL" };
+  const ccas = { code: "CCAS" };
+  assert.equal(seq.cleSequence(parEntite, { entity: ccas }), "CCAS");
+  // Une portée sans compteur part de la séquence générale : rien à ressaisir.
+  assert.equal(seq.sequenceCourante(parEntite, { entity: ccas }), 7);
+  seq.fixerSequence(parEntite, 7, { entity: vsl });
+  assert.equal(seq.sequenceCourante(parEntite, { entity: vsl }), 8);
+  assert.equal(seq.sequenceCourante(parEntite, { entity: ccas }), 7, "chaque entité a son chrono");
+
+  const parType = { numbering: { ...base, portee: "type" } };
+  assert.equal(seq.cleSequence(parType, { actTypeId: "arrete" }), "arrete");
+  seq.fixerSequence(parType, 7, { actTypeId: "arrete" });
+  assert.equal(seq.sequenceCourante(parType, { actTypeId: "arrete" }), 8);
+  assert.equal(seq.sequenceCourante(parType, { actTypeId: "deliberation" }), 7);
+});
+
+test("sequence : un numéro composé se relit (rang, année, entité)", async (t) => {
+  const seq = await charger("../lib/sequence.js");
+  if (!seq) return t.skip("module indisponible hors navigateur");
+  const config = { numbering: { seq: 1, pad: 3, year: 2026, pattern: "{year}-{seq}-{entityCode}" } };
+  assert.equal(seq.seqDeNumero(config, "2026-412-VSL"), 412);
+  assert.equal(seq.anneeDeNumero(config, "2026-412-VSL"), 2026);
+  assert.equal(seq.entiteCodeDeNumero(config, "2026-412-VSL"), "VSL");
+  // Un motif surnuméraire qui change de forme : la relecture suit le motif.
+  const c2 = { numbering: { seq: 1, year: 2026, pattern: "{entityCode}/{actTypeId}/{year}/{seq}" } };
+  assert.equal(seq.seqDeNumero(c2, "VSL/arrete/2026/7"), 7);
+  assert.equal(seq.entiteCodeDeNumero(c2, "VSL/arrete/2026/7"), "VSL");
+});
+
+// --------------------------------------------------------------- chrono
+// L'écran « Chrono de numérotation » se bâtit sur ce noyau : chaque acte
+// numéroté donne une ligne, les rangs jamais attribués en donnent une aussi.
+test("chrono : les lignes, les rangs libres et les filtres", async (t) => {
+  const chrono = await charger("../lib/chrono.js");
+  if (!chrono) return t.skip("module indisponible hors navigateur");
+  const config = {
+    entities: [{ id: "e1", code: "VSL", name: "Ville" }],
+    actTypes: [{ id: "arrete", label: "Arrêté" }],
+    numbering: { seq: 4, pad: 3, year: 2026, pattern: "{year}-{seq}-{entityCode}" },
+  };
+  const actes = [
+    { id: "a1", numero: "2026-001-VSL", objet: "premier", entityId: "e1", statut: "publie", createdAt: "2026-01-05" },
+    { id: "a2", numero: "2026-003-VSL", objet: "troisième", entityId: "e1", statut: "brouillon", createdAt: "2026-01-09" },
+    { id: "a3", values: { numero: "" }, objet: "sans numéro : hors chrono" },
+  ];
+  const lignes = chrono.lignesChrono(config, actes);
+  assert.equal(lignes.length, 2, "un acte sans numéro n'entre pas au chrono");
+
+  const libres = chrono.rangsLibres(config, lignes);
+  assert.deepEqual(libres.map((l) => l.seq), [2], "le rang 2 n'a jamais été tiré");
+
+  const toutes = [...lignes, ...libres];
+  assert.equal(chrono.resumeChrono(config, toutes).total, 2);
+  assert.equal(chrono.resumeChrono(config, toutes).libres, 1);
+
+  const masque = chrono.filtrerTrier(toutes, { ...chrono.FILTRES_VIDES, libres: false });
+  assert.equal(masque.length, 2, "les rangs libres se masquent");
+
+  const cherche = chrono.filtrerTrier(toutes, { ...chrono.FILTRES_VIDES, q: "premier" });
+  assert.deepEqual(cherche.map((l) => l.numero), ["2026-001-VSL"]);
+
+  const titre = chrono.tableauDe(lignes)[0];
+  assert.equal(titre.length, chrono.COLONNES_CHRONO.length, "l'export a les mêmes colonnes que le tableau");
+  assert.equal(titre[0], "Numéro");
+});

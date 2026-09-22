@@ -34,6 +34,12 @@ export function createActesApi({
   maxPublies = 40,
   maxSignatures = 80,
   maxActes = 80,
+  // Le PRESTATAIRE DE SIGNATURE (voir signature.mjs) : le seul composant qui
+  // appelle réellement l'API du prestataire, avec la clé — qui ne quitte pas le
+  // serveur. Absent (ou non configuré), le circuit électronique reste en
+  // simulation : le service renvoie alors les réglages qu'on lui a transmis,
+  // sans rien appeler au-dehors.
+  prestataire = null,
 }) {
   const db = state;
   let dirty = null;           // dernier état sérialisé, en attente d'écriture
@@ -150,7 +156,7 @@ export function createActesApi({
     return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
   }
   function resumePublication(p, latest) {
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null };
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
   }
 
   function clePublication(eliUri, dateExpr) {
@@ -197,9 +203,9 @@ export function createActesApi({
         "/v1/actes/{id}/signature": {
           post: {
             operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
-            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état.",
+            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte alors le lien de signature réel (`lienSignature`, `dossier`) ; sinon le circuit est simulé (`simulation: true`), et rien ne sort de la collectivité. La clé du prestataire n'est jamais transmise par le client, ni écrite au registre.",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (voir Administration › Signature). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
             responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé" }, 401: { description: "Jeton absent" } },
           },
         },
@@ -291,35 +297,109 @@ export function createActesApi({
     return ok(201, { id, href: "/v1/actes/" + id, sha256: sha, statut: acte.statut, deposeLe: acte.deposeLe }, { location: "/v1/actes/" + id });
   }
 
-  function hEnvoyerEnSignature(ctx) {
+  // --------------------------------------------------------------------------
+  // ENVOYER EN SIGNATURE — l'ouverture du circuit.
+  //
+  // Deux façons de le mener, réglées par le référentiel (`signature.api`, voir
+  // src/lib/externe.js) et par le `.env` du déploiement :
+  //
+  //   • le transport vaut « service » et une adresse ET une clé sont
+  //     configurées : c'est CE SERVICE qui appelle le prestataire, par
+  //     signature.mjs — la clé ne sort jamais du serveur. Le client reçoit le
+  //     lien de signature réel, et le prestataire préviendra le service par le
+  //     webhook ;
+  //   • sinon : le circuit est SIMULÉ. Le service tient le registre, et c'est
+  //     l'application qui joue le prestataire (c'est le mode de la
+  //     démonstration, et celui d'une collectivité qui n'a pas encore branché
+  //     le sien). Rien ne sort de la collectivité.
+  //
+  // Le client transmet ses réglages (`api`) : ils sont ceux du référentiel, et
+  // le `.env` les a éventuellement écrasés. Ils servent à la simulation, et
+  // restent enregistrés sur le circuit, pour que la lecture d'un dossier dise
+  // toujours d'où le numéro et le lien venaient. JAMAIS la clé.
+  // --------------------------------------------------------------------------
+  async function hEnvoyerEnSignature(ctx) {
     const acte = lireActe(ctx.params.id);
     if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
     if (acte.statut === "signee" || acte.statut === "publie") return err(409, "Cet acte est déjà signé (" + acte.statut + ").", { code: "deja_signe" });
     const b = ctx.body || {};
     const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
+    const reglages = { ...(b.api || {}) };
+    const niveau = b.niveau || reglages.niveau || "avancee";
+    const urlNotification = b.urlNotification || reglages.urlNotification || "/v1/webhooks/signature";
+
+    // Le prestataire est-il réellement branché côté service ? Le circuit
+    // « simple » (niveau simple) n'y touche jamais : il se signe DANS
+    // l'application, avec le compte du signataire — voir src/lib/externe.js.
+    const branche = !!(prestataire && prestataire.actif()) && niveau !== "simple";
     const id = nextId("SIG", db.signatures);
     const sig = {
       id, acteId: acte.id, numero: acte.numero, acteSha256: acte.sha256,
-      statut: "en_attente", signataires, niveau: b.niveau || "avancee",
-      urlNotification: b.urlNotification || "/v1/webhooks/signature",
-      prestataire: b.prestataire || "esup-signature", creeLe: nowIso(), documentSigne: null,
+      statut: "en_attente", signataires, niveau,
+      urlNotification,
+      prestataire: reglages.prestataire || "esup-signature",
+      // Les réglages reçus — jamais la clé, qui n'est même pas transmise par le
+      // client : elle ne vit qu'auprès du service (SCRIBA_SIGNATURE_API_CLE).
+      api: { ...reglages },
+      simulation: !branche,
+      creeLe: nowIso(), documentSigne: null,
     };
+
+    // Le dépôt réel auprès du prestataire : trois appels, dont la réponse porte
+    // l'identifiant du dossier et le lien de signature. Un échec n'ouvre PAS le
+    // circuit : le registre reste intact, et le client sait quoi corriger.
+    let depot = null;
+    if (branche) {
+      try {
+        depot = await prestataire.provisionner({
+          akn: acte.akn, reference: acte.numero || acte.id, numero: acte.numero || "",
+          objet: acte.objet || "", acteId: acte.id, empreinte: acte.sha256,
+          signataires: signataires.map((s) => ({ ...s, niveau: s.niveau || niveau })),
+        });
+      } catch (e) {
+        return err(502, "Le circuit n'a pas pu être ouvert auprès du prestataire : " + String((e && e.message) || e), { code: "prestataire_indisponible" });
+      }
+      sig.docId = depot.document;
+      sig.lienSignature = depot.lienSignature || "";
+    } else {
+      // Simulation : le lien est celui que l'application jouera elle-même — il
+      // ne pointe nulle part de réel, et le dossier est le circuit lui-même.
+      sig.docId = id;
+      sig.lienSignature = (reglages.url || "") + "/signature/" + id;
+    }
+
     db.signatures[id] = sig;
     acte.statut = "en_signature";
     acte.signatureId = id;
     evince(db.signatures, maxSignatures, "creeLe");
     if (!persist()) { delete db.signatures[id]; acte.statut = "depose"; return err(507, "Le service n'a plus de place disponible."); }
+
+    const infoPrestataire = branche
+      ? depot.prestataire
+      : {
+        id: reglages.prestataire || "esup-signature",
+        nom: (reglages.prestataire || "esup-signature") + " (simulation)",
+        baseUrl: reglages.url || "",
+        niveau,
+        demonstration: true,
+      };
     return ok(202, {
       signatureId: id,
       statut: "en_attente",
       acteId: acte.id,
       empreinte: acte.sha256,
       signataires,
-      lienSignature: (b.basePrestataire || "") + "/signature/" + id,
+      niveau,
+      simulation: !branche,
+      dossier: sig.docId || id,
+      lienSignature: sig.lienSignature || "",
       relevé_apres_secondes: 20,
       prestataire: {
-        id: "esup-signature", nom: "ESUP-Signature (simulation)", baseUrl: b.basePrestataire || "", niveau: sig.niveau,
-        document: "/documents", signataires: "/documents/{id}/signataires", demarrer: "/documents/{id}/demarrer", statut: "/documents/{id}",
+        ...infoPrestataire,
+        document: (reglages.cheminDocument || "/documents"),
+        signataires: (reglages.cheminSignataires || "/documents/{document}/signataires"),
+        demarrer: (reglages.cheminDemarrer || "/documents/{document}/demarrer"),
+        statut: (reglages.cheminStatut || "/documents/{document}"),
       },
       notifications: { url: sig.urlNotification, evenement: "signature.terminee" },
     }, { location: "/v1/signatures/" + id });
@@ -435,8 +515,16 @@ export function createActesApi({
       numero: b.numero || (informative ? "" : acte.numero), nature: b.nature || acte.nature, objet: b.objet || acte.objet,
       themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
       entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
-      dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
+      // Un document non juridique n'a PAS d'entrée en vigueur : le service ne
+      // retient aucune date d'opposabilité, même si un client en proposait une.
+      dateDocument, datePublication, dateOpposabilite: b.juridique === false ? "" : (b.dateOpposabilite || ""),
       opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
+      // Un document NON JURIDIQUE (verbatim, déclaration, vœu) : publié au
+      // recueil, mais sans opposabilité. Le drapeau vient du client, qui l'a lu
+      // sur la nature de la trame ; il voyage avec la publication et jusqu'au
+      // recueil, qui présente alors le document sans entrée en vigueur.
+      juridique: b.juridique === false ? false : undefined,
+      natureDoc: b.natureDoc || undefined,
       kind: b.kind || "originale", brandName: b.brandName || "",
       // Une publication INFORMATIVE (le règlement consolidé d'une annexe) et,
       // pour toute publication, l'acte qui l'adopte s'il y en a un : le recueil
@@ -510,6 +598,8 @@ export function createActesApi({
       recueil: rec.recueil,
       epingle: rec.epingle === true,
       informative: rec.informative === true,
+      juridique: rec.juridique === false ? false : undefined,
+      natureDoc: rec.natureDoc || undefined,
       adoption: rec.adoption || null,
       versions,
       ressource: "/v1/publications/" + encodeURIComponent(cle),
@@ -690,7 +780,7 @@ export function createActesApi({
       p.themeLabel ? "Thème : " + p.themeLabel + "." : "",
       p.entityName ? p.entityName + "." : "",
       p.datePublication ? "Publié le " + dateLongue(p.datePublication)
-        + (p.dateOpposabilite ? ", entrée en vigueur le " + dateLongue(p.dateOpposabilite) : "") + "." : "",
+        + (p.juridique === false ? " (document non opposable)" : p.dateOpposabilite ? ", entrée en vigueur le " + dateLongue(p.dateOpposabilite) : "") + "." : "",
     ].filter(Boolean);
     const texte = parts.join(" ").replace(/\s+/g, " ").trim();
     return texte.length > max ? texte.slice(0, max - 1).trimEnd() + "…" : texte;
@@ -738,7 +828,9 @@ export function createActesApi({
       `- Identifiant ELI : \`${p.eliUri || "—"}\``,
       `- Date de l'acte : ${dateLongue(p.dateDocument) || "—"}`,
       `- Publié le : ${dateLongue(p.datePublication) || "—"}`,
-      `- Entrée en vigueur : ${dateLongue(p.dateOpposabilite) || "—"}`,
+      p.juridique === false
+        ? "- Document non opposable : ce document est publié pour être porté à la connaissance de tous ; il ne crée ni droits ni obligations, et aucune entrée en vigueur ne s'y attache."
+        : `- Entrée en vigueur : ${dateLongue(p.dateOpposabilite) || "—"}`,
       "",
       "---",
       "",
@@ -1027,7 +1119,7 @@ Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>
       lignes.push(`### ${annee}`, "");
       for (const p of actes) {
         const d = [p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "",
-          p.dateOpposabilite ? "en vigueur le " + dateLongue(p.dateOpposabilite) : "",
+          p.juridique === false ? "document non opposable" : p.dateOpposabilite ? "en vigueur le " + dateLongue(p.dateOpposabilite) : "",
           p.epingle === true ? "à la une" : "",
           latestOf(p.eliUri) === p ? "" : "version antérieure"].filter(Boolean).join(" · ");
         lignes.push(`- [${[p.numero, p.objet].filter(Boolean).join(" — ")}](${adresseActe(base, p.cle)}) : ${d}.${p.themeLabel ? " Thème : " + p.themeLabel + "." : ""} ELI : \`${p.eliUri || "—"}\`. Formats : [JSON](${adresseFormat(base, p.cle, "json")}), [Markdown](${adresseFormat(base, p.cle, "md")}), [texte](${adresseFormat(base, p.cle, "txt")}).`);

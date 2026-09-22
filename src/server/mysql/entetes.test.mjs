@@ -103,3 +103,28 @@ test("aucune valeur valide n'est modifiée au passage", () => {
   };
   assert.deepEqual(entetesSurs(entetes, { journal }), entetes);
 });
+
+test("un en-tête à plusieurs valeurs — les cookies — reste un tableau", () => {
+  const { notes, journal } = noter();
+  // La connexion pose DEUX cookies : la session et son jeton anti-CSRF. Joindre
+  // les deux valeurs par une virgule donne une valeur invalide (`Set-Cookie` est
+  // le seul en-tête qu'on ne peut pas replier), que les navigateurs
+  // n'interprètent que par tolérance — et que le couple session + anti-CSRF,
+  // justement, ne peut pas se permettre de perdre.
+  const surs = entetesSurs({
+    "set-cookie": [
+      "scribae_session=abc; Path=/; HttpOnly; SameSite=Lax",
+      "scribae_csrf=def; Path=/; SameSite=Lax",
+    ],
+  }, { journal });
+  assert.equal(Array.isArray(surs["set-cookie"]), true, "les valeurs restent séparées");
+  assert.deepEqual(surs["set-cookie"], [
+    "scribae_session=abc; Path=/; HttpOnly; SameSite=Lax",
+    "scribae_csrf=def; Path=/; SameSite=Lax",
+  ]);
+  assert.equal(notes.length, 0, "aucune valeur valide n'est signalée");
+  // Une valeur douteuse est écartée SEULE : les autres passent.
+  const mixte = entetesSurs({ "set-cookie": ["a=1; Path=/", "b=\u2014; Path=/"] }, { journal });
+  assert.deepEqual(mixte["set-cookie"], ["a=1; Path=/"]);
+  assert.equal(notes.length, 1, "seule la valeur douteuse est signalée");
+});

@@ -1,6 +1,6 @@
 import {
   state, init, parseRoute, navigate, onChange, applyBrand, setViewRenderer, can, logout,
-  currentUser, emit, signalerEcranCollab, libererRedaction, parapheurActif,
+  currentUser, emit, signalerEcranCollab, libererRedaction,
 } from "./state.js";
 import { h, clear, icon, button, badge, toast } from "./dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "./brand.js";
@@ -8,8 +8,8 @@ import { versionBadge, releasedLabel } from "../lib/version.js";
 import { fullName, roleLabel, badgesOf, initialsOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
 import { storageAvailable } from "../lib/store.js";
-import { applyTheme, onSystemThemeChange } from "../lib/theme.js";
-import { authConfig, isTestProvider, isPassword } from "../lib/auth.js";
+import { applyTheme, onSystemThemeChange, brandLogoUrl } from "../lib/theme.js";
+import { authConfig, isTestProvider, accesLocal, sessionDeService } from "../lib/auth.js";
 import { themeButton, themeChooser } from "./theme.js";
 import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
@@ -24,6 +24,8 @@ import { renderEditor } from "./views/editor.js";
 import { renderRediger } from "./views/rediger.js";
 import { renderActes } from "./views/actes.js";
 import { renderDelegations } from "./views/delegations.js";
+import { renderOrganigramme } from "./views/organigramme.js";
+import { renderChrono } from "./views/chrono.js";
 import { renderReferentiel } from "./views/referentiel.js";
 import { renderStyles } from "./views/styles.js";
 import { renderAide } from "./views/aide.js";
@@ -34,11 +36,13 @@ import { renderRecueilPublic, retirerMetaRecueil } from "./views/recueil-public.
 import { amorcerRecueil } from "./demo-publications.js";
 import { appliquerAbrogations } from "./abrogations-apply.js";
 import { renderDocs } from "./views/docs.js";
+import { renderApiReference } from "./views/api-reference.js";
 import { renderParapheur } from "./views/parapheur.js";
 import { renderRevision } from "./views/revision.js";
 import { renderExecution } from "./views/execution.js";
 import { renderCorbeille } from "./views/corbeille.js";
 import { monterBarreCollab } from "./collab.js";
+import { avecCurseur } from "./focus.js";
 import { monterAssistants, assistantsChooser } from "./assistant.js";
 import { installerRaccourcis, ouvrirRecherche } from "./global-search.js";
 
@@ -48,8 +52,17 @@ const NAV = [
     { id: "rediger", label: "Rédiger un acte", icon: "plus", perm: "actes.rediger" },
     { id: "modifier", label: "Modifier un acte", icon: "refresh", perm: "actes.gerer" },
     { id: "actes", label: "Actes", icon: "list", perm: "actes.rediger" },
+    // Le chrono de numérotation : le registre des numéros tirés. Il se lit comme
+    // les actes — tout rédacteur a le droit de savoir quel numéro porte quoi —
+    // mais ses deux gestes d'écriture (passer à l'année suivante, annuler un
+    // rang) sont réservés à l'administration, dans la vue.
+    { id: "chrono", label: "Chrono de numérotation", icon: "list", perm: "actes.rediger" },
     { id: "delegations", label: "Délégations", icon: "org" },
-    { id: "parapheur", label: "Parapheur", icon: "check", perm: "actes.valider", experimental: true },
+    // L'organigramme des entités, services et bureaux : ouvert à tous les
+    // comptes, comme les délégations — savoir qui compose la collectivité n'est
+    // pas une donnée réservée.
+    { id: "organigramme", label: "Organigramme", icon: "org" },
+    { id: "parapheur", label: "Parapheur", icon: "check", perm: "actes.valider" },
     { id: "revision", label: "Révision", icon: "eye", perm: "actes.reviser" },
   ] },
   { group: "Publier", items: [
@@ -67,6 +80,10 @@ const NAV = [
   ] },
   { group: "Aide", items: [
     { id: "aide", label: "Guide", icon: "info" },
+    // La référence de l'API REST et son panneau de commande : réservés à qui
+    // peut lire la documentation technique (permission « docs.voir »), puisque
+    // le panneau joue de VRAIS appels sur le service.
+    { id: "api", label: "API REST", icon: "doc", perm: "docs.voir" },
     { id: "docs", label: "Documentation technique", icon: "doc", perm: "docs.voir" },
   ] },
 ];
@@ -86,6 +103,8 @@ const VIEW_PERMS = {
   // modifications qui sont gardées (permission « delegations.gerer », contrôlée
   // dans la vue).
   delegations: null,
+  organigramme: null,
+  chrono: "actes.rediger",
   modifier: "actes.gerer",
   signature: "actes.signer",
   publications: "signature.gerer",
@@ -101,10 +120,11 @@ const VIEW_PERMS = {
   // La documentation technique (exploitation, installation, sécurité) est
   // réservée aux administrateurs.
   docs: "docs.voir",
+  api: "docs.voir",
 };
-// Le parapheur est une fonction expérimentale : éteint, son écran n'est pas
-// accessible, même par un lien direct (voir src/lib/validation.js).
-const allowed = (view) => (!VIEW_PERMS[view] || can(VIEW_PERMS[view])) && (view !== "parapheur" || parapheurActif());
+// Le parapheur n'est plus expérimental (1.5.0) : son écran est accessible comme
+// les autres, et c'est la présence de circuits qui décide de ce qu'il montre.
+const allowed = (view) => !VIEW_PERMS[view] || can(VIEW_PERMS[view]);
 const firstAllowedView = () => ["trames", "rediger", "actes", "signature", "publications", "aide"].find(allowed) || "aide";
 
 const VIEWS = {
@@ -114,6 +134,8 @@ const VIEWS = {
   actes: renderActes,
   acte: renderActeDetail,
   delegations: renderDelegations,
+  organigramme: renderOrganigramme,
+  chrono: renderChrono,
   modifier: renderModifier,
   referentiel: renderReferentiel,
   styles: renderStyles,
@@ -127,6 +149,7 @@ const VIEWS = {
   corbeille: renderCorbeille,
   aide: renderAide,
   docs: renderDocs,
+  api: renderApiReference,
 };
 
 // Les écrans PUBLICS échappent à la coquille : ni session, ni navigation, ni
@@ -147,13 +170,36 @@ let mainEl = null;
 let appEl = null;
 
 // Pastille d'état de la persistance : discrète en mode local (c'est le mode par
-// défaut), explicite dès que les données sont partagées.
+// défaut), explicite dès que les données sont partagées. Les quatre états ont
+// chacun leur mot : un service qu'on interroge encore n'est pas un service en
+// erreur — lui donner le mot de l'erreur faisait croire à une panne à chaque
+// redessin, alors que la connexion était simplement en cours.
+//
+// Elle porte un identifiant : l'état de la base change souvent, et c'est ELLE
+// qu'on remplace alors, sans reconstruire l'écran (voir `rafraichirPastilleBase`).
 function storageBadge() {
   if (!db.isShared()) return null;
   const st = db.status();
-  const color = st.state === "ok" ? "success" : st.state === "offline" ? "warning" : st.state === "error" ? "error" : "info";
-  const text = st.state === "ok" ? "base partagée" : st.state === "offline" ? "base hors ligne" : "base : erreur";
-  return h("span", { class: "fr-badge fr-badge--" + color, title: st.detail || "", text });
+  const ETATS = {
+    ok: ["success", "base partagée"],
+    offline: ["warning", "base hors ligne"],
+    error: ["error", "base : erreur"],
+    unknown: ["info", "base : connexion…"],
+  };
+  const [color, text] = ETATS[st.state] || ETATS.unknown;
+  return h("span", { id: "storage-badge", class: "fr-badge fr-badge--" + color, title: st.detail || "", text });
+}
+
+// L'état de la base change à chaque écriture qui passe (ou qui échoue) : le
+// signaler ne doit pas refaire la page. On remplace la SEULE pastille de
+// l'en-tête — et si c'est le MODE qui a changé (locale ⇄ partagée), la pastille
+// apparaît ou disparaît : là, la coquille est refaite, une fois.
+function rafraichirPastilleBase() {
+  const actuelle = document.getElementById("storage-badge");
+  const suivante = storageBadge();
+  if (actuelle && suivante) { actuelle.replaceWith(suivante); return; }
+  if (!actuelle && !suivante) return;
+  emit();
 }
 
 // Bascule clair ⇄ sombre : un bouton dans l'en-tête (le geste courant), et le
@@ -199,7 +245,10 @@ function userMenu() {
   // En mode mot de passe, on ne « change » pas de compte en choisissant dans une
   // liste : on se déconnecte, et l'écran de connexion reprend la main. Le menu
   // porte donc la déconnexion, plus le changement de son propre mot de passe.
-  if (isPassword(state.config)) {
+  // Un compte local (mode mot de passe, ou compte de service en mode annuaire)
+  // peut changer SON mot de passe ; les autres se contentent de changer de
+  // compte. Voir src/lib/auth.js, `accesLocal`.
+  if (accesLocal(state.config)) {
     menu.appendChild(item("Changer mon mot de passe", "lock", () => ouvrirChangementMotDePasse({ surFait: () => emit() })));
     menu.appendChild(item("Se déconnecter", "x", () => logout()));
   } else {
@@ -238,6 +287,10 @@ function shell() {
   const brand = state.config.brand || {};
   const initials = (brand.shortName || brand.name || "?")
     .split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
+  // L'emblème du référentiel, dans la variante du thème courant : la coquille est
+  // reconstruite à chaque changement d'apparence, le logo suit donc sans autre
+  // précaution (voir `brandLogoUrl`, src/lib/theme.js).
+  const logo = brandLogoUrl(brand);
 
   // Bandeau de démonstration : en tête, au-dessus de l'en-tête. Il n'apparaît
   // que si le DÉPLOIEMENT a allumé la démonstration (voir src/lib/demo.js).
@@ -267,8 +320,8 @@ function shell() {
     h("div", { class: "app-header__spacer" }),
     h("div", { class: "app-header__tools" },
       h("div", { class: "app-org", title: "Structure au nom de laquelle les actes sont pris" },
-        brand.logoUrl
-          ? h("img", { src: brand.logoUrl, alt: "" })
+        logo
+          ? h("img", { src: logo, alt: "" })
           : h("span", { class: "app-org__mark", text: initials }),
         h("span", { class: "app-org__name", text: brand.name || "Organisation" }),
       ),
@@ -291,7 +344,7 @@ function shell() {
 
   const nav = h("nav", { class: "app-nav" });
   for (const g of NAV) {
-    const items = g.items.filter((it) => (!it.perm || can(it.perm)) && (!it.experimental || parapheurActif()));
+    const items = g.items.filter((it) => !it.perm || can(it.perm));
     if (!items.length) continue;
     nav.appendChild(h("div", { class: "app-nav__group", text: g.group }));
     for (const it of items) {
@@ -319,6 +372,13 @@ export function renderApp(root) {
 
 function drawView() {
   if (!mainEl || publicMode) return;
+  // Le redessin d'une vue ne doit pas coûter son curseur à l'agent : une
+  // sauvegarde différée, un état de base qui change, une donnée qui arrive, et
+  // le champ en cours de saisie était reconstruit. Voir src/ui/focus.js.
+  avecCurseur(drawViewNow, () => state.route.view);
+}
+
+function drawViewNow() {
   clear(mainEl);
   if (!allowed(state.route.view)) state.route = { view: firstAllowedView(), params: {} };
   const view = VIEWS[state.route.view] || renderTrames;
@@ -422,7 +482,11 @@ async function boot() {
     toast(`${conflicts.length} élément(s) de « ${COLLECTIONS[collection]?.label || collection} » ont été modifiés sur un autre poste. La version de la base a été reprise.`, "warning");
     emit();
   });
-  db.onStatus(() => { if (state.ready) emit(); });
+  // L'état de la base, lui, ne refait pas l'écran : il ne change QUE ce que la
+  // pastille de l'en-tête en dit (et, sur l'écran qui le montre, le panneau
+  // « Base de données » s'en aperçoit par lui-même). Un service qui refuse une
+  // écriture pendant une saisie ne doit pas la faire perdre.
+  db.onStatus(() => { if (state.ready) rafraichirPastilleBase(); });
   // Raccourcis globaux (Ctrl+K, « / ») : posés une seule fois.
   installerRaccourcis();
   // Les deux assistants (l'atelier et le recueil) : posés une seule fois, hors
@@ -434,6 +498,11 @@ async function boot() {
   parseRoute();
   // Vérifie la santé de la persistance en tâche de fond (sans bloquer l'affichage).
   db.health().catch(() => {});
+  // Et represente, doucement, les écritures mises de côté : la file n'était
+  // rejouée que par une lecture ou un contrôle de santé, si bien qu'un poste
+  // laissé sur un écran immobile pouvait garder ses écritures des heures, même
+  // après le retour de la base. Voir `reprendreAuto` (src/lib/db/index.js).
+  db.reprendreAuto();
   // Démonstration : le recueil public se remplit au premier démarrage (les
   // actes que la fiction déclare publiés sont publiés par le chemin réel, et
   // le service leur attribue leur ELI). Silencieux et sans effet sur une
@@ -452,7 +521,7 @@ async function boot() {
 let tachesDeFondFaites = false;
 function tachesDeFond() {
   if (tachesDeFondFaites || !state.ready) return;
-  if (isPassword(state.config) && !state.user) return;
+  if (sessionDeService(state.config) && !state.user) return;
   tachesDeFondFaites = true;
   amorcerRecueil().catch((e) => console.warn("Amorçage du recueil :", e));
   appliquerAbrogations().catch((e) => console.warn("Abrogations :", e));
@@ -486,6 +555,14 @@ function normaliserRoute() {
 }
 
 function renderRoot(root) {
+  // La coquille entière est reconstruite (déconnexion, changement d'écran,
+  // données rechargées) : le curseur et le défilement sont repris après coup —
+  // hors changement d'écran, où la nouvelle page commence en haut. Voir
+  // src/ui/focus.js.
+  avecCurseur(() => renderRootMaintenant(root), () => state.route.view);
+}
+
+function renderRootMaintenant(root) {
   normaliserRoute();
   publicMode = EST_PUBLIQUE(state.route.view);
   clear(root);

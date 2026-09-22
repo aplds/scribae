@@ -88,6 +88,13 @@ export const VARIABLES = [
     exemple: "https://www.exemple.fr/blason.svg",
   },
   {
+    env: "SCRIBA_IDENTITE_EMBLEME_SOMBRE", cle: "brand.logoUrlDark", portee: "referentiel",
+    type: "texte", groupe: "Identité",
+    libelle: "Emblème (thème sombre)",
+    description: "Emblème de rechange, employé quand le poste de travail est en thème sombre. Vide : l'emblème ordinaire sert dans les deux thèmes.",
+    exemple: "https://www.exemple.fr/blason-clair.svg",
+  },
+  {
     env: "SCRIBA_IDENTITE_POLICE_INTERFACE", cle: "brand.uiFont", portee: "referentiel",
     type: "texte", groupe: "Identité",
     libelle: "Police de l'interface",
@@ -293,15 +300,86 @@ export const VARIABLES = [
     description: "« electronique » : prestataire par API. « simple » : signature dans l'application. « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement.",
     exemple: "electronique",
   },
+  // --- Signature : l'API du prestataire -------------------------------------
+  // Le circuit électronique suppose un prestataire joignable. Son adresse, son
+  // identifiant, le niveau de signature demandé et ses points de terminaison se
+  // règlent ici (ou dans Administration › Signature) — la CLÉ, elle, reste au
+  // service (`SCRIBA_SIGNATURE_API_CLE`, plus bas) : c'est un secret.
+  {
+    env: "SCRIBA_SIGNATURE_API_TRANSPORT", cle: "signature.api.transport", portee: "referentiel",
+    type: "choix", choix: ["service", "demonstration"], groupe: "Signature — API",
+    libelle: "Transport du circuit électronique",
+    description: "« service » : c'est le service de la collectivité qui appelle le prestataire — seul moyen de garder la clé d'API côté serveur. « demonstration » : le circuit est simulé localement (aucun appel sortant).",
+    exemple: "service",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_URL", cle: "signature.api.url", portee: "referentiel",
+    type: "url", groupe: "Signature — API",
+    libelle: "Adresse de base du prestataire",
+    description: "Racine de l'API du prestataire de signature. Vide, le circuit électronique reste en simulation : rien ne sort de la collectivité.",
+    exemple: "https://signature.exemple.fr/api/v1",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_PRESTATAIRE", cle: "signature.api.prestataire", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Identifiant du prestataire",
+    description: "Nom technique du prestataire (il sert aux en-têtes et au journal).",
+    exemple: "esup-signature",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_NIVEAU", cle: "signature.api.niveau", portee: "referentiel",
+    type: "choix", choix: ["simple", "avancee", "qualifiee"], groupe: "Signature — API",
+    libelle: "Niveau de signature demandé",
+    description: "Niveau demandé au prestataire pour les actes de la collectivité : signature simple, avancée (certificat), ou qualifiée (eIDAS).",
+    exemple: "avancee",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_NOTIFICATION", cle: "signature.api.urlNotification", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Adresse de notification (webhook)",
+    description: "L'adresse que le prestataire appellera une fois l'acte signé. Vide : l'adresse du service, suivie de /v1/webhooks/signature.",
+    exemple: "https://actes.exemple.fr/v1/webhooks/signature",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_TIMEOUT", cle: "signature.api.timeoutMs", portee: "referentiel",
+    type: "entier", min: 1000, max: 120000, groupe: "Signature — API",
+    libelle: "Délai d'attente du prestataire (ms)",
+    description: "Temps maximal accordé à un appel au prestataire avant abandon.",
+    exemple: "20000",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_CHEMIN_DOCUMENT", cle: "signature.api.cheminDocument", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Chemin — dépôt du document",
+    description: "Point de terminaison qui reçoit le document à signer, relatif à l'adresse de base. Aucun jeton.",
+    exemple: "/documents",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_CHEMIN_SIGNATAIRES", cle: "signature.api.cheminSignataires", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Chemin — ajout d'un signataire",
+    description: "Point de terminaison qui reçoit les signataires. Jeton {document} : l'identifiant rendu au dépôt.",
+    exemple: "/documents/{document}/signataires",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_CHEMIN_DEMARRER", cle: "signature.api.cheminDemarrer", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Chemin — démarrage du circuit",
+    description: "Point de terminaison qui lance le circuit de signature. Jeton {document}.",
+    exemple: "/documents/{document}/demarrer",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_CHEMIN_STATUT", cle: "signature.api.cheminStatut", portee: "referentiel",
+    type: "texte", groupe: "Signature — API",
+    libelle: "Chemin — suivi du circuit",
+    description: "Point de terminaison interrogé pour relire le statut d'un circuit. Jeton {document}.",
+    exemple: "/documents/{document}",
+  },
 
   // --- Fonctions et assistants ---------------------------------------------
-  {
-    env: "SCRIBA_PARAPHEUR", cle: "experimental.parapheur", portee: "referentiel",
-    type: "booleen", groupe: "Fonctions",
-    libelle: "Parapheur (circuit de validation)",
-    description: "Active le circuit de validation avant signature. Éteint par défaut.",
-    exemple: "false",
-  },
+  // Le parapheur n'est plus un interrupteur (1.5.0) : il vit dans l'onglet
+  // « Circuits de validation », et ce sont les circuits enregistrés qui
+  // décident. Il n'a donc plus de variable de déploiement.
   {
     env: "SCRIBA_CONTROLE_LEGALITE", cle: "experimental.controleLegalite", portee: "referentiel",
     type: "booleen", groupe: "Fonctions",
@@ -370,9 +448,9 @@ export const VARIABLES = [
 
   // --- Authentification -----------------------------------------------------
   {
-    env: "AUTH_MODE", portee: "service", type: "choix", choix: ["password", "demo"], groupe: "Authentification",
+    env: "AUTH_MODE", portee: "service", type: "choix", choix: ["password", "oidc", "demo"], groupe: "Authentification",
     libelle: "Mode d'authentification", defaut: "password",
-    description: "« password » : vrais comptes locaux (mot de passe vérifié par le service, session par cookie). « demo » : comptes choisis dans une liste, sans mot de passe — essai seulement.",
+    description: "« password » : vrais comptes locaux (mot de passe vérifié par le service, session par cookie). « oidc » : l'annuaire de la collectivité (OpenID Connect) — MAIS les comptes locaux restent ouverts, et c'est ce qui donne accès au compte d'administration déclaré ici : les deux portes coexistent. « demo » : comptes choisis dans une liste, sans mot de passe — essai seulement.",
     exemple: "password",
   },
   {
@@ -446,6 +524,11 @@ export const VARIABLES = [
     env: "API_TOKEN", portee: "service", type: "texte", secret: true, groupe: "Jetons d'API",
     libelle: "Jeton remis à l'application",
     description: "Le même jeton, en clair, remis au conteneur web. Doit correspondre à une empreinte de API_TOKENS. SECRET.",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_API_CLE", portee: "service", type: "texte", secret: true, groupe: "Signature — API",
+    libelle: "Clé d'API du prestataire de signature",
+    description: "La clé que le service présente au prestataire (en-tête Authorization). Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, le service n'appelle pas le prestataire en production. SECRET.",
   },
   {
     env: "CORS_ORIGINS", portee: "service", type: "liste", groupe: "Façade HTTP",

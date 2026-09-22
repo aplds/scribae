@@ -93,7 +93,7 @@ export function renderActes(root) {
           ? h("span", { class: "fr-small" },
             h("span", { class: "fr-mono", text: a.publication.eliUri || a.eli || "" }),
             h("br"),
-            h("span", { class: "fr-muted", text: "opposable le " + formatDate(a.publication.dateOpposabilite) }))
+            h("span", { class: "fr-muted", text: a.publication.juridique === false ? "document non opposable" : "opposable le " + formatDate(a.publication.dateOpposabilite) }))
           : !actePubliable(a)
             ? (natureOfActe(a, state.trames) === "annexe"
               ? h("span", { class: "fr-badge fr-badge--info", title: "Annexe : elle ne se signe ni ne se publie pour elle-même. Son texte suit l'acte qui l'adopte, dans l'original signé.", text: "annexe" })
@@ -332,7 +332,7 @@ async function soumettreAuCircuit(a) {
 
 // Où en est l'acte du point de vue de son opposabilité : exécutoire, en attente
 // d'une formalité, contesté, ou définitif.
-const EXECUTION_COURT = { definitif: "définitif", executoire: "exécutoire", recours: "recours" };
+const EXECUTION_COURT = { definitif: "définitif", executoire: "exécutoire", recours: "recours", document: "document" };
 function celluleExecution(a) {
   if (!(a.original || a.statut === "signee" || a.statut === "publie")) return h("span", { class: "fr-small fr-muted", text: "—" });
   const r = resumeExecution(a, state.config, { publiable: actePubliable(a), trame: state.trames.find((t) => t.id === a.trameId) });

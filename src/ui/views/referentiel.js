@@ -1,4 +1,4 @@
-import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, parapheurActif, regenerateDemoActes } from "../state.js";
+import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
 import { download, pickFile, uid, formatDate, todayIso, copyText } from "../../lib/util.js";
 import * as cles from "../../lib/cles-service.js";
@@ -9,27 +9,32 @@ import { seedConfig, seedTrames } from "../../lib/seed.js";
 import { amendVocab } from "../../lib/amend.js";
 import { abrogationVocab } from "../../lib/abrogations.js";
 import { newService, newBureau } from "../../lib/scope.js";
+import { ENTITY_KINDS, newEntite } from "../../lib/organigramme.js";
 import { newConseil } from "../../lib/conseils.js";
-import { newCircuit, newStep, STEP_ROLES, STEP_KINDS } from "../../lib/validation.js";
+import { newCircuit, newStep, STEP_ROLES, STEP_KINDS, natureEtape, etapeDefauts } from "../../lib/validation.js";
 import { newCompetence, competenceLabel } from "../../lib/revision.js";
 import { DELAIS_DEFAUT } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE } from "../../lib/legalite.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { TYPES_RECUEIL_EXTERNE, newRecueilExterne, RENVOIS_RECOMMANDES, MENTIONS_PUBLIQUES, MENTIONS_DEFAUT, mentionsParDefaut } from "../../lib/recueil.js";
 import { LICENCE_DEFAUT } from "../../lib/recueil.js";
-import { signatureSettings, SIGNATURE_MODES, MODES_TRAME, trameModeLabel, circuitPour, circuitsDisponibles, modeLabel } from "../../lib/externe.js";
+import {
+  signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, MODES_TRAME, trameModeLabel,
+  circuitPour, circuitsDisponibles, modeLabel,
+  circuitElectroniqueSimule, motifCircuitSimule, prestataireDuService,
+} from "../../lib/externe.js";
 import { EVENEMENTS, courrielSettings, etatService as etatCourriel, envoyerTest, evenementDe } from "../../lib/courriel.js";
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
 import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
-import { optionsDeployees } from "../../lib/deploiement-config.js";
+import { optionsDeployees, poseParLeDeploiement } from "../../lib/deploiement-config.js";
 import { post, errorMessage } from "../../lib/remote.js";
-import { modeDeploiement } from "../../lib/auth.js";
+import { modeDeploiement, comptesDuDeploiement, sessionDeService } from "../../lib/auth.js";
 import { cleService } from "../../lib/cle-service.js";
 import { annuairePanel } from "../oidc.js";
 import {
   numberingSettings, demanderNumero, relaisDisponible,
-  SOURCES, TRANSPORTS, METHODES, JETONS, EXTERNE_DEFAUT, GABARIT_GRIST,
+  SOURCES, TRANSPORTS, METHODES, JETONS, EXTERNE_DEFAUT, GABARIT_GRIST, PORTEES,
 } from "../../lib/numbering.js";
 
 const TABS = [
@@ -72,9 +77,6 @@ export function renderReferentiel(root) {
 
   const tabs = h("div", { class: "fr-tabs" });
   for (const t of TABS) {
-    // Le parapheur est une fonction expérimentale : éteint, son onglet de
-    // réglage n'est pas proposé (voir Administration › Expérimentale).
-    if (t.id === "circuits" && !parapheurActif()) continue;
     tabs.appendChild(h("button", {
       class: "fr-tab" + (ui.refTab === t.id ? " fr-tab--active" : ""),
       text: t.label,
@@ -91,6 +93,31 @@ export function renderReferentiel(root) {
   const save = () => { touch("config", { rerender: false }); applyBrand(); };
 
   if (ui.refTab === "identite") {
+    // Deux emblèmes, la même saisie : celui du fond clair, et celui du fond
+    // sombre — employé quand le poste de travail est en thème sombre (voir
+    // `brandLogoUrl`, src/lib/theme.js). Une démonstration embarque les siens
+    // sous forme de data URL (image intégrée au référentiel) : le champ paraît
+    // alors vide, et une saisie la remplace. L'aperçu du second se pose sur le
+    // fond sombre de l'application, sans quoi on ne verrait pas ce que l'on
+    // règle — un logo clair sur fond clair ne se distingue pas d'une image
+    // cassée.
+    const champEmbleme = (label, cle, help, fond) => {
+      const url = c.brand[cle] || "";
+      const integre = url.startsWith("data:");
+      return h("div", { class: "fr-grid fr-grid--2" },
+        textField({
+          label,
+          value: integre ? "" : url,
+          placeholder: integre ? "logo intégré à la démonstration" : "",
+          help: integre ? "La démonstration embarque un logo (image intégrée au référentiel). Saisissez une URL ici pour le remplacer." : help,
+          onChange: (v) => { c.brand[cle] = v.trim() || (integre ? url : ""); save(); redraw(); },
+        }),
+        url ? h("div", { class: "fr-row", style: { alignItems: "center", gap: "10px", paddingTop: "22px" } },
+          h("img", { src: url, alt: "", style: { height: "40px", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "2px", background: fond } }),
+          button("Retirer", { variant: "tertiary", size: "sm", onClick: () => { c.brand[cle] = ""; save(); redraw(); } }),
+        ) : null,
+      );
+    };
     body.appendChild(card("Marque et identité de l'organisation", "Ces valeurs alimentent l'en-tête de l'application et les métadonnées des actes. La couleur pilote les tokens du design system.",
       textField({ label: "Nom", value: c.brand.name, onChange: (v) => { c.brand.name = v; save(); } }),
       textField({ label: "Nom court (initiale du bandeau)", value: c.brand.shortName, onChange: (v) => { c.brand.shortName = v; save(); } }),
@@ -104,23 +131,8 @@ export function renderReferentiel(root) {
         h("button", { class: "fr-btn fr-btn--primary", text: "Bouton principal" }),
         h("button", { class: "fr-btn fr-btn--secondary", text: "Bouton secondaire" }),
       ),
-      (() => {
-        const logo = c.brand.logoUrl || "";
-        const integre = logo.startsWith("data:");
-        return h("div", { class: "fr-grid fr-grid--2" },
-          textField({
-            label: "URL du logo (facultatif)",
-            value: integre ? "" : logo,
-            placeholder: integre ? "logo intégré à la démonstration" : "",
-            help: integre ? "La démonstration embarque un logo (image intégrée au référentiel). Saisissez une URL ici pour le remplacer." : "Ex. https://www.exemple.fr/logo.png",
-            onChange: (v) => { c.brand.logoUrl = v.trim() || (integre ? logo : ""); save(); redraw(); },
-          }),
-          logo ? h("div", { class: "fr-row", style: { alignItems: "center", gap: "10px", paddingTop: "22px" } },
-            h("img", { src: logo, alt: "", style: { height: "40px", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "2px" } }),
-            button("Retirer", { variant: "tertiary", size: "sm", onClick: () => { c.brand.logoUrl = ""; save(); redraw(); } }),
-          ) : null,
-        );
-      })(),
+      champEmbleme("URL du logo (facultatif)", "logoUrl", "Ex. https://www.exemple.fr/logo.png", ""),
+      champEmbleme("URL du logo en thème sombre (facultatif)", "logoUrlDark", "Employé quand l'application est en thème sombre, à la place du logo ci-dessus. Vide : le logo ordinaire sert dans les deux thèmes.", "#1b1e26"),
       textField({ label: "Police d'interface", value: c.brand.uiFont || "", onChange: (v) => { c.brand.uiFont = v; save(); } }),
       fontField({ label: "Police des documents", value: c.brand.documentFont || "", help: "Valeur de repli, quand une feuille de style ne dit rien — et police du papier des écrits qui ne sont pas des actes (états, attestations). La présentation des actes se règle par feuille de style.", onChange: (v) => { c.brand.documentFont = v; save(); } }),
       can("trames.styles") ? h("p", { class: "fr-hint", style: { margin: "2px 0 0" } },
@@ -244,17 +256,33 @@ export function renderReferentiel(root) {
   if (ui.refTab === "entites") {
     body.appendChild(listPanel({
       title: "Entités", help: "Commune, établissements publics, associations, services : toute structure citée ou signataire d'un acte. Le code alimente la numérotation.",
-      items: c.entities, factory: () => ({ id: uid("ent"), code: "XXX", kind: "commune", name: "Nouvelle entité", legalName: "", seatCity: "", tribunal: "", parentId: "" }),
+      items: c.entities, factory: () => newEntite(),
       fields: (rec) => [
         { key: "code", label: "Code", type: "text" },
-        { key: "kind", label: "Nature", type: "select", options: ["commune", "etablissement-public", "etablissement", "association", "service"] },
+        { key: "kind", label: "Nature", type: "select", options: ENTITY_KINDS.map((k) => ({ value: k.id, label: k.label })) },
         { key: "name", label: "Nom", type: "text" },
         { key: "nameWithArt", label: "Nom avec article (dans une phrase)", type: "text", help: "Ex. « la commune de … », avec l'article qui convient." },
         { key: "authorityFormula", label: "Formule d'autorité", type: "text", help: "Ligne d'en-tête de l'acte, ex. « Le maire de … »." },
         { key: "legalName", label: "Dénomination juridique", type: "text" },
         { key: "seatCity", label: "Ville du siège", type: "text" },
         { key: "tribunal", label: "Tribunal administratif compétent", type: "text" },
-        { key: "parentId", label: "Entité de rattachement", type: "select", options: c.entities.filter((e) => e.id !== rec.id).map((e) => ({ value: e.id, label: e.name })), placeholder: "—" },
+        {
+          key: "autonome", label: "Entité autonome (personnalité morale propre)", type: "boolean",
+          help: "Décochez pour une structure qui agit au nom d'une autre : une régie municipale, un service doté d'un directeur. Elle garde son signataire principal, ses services et ses actes.",
+        },
+        { key: "parentId", label: "Entité de rattachement", type: "select", options: c.entities.filter((e) => e.id !== rec.id).map((e) => ({ value: e.id, label: e.name })), placeholder: "—", help: "Sert au rattachement d'une entité non autonome, et à l'ordre de l'organigramme." },
+        {
+          key: "signerPersonId", label: "Signataire principal", type: "select",
+          placeholder: "— Aucun —",
+          options: (c.people || []).map((p) => ({ value: p.id, label: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.id })),
+          help: "La personne qui signe les actes de cette entité quand la trame n'en désigne aucun. Le même réglage existe dans l'écran Organigramme, au clic sur l'entité.",
+        },
+        {
+          key: "signerRoleId", label: "Qualité du signataire principal", type: "select",
+          placeholder: "— Sa qualité usuelle —",
+          options: (c.roles || []).map((r) => ({ value: r.id, label: r.label })),
+          help: "La qualité sous laquelle il signe, quand elle diffère de son rôle habituel.",
+        },
       ],
       save,
     }));
@@ -429,7 +457,7 @@ export function renderReferentiel(root) {
         button("Réinstaller le jeu de démonstration", { variant: "tertiary", onClick: resetAll }),
         button("Repartir d'un référentiel vierge", { variant: "tertiary", danger: true, onClick: resetVierge }),
       ),
-      h("p", { class: "fr-small fr-muted", text: "« Repartir d'un référentiel vierge » efface tout — référentiel, trames, actes, comptes — et, sur le service partagé, actes déposés, circuits et publications ; l'application redémarre ensuite sur un référentiel neuf. C'est la sortie de démonstration : si la démonstration est allumée par le déploiement (`DEMO` dans le .env du service), le jeu fictif sera réinstallé au démarrage suivant — éteignez d'abord ce réglage." }),
+      h("p", { class: "fr-small fr-muted", text: `« Repartir d'un référentiel vierge » efface le référentiel, les trames et les actes — et, sur le service partagé, actes déposés, circuits et publications ; l'application redémarre ensuite sur un référentiel neuf. Les COMPTES sont conservés quand la connexion passe par le service de la collectivité (comptes locaux ou annuaire) : leurs mots de passe sont gardés par lui, hors du référentiel. C'est la sortie de démonstration : si la démonstration est allumée par le déploiement (\`DEMO\` dans le .env du service), le jeu fictif sera réinstallé au démarrage suivant — éteignez d'abord ce réglage.` }),
       optionsDeployees() && Object.keys(optionsDeployees().variables).length
         ? h("p", { class: "fr-small", text: `Réglages posés par le déploiement (fichier .env) : ${Object.keys(optionsDeployees().variables).length}. Ils s'appliquent par-dessus le référentiel à chaque démarrage — une valeur saisie ici ne les remplace pas ; une variable retirée du .env n'est plus imposée au lancement suivant. La liste est dans « Documentation technique › Variables de déploiement ».` })
         : null,
@@ -449,6 +477,20 @@ export function renderReferentiel(root) {
 // On ne range pas ici des données : on choisit *où* elles vivent. Le réglage
 // est propre au poste (il n'est pas exporté avec le référentiel) : chaque poste
 // peut viser la même base partagée.
+//
+// C'est le SEUL écran qui montre l'état de la base en clair : il s'y abonne donc
+// (l'en-tête, lui, se contente de sa pastille — voir `rafraichirPastilleBase`,
+// src/ui/app.js). Refaire la coquille à chaque changement d'état faisait
+// clignoter l'écran, et perdre le curseur de qui saisissait une adresse de
+// service ou un jeton.
+let stopSuiviBase = null;
+function suivreEtatDeLaBase() {
+  if (stopSuiviBase) { stopSuiviBase(); stopSuiviBase = null; }
+  stopSuiviBase = db.onStatus(() => {
+    if (state.route.view === "referentiel" && state.ui?.refTab === "base") redrawView();
+  });
+}
+
 function databasePanel() {
   const ui = state.ui;
   ui.dbDraft = ui.dbDraft || { ...db.getSettings() };
@@ -461,6 +503,11 @@ function databasePanel() {
   const active = db.getSettings();
   const st = db.status();
   const live = h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", alignItems: "center", margin: "10px 0 18px", minHeight: "22px" } });
+  // L'essai le plus récent est gardé dans l'état de l'ÉCRAN : un redessin — un
+  // changement d'état de la base en déclenche un — ne doit pas effacer la
+  // réponse qu'on vient d'obtenir. C'est justement quand la base hésite qu'on
+  // relit cet essai.
+  for (const noeud of renduEssai(ui.dbEssai)) live.appendChild(noeud);
 
   wrap.appendChild(h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", alignItems: "center" } },
     h("span", { class: "fr-badge fr-badge--info", text: "En service : " + db.modeById(active.mode).label }),
@@ -475,14 +522,37 @@ function databasePanel() {
         clear(live);
         live.appendChild(h("span", { class: "fr-small fr-muted", text: "Test en cours…" }));
         const res = await db.test(d);
+        // DEUX questions, deux réponses : le service répond-il, et accepte-t-il
+        // d'ÉCRIRE ? La route de santé ne demande ni session ni anti-CSRF : elle
+        // peut répondre 200 pendant que la base refuse chaque geste — l'écran
+        // montrait alors « Connexion réussie » à côté d'une pastille rouge et
+        // d'une file d'écritures en attente (voir CHANGELOG, note 1.3.2k).
+        ui.dbEssai = { ...res, dirty, at: new Date().toISOString(), partage: db.modeById(d.mode).shared, base: d.mode === "external" ? (d.url || "") : "" };
         clear(live);
-        live.appendChild(h("span", { class: `fr-badge fr-badge--${res.ok ? "success" : "error"}`, text: res.ok ? "Connexion réussie" : "Échec de la connexion" }));
-        live.appendChild(h("span", { class: "fr-small fr-muted", text: res.detail || "" }));
+        for (const noeud of renduEssai(ui.dbEssai)) live.appendChild(noeud);
         btn.disabled = false;
+        // L'essai vient de répondre sur ce réglage : l'état montré plus haut peut
+        // donc être repris en compte — rien ne le recalcule tout seul, et une
+        // pastille rouge vieille d'une panne réparée resterait affichée.
+        if (!dirty) await db.health().catch(() => {});
       },
     }),
   ));
   wrap.appendChild(live);
+  // Le motif de l'état, écrit noir sur blanc : la pastille ne le porte qu'en
+  // infobulle, et un exploitant qui doit recopier un message d'erreur ne
+  // devrait pas avoir à survoler une pastille pour le lire.
+  if (st.state !== "ok" && st.detail) {
+    wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 14px" }, text: st.detail }));
+  }
+
+  // Les écritures en attente : ce qui attend, depuis quand, ce que la base a
+  // répondu au dernier renvoi — et les deux gestes. C'est la même question que
+  // l'état, juste au-dessus : « 75 écritures en attente » sans dire lesquelles,
+  // ni pourquoi elles ne partent pas, ni comment les renvoyer, ne se répare pas
+  // (voir CHANGELOG, note 1.3.2l).
+  const attente = db.pendingInfo();
+  if (attente.count) wrap.appendChild(blocEnAttente(attente));
 
   const fields = h("div");
   const paintFields = () => {
@@ -493,11 +563,21 @@ function databasePanel() {
         help: "L'URL de base du serveur déployé (voir src/server/README.md). Laissez vide si l'application est servie par ce même serveur — c'est le cas du déploiement auto-hébergé ; sinon les chemins /v1/db/… y sont ajoutés.",
         onChange: (v) => { d.url = v.trim(); },
       }));
-      fields.appendChild(textField({
-        label: "Jeton d'API", value: d.token || "",
-        help: "Jeton d'écriture remis par l'administrateur de la base. Seule son empreinte SHA-256 est conservée côté serveur.",
-        onChange: (v) => { d.token = v.trim(); },
-      }));
+      // Mode « comptes locaux (mot de passe) » : la porte est la SESSION du
+      // service (identifiant et mot de passe, cookie), et les écritures portent
+      // l'anti-CSRF de la page — le jeton d'API n'est PAS utilisé. Le champ
+      // disparaît : il laissait croire qu'un jeton (souvent le gabarit du
+      // `.env`, une suite de zéros) était en service, et qu'il fallait le
+      // corriger pour que la base réponde.
+      if (sessionDeService(state.config)) {
+        fields.appendChild(h("p", { class: "fr-small fr-muted", text: "Ce déploiement ouvre les données par une SESSION (identifiant et mot de passe) : aucun jeton d'API n'est nécessaire. C'est la session de l'agent, et elle seule, qui autorise la lecture et l'écriture — le service refuse une écriture sans elle." }));
+      } else {
+        fields.appendChild(textField({
+          label: "Jeton d'API", value: d.token || "",
+          help: "Jeton d'écriture remis par l'administrateur de la base. Seule son empreinte SHA-256 est conservée côté serveur.",
+          onChange: (v) => { d.token = v.trim(); },
+        }));
+      }
     } else if (d.mode === "service") {
       fields.appendChild(textField({
         label: "Clé d'écriture du service", value: d.token || "", type: "password",
@@ -669,8 +749,19 @@ function databasePanel() {
   wrap.appendChild(report);
   wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" }, text: "La session et les réglages de ce poste restent locaux. Le jeton de la base n'est jamais exporté avec le référentiel." }));
 
+  suivreEtatDeLaBase();
+  // L'état affiché date du DERNIER geste : rien ne le recalcule. Un écran qui
+  // MONTRE l'état doit donc l'éprouver à son ouverture — sinon une pastille
+  // rouge, vieille d'une panne déjà réparée, reste affichée à côté d'un test de
+  // connexion réussi, et l'écran se contredit (voir CHANGELOG, note 1.3.2k).
+  if (db.status().state !== "ok" && Date.now() - derniereVerificationBase > 5000) {
+    derniereVerificationBase = Date.now();
+    db.health().catch(() => {});
+  }
   return wrap;
 }
+
+let derniereVerificationBase = 0;
 
 function stateBadge(st) {
   const map = {
@@ -681,6 +772,110 @@ function stateBadge(st) {
   };
   const [color, label] = map[st.state] || map.unknown;
   return h("span", { class: `fr-badge fr-badge--${color}`, title: st.detail || "", text: label });
+}
+
+// Une ligne de verdict d'essai : la question posée, et le mot du service.
+// « oui » et « non » disent l'essentiel ; le message du service dit le reste.
+function ligneEssai(question, ok, detail) {
+  return h("div", { class: "fr-row", style: { gap: "8px", alignItems: "baseline", flexWrap: "wrap" } },
+    h("span", { class: `fr-badge fr-badge--${ok ? "success" : "error"}`, text: question }),
+    detail ? h("span", { class: "fr-small fr-muted", text: detail }) : null,
+  );
+}
+
+// Le rendu d'un essai de connexion, hors du panneau : il sert à l'afficher au
+// moment de l'essai ET à le reprendre après un redessin — un verdict qui
+// s'efface tout seul ne sert à rien.
+function renduEssai(essai) {
+  if (!essai) return [];
+  const echec = essai.ecriture && !essai.ecriture.ok;
+  // Le refus est constaté ; la PISTE dit quoi faire. Sans elle, « csrf_invalide »
+  // ne dit rien à personne (voir CHANGELOG, note 1.3.2m).
+  const piste = echec ? db.expliquerRefus({ code: essai.ecriture.code, base: essai.base }) : "";
+  return [
+    ligneEssai(essai.partage === false ? "Le stockage du navigateur répond" : "Le service répond", !!essai.ok, essai.detail || ""),
+    essai.ecriture ? ligneEssai("La base accepte les écritures", !!essai.ecriture.ok, essai.ecriture.detail || "") : null,
+    piste ? h("p", { class: "fr-small fr-muted", style: { flexBasis: "100%", margin: "2px 0 0" }, text: piste }) : null,
+    h("span", { class: "fr-small fr-muted", text: `${essai.dirty
+      ? "Essai porté sur le réglage AFFICHÉ : « Appliquer et recharger » le mettra en service"
+      : "Essai porté sur le réglage en service"}${essai.at ? ` — ${depuisQuand(essai.at)}` : ""}.` }),
+  ].filter(Boolean);
+}
+
+// « il y a douze minutes » : l'âge d'une attente se lit mieux en durée qu'en
+// date — c'est ce qui dit si la panne dure depuis deux minutes ou deux jours.
+function depuisQuand(iso) {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "un moment";
+  const minutes = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes} minute${minutes > 1 ? "s" : ""}`;
+  const heures = Math.floor(minutes / 60);
+  if (heures < 24) return `il y a ${heures} heure${heures > 1 ? "s" : ""}`;
+  const jours = Math.floor(heures / 24);
+  return `il y a ${jours} jour${jours > 1 ? "s" : ""}`;
+}
+
+// Le bloc des écritures en attente : ce qui attend, depuis quand, et ce que la
+// base a répondu. Les deux gestes sont ici, à côté du motif, parce que c'est le
+// seul endroit d'où l'on peut agir : renvoyer (« la base répond de nouveau »),
+// ou abandonner (« ces écritures-là ne partiront jamais »).
+function blocEnAttente(info) {
+  const box = h("div", { class: "fr-card", style: { background: "var(--bg-alt)", margin: "0 0 14px" } });
+  box.appendChild(h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+    h("span", { class: "fr-badge fr-badge--warning", text: `${info.count} écriture(s) en attente de la base` }),
+    h("span", { class: "fr-small fr-muted", text: `en attente depuis ${depuisQuand(info.depuis)}` }),
+  ));
+  box.appendChild(h("p", { class: "fr-small", style: { margin: "8px 0 0" },
+    text: `Par collection : ${info.collections.map((c) => `${c.label} (${c.count})`).join(" · ")}.` }));
+  if (info.derniereErreur) {
+    // Le nom de la collection refusée est dans le motif : sans lui, « la base a
+    // refusé le renvoi » ne dit pas QUOI renvoyer — et c'est justement ce qu'il
+    // faut corriger (ou abandonner) quand le refus est définitif.
+    const label = (info.collections.find((c) => c.name === info.derniereErreur.collection) || {}).label
+      || (db.COLLECTIONS[info.derniereErreur.collection] || {}).label || info.derniereErreur.collection;
+    box.appendChild(h("p", { class: "fr-error-text fr-small", style: { margin: "4px 0 0" },
+      text: `Dernier renvoi refusé ${depuisQuand(info.derniereErreur.at)}${label ? ` (${label})` : ""} : ${info.derniereErreur.message}` +
+        (info.derniereErreur.status ? ` (HTTP ${info.derniereErreur.status})` : "") }));
+  }
+  box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
+    text: "Ces écritures sont gardées sur CE poste et renvoyées automatiquement dès que la base répond (toutes les trente secondes). Tant qu'elles attendent, elles ne sont PAS dans la base : les autres postes ne les voient pas encore." }));
+  box.appendChild(h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", marginTop: "8px" } },
+    button("Renvoyer maintenant", {
+      variant: "primary", size: "sm", icon: "refresh",
+      onClick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        // Le pilote peut avoir été bâti sur un présage périmé du mode (voir
+        // `reparerPilote`) : on répare à la demande — mode redemandé au service,
+        // jeton anti-CSRF relu avec la session, pilote refait — sinon un refus
+        // d'anti-CSRF ou de session se répéterait à l'identique.
+        await db.reparerPilote({ force: true }).catch(() => {});
+        const r = await db.flushPending();
+        // Le bloc est reconstruit juste après : c'est LUI qui porte le motif du
+        // refus (« Dernier renvoi refusé… »). Le toast, lui, dit que le geste a
+        // bien eu lieu — sans quoi un échec identique au précédent ne se verrait
+        // pas.
+        if (r.error) toast("Le renvoi a échoué : la base a refusé ces écritures", "error");
+        else toast(`${r.flushed} écriture(s) transmises à la base`, "success");
+        btn.disabled = false;
+        redrawView();
+      },
+    }),
+    button("Abandonner ces écritures", {
+      variant: "tertiary", size: "sm", danger: true,
+      onClick: async () => {
+        const ok = await confirmDialog("Abandonner les écritures en attente",
+          `Les ${info.count} écriture(s) gardées sur ce poste ne seront pas renvoyées à la base. Ce poste repart de ce que la base contient : les modifications faites hors ligne et non transmises seront perdues.`,
+          { confirmLabel: "Abandonner" });
+        if (!ok) return;
+        const n = await db.viderPending();
+        toast(`${n} écriture(s) abandonnée(s)`, "warning");
+        redrawView();
+      },
+    }),
+  ));
+  return box;
 }
 
 function card(title, sub, ...children) {
@@ -960,9 +1155,23 @@ async function resetAll() {
 // vierge — ou le jeu de démonstration, si le déploiement l'allume encore (voir
 // src/lib/demo.js).
 async function resetVierge() {
+  // Les COMPTES du DÉPLOIEMENT — comptes locaux tenus par le service, ou agents
+  // de l'annuaire — ne partent pas avec le référentiel : leurs mots de passe
+  // vivent chez le service, hors du référentiel, et les effacer ici laissait
+  // l'installation sans personne pour se connecter, le compte d'administration
+  // compris (voir `comptesDuDeploiement`, src/lib/auth.js). La fenêtre de
+  // confirmation le dit, puisque le bouton promettait jusqu'ici d'effacer
+  // « tout, comptes compris ».
+  const garderComptes = comptesDuDeploiement();
   const ok = await confirmDialog(
     "Repartir d'un référentiel vierge",
-    "Tout est effacé : référentiel, trames, actes, comptes, et — sur le service partagé — actes déposés, circuits de signature et publications. L'installation repart d'une page blanche, à construire. Action irréversible.",
+    "Tout est effacé : référentiel, trames, actes"
+      + (garderComptes ? "" : ", comptes")
+      + ", et — sur le service partagé — actes déposés, circuits de signature et publications."
+      + (garderComptes
+        ? " Les COMPTES, eux, sont CONSERVÉS : leurs mots de passe sont gardés par le service, et les effacer ici ne les supprimerait pas — l'installation se retrouverait sans personne pour se connecter, votre compte compris. Supprimez ceux qui n'ont plus lieu d'être dans « Comptes et rôles »."
+        : "")
+      + " L'installation repart d'une page blanche, à construire. Action irréversible.",
     { confirmLabel: "Repartir à zéro", danger: true },
   );
   if (!ok) return;
@@ -984,7 +1193,7 @@ async function resetVierge() {
     );
     if (!continuer) return;
   }
-  await clearAll();
+  await clearAll({ garderComptes });
   location.reload();
 }
 
@@ -993,7 +1202,7 @@ async function resetVierge() {
 // démonstration du référentiel — sauf en mode « mot de passe », où c'est la
 // session de l'agent qui ouvre le droit (voir src/lib/remote.js).
 async function purgerService() {
-  const token = modeDeploiement() === "password"
+  const token = sessionDeService(state.config)
     ? null
     : (cleService() || publicationSettings(state.config).jetonDemonstration || null);
   try {
@@ -1032,7 +1241,7 @@ function circuitsPanel(save, redraw) {
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Circuits de validation" }),
       button("Nouveau circuit", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { c.circuits.push(newCircuit()); paint(); } }),
     ),
-    h("p", { class: "fr-card__sub", text: "Le chemin que suit un acte avant d'être signé : une suite d'étapes, chacune confiée à un rôle, qui demande un bon pour accord ou un simple avis. Les étapes sont séquentielles. Un circuit sans ciblage s'applique à tous les actes ; un circuit ciblé l'emporte sur lui." }),
+    h("p", { class: "fr-card__sub", text: "Le chemin que suit un acte avant d'être signé : une suite d'étapes, chacune d'une nature — vérification, visa ou signature — et confiée à un rôle. Les étapes sont séquentielles, et un circuit s'ouvre en principe par la vérification du réviseur. Un circuit sans ciblage s'applique à tous les actes ; un circuit ciblé l'emporte sur lui. Sans circuit, les actes partent directement en signature." }),
   ));
 
   if (!c.circuits.length) {
@@ -1109,8 +1318,31 @@ function etapeEdit(s, j, cir, paint) {
     button("", { variant: "tertiary", size: "sm", icon: "trash", title: "Supprimer", onClick: () => { cir.steps.splice(j, 1); paint(); } }),
   ));
   sub.appendChild(textField({ label: "Intitulé de l'étape", value: s.label || "", onChange: (v) => { s.label = v; garder(); } }));
-  sub.appendChild(selectField({ label: "Rôle attendu", value: s.role || "editeur", options: STEP_ROLES.map((r) => ({ value: r.id, label: r.label })), onChange: (v) => { s.role = v; garder(); } }));
-  sub.appendChild(selectField({ label: "Nature", value: s.kind || "accord", help: "Un bon pour accord conditionne la suite ; un avis est consultatif.", options: STEP_KINDS.map((k) => ({ value: k.id, label: k.label })), onChange: (v) => { s.kind = v; garder(); } }));
+  // La NATURE vient en premier : c'est elle qui commande le sens de l'étape, et
+  // son rôle naturel. Changer la nature fait suivre le rôle et l'intitulé tant
+  // qu'ils sont restés ceux de la nature précédente — un réglage voulu à la main
+  // n'est jamais écrasé.
+  sub.appendChild(selectField({
+    label: "Nature", value: natureEtape(s.kind).id,
+    help: natureEtape(s.kind).hint,
+    options: STEP_KINDS.map((k) => ({ value: k.id, label: k.label })),
+    onChange: (v) => {
+      const avant = etapeDefauts(s.kind);
+      const apres = etapeDefauts(v);
+      if (s.role === avant.role) s.role = apres.role;
+      if (s.label === avant.label) s.label = apres.label;
+      if (s.serviceScoped === avant.serviceScoped) s.serviceScoped = apres.serviceScoped;
+      s.kind = natureEtape(v).id;
+      garder();
+      paint();
+    },
+  }));
+  sub.appendChild(selectField({
+    label: "Rôle attendu", value: s.role || etapeDefauts(s.kind).role,
+    help: "Qui tient cette étape. Le rôle naturel de la nature choisie est proposé, mais rien ne l'impose : l'administrateur tient de toute façon n'importe quelle étape, comme recours.",
+    options: STEP_ROLES.map((r) => ({ value: r.id, label: r.label })),
+    onChange: (v) => { s.role = v; garder(); },
+  }));
   const scope = h("input", { type: "checkbox", checked: s.serviceScoped !== false });
   scope.addEventListener("change", () => { s.serviceScoped = scope.checked; garder(); });
   sub.appendChild(h("label", { class: "fr-check" }, scope, "Le valideur doit relever du service de l'acte"));
@@ -1191,6 +1423,27 @@ function numerotationPanel(save, redraw) {
     "Le motif compose le numéro de l'acte à partir de ses jetons ; il vaut pour les deux sources.",
     compo, seqFields);
   wrap.appendChild(carte);
+
+  // La PORTÉE du chrono : un compteur unique, un par entité, ou un par type
+  // d'acte. Chaque portée a son propre compteur (`numbering.sequences`), ce qui
+  // permet d'attribuer un numéro par entité sans rien ressaisir : une portée qui
+  // n'a pas encore de compteur repart de la séquence générale.
+  wrap.appendChild(card("Portée du chrono",
+    "À quoi se rattache la séquence : à toute la collectivité, à chaque entité, ou à chaque type d'acte. C'est ce qui décide si deux actes pris le même jour portent des rangs consécutifs ou repartent chacun de leur côté.",
+    choiceField({
+      label: "Une séquence", value: n.portee, options: PORTEES,
+      help: "Une collectivité qui numérote « arrêtés » et « délibérations » dans deux suites distinctes choisit « par type d'acte » ; une commune qui numérote séparément chaque établissement choisit « par entité ».",
+      onChange: (v) => { n.portee = v; save(); redraw(); },
+    }),
+    h("p", { class: "fr-small fr-muted", text: n.portee === "global"
+      ? "Un seul chrono : tous les actes de la collectivité partagent la suite, quels que soient leur entité et leur type."
+      : n.portee === "entite"
+        ? "Un chrono par entité : chaque code d'entité a sa propre séquence, et son propre rang. Le motif du numéro gagne à comporter le jeton {entityCode}, sans quoi deux entités composeraient le même numéro."
+        : "Un chrono par type d'acte : chaque type a sa propre séquence. Le motif gagne à comporter le jeton {actTypeId}." }),
+    h("p", { class: "fr-small" },
+      button("Voir le chrono de numérotation", { variant: "secondary", size: "sm", icon: "list", onClick: () => navigate("chrono") }),
+      h("span", { class: "fr-small fr-muted", text: " — tous les numéros attribués, leur état, les trous et les numéros annulés, avec tri, filtres et export CSV / XLSX." })),
+  ));
 
   wrap.appendChild(card("Identifiant ELI",
     "Le motif ELI compose l'identifiant persistant et les URI de publication. Il ne dépend pas de la source du numéro.",
@@ -1364,6 +1617,11 @@ function delaisPanel(save, redraw) {
 function signaturePanel(save, redraw) {
   const c = state.config;
   const s = (c.signature = { ...(c.signature || {}) });
+  // L'API du prestataire (circuit électronique) : un bloc à part, dont on
+  // remplit les manques. La CLÉ n'y figure pas — elle vit au SERVICE
+  // (`SCRIBA_SIGNATURE_API_CLE`), et jamais dans le référentiel, qui s'exporte
+  // et se partage.
+  const api = (s.api = { ...SIGNATURE_API_DEFAUT, ...(s.api || {}) });
   const d = signatureSettings(c);
   const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
   wrap.appendChild(h("h2", { class: "fr-card__title", text: "Circuit de signature" }));
@@ -1380,6 +1638,100 @@ function signaturePanel(save, redraw) {
   wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
     h("p", { class: "fr-alert__title", text: modeLabel(d.mode) }),
     h("p", { class: "fr-small", text: mode.hint })));
+
+  // ------------------------------------------------ l'API du prestataire
+  // Le circuit électronique a besoin d'un prestataire joignable. Ses réglages
+  // sont ici ; sa CLÉ, jamais : elle vit dans le `.env` du déploiement
+  // (`SCRIBA_SIGNATURE_API_CLE`), parce qu'un référentiel s'exporte, se copie et
+  // se partage. Quand cette page est servie par le service de la collectivité,
+  // c'est LUI qui sait si le prestataire est réellement branché (il détient la
+  // clé) : son état est affiché, et c'est lui qui fait autorité.
+  const simule = circuitElectroniqueSimule();
+  const svc = prestataireDuService();
+  const deploie = (chemin) => poseParLeDeploiement("signature.api." + chemin);
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+  wrap.appendChild(sectionHeader("API du prestataire (circuit électronique)"));
+  wrap.appendChild(h("div", { class: "fr-alert fr-alert--" + (simule ? "warning" : "success"), style: { marginBottom: "12px" } },
+    h("p", { class: "fr-alert__title", text: simule ? "Circuit électronique simulé" : "Prestataire branché" }),
+    h("p", { class: "fr-small", text: simule
+      ? "Aucun appel ne sort de la collectivité : l'application joue elle-même le prestataire. " + (motifCircuitSimule(c) || "")
+      : `Le service appelle « ${svc.prestataire} » à l'adresse ${svc.url} — la clé d'API reste au service, et ne transite jamais par cette page.` }),
+    h("p", { class: "fr-small fr-muted", text: simule
+      ? "Pour brancher un prestataire : renseignez son adresse ci-dessous (ou dans le .env), réglez le transport sur « service », et posez la clé d'API dans le fichier .env du déploiement (SCRIBA_SIGNATURE_API_CLE). La clé ne se saisit jamais ici : le référentiel s'exporte, se copie et se partage."
+      : "Les réglages ci-dessous disent au service QUOI demander au prestataire ; la clé, elle, ne quitte pas le serveur." })));
+
+  wrap.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+    choiceField({
+      label: "Transport", value: api.transport,
+      options: [
+        { value: "service", label: "Par le service de la collectivité (la clé reste au serveur)" },
+        { value: "demonstration", label: "Simulation locale (aucun appel sortant)" },
+      ],
+      help: "« Par le service » est le seul transport qui garde la clé d'API côté serveur : c'est le réglage d'une installation réelle. « Simulation locale » sert aux essais et aux démonstrations."
+        + (deploie("transport") ? " Posé par le .env : une saisie ici ne tient pas." : ""),
+      onChange: (v) => { api.transport = v; save(); redraw(); },
+    }),
+    textField({
+      label: "Adresse de base du prestataire", value: api.url, placeholder: "https://signature.exemple.fr/api/v1",
+      help: "La racine de l'API du prestataire. Vide : le circuit électronique reste simulé."
+        + (deploie("url") ? " Posée par le .env." : ""),
+      onChange: (v) => { api.url = v; save(); },
+    }),
+    textField({
+      label: "Identifiant du prestataire", value: api.prestataire, placeholder: "esup-signature",
+      help: "Le nom technique du prestataire : il apparaît sur les dossiers et dans le journal."
+        + (deploie("prestataire") ? " Posé par le .env." : ""),
+      onChange: (v) => { api.prestataire = v; save(); },
+    }),
+    selectField({
+      label: "Niveau de signature demandé", value: api.niveau,
+      options: [
+        { value: "simple", label: "Signature simple" },
+        { value: "avancee", label: "Signature avancée (certificat)" },
+        { value: "qualifiee", label: "Signature qualifiée (eIDAS)" },
+      ],
+      help: "Le niveau que l'application DEMANDE au prestataire pour les actes de la collectivité. C'est lui qui décide de la valeur juridique de la signature."
+        + (deploie("niveau") ? " Posé par le .env." : ""),
+      onChange: (v) => { api.niveau = v; save(); },
+    }),
+    textField({
+      label: "Adresse de notification (webhook)", value: api.urlNotification, placeholder: "https://actes.exemple.fr/v1/webhooks/signature",
+      help: "L'adresse que le prestataire appellera une fois l'acte signé. Vide : l'adresse du service, suivie de /v1/webhooks/signature."
+        + (deploie("urlNotification") ? " Posée par le .env." : ""),
+      onChange: (v) => { api.urlNotification = v; save(); },
+    }),
+    textField({
+      label: "Délai d'attente (ms)", type: "number", value: String(api.timeoutMs),
+      help: "Temps maximal accordé à un appel au prestataire avant abandon."
+        + (deploie("timeoutMs") ? " Posé par le .env." : ""),
+      onChange: (v) => { api.timeoutMs = Number(v) || 20000; save(); },
+    })));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" }, text: "Points de terminaison du prestataire — relatifs à l'adresse de base. Le jeton {document} reçoit l'identifiant du dossier rendu au dépôt." }));
+  wrap.appendChild(h("div", { class: "fr-grid fr-grid--2" },
+    textField({
+      label: "Chemin — dépôt du document", value: api.cheminDocument, placeholder: "/documents",
+      help: "Reçoit le document à signer.",
+      onChange: (v) => { api.cheminDocument = v; save(); },
+    }),
+    textField({
+      label: "Chemin — ajout d'un signataire", value: api.cheminSignataires, placeholder: "/documents/{document}/signataires",
+      help: "Reçoit les signataires, un par un.",
+      onChange: (v) => { api.cheminSignataires = v; save(); },
+    }),
+    textField({
+      label: "Chemin — démarrage du circuit", value: api.cheminDemarrer, placeholder: "/documents/{document}/demarrer",
+      help: "Lance le circuit : c'est cet appel qui rend le lien de signature.",
+      onChange: (v) => { api.cheminDemarrer = v; save(); },
+    }),
+    textField({
+      label: "Chemin — suivi du circuit", value: api.cheminStatut, placeholder: "/documents/{document}",
+      help: "Interrogé pour relire le statut d'un dossier.",
+      onChange: (v) => { api.cheminStatut = v; save(); },
+    }),
+    h("div", { class: "fr-row", style: { gridColumn: "1 / -1" } },
+      button("Rétablir les réglages livrés", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => { s.api = { ...SIGNATURE_API_DEFAUT }; save(); redraw(); } }))));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
+    text: "La CLÉ du prestataire ne se règle pas ici : elle vit dans le fichier .env du déploiement (SCRIBA_SIGNATURE_API_CLE), où le service la lit au démarrage. Elle n'est jamais transmise à cette page, ni recopiée dans un export du référentiel." }));
 
   wrap.appendChild(h("hr", { class: "fr-sep" }));
   wrap.appendChild(sectionHeader("Les trois circuits"));
@@ -1841,39 +2193,22 @@ function recueilsExternesBloc(save, redraw) {
 // suit les données exportées et importées.
 function experimentalPanel(save, redraw) {
   const c = state.config;
-  const x = (c.experimental = c.experimental || { parapheur: false, controleLegalite: false });
+  const x = (c.experimental = c.experimental || { parapheur: true, controleLegalite: false });
   if (x.controleLegalite === undefined) x.controleLegalite = false;
+  // Le parapheur n'est plus expérimental (1.5.0) : il vit dans l'onglet
+  // « Circuits de validation », et son réglage est la présence de circuits.
+  if (x.parapheur === false) x.parapheur = true;
   const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
   wrap.appendChild(h("h2", { class: "fr-card__title", text: "Fonctions expérimentales" }));
   wrap.appendChild(h("p", { class: "fr-card__sub", text: "Ces fonctions sont livrées avec l'application, mais éteintes par défaut : elles ne conviennent pas à toutes les organisations, et leur comportement peut encore changer. Activez-les en connaissance de cause." }));
-  wrap.appendChild(choiceField({
-    label: "Circuit de validation des actes (parapheur)",
-    value: !!x.parapheur,
-    options: [{ value: true, label: "Activé" }, { value: false, label: "Désactivé (par défaut)" }],
-    help: "Fait franchir à chaque acte un circuit d'étapes (bon pour accord, avis) défini dans le référentiel, avant l'envoi en signature. La plupart des collectivités ont déjà leur propre circuit interne, en amont de « Envoyer en signature » : laissez désactivé si c'est votre cas.",
-    // `touch` (et non `save`) : l'activation change AUSSI le menu de gauche et
-    // les onglets — il faut redessiner la coquille, pas seulement la vue.
-    onChange: async (v) => {
-      x.parapheur = v;
-      touch("config");
-      // Les actes de démonstration portent (ou non) leur passage au parapheur :
-      // on les reconstruit pour que le changement se voie immédiatement.
-      if (await regenerateDemoActes()) toast("Actes de démonstration reconstruits pour suivre le réglage.");
-    },
-  }));
-  if (x.parapheur) {
-    wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
-      h("p", { class: "fr-alert__title", text: "Le parapheur est activé" }),
-      h("p", { class: "fr-small", text: "L'onglet « Circuits de validation » de l'Administration et l'écran « Parapheur » sont de nouveau accessibles. Un acte dont le circuit n'est pas achevé ne peut pas être envoyé en signature, et sa modification après validation rend celle-ci caduque." }),
-      h("div", { class: "fr-row" },
-        button("Régler les circuits de validation", {
-          variant: "secondary", size: "sm", icon: "check",
-          onClick: () => { state.ui.refTab = "circuits"; redraw(); },
-        }))));
-  } else {
-    wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "10px" },
-      text: "Parapheur désactivé : les actes rédigés partent directement en signature, et un acte signé publiable est publié au recueil automatiquement. Les circuits éventuellement enregistrés dans le référentiel sont conservés — les réactiver les remet en service tels quels." }));
-  }
+  wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginBottom: "12px" } },
+    h("p", { class: "fr-alert__title", text: "Le parapheur est désormais une fonction ordinaire" }),
+    h("p", { class: "fr-small", text: "Le circuit de validation n'est plus expérimental : il est toujours disponible, et ce sont les circuits enregistrés dans le référentiel qui décident. Un référentiel sans circuit n'a aucun parapheur — les actes partent directement en signature." }),
+    h("div", { class: "fr-row" },
+      button("Régler les circuits de validation", {
+        variant: "secondary", size: "sm", icon: "check",
+        onClick: () => { state.ui.refTab = "circuits"; redraw(); },
+      }))));
 
   // La transmission au contrôle de légalité : une étape de plus, entre le
   // retour signé et la publication, qui passe par l'API d'envoi de la

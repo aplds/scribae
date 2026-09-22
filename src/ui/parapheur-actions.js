@@ -16,7 +16,13 @@ import { h, button, toast } from "./dom.js";
 import { promptDialog } from "./components.js";
 import {
   demarrerValidation, redemarrerValidation, appliquerDecision, etapeActive,
+  verdictDe, actionDe, etiquetteEtape,
 } from "../lib/validation.js";
+
+// Le rôle d'une étape, sous la forme que le journal et les notifications
+// attendent : « role:reviseur », « role:editeur »… Un seul vocabulaire, donc
+// une étape de vérification s'annonce au réviseur sans que rien ici ne le sache.
+const destinataireRole = (etape) => (etape && etape.role ? "role:" + etape.role : "");
 
 // Ouvrir le circuit sur un acte. Le circuit porte sur le texte ENREGISTRÉ : les
 // appelants enregistrent d'abord, puis soumettent.
@@ -28,7 +34,7 @@ export async function soumettreCircuit(a, circuit, { paint = redrawView } = {}) 
   await journaliser({
     action: "parapheur.depot", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
     detail: `soumis au circuit « ${circuit.label} »` + (etape ? ` — étape « ${etape.label} »` : ""),
-    to: [etape ? (etape.role === "administrateur" ? "role:administrateur" : "role:editeur") : ""].filter(Boolean),
+    to: [destinataireRole(etape), etape && etape.kind !== "verification" ? "role:reviseur" : ""].filter(Boolean),
   });
   touch("actes", { rerender: false });
   toast("Acte soumis au circuit de validation", "success");
@@ -65,7 +71,7 @@ export async function deciderEtape(a, etape, decision, commentaire, { paint = re
     toast("Un renvoi ou un refus doit être motivé.", "warning");
     return;
   }
-  const dit = libelle || (decision === "valide" ? (etape.kind === "avis" ? "Avis donné" : "Bon pour accord donné")
+  const dit = libelle || (decision === "valide" ? verdictDe(etape.kind)
     : decision === "passe" ? "Étape passée" : decision === "refuse" ? "Acte refusé" : "Acte renvoyé en rédaction");
   appliquerDecision(a, etape.id, decision, state.user, texte);
   a.updatedAt = new Date().toISOString();
@@ -73,8 +79,11 @@ export async function deciderEtape(a, etape, decision, commentaire, { paint = re
   const suivante = etapeActive(v);
   const destinataires = [];
   if (decision === "valide" || decision === "passe") {
-    if (suivante) destinataires.push(suivante.role === "administrateur" ? "role:administrateur" : "role:editeur");
-    if (v.statut === "valide") destinataires.push(a.createdBy || "", "role:administrateur");
+    if (suivante) destinataires.push(destinataireRole(suivante));
+    // L'étape de vérification intéresse le réviseur, même quand elle n'est pas
+    // la première : c'est lui qui contrôle, et le circuit le lui annonce.
+    if (suivante && suivante.kind === "verification") destinataires.push("role:reviseur");
+    if (v.statut === "valide") destinataires.push(a.createdBy || "", "role:administrateur", "role:signataire");
   } else {
     destinataires.push(a.createdBy || "", "role:editeur");
   }
@@ -91,16 +100,20 @@ export async function deciderEtape(a, etape, decision, commentaire, { paint = re
 
 // La carte de décision, telle qu'elle doit apparaître quand l'étape ouverte est
 // de mon ressort. Elle est partagée pour que l'écran du parapheur et la fiche de
-// l'acte proposent exactement les mêmes choix.
+// l'acte proposent exactement les mêmes choix. Le geste principal porte le verbe
+// de la nature de l'étape : « Vérifier », « Donner mon visa », « Marquer prêt à
+// signer ».
 export function carteDecision(a, etape, { heading = "h2" } = {}) {
+  const nature = etiquetteEtape(etape.kind);
   const zone = h("textarea", { class: "fr-textarea", rows: 3, placeholder: "Observation (obligatoire pour un renvoi ou un refus)" });
   return h("div", { class: "fr-card parapheur-decision" },
     h(heading, { class: "fr-card__title", text: "Votre décision" }),
-    h("p", { class: "fr-small fr-muted", text: etape.label + (etape.help ? " — " + etape.help : "") }),
+    h("p", { class: "fr-small fr-muted", text: nature.label + " — " + etape.label + (etape.help ? " : " + etape.help : "") }),
+    h("p", { class: "fr-small fr-muted", text: nature.hint }),
     h("label", { class: "fr-label", text: "Observation" }),
     zone,
     h("div", { class: "fr-row", style: { marginTop: "10px" } },
-      button(etape.kind === "avis" ? "Donner l'avis" : "Bon pour accord", {
+      button(actionDe(etape.kind), {
         variant: "primary", icon: "check",
         onClick: () => deciderEtape(a, etape, "valide", zone.value),
       }),

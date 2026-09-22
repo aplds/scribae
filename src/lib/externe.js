@@ -38,6 +38,7 @@
 //
 // Ce module est pur : il ne connaît ni le DOM ni l'état de l'application.
 // ============================================================================
+import { prestataireDeploye } from "./deploiement-config.js";
 
 // --------------------------------------------------------------- les réglages
 // Le circuit général de la collectivité. « electronique » est le comportement
@@ -64,9 +65,119 @@ export const SIGNATURE_DEFAUT = { mode: "electronique" };
 
 const MODES_VALIDES = ["electronique", "simple", "externe"];
 
+// ----------------------------------------------------------------------------
+// L'API DU PRESTATAIRE DE SIGNATURE (circuit « electronique »).
+//
+// Le circuit électronique suppose un prestataire joignable — ESUP-Signature, un
+// parapheur, l'outil de la collectivité. Jusqu'ici, seule la démonstration
+// simulait ce prestataire : en production, il n'y avait NULLE PART où régler
+// son adresse, son niveau de signature, sa clé d'API ni son délai. Ces réglages
+// sont donc réunis ici (`config.signature.api`), posés à la main dans
+// Administration › Signature ou déclarés dans le `.env` du déploiement
+// (`SCRIBA_SIGNATURE_API_*`, voir src/server/mysql/variables.mjs).
+//
+// La CLÉ DU PRESTATAIRE ne vit PAS ici : c'est un secret, il ne se recopie ni
+// dans le référentiel, ni dans un export, ni dans la réponse d'une route. Elle
+// reste au SERVICE (`SCRIBA_SIGNATURE_API_CLE`) qui seul appelle le prestataire.
+//
+// `transport` : « service » (c'est le service de la collectivité qui appelle le
+// prestataire — seul moyen de garder la clé côté serveur), ou « demonstration »
+// (le circuit est simulé : aucun appel sortant, ce qui reste le défaut tant
+// qu'aucune adresse n'est renseignée).
+export const SIGNATURE_API_DEFAUT = {
+  transport: "service",       // service | demonstration
+  url: "",                    // base du prestataire, ex. https://signature.exemple.fr/api/v1
+  prestataire: "esup-signature", // identifiant du prestataire (libellé technique)
+  niveau: "avancee",          // simple | avancee | qualifiee
+  urlNotification: "",        // laissée vide = l'adresse du service + /v1/webhooks/signature
+  timeoutMs: 20000,
+  // Points de terminaison du prestataire, relatifs à `url` — les mêmes jetons
+  // que la numérotation externe : {document} {signature} {acte} {numero}.
+  cheminDocument: "/documents",
+  cheminSignataires: "/documents/{document}/signataires",
+  cheminDemarrer: "/documents/{document}/demarrer",
+  cheminStatut: "/documents/{document}",
+};
+
+const NIVEAUX_VALIDES = ["simple", "avancee", "qualifiee"];
+
 export function signatureSettings(config) {
   const s = (config && config.signature) || {};
-  return { ...SIGNATURE_DEFAUT, ...s, mode: MODES_VALIDES.includes(s.mode) ? s.mode : "electronique" };
+  const a = s.api || {};
+  return {
+    ...SIGNATURE_DEFAUT,
+    ...s,
+    mode: MODES_VALIDES.includes(s.mode) ? s.mode : "electronique",
+    api: {
+      ...SIGNATURE_API_DEFAUT,
+      ...a,
+      niveau: NIVEAUX_VALIDES.includes(a.niveau) ? a.niveau : SIGNATURE_API_DEFAUT.niveau,
+      transport: a.transport === "demonstration" ? "demonstration" : "service",
+      timeoutMs: Number(a.timeoutMs) || SIGNATURE_API_DEFAUT.timeoutMs,
+    },
+  };
+}
+
+// Le prestataire est-il RÉELLEMENT branché ? Une adresse renseignée, et un
+// transport autre que la simulation. C'est cette question qui décide si
+// l'application annonce un circuit électronique opérationnel ou une simulation.
+export const prestataireBranche = (config) => {
+  const a = signatureSettings(config).api;
+  return a.transport !== "demonstration" && !!String(a.url || "").trim();
+};
+
+// ----------------------------------------------------------------------------
+// LE CIRCUIT ÉLECTRONIQUE EST-IL SIMULÉ ?
+//
+// La question ne se tranche pas dans le navigateur : c'est le SERVICE qui sait
+// s'il détient la clé du prestataire (`SCRIBA_SIGNATURE_API_CLE`) et s'il
+// appellera vraiment son API. Sans service (aperçu en ligne, page statique), ou
+// quand le service dit qu'il n'est pas branché, le circuit est SIMULÉ : c'est
+// l'application qui joue le prestataire, sans rien faire sortir de la
+// collectivité. Voir src/lib/deploiement-config.js (l'état rendu par
+// `GET /v1/config`) et src/ui/views/signature.js, qui en tire la façon de mener
+// l'acte : lien réel du prestataire, ou outil de démonstration embarqué.
+// ----------------------------------------------------------------------------
+export const prestataireDuService = () => prestataireDeploye();
+
+export const circuitElectroniqueSimule = () => {
+  const svc = prestataireDeploye();
+  // Pas de service qui parle : rien ne peut sortir, donc simulation.
+  if (!svc) return true;
+  // Le service dit lui-même s'il est branché (adresse ET clé présentes).
+  return !svc.actif;
+};
+
+// Pourquoi le circuit est simulé, en une phrase — celle qu'on montre à
+// l'administrateur. Quand le service parle, c'est SON motif qui fait foi.
+export function motifCircuitSimule(config) {
+  const svc = prestataireDeploye();
+  if (svc) return svc.motif || (svc.actif ? "" : "Le prestataire n'est pas configuré sur le service.");
+  const a = signatureSettings(config).api;
+  if (a.transport === "demonstration") return "Le transport est réglé sur « demonstration » : aucun appel sortant.";
+  if (!String(a.url || "").trim()) return "Aucune adresse de prestataire n'est renseignée : le circuit électronique est simulé.";
+  return "Cette page n'est pas servie par le service de la collectivité : le prestataire ne peut pas être appelé d'ici.";
+}
+
+// Les réglages du prestataire tels que le service les reçoit au dépôt de
+// l'acte et à l'ouverture du circuit : jamais la clé, qui ne quitte pas le
+// serveur. C'est ce que l'application joint à `POST /v1/actes/{id}/signature`.
+export function reglagesPrestataire(config) {
+  const a = signatureSettings(config).api;
+  return {
+    transport: a.transport,
+    url: String(a.url || "").trim(),
+    prestataire: a.prestataire,
+    niveau: a.niveau,
+    urlNotification: String(a.urlNotification || "").trim(),
+    timeoutMs: a.timeoutMs,
+    chemins: {
+      document: a.cheminDocument,
+      signataires: a.cheminSignataires,
+      demarrer: a.cheminDemarrer,
+      statut: a.cheminStatut,
+    },
+  };
 }
 
 export const modeLabel = (id) =>

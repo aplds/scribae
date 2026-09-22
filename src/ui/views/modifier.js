@@ -20,7 +20,7 @@ import { textField, selectField, emptyState, helpLink, confirmDialog, promptDial
 import { openActe } from "./rediger.js";
 import { fullName } from "../../lib/users.js";
 import {
-  etapeActive, validationAJour, avancement, VALIDATION_STATUTS, ETAPE_STATUTS,
+  etapeActive, validationAJour, avancement, VALIDATION_STATUTS, ETAPE_STATUTS, etiquetteEtape,
 } from "../../lib/validation.js";
 import {
   formalites, statutExecution, dateExecutoire, dateLimiteRecours, ecartJours, aujourdhui,
@@ -42,8 +42,8 @@ import {
 } from "../../lib/amend-edit.js";
 import { buildEditableDocument } from "./amend-editor.js";
 import { signerPicker } from "../signer-picker.js";
-import { compile, nextNumero, interpolate } from "../../lib/compile.js";
-import { reserverNumero } from "../../lib/numbering.js";
+import { compile, interpolate } from "../../lib/compile.js";
+import { reserverNumero, fixerSequence, prochainNumeroLibre } from "../../lib/numbering.js";
 import { renderDocument, applyPaper } from "../../lib/render.js";
 import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
 import { parseDocumentFile } from "../../lib/akn.js";
@@ -214,7 +214,9 @@ function defaultMeta(doc, designation, cibleDesignation) {
     })
     : `modification de ${cible}`;
   return {
-    numero: entity ? nextNumero(config, entity) : "",
+    // Le numéro proposé est un numéro LIBRE : la séquence saute les rangs déjà
+    // portés par un acte ou annulés (voir src/lib/sequence.js).
+    numero: entity ? prochainNumeroLibre(config, { entity, actes: state.actes }).numero : "",
     designation: des,
     objet,
     dateSignature: todayIso(),
@@ -837,14 +839,22 @@ function renderWorkspace(root) {
               entityId: mod.meta.entityId,
               objet: mod.meta.objet || "",
               date: mod.meta.dateSignature || todayIso(),
+              actTypeId: mod.meta.actTypeId || "",
+              actes: state.actes,
             });
             mod.meta.numero = res.numero;
             mod.meta.numeroSource = res.source === "externe"
               ? { source: "externe", ref: res.ref || "", valeur: res.valeur || "", at: new Date().toISOString() }
               : null;
-            if (res.source === "interne") { config.numbering.seq += 1; touch("config", { rerender: false }); }
+            if (res.source === "interne") {
+              // La séquence est fixée au rang RÉSERVÉ : elle enjambe les numéros
+              // déjà pris au lieu de les proposer une seconde fois.
+              fixerSequence(config, res.seq, { entity, actTypeId: mod.meta.actTypeId || "" });
+              touch("config", { rerender: false });
+            }
             numeroInput.value = mod.meta.numero;
-            toast("Numéro réservé : " + mod.meta.numero, "success");
+            toast("Numéro réservé : " + mod.meta.numero
+              + (res.sautes ? ` (${res.sautes} rang(s) déjà pris, enjambé(s))` : ""), "success");
           } catch (e) {
             toast(String((e && e.message) || e), "error");
           }
@@ -1100,8 +1110,8 @@ export function renderActeDetail(root, params) {
 
   // Le parapheur : où en est l'acte dans son circuit de validation, et ce que
   // le lecteur peut y faire. C'est la même mécanique que l'écran « Parapheur »,
-  // ramenée sur la fiche de l'acte concerné. Fonction expérimentale : la carte
-  // n'apparaît que si elle est activée (Administration › Expérimentale).
+  // ramenée sur la fiche de l'acte concerné. La carte n'apparaît que si un
+  // circuit s'applique vraiment à l'acte.
   if (parapheurActif()) root.appendChild(parapheurCard(a));
 
   // La révision : le contrôle avant la signature (voir src/lib/revision.js).
@@ -1141,7 +1151,7 @@ export function renderActeDetail(root, params) {
         : h("p", { class: "fr-small", text: a.externe && a.externe.statut === "a_signer" ? "Document remis au signataire : la version signée n'a pas encore été déposée." : a.statut === "en_signature" ? "Circuit de signature ouvert, en attente de signature." : a.statut === "en_attente" ? "En attente : la version consolidée sera publiée en même temps que l'acte modificatif." : "Acte non signé." }),
       p ? h("div", {},
         h("p", { class: "fr-small" }, h("strong", { text: "Publié. " }), `ELI ${p.eliUri}`),
-        h("p", { class: "fr-small fr-muted", text: `Publié le ${formatDate(p.datePublication)} · entrée en vigueur le ${formatDate(p.dateOpposabilite)} · ${p.recueil || ""}` }),
+        h("p", { class: "fr-small fr-muted", text: [`Publié le ${formatDate(p.datePublication)}`, p.juridique === false ? "document non opposable" : `entrée en vigueur le ${formatDate(p.dateOpposabilite)}`, p.recueil || ""].filter(Boolean).join(" · ") }),
       ) : null,
       // Un acte retiré du recueil garde la trace du retrait et de son motif :
       // c'est un geste exceptionnel, il ne doit pas s'oublier.
@@ -1356,7 +1366,7 @@ function etapeTraceEl(s, i, v) {
       h("p", { class: "sig-step__title" },
         s.label,
         h("span", { class: "fr-badge fr-badge--" + info.color, style: { marginLeft: "6px" }, text: info.label }),
-        s.kind === "avis" ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "avis" }) : null,
+        h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: etiquetteEtape(s.kind).label }),
         s.optional ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "facultative" }) : null,
       ),
       h("p", { class: "sig-step__line", text: s.at ? `${s.byName || "—"} · le ${formatDate(String(s.at).slice(0, 10))}` : (ouverte ? "Étape ouverte" : "En attente") }),
@@ -1384,15 +1394,20 @@ function executionCard(a) {
     h("span", { class: "fr-badge fr-badge--" + st.color, text: st.label }),
   ));
 
-  box.appendChild(exe
-    ? h("p", { class: "fr-small" },
-      h("strong", { text: "Exécutoire le " + formatDate(exe) + ". " }),
-      rec
-        ? `${recoursTypeLabel(rec.type) || "Recours"} introduit le ${formatDate(rec.introduitLe)} : le délai de recours est clos, l'acte est contesté.`
-        : limite ? `Délai de recours contentieux jusqu'au ${formatDate(limite)} (${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"}).` : "")
-    : h("p", { class: "fr-small fr-muted", text: st.code === "brouillon"
-      ? "L'acte n'est pas signé : le caractère exécutoire se constate après la signature."
-      : "L'acte n'est pas encore exécutoire : " + (st.manquantes || []).map((m) => m.court).join(" et ") + " manque(nt)." }));
+  box.appendChild(st.code === "document"
+    // Un verbatim, une déclaration, un vœu : publié au recueil, mais il ne fait
+    // pas droit. On le dit ici plutôt que d'afficher une opposabilité qui
+    // n'existe pas (voir src/lib/execution.js, STATUTS_EXECUTION).
+    ? h("p", { class: "fr-small fr-muted", text: "Document non juridique : publié au recueil pour être lu, il ne fait pas droit — ni caractère exécutoire, ni délai de recours. Seule la publication le concerne." })
+    : exe
+      ? h("p", { class: "fr-small" },
+        h("strong", { text: "Exécutoire le " + formatDate(exe) + ". " }),
+        rec
+          ? `${recoursTypeLabel(rec.type) || "Recours"} introduit le ${formatDate(rec.introduitLe)} : le délai de recours est clos, l'acte est contesté.`
+          : limite ? `Délai de recours contentieux jusqu'au ${formatDate(limite)} (${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"}).` : "")
+      : h("p", { class: "fr-small fr-muted", text: st.code === "brouillon"
+        ? "L'acte n'est pas signé : le caractère exécutoire se constate après la signature."
+        : "L'acte n'est pas encore exécutoire : " + (st.manquantes || []).map((m) => m.court).join(" et ") + " manque(nt)." }));
 
   // Le recours du dossier : sa date d'introduction ferme le délai, et c'est elle
   // qui interdit d'attester qu'il n'y a pas eu de recours. On le note depuis

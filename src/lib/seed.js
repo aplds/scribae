@@ -55,6 +55,15 @@ export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64
 
 const LOGO_DATA_URL = "data:image/svg+xml;base64," + btoa(LOGO_SVG.trim());
 
+// La variante du thème sombre : MÊME écu, mais le galon s'éclaircit. Un trait
+// bleu nuit posé sur le fond sombre de l'application disparaîtrait, et l'écu
+// flotterait sans contour ; le reste du dessin — ciel, soleil, monts, eau — est
+// clair et tient sur les deux fonds. On ne retouche donc que le contour, et par
+// remplacement de la seule chaîne concernée : redessiner l'écu en double ferait
+// diverger les deux emblèmes à la première retouche du dessin.
+const LOGO_SVG_SOMBRE = LOGO_SVG.replace('stroke="#12335c" stroke-width="3.4"', 'stroke="#cfe0f5" stroke-width="3.4"');
+const LOGO_DATA_URL_SOMBRE = "data:image/svg+xml;base64," + btoa(LOGO_SVG_SOMBRE.trim());
+
 export function seedConfig() {
   const c = emptyConfig();
   c.brand = {
@@ -64,6 +73,7 @@ export function seedConfig() {
     colorDark: "#1212ff",
     baseUri: "https://www.valmont-sur-loire.fr",
     logoUrl: LOGO_DATA_URL,
+    logoUrlDark: LOGO_DATA_URL_SOMBRE,
     uiFont: "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
     documentFont: "'Times New Roman', Times, Georgia, serif",
     supportName: "Service des affaires générales",
@@ -95,6 +105,14 @@ export function seedConfig() {
     { id: "reglement", label: "Règlement", aknElement: "act" },
     { id: "convention", label: "Convention", aknElement: "act" },
     { id: "charte", label: "Charte", aknElement: "act" },
+    // Les DOCUMENTS D'ASSEMBLÉE qui se publient sans faire droit : le verbatim
+    // d'une séance, une déclaration, un vœu. Ce sont les types d'acte que
+    // portent les trames de nature « verbatim », « declaration » et « voeu »
+    // (voir src/lib/schema.js) — le type nomme le document, la nature dit sa
+    // portée.
+    { id: "compte-rendu", label: "Compte rendu", aknElement: "doc" },
+    { id: "declaration", label: "Déclaration", aknElement: "doc" },
+    { id: "voeu", label: "Vœu", aknElement: "doc" },
   ];
 
   // Chaque rôle porte ses DEUX formes : `m` et `f`. C'est d'elles que vient
@@ -128,6 +146,13 @@ export function seedConfig() {
       legalName: "Commune de Valmont-sur-Loire",
       seatCity: "Valmont-sur-Loire",
       tribunal: "Orléans",
+      // AUTONOME : la commune est une personne morale à part entière. Son
+      // SIGNATAIRE PRINCIPAL est son maire — la personne qui signe ses actes
+      // quand la trame n'en désigne aucune, sous sa qualité de maire (voir
+      // src/lib/compile.js et src/lib/organigramme.js).
+      autonome: true,
+      signerPersonId: "p-faure",
+      signerRoleId: "maire",
     },
     {
       id: "ent-ccas", code: "CCAS", kind: "etablissement-public",
@@ -138,6 +163,13 @@ export function seedConfig() {
       seatCity: "Valmont-sur-Loire",
       tribunal: "Orléans",
       parentId: "ent-vsl",
+      // Le CCAS a SA personnalité morale : il est autonome, même s'il figure
+      // sous la commune dans l'organigramme. Ses actes sont signés par sa
+      // directrice, qui tient sa compétence d'une délégation de la présidente
+      // (voir `ref-ccas-deliberation` plus bas).
+      autonome: true,
+      signerPersonId: "p-martin",
+      signerRoleId: "directeur-service",
     },
     {
       id: "ent-cde", code: "CDE", kind: "etablissement-public",
@@ -148,6 +180,11 @@ export function seedConfig() {
       seatCity: "Valmont-sur-Loire",
       tribunal: "Orléans",
       parentId: "ent-vsl",
+      // La caisse des écoles est, elle aussi, une personne morale distincte :
+      // autonome, et présidée par sa propre présidente.
+      autonome: true,
+      signerPersonId: "p-lefevre",
+      signerRoleId: "president",
     },
     {
       // Établissement public AUTONOME : son autorité de tête n'est pas le maire,
@@ -161,6 +198,28 @@ export function seedConfig() {
       legalName: "Office public de l'habitat du Valmont",
       seatCity: "Valmont-sur-Loire",
       tribunal: "Orléans",
+      autonome: true,
+      signerPersonId: "p-lambert",
+      signerRoleId: "president-ca",
+    },
+    {
+      // LA RÉGIE DU CINÉMA — le cas que le rattachement existe pour décrire :
+      // elle n'a PAS de personnalité morale propre (c'est une régie de la
+      // commune, dotée seulement de l'autonomie financière), mais elle a son
+      // directeur, son service et ses actes. `autonome: false` dit qu'elle est
+      // rattachée ; `parentId` dit à quoi. Son signataire principal est son
+      // directeur, et non le maire.
+      id: "ent-cinema", code: "CIN", kind: "etablissement",
+      name: "Régie du cinéma municipal",
+      nameWithArt: "la régie du cinéma municipal",
+      authorityFormula: "{qualite} de la régie du cinéma municipal",
+      legalName: "Régie du cinéma municipal de Valmont-sur-Loire",
+      seatCity: "Valmont-sur-Loire",
+      tribunal: "Orléans",
+      parentId: "ent-vsl",
+      autonome: false,
+      signerPersonId: "p-chevalier",
+      signerRoleId: "directeur-service",
     },
   ];
 
@@ -314,6 +373,16 @@ export function seedConfig() {
         { id: "bur-oph-patrimoine", name: "Patrimoine et travaux" },
       ],
     },
+    {
+      // La régie n'a pas de personnalité morale, mais elle a bel et bien ses
+      // services : c'est ce que l'organigramme doit montrer. Le rattachement se
+      // lit sur l'ENTITÉ (`parentId`, `autonome`), jamais sur le service.
+      id: "svc-cinema", code: "CIN", name: "Exploitation du cinéma municipal", entityId: "ent-cinema",
+      bureaux: [
+        { id: "bur-cin-programmation", name: "Programmation et accueil du public" },
+        { id: "bur-cin-technique", name: "Cabine et technique" },
+      ],
+    },
   ];
 
   c.people = [
@@ -355,6 +424,9 @@ export function seedConfig() {
     { id: "p-leroy", civility: "Madame", firstName: "Anne", lastName: "LEROY", entityId: "ent-vsl", roles: ["directeur-service"], serviceId: "svc-finances", bureauId: "bur-fin-budget", refs: [] },
     { id: "p-delacroix", civility: "Monsieur", firstName: "Pierre", lastName: "DELACROIX", entityId: "ent-vsl", roles: ["chef-de-bureau"], serviceId: "svc-finances", bureauId: "bur-fin-marches", refs: [] },
     { id: "p-lefevre", civility: "Madame", firstName: "Christine", lastName: "LEFÈVRE", entityId: "ent-cde", roles: ["president"], refs: [] },
+    // Le directeur de la régie du cinéma : la régie n'a pas de personnalité
+    // morale, mais elle a un directeur — c'est lui qui signe ses actes.
+    { id: "p-chevalier", civility: "Monsieur", firstName: "Olivier", lastName: "CHEVALIER", entityId: "ent-cinema", roles: ["directeur-service"], serviceId: "svc-cinema", refs: [] },
     // Des administrés : pétitionnaires d'urbanisme, preneurs d'une concession
     // funéraire, organisateurs d'une manifestation. Ils ne signent rien — ils
     // sont la partie nommée dans l'acte.
@@ -661,6 +733,7 @@ export function seedConfig() {
     { id: "fam-environnement", label: "Environnement et cadre de vie", description: "Propreté, espaces verts, eau, nuisances et qualité de la vie quotidienne." },
     { id: "fam-domaine-public", label: "Domaine public", description: "Occupations du domaine public, terrasses, emprises et mobilier communal." },
     { id: "fam-individuels", label: "Actes individuels (non publiables)", description: "Décisions individuelles qui ne sont pas publiées au recueil (elles se notifient)." },
+    { id: "fam-seances", label: "Séances et documents d'assemblée", description: "Verbatims de séance, déclarations et vœux : des documents publiés au recueil, mais qui ne font pas droit." },
   ];
   // Les feuilles de style de la démonstration (voir src/lib/styles.js) : une
   // feuille générale, une charte propre au CCAS, une charte pour les actes
@@ -683,22 +756,27 @@ export function seedConfig() {
   // actes individuels. La résolution retient le circuit le PLUS SPÉCIFIQUE :
   // une revalorisation (famille « actes individuels ») suit le circuit allégé,
   // pas le circuit général.
+  //
+  // Chaque étape a une NATURE — vérification, visa ou signature — et un rôle.
+  // Le circuit général s'ouvre par la vérification du RÉVISEUR (le contrôle du
+  // dossier avant tout engagement), puis vient le visa de la direction. Le
+  // circuit de l'office va jusqu'à la signature, portée par le signataire.
   c.circuits = [
     {
       id: "cir-general",
       label: "Circuit général de la commune",
-      description: "Bon pour accord du chef de service, puis visa de la direction générale.",
+      description: "Vérification du réviseur, puis visa de la direction générale.",
       active: true,
       entityIds: ["ent-vsl"], familyIds: [], trameIds: [],
       steps: [
         {
-          id: "etp-chef-service", label: "Bon pour accord du chef de service",
-          role: "editeur", kind: "accord", serviceScoped: true, optional: false,
-          help: "Le chef du service qui a préparé l'acte vérifie le fond et l'orthographe avant transmission.",
+          id: "etp-verif-reviseur", label: "Vérification du dossier",
+          role: "reviseur", kind: "verification", serviceScoped: false, optional: false,
+          help: "Le réviseur — le service des affaires juridiques, ici — contrôle que le dossier est complet, l'acte conforme et les visas réunis, avant tout engagement.",
         },
         {
           id: "etp-direction", label: "Visa de la direction générale",
-          role: "administrateur", kind: "accord", serviceScoped: false, optional: false,
+          role: "administrateur", kind: "visa", serviceScoped: false, optional: false,
           help: "Contrôle de légalité interne et engagement de la collectivité.",
         },
       ],
@@ -706,54 +784,55 @@ export function seedConfig() {
     {
       id: "cir-ccas",
       label: "Circuit du CCAS",
-      description: "Bon pour accord du responsable de service, puis avis du secrétariat général.",
+      description: "Visa du responsable de service, puis vérification facultative du secrétariat général.",
       active: true,
       entityIds: ["ent-ccas"], familyIds: [], trameIds: [],
       steps: [
         {
-          id: "etp-ccas-chef", label: "Bon pour accord du responsable de service",
-          role: "editeur", kind: "accord", serviceScoped: true, optional: false,
+          id: "etp-ccas-chef", label: "Visa du responsable de service",
+          role: "editeur", kind: "visa", serviceScoped: true, optional: false,
           help: "L'action sociale relève du CCAS : le responsable du service concerné engage son budget.",
         },
         {
-          id: "etp-ccas-avis", label: "Avis du secrétariat général",
-          role: "administrateur", kind: "avis", serviceScoped: false, optional: true,
-          help: "Avis facultatif : il n'empêche pas la signature, mais il est conservé au dossier.",
+          id: "etp-ccas-avis", label: "Vérification du secrétariat général",
+          role: "administrateur", kind: "verification", serviceScoped: false, optional: true,
+          help: "Vérification facultative : elle n'empêche pas la signature, mais elle est conservée au dossier.",
         },
       ],
     },
     {
       id: "cir-individuels",
       label: "Circuit allégé — actes individuels",
-      description: "Un seul bon pour accord : les actes individuels ne passent pas par la direction.",
+      description: "Une seule vérification : les actes individuels ne passent pas par la direction.",
       active: true,
       entityIds: [], familyIds: ["fam-individuels"], trameIds: [],
       steps: [
         {
-          id: "etp-individuel", label: "Bon pour accord du responsable des ressources humaines",
-          role: "editeur", kind: "accord", serviceScoped: true, optional: false,
+          id: "etp-individuel", label: "Vérification du responsable des ressources humaines",
+          role: "editeur", kind: "verification", serviceScoped: true, optional: false,
           help: "Vérification de l'habilitation, du grade et du montant avant signature.",
         },
       ],
     },
     {
       // L'office a SON circuit, calé sur son entité : ses décisions ne passent
-      // pas par la direction générale de la commune, mais par la sienne.
+      // pas par la direction générale de la commune, mais par la sienne — et le
+      // signataire de l'office y marque son accord avant la signature.
       id: "cir-oph",
       label: "Circuit de l'office public de l'habitat",
-      description: "Bon pour accord du responsable de service, puis visa de la direction générale de l'office.",
+      description: "Visa du responsable de service, puis signature par le signataire de l'office.",
       active: true,
       entityIds: ["ent-oph"], familyIds: [], trameIds: [],
       steps: [
         {
-          id: "etp-oph-service", label: "Bon pour accord du responsable de service",
-          role: "editeur", kind: "accord", serviceScoped: true, optional: false,
+          id: "etp-oph-service", label: "Visa du responsable de service",
+          role: "editeur", kind: "visa", serviceScoped: true, optional: false,
           help: "Le responsable du service qui a préparé le marché vérifie le dossier avant transmission.",
         },
         {
-          id: "etp-oph-direction", label: "Visa de la direction générale de l'office",
-          role: "administrateur", kind: "avis", serviceScoped: false, optional: false,
-          help: "Le visa engage l'office : il porte sur le choix du titulaire et le montant.",
+          id: "etp-oph-direction", label: "Signature de l'acte",
+          role: "signataire", kind: "signature", serviceScoped: false, optional: false,
+          help: "Le signataire de l'office marque son accord pour signer : le circuit est alors achevé, et l'acte passe à la signature.",
         },
       ],
     },
@@ -848,6 +927,7 @@ export function seedTrames() {
   return [
     nominationTrame(), delegationTrame(), permisTrame(), marcheTrame(), regieTrame(), subventionTrame(), revalorisationTrame(),
     reglementTrame(), deliberationTrame(), deliberationCATrame(),
+    verbatimTrame(), declarationTrame(), voeuTrame(),
     policeTrame(), environnementTrame(), evenementTrame(), periscolaireTrame(),
     cantineTrame(), grilleTarifaireTrame(), annexeTrame(),
     conventionTrame(), avenantTrame(), achatTrame(), occupationTrame(), concessionTrame(),
@@ -1659,6 +1739,139 @@ function deliberationCATrame() {
       }),
       newNode("signature", { place: "{{entity.seatCity}}" }),
       ...recoursAndPublication(),
+    ],
+  });
+}
+
+// ============================================================================
+// LES DOCUMENTS D'ASSEMBLÉE QUI NE FONT PAS DROIT.
+//
+// La collectivité publie bien des choses qui ne sont pas des actes : le compte
+// rendu intégral d'une séance, une déclaration faite devant l'assemblée, un
+// vœu. Ce sont des DOCUMENTS — les administrés les cherchent au recueil —, mais
+// ils ne créent ni droits ni obligations. Leur nature (`nature: "verbatim"`,
+// `"declaration"`, `"voeu"`) le dit à l'application : la publication les dépose
+// au recueil sans opposabilité, sans entrée en vigueur et sans délai de recours
+// (voir src/lib/eli.js et src/lib/execution.js). Ces trames sont donc
+// PUBLIABLES — c'est tout leur intérêt — mais leur corps n'a ni visas, ni
+// considérants, ni « articles » : c'est un texte qu'on donne à lire, non un
+// dispositif qui décide.
+// ============================================================================
+function corpsDocumentAssemblee({ titre, mention }) {
+  return [
+    newNode("title", { text: titre }),
+    newNode("authority", { text: "{{autorite}}" }),
+    newNode("para", { text: mention }),
+  ];
+}
+
+// Le VERBATIM : le compte rendu intégral des débats d'une séance.
+function verbatimTrame() {
+  return newTrame({
+    id: "tpl-verbatim",
+    name: "Verbatim de séance du conseil municipal (document)",
+    version: "26.01",
+    familyId: "fam-seances",
+    actTypeId: "compte-rendu",
+    status: "published",
+    owner: "Secrétariat général",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    assemblee: true,
+    nature: "verbatim",
+    description: "Compte rendu intégral d'une séance du conseil municipal : le texte des débats, publié au recueil pour être lu — sans opposabilité.",
+    fields: [
+      ...commonHeader([]).filter((f) => f.id !== "dateEffet"),
+      newField({ id: "dateSeance", label: "Date de la séance", type: "date", group: "Séance" }),
+      newField({ id: "numeroSeance", label: "Numéro de séance", type: "text", required: false, group: "Séance", help: "Ex. « séance ordinaire du 22 septembre ». Paraît sous la présidence." }),
+      newField({ id: "presidence", label: "Présidence de séance", type: "text", required: false, group: "Séance" }),
+      newField({ id: "ordreDuJour", label: "Ordre du jour", type: "textarea", group: "Séance", help: "Une ligne par point examiné." }),
+      newField({ id: "compteRendu", label: "Compte rendu des débats", type: "textarea", group: "Débats", help: "Le texte intégral des échanges : c'est le verbatim proprement dit." }),
+    ],
+    rules: [
+      newRule({ id: "r-verbatim-1", level: "blocking", expr: "exists(dateSeance) && exists(compteRendu)", message: "La date de la séance et le compte rendu des débats sont obligatoires.", author: "Secrétariat général", date: "2026-09-01" }),
+    ],
+    body: [
+      ...corpsDocumentAssemblee({
+        titre: "Verbatim de la séance du conseil municipal du {{dateSeance|date-long}}",
+        mention: "{{numeroSeance ? numeroSeance + \". \" : \"\"}}{{presidence ? \"Séance présidée par \" + presidence + \". \" : \"\"}}Le présent document rapporte le texte intégral des débats de la séance. Il est publié au recueil pour être porté à la connaissance de tous : il ne fait pas droit, et n'est donc pas opposable.",
+      }),
+      newNode("para", { text: "{{ordreDuJour}}", when: "exists(ordreDuJour)" }),
+      newNode("para", { text: "{{compteRendu}}", when: "exists(compteRendu)" }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+    ],
+  });
+}
+
+// La DÉCLARATION : un texte pris devant ou par l'assemblée, publié pour être lu
+// — une déclaration de groupe, une déclaration liminaire, une prise de position.
+function declarationTrame() {
+  return newTrame({
+    id: "tpl-declaration",
+    name: "Déclaration devant l'assemblée (document)",
+    version: "26.01",
+    familyId: "fam-seances",
+    actTypeId: "declaration",
+    status: "published",
+    owner: "Secrétariat général",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    assemblee: true,
+    nature: "declaration",
+    description: "Déclaration prise devant l'assemblée (déclaration de groupe, déclaration liminaire, prise de position) : publiée au recueil, sans portée juridique propre.",
+    fields: [
+      ...commonHeader([]).filter((f) => f.id !== "dateEffet"),
+      newField({ id: "auteurDeclaration", label: "Auteur de la déclaration", type: "text", group: "Déclaration", help: "Le groupe, l'élu ou la personne qui déclare." }),
+      newField({ id: "contexte", label: "Circonstance", type: "textarea", required: false, group: "Déclaration", help: "À quel moment et à quel propos la déclaration a été prise." }),
+      newField({ id: "texte", label: "Texte de la déclaration", type: "textarea", group: "Déclaration" }),
+    ],
+    rules: [
+      newRule({ id: "r-declaration-1", level: "blocking", expr: "exists(auteurDeclaration) && exists(texte)", message: "L'auteur et le texte de la déclaration sont obligatoires.", author: "Secrétariat général", date: "2026-09-01" }),
+    ],
+    body: [
+      ...corpsDocumentAssemblee({
+        titre: "Déclaration du {{dateSignature|date-long}}",
+        mention: "{{auteurDeclaration ? \"Déclaration de \" + auteurDeclaration + \". \" : \"\"}}{{contexte ? contexte + \" \" : \"\"}}Ce texte est publié au recueil pour être porté à la connaissance de tous. Il engage son auteur, non la collectivité : il ne fait pas droit, et n'est donc pas opposable.",
+      }),
+      newNode("para", { text: "{{texte}}", when: "exists(texte)" }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
+    ],
+  });
+}
+
+// Le VŒU : une motion de l'assemblée. L'assemblée DEMANDE, elle ne décide pas —
+// le vœu se publie, il ne s'exécute pas.
+function voeuTrame() {
+  return newTrame({
+    id: "tpl-voeu",
+    name: "Vœu de l'assemblée (document)",
+    version: "26.01",
+    familyId: "fam-seances",
+    actTypeId: "voeu",
+    status: "published",
+    owner: "Secrétariat général",
+    serviceId: "svc-sg",
+    bureauId: "bur-sg-assemblees",
+    assemblee: true,
+    nature: "voeu",
+    description: "Vœu ou motion de l'assemblée : adopté et publié, mais l'assemblée demande — elle ne décide pas. Sans force exécutoire.",
+    fields: [
+      ...commonHeader([]).filter((f) => f.id !== "dateEffet"),
+      newField({ id: "destinataire", label: "Destinataire du vœu", type: "text", group: "Vœu", help: "À qui l'assemblée adresse sa demande (l'État, la région, le département…)." }),
+      newField({ id: "expose", label: "Exposé", type: "textarea", required: false, group: "Vœu", help: "Les motifs du vœu." }),
+      newField({ id: "demande", label: "Demande de l'assemblée", type: "textarea", group: "Vœu" }),
+    ],
+    rules: [
+      newRule({ id: "r-voeu-1", level: "blocking", expr: "exists(destinataire) && exists(demande)", message: "Le destinataire et la demande de l'assemblée sont obligatoires.", author: "Secrétariat général", date: "2026-09-01" }),
+    ],
+    body: [
+      ...corpsDocumentAssemblee({
+        titre: "Vœu de l'assemblée du {{dateSignature|date-long}}",
+        mention: "{{destinataire ? \"Adressé à \" + destinataire + \". \" : \"\"}}L'assemblée émet le vœu qui suit. Elle demande, elle ne décide pas : ce document est publié au recueil comme la position de l'assemblée, et n'a pas de force exécutoire.",
+      }),
+      newNode("para", { text: "{{expose}}", when: "exists(expose)" }),
+      newNode("para", { text: "{{demande}}", when: "exists(demande)" }),
+      newNode("signature", { place: "{{entity.seatCity}}" }),
     ],
   });
 }

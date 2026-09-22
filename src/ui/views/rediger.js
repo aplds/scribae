@@ -32,7 +32,7 @@ import { download, uid, debounce, formatDate, todayIso, normalizeSpace } from ".
 import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { tramePublishable, natureDe, NODE_MAP, newNode, ladderOf, paramsBloc, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
-import { estExterne, reserverNumero } from "../../lib/numbering.js";
+import { estExterne, reserverNumero, fixerSequence } from "../../lib/numbering.js";
 import { safeEval } from "../../lib/expr.js";
 import { listSlots, locateAddr, fieldIdsInText, valeurReglage } from "../../lib/redaction.js";
 import { abrogationVocab, clauseAbrogation, cibleTexte, KINDS, designationDe as designationDeActe } from "../../lib/abrogations.js";
@@ -611,7 +611,7 @@ export function renderRediger(root, params) {
     const el = root.querySelector("#rediger-parapheur");
     if (!el) return;
     clear(el);
-    // Parapheur éteint (fonction expérimentale) : rien à dire au rédacteur.
+    // Aucun circuit applicable : rien à dire au rédacteur.
     if (!parapheurActif()) return;
     const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
     if (!acte) {
@@ -1984,17 +1984,24 @@ export function renderRediger(root, params) {
         date: draft.values.dateSignature || todayIso(),
         trameId: trame.id,
         actTypeId: trame.actTypeId || "",
+        actes: state.actes,
       });
       draft.values.numero = res.numero;
       draft.numeroSource = res.source === "externe"
         ? { source: "externe", ref: res.ref || "", valeur: res.valeur || "", at: new Date().toISOString(), par: state.user?.id || "", parName: state.user ? fullName(state.user) : "" }
         : null;
       if (res.source === "interne") {
-        config.numbering.seq += 1;
+        // Le compteur est fixé au rang RÉSERVÉ : la séquence saute ainsi les
+        // numéros déjà pris, au lieu de les proposer de nouveau.
+        fixerSequence(config, res.seq, {
+          entity: config.entities.find((e) => e.id === draft.values.__entityId),
+          actTypeId: trame.actTypeId || "",
+        });
         touch("config", { rerender: false });
       }
       paintFull();
-      toast("Numéro réservé : " + res.numero, "success");
+      toast("Numéro réservé : " + res.numero
+        + (res.sautes ? ` (${res.sautes} rang(s) déjà pris, enjambé(s))` : ""), "success");
       // Une attribution externe est un fait : elle sort de l'application et
       // engage une ligne chez le service. Elle entre donc au journal.
       if (res.source === "externe") {

@@ -11,8 +11,8 @@ ouverts et normés (Akoma Ntoso, Schematron, JSON-LD/ELI, HTML imprimable).
 > numérotation d'arrêtés et son recueil. Rien de réel. Voir `src/lib/seed.js` (référentiel et
 > trames) et `src/lib/demo-actes.js` (les actes).
 >
-> Le jeu fait vivre une **collectivité d'une certaine importance** : **soixante-six actes** sur
-> **vingt et une trames**, dont quinze publiés au recueil public. Il met en avant ce que la
+> Le jeu fait vivre une **collectivité d'une certaine importance** : **soixante-neuf actes** sur
+> **vingt-cinq trames**, dont dix-sept publiés au recueil public. Il met en avant ce que la
 > collectivité montre d'abord — les **annexes** (le règlement d'accès à la restauration scolaire
 > et la grille tarifaire des services municipaux, entre autres : un document adopté ne se signe
 > pas, son texte suit l'original de l'acte qui l'adopte) et les **événements à venir** (la fête
@@ -104,9 +104,14 @@ Le `.gitignore` ajouté à la racine vaut ceci. Le `.env` n'est **jamais** commi
 secrets de déploiement (voir `docs/VARIABLES.md`, qui ne montre aucune valeur).
 
 ```gitignore
+# Dépendances
 node_modules/
+
+# Secrets de déploiement — jamais commités (voir src/server/env.example)
 .env
 .env.local
+
+# Fichiers système
 .DS_Store
 Thumbs.db
 *~
@@ -197,10 +202,22 @@ Le bandeau :
   restent valides tels quels.
 
 **Sortir de la démonstration.** `Administration › Données › « Repartir d'un référentiel
-vierge »` efface le référentiel, les trames, les actes et les comptes du poste, **et** — sur le
+vierge »` efface le référentiel, les trames et les actes du poste, **et** — sur le
 service partagé — les actes déposés, les circuits de signature et les publications (route
 `POST /v1/admin/purge`, réservée à l'administration) : sans cela, basculer `DEMO=false`
 laisserait les données fictives en place, et les publications au recueil public.
+
+Les **comptes** suivent leur propriétaire (note 1.3.2p). En démonstration — et sans service —, ils
+font partie du jeu fictif et partent avec lui. Quand la connexion passe par le **service**
+(comptes locaux à mot de passe, ou annuaire), ils sont **CONSERVÉS** : leurs mots de passe vivent
+chez lui (`sb_motdepasse`), **hors du référentiel**, si bien que les effacer ne supprimait aucun
+accès — et l'installation se retrouvait sans personne pour se connecter, le compte
+d'administration compris. C'est `comptesDuDeploiement()` (`src/lib/auth.js`) qui tranche, et
+`clearAll({ garderComptes })` (`src/lib/store.js`) qui exécute. Le service **rétablit d'ailleurs
+son compte d'administration** au démarrage si le référentiel l'a perdu et que son mot de passe est
+resté (`src/server/mysql/amorcage.mjs` — mot de passe conservé, jamais remplacé), et la commande
+de secours `printf '%s' "$MDP" | node server.mjs --mot-de-passe <identifiant>` **crée** le compte
+s'il n'existe plus.
 
 ## Réglages déclaratifs (`.env`)
 
@@ -228,7 +245,8 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Actes** (registre local : numéro, objet, nature, conformité à la trame, statut, parapheur, exécution, export ; pastille **« abrogé »** / **« abrogation prévue »** ; **corbeille réservée aux brouillons**, les actes signés ou publiés passant par **« Retirer / abroger »**) | ✅ |
 | **Annexes** (un document adopté par un autre — règlement, tableau : **pas de numéro propre**, pas de signature ; son texte suit l'acte qui l'adopte, dans le même original signé ; identification par la décision d'adoption — « Annexe à la délibération n° … » ; ni autorité ni mention de publication au recueil, mais les **visas** sont conservés ; modification par **adoption d'une nouvelle rédaction**, en suivi des modifications) | ✅ |
 | **Règlements** (une annexe déclarée **Règlement** sur sa trame est en outre publiée **à part au recueil, à titre informatif** : texte normatif qu'on consulte pour lui-même, comme un **code**, sous son propre identifiant stable `eli:/fr/reg/…` — les publications successives en sont les **versions**, la dernière déposée étant en vigueur ; page sans opposabilité ni original, mais avec l'acte qui l'adopte ; il se cherche et se classe par thème au recueil) | ✅ (démonstration) |
-| **Parapheur** — *fonction expérimentale, éteinte par défaut* (circuit de validation du référentiel : étapes séquentielles, bon pour accord ou avis, ciblage trame/famille/entité, décisions motivées, empreinte du texte validé, reprise de circuit ; file « à valider par moi ») | ✅ |
+| **Parapheur** (circuit de validation du référentiel : étapes séquentielles à **trois natures** — vérification, visa, signature —, chacune confiée à un rôle, ciblage trame/famille/entité, décisions motivées, empreinte du texte validé, reprise de circuit ; file « à valider par moi ») | ✅ |
+| **Documents non juridiques** (verbatim d'assemblée, déclaration, vœu : signés et **publiés au recueil** sous identifiant ELI, mais **sans opposabilité, sans entrée en vigueur et sans délai de recours** — le recueil les présente comme des documents) | ✅ |
 | **Révision** — rôle « Réviseur » **cumulable** : contrôle de l'acte entre l'envoi à signature décidé par le rédacteur et l'envoi effectif (rapport de conformité, correction, validation — elle déclenche l'envoi — ou rejet motivé, l'acte revenant en brouillon) ; **compétence** par compte ou portée par un service (ou certains de ses bureaux), ciblée services/familles/trames/types d'actes/entités ; empreinte du texte révisé ; porte de signature (client et service) | ✅ |
 | **Exécution & délais** (échéancier des formalités : transmission au contrôle de légalité, publication, notification ; **recours introduit** et sa date d'introduction ; date d'exécutoire, délai de recours, alertes de retard ; **pièces du dossier** : état des formalités, attestation de non-recours) | ✅ |
 | **Recherche globale** (Ctrl+K ou « / » : actes, trames, personnes, services, références, comptes, guide) | ✅ |
@@ -237,7 +255,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Collaboration** (présence des postes, verrou souple de rédaction, notifications et cloche) | ✅ |
 | **Modifier un acte** (l'acte en vigueur est **édité en place**, comme dans un traitement de texte : ajout et retrait d'un **paragraphe**, d'une **ligne de liste** ou d'une **ligne de tableau** ; **réattribution d'un numéro** à un article — le numéro doit être libre — ou **« tout renuméroter »** ; la confirmation produit l'acte modificatif + la version consolidée, puis le circuit signature → publication rend la consolidation opposable et supplante l'originale) | ✅ |
 | **Abroger un acte, ou l'un de ses articles** (prévu **dès la rédaction** d'un acte, y compris un acte non modificatif : on vise au référentiel l'acte — ou tel article d'un acte — à abroger ; la clause d'abrogation s'ajoute au document, et l'abrogation prend effet **au jour de l'entrée en vigueur** de l'acte qui la porte, non à sa publication ; l'acte abrogé le devient en bloc, l'article abrogé est consolidé) | ✅ |
-| **Signature électronique** (dépôt par API REST, circuit auprès du prestataire, retour de l'acte signé et vérification) | ✅ (démonstration) |
+| **Signature électronique** — réglages de l'**API du prestataire** (transport, adresse, prestataire, niveau de signature, adresse de notification, délai, et les quatre points de terminaison : document, signataires, démarrage, statut) posés dans l'Administration ou déclarés dans le `.env` (`SCRIBA_SIGNATURE_API_*`), la **clé restant au service** (`SCRIBA_SIGNATURE_API_CLE`, jamais dans le référentiel ni dans une réponse) ; ouverture réelle du circuit par le **service**, retour de l'acte signé et vérification par empreinte | ✅ (démonstration hors service) |
 | **Signature électronique simple** — signer **dans l'application**, sans prestataire : fenêtre de signature (document, identité du signataire, empreinte, **déclaration à cocher**), signature cryptographique et horodatée, **trace nominative** (nom, fonction, adresse électronique, compte, moyen d'authentification, poste) conservée dans l'**original interne** ; réglage **global** ou **par trame** (*imposée* / *autorisée*) | ✅ (démonstration) |
 | **Original signé à deux parts** — **part publique** (nom, fonction, date, empreinte, certificat, horodatage : ce que voit le recueil, l'export JSON et les routes ouvertes) et **part interne** (mentions nominatives, authentification, poste, courriels : rangée au registre, servie par la seule route protégée `GET /v1/actes/{id}/dossier-signature`, lue par « Dossier de signature (interne)… ») | ✅ (démonstration) |
 | **Notifications par courriel** (six événements activables — acte à signer, signé, publié, à valider, à réviser, notification à l'intéressé —, expéditeur, adresse de réponse, copie systématique ; le service parle au **serveur SMTP** du `.env`, `SMTP_*` ; message d'essai ; un envoi qui échoue est tracé « non envoyé » au journal **et** au dossier interne de l'acte) | ✅ (service auto-hébergé ; indisponible en démonstration) |
@@ -250,16 +268,19 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Mentions du recueil public** (Administration › Publication : **mentions légales** rappelant les règles de publication et d'opposabilité des actes — L. 2131-1 CGCT, R. 421-1 CJA — et **mentions d'accessibilité** — loi du 11 février 2005, RGAA, Défenseur des droits —, écrites par l'administrateur, remplacées par un **lien** vers le site de la collectivité, ou **désactivées** ; repliées sous leur titre en bas de page du recueil) | ✅ |
 | **Réglage « Publication automatique »** (Administration › Publication : publier au retour signé, ou laisser l'acte au registre pour une administration qui publie ailleurs) | ✅ |
 | **Administration** (identité, vocabulaire, numérotation — **séquence interne ou service externe**, entités, personnes, rôles, **services et bureaux**, références, mentions, familles, types d'actes, données) | ✅ |
-| **Feuilles de style** (charte graphique : marges, typographie, couleurs, logo, en-tête, pied, filets, **encadrés à côtés choisis**, **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; préréglages ; résolution trame → entité → famille → générale ; **éditeur direct WYSIWYG sur le style**) | ✅ |
+| **Chrono de numérotation** (tous les rangs attribués — année, entité, type d'acte, numéro composé, état de l'acte, dates, rédacteur —, **rangs jamais attribués** et **numéros annulés** avec leur motif ; compteurs, filtres, tri par colonne, **export CSV et XLSX** ; portée du chrono — un seul, un par entité ou un par type d'acte —, **passage à l'année suivante** et annulation d'un rang ; un numéro n'est **jamais attribué deux fois**) | ✅ |
+| **Organigramme** (entités → services → bureaux, en arbre ou en liste, même toile que les délégations : fiche de chaque maille, **signataire principal** d'une entité, **entité autonome ou rattachée** à une autre — le cas d'une régie sans personnalité morale propre mais avec son directeur, ses services et ses actes —, entités hors arbre signalées) | ✅ |
+| **API REST documentée, avec panneau de commande** (*Aide › API REST*, et `docs/API.md` engendré) : toutes les routes du service — rôle exigé, paramètres, corps, réponses, champs notables, exemple cURL —, et la possibilité de **jouer la requête pour de vrai** depuis l'application (chemin, corps et jeton modifiables, réponse avec code et durée ; l'appel figure dans « API & journal ») | ✅ |
+| **Feuilles de style** (charte graphique : marges, typographie, couleurs, **deux emblèmes en en-tête — à gauche et à droite du filet**, chacun sa hauteur, en-tête, pied, filets, **encadrés à côtés choisis**, **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; **graisse de la formule d'autorité** — normal, italique, **gras**, gras italique —, les feuilles enregistrées avant ce choix gardant leur rendu ; préréglages ; résolution trame → entité → famille → générale ; **éditeur direct WYSIWYG sur le style**) | ✅ |
 | **Apparence claire / sombre** (bouton d'en-tête, choix « Automatique » dans le menu du compte ; préférence de poste, le papier reste blanc) | ✅ |
 | **Assistants « Plume » et « Publia »** (mode d'emploi pour l'atelier, actes publiés pour le recueil ; **nom** et **icône** réglables par l'administrateur, **masquables par chaque agent** dans le menu du compte ; réponses renvoyant par des **liens cliquables** — le chapitre du guide, l'acte du recueil ; Publia connaît l'**acte consulté** et répond d'abord sur lui) | ✅ (démonstration) |
 | **Comptes et rôles** (écran de connexion, 6 rôles — dont le **réviseur** et le **signataire**, cumulables, et le **visiteur**, sans accès —, gestion des comptes, **périmètre par service/bureau**, compétence de réviseur, **champ de compétence de signature et rapprochement du compte de l'outil de signature**, contrôle d'accès) | ✅ (démonstration) |
-| **Annuaire de la collectivité (OIDC)** (connexion par le fournisseur d'identité, PKCE, vérification du jeton, groupes → rôles, périmètre par revendications, **désactivation automatique des comptes de démonstration**, **écran d'accueil du visiteur sans rôle**, annuaire d'essai intégré) | ✅ |
+| **Annuaire de la collectivité (OIDC)** (connexion par le fournisseur d'identité, PKCE, vérification du jeton, groupes → rôles, périmètre par revendications, **désactivation automatique des comptes de démonstration**, **écran d'accueil du visiteur sans rôle**, annuaire d'essai intégré ; **les comptes locaux restent joignables** — le bloc « Ou par un compte local » de l'écran de connexion donne accès au **compte d'administration du `.env`** et aux comptes créés à la main, même annuaire injoignable) | ✅ |
 | **Comptes locaux (mot de passe)** (mode `AUTH_MODE=password` du `.env` : dérivé `scrypt` — jamais le mot de passe —, blocage après échecs, session en cookie `HttpOnly` + anti-CSRF, compte d'administration créé depuis le `.env`, remise d'un mot de passe provisoire depuis *Comptes et rôles*, mode démonstration réglable) | ✅ |
 | **Base de données** (pilotes local / service partagé / **serveur MySQL-MariaDB** externe, synchronisation par enregistrement, conflits, file hors ligne) | ✅ |
 | **Auto-hébergement** (pile Docker nginx + service Node + MySQL/MariaDB, édition web de l'application, transport HTTP) | ✅ |
 | **Bibliothèque de trames partagée / multi-poste** | ✅ (mode partagé ; export/import JSON toujours disponible) |
-| **Guide** (wiki intégré : 25 chapitres, glossaire, dépannage, fiche mémo, impression) | ✅ |
+| **Guide** (wiki intégré : 28 chapitres — dont le chrono de numérotation, l'organigramme et l'API REST —, glossaire, dépannage, fiche mémo, impression) | ✅ |
 | PDF/A certifié, bordereau SEDA | ⏳ |
 
 ### Comptes et rôles
@@ -531,6 +552,20 @@ identifiant. Il est annoncé au navigateur par `GET /v1/auth/config` (`src/lib/m
   mots de passe (`dialogueMotDePasseCompte`) — voir `src/server/mysql/comptes.mjs`, et le banc
   d'essai `src/server/mysql/comptes.test.mjs`.
 
+**Deux portes, pas une.** Le mode d'authentification dit la porte ORDINAIRE, pas la seule porte.
+Un annuaire est un service extérieur : s'il est injoignable (incident, réseau, panne du
+fournisseur), l'installation ne doit pas se trouver sans personne pour entrer — à commencer par
+son administrateur. Le SERVICE le dit donc explicitement au navigateur
+(`GET /v1/auth/config` rend `comptesLocaux` : vrai en mode `password` **et** en mode `oidc`, faux
+en démonstration), et l'écran de connexion propose alors, **sous** le bouton de l'annuaire, le
+bloc « **Ou par un compte local** » (`blocLocal()`, `src/ui/views/connexion.js`) : le **compte
+d'administration déclaré dans le `.env`** (`SCRIBA_ADMIN_*`, voir `server/mysql/amorcage.mjs`) et
+les comptes locaux créés à la main y entrent, par identifiant et mot de passe. La même vérité
+(`comptesLocaux`) commande le panneau « Comptes et rôles » — qui affiche alors la colonne
+« Mot de passe » — et le module `src/lib/auth.js` expose les deux prédicats : `accesLocal(config)`
+(les comptes locaux sont joignables) et `sessionDeService(config)` (la session est portée par le
+service et doit donc être fermée à la déconnexion, `logout` dans `src/ui/state.js`).
+
 **Brancher l'annuaire désactive automatiquement les comptes de démonstration**
 (`disableDemo`, actif par défaut) : ils ne sont plus proposés à la connexion, ne peuvent plus
 ouvrir de session (garde-fou `accountUsable()`, appliqué aussi bien à l'écran de connexion
@@ -682,6 +717,59 @@ son **préréglage Grist**, et l'écran de rédaction (`views/rediger.js`), dont
 cas échéant, et la possibilité de **redemander** un numéro (sous confirmation) si le premier
 n'a pas servi. Le même geste existe dans « Modifier un acte » pour l'acte modificatif.
 
+### La séquence interne : un noyau pur, et un numéro qui ne se donne pas deux fois
+
+La séquence interne tenait dans `src/lib/numbering.js`, mêlée à l'appel du service externe. Elle
+a son propre module : **`src/lib/sequence.js`**, sans AUCUNE importation (c'est ce qui évite un
+cycle entre la compilation et la numérotation externe). Il porte :
+
+- le **motif** du numéro (`{year}-{seq}-{entityCode}`, `{actTypeId}`…), le **remplissage** des
+  zéros (`pad`), l'**année** de référence, la **séquence** (le rang du prochain numéro) et sa
+  **PORTÉE** — `global` (un seul chrono pour la collectivité), `entite` (un chrono par code
+  d'entité) ou `type` (un chrono par type d'acte) ;
+- la **relecture** d'un numéro composé (`seqDeNumero`, `anneeDeNumero`, `entiteCodeDeNumero`) :
+  c'est elle qui permet à l'écran du chrono de classer, filtrer et repérer les trous sans que
+  l'administration décrive deux fois son motif ;
+- l'**annulation** d'un numéro (`annulerNumero`) : le rang n'est pas recyclé — une séquence
+  administrative ne revient pas en arrière —, il entre au chrono comme « annulé », avec son motif ;
+- `composerNumeroInterne`, `nextNumero` (le numéro tel qu'il se lit aujourd'hui) et surtout
+  **`prochainNumeroLibre`** : le numéro proposé est un numéro **libre**. On part du compteur et
+  l'on avance tant que le numéro composé est déjà porté par un acte, ou annulé. Sans cette garde,
+  un compteur resté en arrière — numéros attribués hors de l'application, reprise d'un autre
+  outil, passage d'année — proposerait un numéro déjà pris, et le registre porterait deux actes
+  du même numéro ;
+- **`fixerSequence(config, rang, {…})`** : le seul endroit où le compteur avance. Une réservation
+  l'appelle avec le rang RENDU (et non « le suivant »), si bien qu'elle enjambe les numéros pris ;
+  le compteur ne recule jamais. `incrementerSequence` en est le cas ordinaire (+1).
+
+`src/lib/numbering.js` réexporte ce noyau (les écrans n'ont donc qu'un module à connaître) et
+ajoute l'appel au service externe. `src/lib/compile.js` réexporte lui aussi les mêmes noms, pour
+l'atelier : le numéro d'un document, le numéro proposé par défaut dans « Modifier un acte »
+et le rang du chrono sortent donc tous de la même composition.
+
+### L'écran du chrono de numérotation
+
+**`src/lib/chrono.js`** (module pur) reconstitue le chrono à partir de ce que l'application sait
+déjà — les actes, leurs numéros, leur état, leurs dates et leurs auteurs — et le complète de deux
+choses que les actes seuls ne montrent pas : les **numéros annulés** (`numbering.annules`) et les
+**rangs libres** (les rangs jamais tirés, entre 1 et le plus haut rang atteint d'une année : on ne
+devine rien au-delà du dernier rang). `lignesChrono`, `rangsLibres`, `filtrerTrier`, `resumeChrono`,
+et **`COLONNES_CHRONO`** — une seule déclaration de colonnes, qui sert au tableau de l'écran COMME
+aux exports : ce qu'on voit et ce qu'on exporte ne peuvent pas diverger.
+
+L'écran (`src/ui/views/chrono.js`, route `chrono`) présente des **compteurs** (actes numérotés,
+dernier rang, prochain numéro, rangs libres, numéros annulés), des **filtres** (année, entité, type
+d'acte, état, source, période, texte, et les deux cases « rangs libres » / « numéros annulés »),
+un **tri par colonne** (clic sur l'en-tête), et l'**export CSV ou XLSX** du résultat filtré. Les
+deux états qui ne sont pas des actes ordinaires ont leur présentation propre : le rang libre est
+grisé et en italique, le numéro annulé est barré — un trou dans le chrono doit s'expliquer au
+premier regard. Le **passage à l'année suivante** s'y fait d'un bouton (quand le chrono est resté
+sur l'année précédente), et **« Annuler le rang »** libère une attribution faite par erreur.
+
+L'écriture XLSX n'a **aucune dépendance** : `src/lib/xlsx.js` écrit un vrai classeur (archive ZIP
+en magasin, `[Content_Types].xml`, feuille, styles minimaux, chaînes partagées) et le CSV, avec
+son BOM, pour qu'Excel reconnaisse l'UTF-8 et les accents.
+
 ### Le papier des documents : A4
 
 Tous les documents de l'application sont des actes administratifs **français** : ils se lisent
@@ -761,6 +849,23 @@ enregistrées avant l'ajout d'un réglage sont **normalisées à l'ouverture** d
 (`emptyStyle(s)`), et `styleCss` applique de toute façon les défauts : une charte ancienne
 reste imprimable, et rien n'est migré de force.
 
+**L'en-tête peut porter DEUX emblèmes.** Le premier (`logoUrl`, à gauche, hauteur `logoHeight`)
+existait ; le second (`logoRightUrl`, hauteur `logoRightHeight` — vide, celle du premier) est
+nouveau. `documentSheetHeader` (`src/lib/render.js`) pose alors la classe
+`doc-sheet-header--duo` et rend le texte d'en-tête flexible, pour que la marque de gauche et la
+marque de droite se répondent aux deux bouts du filet (`styleCss` écrit
+`.doc-sheet-header--duo .doc-sheet-logo--right { margin-left: auto }`). C'est le cas d'une charte
+qui associe l'emblème de la collectivité à celui de l'État, d'un partenaire ou d'une délégation.
+Emplacement vide : rien n'est rendu, et le document se présente exactement comme avant.
+`logoAlign` (`data-align`) continue de régler l'alignement de l'ensemble.
+
+**La formule d'autorité peut être en gras.** Elle ne se réglait qu'en italique ou en normal
+(`authorityItalic`, une case) ; elle a désormais une **graisse** (`authorityWeight`) : « Hérité »,
+normal, italique, **gras**, ou gras italique. La valeur « Hérité » traduit l'ancien booléen — une
+feuille enregistrée avant ce réglage garde donc son rendu, et rien n'est migré de force (même
+principe que pour les autres réglages ajoutés après coup).
+
+
 L'écran a **deux vues, un seul schéma** : « Réglages » (tous les groupes, `GROUPS`) et
 « Édition directe », l'éditeur **WYSIWYG sur le style uniquement**. Dans cette seconde vue, un
 clic dans l'aperçu remonte l'arbre DOM depuis l'élément touché jusqu'à une classe connue
@@ -807,6 +912,22 @@ qu'il sortira. La couleur de la collectivité étant souvent très foncée (l'il
 et garde la teinte d'origine dans `--brand-light` — c'est elle que reprend le papier. L'UI du
 sélecteur est dans `src/ui/theme.js` (bouton de l'en-tête `themeButton`, choix complet dans le
 menu du compte `themeChooser`), utilisée par la coquille **et** par l'écran de connexion.
+
+**L'emblème du référentiel suit le thème.** Un logo dessiné pour un fond blanc — blason aux traits
+sombres, logo noir détouré — devient illisible sur le fond sombre. Le référentiel peut donc porter
+un **second emblème**, `brand.logoUrlDark` (Administration › Identité, « URL du logo en thème
+sombre »), employé quand le thème courant est sombre ; laissé vide, l'emblème ordinaire sert dans
+les deux thèmes. Le choix se fait **au rendu**, par `brandLogoUrl(brand)` (`src/lib/theme.js`), et
+non par une requête média `prefers-color-scheme` : le thème de l'application n'est pas celui du
+système, l'agent peut l'imposer, et la requête média l'ignorerait. Les trois écrans qui montrent
+l'emblème l'appellent donc ainsi — l'en-tête (`src/ui/app.js`), l'écran de connexion
+(`src/ui/comptes-liste.js`, l'avatar de structure du premier compte) et le recueil public
+(`src/ui/views/recueil-public.js`) — et se redessinent au changement d'apparence (`applyBrand`,
+`emit`). **Le papier ne change pas** : les pièces d'exécution (`src/lib/execution-documents.js`),
+les documents compilés et la charte gardent l'emblème ordinaire, sur fond blanc — c'est déjà la
+règle pour la couleur de marque. Le jeu de démonstration embarque ses deux variantes
+(`LOGO_SVG` / `LOGO_SVG_SOMBRE`, `src/lib/seed.js` : même écu, galon éclairci), et un référentiel de
+démonstration qui n'a pas encore la variante la reçoit par `migrateDemoLogoDark` (`src/lib/store.js`).
 
 ### Choisir l'acte à rédiger, et l'auteur des contributions
 
@@ -1344,6 +1465,48 @@ identifiant s'ouvre directement (`?eli=eli:/fr/reg/2026/0418/vsl`, ou `/eli/reg/
 déploiement serveur). **Suite connue** : la **consolidation** d'un règlement modifié est republiée
 sous le même ELI par l'acte modificatif (à éprouver — voir `TODO.md`).
 
+### Les documents qui ne font pas droit
+
+Tout ce qu'une collectivité met au recueil n'est pas un **acte**. Le **verbatim d'une séance** (le
+compte rendu intégral des débats), une **déclaration** prise devant ou par l'assemblée, un **vœu**
+(une motion : l'assemblée demande, elle ne décide pas) sont des **documents** — les administrés les
+cherchent, et ils ont leur place au recueil —, mais ils **ne créent ni droits ni obligations**.
+
+**La nature se choisit sur la trame.** Le champ **« Nature du document »** de l'onglet « Trame »
+(`src/ui/views/editor.js`) propose cinq valeurs, dont trois nouvelles
+(`ACTE_NATURES`, `src/lib/schema.js`) : `acte` et `annexe` **font droit** ; `verbatim`,
+`declaration` et `voeu` **non** (`juridique: false`). La lecture passe par trois aides :
+`natureDe(trame)` (l'identifiant, tout inconnu ramené à `acte`), `natureDocs(id)` (le descripteur)
+et `natureJuridiqueDe(trame)` (« fait-il droit ? »).
+
+**Ils vivent par eux-mêmes — contrairement à une annexe.** Un verbatim, une déclaration, un vœu se
+**signent** comme un acte, se **numérotent**, reçoivent un **identifiant ELI** et se **publient au
+recueil**. Ce qui change, c'est la **portée** de la publication : `juridique: false` voyage **avec
+la publication** (`record.juridique`, puis le corps envoyé au service) et commande, partout :
+
+- **Pas d'opposabilité, pas d'entrée en vigueur, pas de délai de recours.** `publier`
+  (`src/ui/views/signature.js`) n'inscrit **aucune** date d'opposabilité ni règle d'entrée en
+  vigueur ; le **service** force `dateOpposabilite: ""` de son côté (il ne croit pas le client sur
+  ce point — `src/server/mysql/actes.mjs`, et l'émulateur `index.html`).
+- **Pas de formalités d'exécution.** `formalites` (`src/lib/execution.js`) tient la transmission au
+  contrôle de légalité et la notification pour **non requises** — ces documents ne sont pas des
+  actes administratifs —, `statutExecution` rend l'état **« Document — non opposable »**
+  (`code: "document"`), `dateExecutoire` et `dateLimiteRecours` rendent **vide**, et les écrans
+  (registre, échéancier, fiche) comme les pièces du dossier (**état des formalités**,
+  **attestation de non-recours**) le disent. L'onglet « Trame » masque d'ailleurs les deux
+  réglages de formalités pour une nature non juridique.
+- **Le recueil les présente comme des documents.** La version en ligne (`buildWebVersion`,
+  `src/lib/eli.js`) remplace la mention d'opposabilité par un encadré **« Document non opposable »**
+  et classe le fil d'Ariane sous **« Documents »** ; le **JSON-LD** omet la clé
+  `eli:first_date_entry_in_force` ; la notice du recueil (`src/ui/views/acte-publie.js`) porte la
+  marque « document, non opposable » et un champ **« Portée »** au lieu d'« Entrée en vigueur » ;
+  le Markdown, l'écran « Publications » et les fiches s'accordent.
+
+**Rien n'est codé pour un document en particulier** : la nature est une **donnée** de la trame, et
+c'est elle qui décide de la portée. Publier ses verbatims au recueil ne demande donc aucun
+paramétrage : on choisit la nature, le reste suit. Le jeu de démonstration en montre trois (voir
+« Actes de démonstration »).
+
 ### Identifier une annexe : pas de numéro propre
 
 Une annexe n'a **pas de numéro**. Elle n'occupe aucune place au recueil (elle n'y est pas déposée),
@@ -1441,8 +1604,8 @@ suit l'**ACTE** (identifiant ELI) : voir « Publication » plus bas.
 
 ### Actes de démonstration
 
-Le jeu de démonstration ne se limite pas au référentiel et aux trames : il pose **soixante-six
-actes** sur **vingt et une trames** (`src/lib/demo-actes.js`), dont **quarante-neuf rédigés et
+Le jeu de démonstration ne se limite pas au référentiel et aux trames : il pose **soixante-neuf
+actes** sur **vingt-cinq trames** (`src/lib/demo-actes.js`), dont **cinquante-deux rédigés et
 signés**. Ils sont installés au premier démarrage — et remis à niveau quand `SEED_VERSION` change —
 uniquement si les trames sont celles de la démonstration *et* que le registre ne contient que des
 actes de démonstration (`acte-demo-*`) : un registre réel, ou enrichi à la main, n'est jamais
@@ -1455,6 +1618,14 @@ par moi »), un acte **révisé et validé** (avec une correction du réviseur a
 Deux de ces actes illustrent les **actes individuels non publiables** (trame `tpl-revalorisation`,
 `publishable: false`) : l'un signé, l'autre prêt à signer. Ils sont conservés au registre et ne
 passent jamais par la publication (voir plus bas).
+
+**Trois actes** illustrent les **documents qui ne font pas droit** (`acte-demo-467` à `469`) : un
+**verbatim de séance** du conseil municipal et un **vœu** de l'assemblée, tous deux **publiés au
+recueil**, et une **déclaration** signée qui attend sa publication. Leurs trames
+(`tpl-verbatim`, `tpl-declaration`, `tpl-voeu`, famille `fam-seances`) portent la nature
+`verbatim` / `declaration` / `voeu` : le recueil les présente comme des **documents**, sans
+opposabilité, sans entrée en vigueur et sans délai de recours (voir « Les documents qui ne font
+pas droit » plus bas).
 
 **Sept actes** forment le cas de l'**annexe**, qui est ce que la démonstration met en avant avec
 les événements : le **règlement intérieur du conseil** (`acte-demo-417`, adopté par
@@ -1638,7 +1809,10 @@ ou `config` en écriture exigent le rôle **administrateur** — c'est ce qui fe
 privilèges qui consistait à réécrire la collection des comptes. `POST /v1/admin/purge` (rôle
 administrateur, corps `{ confirmation: "repurge" }`) **remet le service à zéro** : c'est le
 pendant, côté service, du bouton « Repartir d'un référentiel vierge » — le recueil public lisant
-le service, vider le seul navigateur laisserait les publications de démonstration en ligne.
+le service, vider le seul navigateur laisserait les publications de démonstration en ligne. Cette
+purge ne touche **ni les comptes ni leurs mots de passe** (tables `sb_record`/`sb_motdepasse`) :
+elle vide le dépôt, pas les accès — c'est le même principe que le bouton côté application, qui
+épargne les comptes quand ils appartiennent au déploiement (note 1.3.2p).
 
 Deux détails de fonctionnement : les **certificats sont créés par titulaire** (`certificate()`
 les indexe par sujet : deux signataires ont deux certificats, comme sur deux postes de
@@ -1861,27 +2035,34 @@ et le service conserve au plus 40 publications (les plus anciennes sont évincé
 
 ### Le parapheur : un acte est validé avant d'être signé
 
-**Fonction expérimentale, éteinte par défaut.** Le parapheur ne s'active que par
-**Administration › Expérimentale** (`config.experimental.parapheur`, faux à l'installation). Le
-défaut « éteint » est un choix de terrain : beaucoup de collectivités ont déjà leur propre
-circuit interne, en amont de « Envoyer en signature ». Éteint, `circuitFor`
-(`src/lib/validation.js`) ne résout **aucun** circuit : l'écran Parapheur, son entrée de menu,
-l'onglet « Circuits de validation » de l'Administration, le réglage de circuit d'une trame et la
-carte Parapheur d'un acte disparaissent (gardés par `parapheurActif`), et la porte de
-validation ne s'applique plus ni côté client ni au dépôt (le service ne reçoit pas d'état de
-validation). Activer l'option **reconstruit les actes de démonstration**
-(`regenerateDemoActes`, `src/ui/state.js`) : ils portent, ou non, leur passage au parapheur
-(`src/lib/demo-actes.js`), et la validation ne se génère que si le parapheur est actif — sans
-quoi l'écran serait vide. Les circuits enregistrés sont conservés.
+Le circuit de validation (le parapheur) est une **fonction ordinaire** : l'écran Parapheur, son
+entrée de menu, l'onglet « Circuits de validation » de l'Administration, le réglage de circuit
+d'une trame et la carte Parapheur d'un acte sont toujours là. Un référentiel qui n'en veut pas
+écarte le circuit sur ses trames (« Aucune validation ») ou désactive le circuit concerné ;
+`parapheurActif` (`src/lib/validation.js`) rend donc toujours vrai, et le réglage
+`experimental.parapheur` — qui n'est plus servi — reste lu (toujours vrai) pour ne pas casser un
+référentiel antérieur.
 
-Quand il est actif, un acte ne passe pas directement de la rédaction à la signature. `src/lib/validation.js`
-définit un **circuit de validation** : une suite d'étapes **séquentielles**, chacune confiée à
-un rôle (« bon pour accord » ou simple « avis »), éventuellement réservée au service de
-l'acte. Deux principes gouvernent le module :
+Un acte ne passe pas directement de la rédaction à la signature. `src/lib/validation.js`
+définit un **circuit de validation** : une suite d'étapes **séquentielles**, chacune portant une
+**nature** et confiée à un **rôle**, éventuellement réservée au service de l'acte. Les trois
+natures d'étape sont :
+
+- la **Vérification** (`verification`) — le contrôle du dossier avant tout engagement : la
+  marche du **réviseur**, qui ouvre le circuit général de la démonstration ;
+- le **Visa** (`visa`) — le « bon pour accord » qui engage le service ou la direction ;
+- la **Signature** (`signature`) — le signataire marque son accord, et le circuit s'achève.
+
+Chaque nature appelle un **rôle par défaut** (vérification → `reviseur`, visa → `editeur`,
+signature → `signataire`), un libellé et la restriction au service : ce sont les valeurs
+proposées quand on ajoute une étape, et l'administrateur peut les changer. Un circuit **ancien**
+reste lu — `natureEtape` ramène `accord` à `visa` et `avis` à `verification` —, et les circuits
+de la démonstration sont mis au nouveau vocabulaire par `migrateCircuitsNatures`
+(`src/lib/store.js`). Deux principes gouvernent le module :
 
 1. **Rien n'est codé en dur.** Un circuit est une donnée du référentiel
    (`config.circuits`), réglable dans **Administration › Circuits de validation** : nombre
-   d'étapes, intitulés, rôles, nature, et **ciblage** (trame nommée, famille d'actes,
+   d'étapes, intitulés, natures, rôles, et **ciblage** (trame nommée, famille d'actes,
    entité). Un circuit sans ciblage est le circuit général ; un circuit ciblé l'emporte.
    Un référentiel sans circuit n'a aucun parapheur — le comportement d'origine est préservé.
 2. **La validation porte sur un TEXTE.** Le circuit mémorise l'**empreinte** du texte
@@ -1984,7 +2165,7 @@ Chaque délivrance entre au **journal** : une pièce sortie du registre est un f
 ### La transmission au contrôle de légalité par API (fonction expérimentale)
 
 **Fonction expérimentale, éteinte par défaut** (`config.experimental.controleLegalite`,
-**Administration › Expérimentale**), comme le parapheur et pour la même raison : la
+**Administration › Expérimentale**) : elle reste **la seule fonction expérimentale**, parce que la
 télétransmission suppose une convention et des identifiants d'accès auprès de la préfecture.
 Éteinte, rien n'est envoyé, la marche n'apparaît pas dans le circuit de signature, et la
 transmission reste une **constatation manuelle** (§ ci-dessus).
@@ -2183,10 +2364,38 @@ touchent des éléments *différents* ne se gênent jamais.
 En mode partagé, chaque lecture réussie est recopiée dans un **miroir** local
 (`kv.actesMirror`) : si la base est injoignable, l'application démarre quand même
 avec ces données, et un bandeau le signale. Les écritures qui échouent faute de
-réseau sont **mises en file** (`kv.actesPending`) et renvoyées automatiquement
-dès que la base répond (au chargement suivant ou après un test de connexion). Un
-refus définitif (jeton invalide) n'est pas mis en file : il faut corriger le
-réglage.
+réseau sont **mises en file** (`kv.actesPending`) et renvoyées dès que la base
+répond — toutes les trente secondes, au retour du réseau, et sur un renvoi demandé
+à la main. Un refus définitif (session, anti-CSRF) n'est pas mis en file : il faut
+corriger le réglage.
+
+Trois règles gouvernent cette file ; l'écran *Base de données* les rend visibles
+(ce qui attend, depuis quand, ce que la base a répondu au dernier renvoi, et les
+gestes *Renvoyer maintenant* / *Abandonner ces écritures*) :
+
+- **une écriture par collection** : les différences d'une collection sont toutes
+  calculées sur le même index serveur, et rien n'en a été appliqué tant que la file
+  n'a pas été vidée — la plus récente porte donc tout ce que les précédentes
+  demandaient, et davantage. Soixante-quinze battements de cœur d'un même poste y
+  tiennent en une écriture ;
+- **un renvoi n'est pas arrêté par la première entrée refusée** : chaque entrée est
+  essayée, celles qui échouent restent (rien n'est perdu), et le motif du premier
+  refus est rapporté avec ce qui a été transmis malgré tout. S'arrêter au premier
+  refus laissait une seule écriture définitivement refusée — une écriture de
+  `users` ou de `config` mise de côté par une session d'administrateur, rejouée
+  après qu'un compte ordinaire a pris la place du poste (`403 droit_requis`) —
+  bloquer TOUTE la file derrière elle, à jamais ;
+- **le motif est conservé** (`kv.actesPending`, clé `meta`) : sans lui, une file
+  muette grossit toute seule et l'exploitant ne peut ni savoir pourquoi, ni quoi
+  corriger. Le motif nomme la collection refusée, et la phrase qui dit le geste.
+
+Un renvoi interroge rarement un pilote juste : quand le service refuse une
+écriture par `csrf_invalide` ou `session_absente`, l'application **répare** le
+pilote avant de renoncer (`reparerPilote`, `src/lib/db/index.js`) — elle redemande
+son mode au service (`GET /v1/auth/config`), relit la session et son jeton
+anti-CSRF, refait le pilote si le régime a changé, et rejoue l'écriture une fois.
+Sans cela, une page chargée pendant un redémarrage du service restait bloquée sur
+un pilote sans anti-CSRF jusqu'au prochain rechargement de la page.
 
 ### Le service de données (contrat REST)
 
@@ -2206,6 +2415,15 @@ jour, à chaque écriture, des colonnes indexées (`numero`, `statut`,
 la base reste donc **interrogeable en SQL** sans jamais saisir ces colonnes à la
 main. Voir `src/server/mysql/README.md` (le service et sa base) et
 `src/server/README.md` (installation Docker, jetons, TLS, sauvegardes).
+
+> **Éprouver une connexion ne se fait pas par la santé de la base.**
+> `GET /v1/db/health` ne demande ni session ni anti-CSRF : elle répond 200 même
+> quand le service refuse ensuite chaque écriture — d'où un écran qui annonçait
+> « Connexion réussie » à côté d'une pastille rouge. Le bouton *Tester la
+> connexion* envoie donc **aussi** une synchronisation VIDE
+> (`POST /v1/db/collections/meta/sync`, `upserts: []`, `deletes: []`) : elle
+> traverse toute la garde — session, anti-CSRF, rôle, transaction — sans déposer
+> le moindre enregistrement (voir `essaiEcriture`, `src/lib/db/service.js`).
 
 > **Ce que le service de démonstration ne peut pas faire** : son bac à sable
 > n'ouvre aucune connexion sortante. Il ne peut donc **pas** parler à MySQL — il
@@ -2292,6 +2510,9 @@ main.pjs                  $meta + les imports de la plateforme (stockage, canal 
 index.html                coquille : script serveur (LE SERVICE) + <link> + <div id="app"> + module
 src/SPEC.md               spécification
 src/docs/ADMINISTRATION.md  DOCUMENTATION D'ADMINISTRATION ET D'EXPLOITATION (auto-hébergement, sécurité, sauvegardes)
+src/docs/API.md           RÉFÉRENCE DE L'API REST (engendrée par scripts/generer-api.mjs, lue par « Documentation technique »)
+src/docs/VARIABLES.md     VARIABLES DE DÉPLOIEMENT (engendré par scripts/generer-variables.mjs)
+src/docs/AUDIT-BUGS-2026-09-22.md  AUDIT CIBLÉ : session, anti-CSRF, file d'attente, état de la base (constats corrigés et points ouverts)
 src/docs/GITHUB.md        PAGE D'ACCUEIL DU DÉPÔT (recopiée en README.md à la racine par l'export GitHub)
 src/CHANGELOG.md          JOURNAL DES VERSIONS (la première entrée datée = la version en service)
 src/TODO.md               chantiers ouverts
@@ -2312,13 +2533,16 @@ src/lib/
   ordre.js                RÉORDONNANCEMENT DU DOCUMENT : l'ordre vit dans `values.__ordre` (un rang par conteneur), appliqué à la compilation — `deplacerVers`, `rangerCommeLaTrame`, `ordresModifies` (module pur) ; les rangs SYNTHÉTIQUES des ajouts (structure.js) y cohabitent avec ceux de la trame
   structure.js            STRUCTURE DU DOCUMENT : les blocs et éléments que la RÉDACTION retire (`values.__supprimes`) ou ajoute (`values.__ajouts`, rang synthétique, texte porté par l'ajout), avec leur intégration à l'ordre — `supprimer`, `retablir`, `ajouterA`, `ajoutPour`, `retirerAjoutPour`, `majAjout`, `slotsAjoutes` (module pur)
   numbering.js            NUMÉROTATION DES ACTES : séquence interne ou service externe (appel HTTP, jetons, lecture de la réponse, journalisation)
+  sequence.js             LE NOYAU DE LA SÉQUENCE INTERNE, sans aucune importation : motif, remplissage, année, portée (globale / par entité / par type), compteurs, numéros annulés, relecture d'un numéro composé, `prochainNumeroLibre` (un numéro ne se donne pas deux fois) et `fixerSequence`
+  chrono.js               LE CHRONO DE NUMÉROTATION : les lignes (actes, rangs libres, numéros annulés), les compteurs, les filtres, le tri et la déclaration des colonnes partagée par le tableau et les exports (module pur)
+  xlsx.js                 ÉCRITURE D'UN CLASSEUR XLSX ET D'UN CSV, sans aucune dépendance (ZIP en magasin, chaînes partagées, BOM)
   redaction.js            adresses d'emplacements (slots), application des écarts (réécritures ET réglages de bloc : échelon, numérotation), repérage
   auto-tokens.js          les jetons AUTOMATIQUES (ce que l'application remplit seule : collectivité, signataire, date, numéro) — partagés par l'éditeur de trame et l'atelier de rédaction
   render.js               rendu DOM du document compilé (aperçu, impression, export HTML ; suivi des modifications ou mentions)
   export.js               Akoma Ntoso 3.0, Schematron, JSON-LD/ELI, Markdown, HTML, Word, impression
   paper.js                LE PAPIER DES DOCUMENTS : A4 (21 × 29,7 cm), marges, sauts de page
   styles.js               FEUILLES DE STYLE (charte graphique) : modèle, polices proposées (FONT_CHOICES), résolution (trame → entité → famille → générale), préréglages, marges du papier, CSS, compteurs de liste (@counter-style), côtés des encadrés, aperçu
-  theme.js                APPARENCE (clair / sombre / automatique) : préférence locale, jetons du document, couleur de marque lisible
+  theme.js                APPARENCE (clair / sombre / automatique) : préférence locale, jetons du document, couleur de marque et emblème du référentiel lisibles (`brandLogoUrl`)
   akn.js                  LECTURE d'Akoma Ntoso 3.0 (import d'un acte publié, tolérant aux ns)
   amend.js                modification d'acte : plan, acte modificatif, version consolidée, mentions d'article (les divisions sont parcourues par flatNodes : articlesOf et buildConsolidated y descendent)
   abrogations.js          ABROGATION d'un acte ou de l'un de ses articles : vocabulaire de la clause, jetons, désignation d'une cible (nature lue à sa trame), composition de l'article d'abrogation, « abrogé par » et « est abrogé » (module pur)
@@ -2326,11 +2550,12 @@ src/lib/
   annexe-docs.js          LES ANNEXES (suite) : la PARTIE ANNEXÉE du document — quels documents un acte annexe, leur document compilé et leur intitulé, pour que leur texte suive l'original signé de l'acte qui les adopte (module pur)
   amend-edit.js           édition en place : adresses stables des passages (rang dans l'ordre imprimé, divisions comprises), plan déduit de la saisie
   remote.js               CLIENT de l'API REST : connexion, appel, journal des échanges
+  api-reference.js        LA DESCRIPTION DE L'API REST, une seule fois : les groupes, les opérations (méthode, chemin, rôle, corps, réponses, champs), les rôles, les codes d'erreur, l'export cURL et le sommaire des routes — ce qui alimente l'écran « API REST » ET `docs/API.md` (engendré)
   signature.js            cryptographie (ECDSA/SHA-256), original signé, prestataire simulé
   externe.js              CIRCUIT DE SIGNATURE EXTERNE (sans API) : réglage global et par trame (imposé / autorisé), résolution du circuit d'un acte, dossier de la version signée (statut, empreinte, certification de conformité du réviseur) et conditions de publication (module pur)
   eli.js                  identifiant ELI, opposabilité, réglages de publication (recueil, automatisme), JSON-LD, et la VERSION EN LIGNE — opposable pour un acte, **informative** pour un règlement (ni opposabilité ni original, mais l'acte qui l'adopte)
   recueil.js              RECUEIL PUBLIC et RECUEIL OUVERT : extraction du document publié (sans sa charte, qui vaut pour le papier), mise en page web, thèmes des actes (famille de la trame) et thème sans matière, derniers actes publiés en vigueur, actes épinglés (bande « À la une »), recherche/facettes, adresses d'un acte (de navigation et de référence), représentations lisibles par machine (JSON, Markdown, texte, Akoma Ntoso) et fichiers du site (llms.txt, recueil.json, sitemap.xml, robots.txt)
-  validation.js           CIRCUIT DE VALIDATION (parapheur, fonction expérimentale — voir `experimental.parapheur`) : circuits du référentiel, étapes, décisions, empreinte du texte validé
+  validation.js           CIRCUIT DE VALIDATION (le parapheur, fonction ordinaire) : circuits du référentiel, étapes à trois natures (vérification, visa, signature), décisions, empreinte du texte validé
   legalite.js             TRANSMISSION AU CONTRÔLE DE LÉGALITÉ par API (fonction expérimentale — voir `experimental.controleLegalite`) : API d'envoi, certificat de transmission (mention, référence, sceau), vérification
   execution.js            CARACTÈRE EXÉCUTOIRE : formalités requises, date d'exécutoire, délai de recours, recours introduit, alertes, constatations
   execution-documents.js  PIÈCES DE L'EXÉCUTION : état des formalités (tout acte), attestation de non-recours (acte définitif non contesté)
@@ -2346,6 +2571,7 @@ src/lib/
   users.js                COMPTES ET RÔLES : rôles, permissions, contrôle d'accès, comptes de démonstration
   scope.js                ORGANISATION : services, bureaux, périmètre d'un compte (qui voit quoi)
   delegations.js          QUALITÉS DU SIGNATAIRE (accord en genre) ET ARBRE DES DÉLÉGATIONS de signature
+  organigramme.js         L'ORGANIGRAMME entités → services → bureaux : les formes d'entité (`ENTITY_KINDS`), l'entité neuve, la PERSONNALITÉ MORALE (`autonome`, `parentId` : une régie rattachée à la commune), le SIGNATAIRE PRINCIPAL, l'arbre, les entités hors arbre et les compteurs de l'écran (module pur)
   fonctions.js            CATALOGUE DES FONCTIONS DE SIGNATURE (rôles, délégations) et des personnes qui les tiennent
   signataires.js          LE SIGNATAIRE : qualité (attribuée par la désignation), rapprochement personne ↔ compte ↔ outil de signature, champ de compétence (chaîne de signature), file « Ma signature » (module pur)
   conseils.js             LES ASSEMBLÉES DÉLIBÉRANTES : les conseils du référentiel (conseil municipal, conseil d'administration) — entité de rattachement, formule d'autorité de la ligne d'en-tête, et la QUALITÉ QUI SIGNE (un rôle du référentiel, configurable conseil par conseil) ; résolution de l'assemblée d'un acte et qualification en genre du signataire (module pur)
@@ -2375,6 +2601,12 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     comptes.mjs           domaine des comptes locaux : mot de passe scrypt, sessions, anti-CSRF (pur, crypto injectée)
     comptes.test.mjs      banc d'essai du domaine des comptes (npm test)
     state.mjs             état du service en base (table sb_etat)
+    variables.mjs         REGISTRE DES VARIABLES DE DÉPLOIEMENT : une seule déclaration — le wiki engendré (`docs/VARIABLES.md`), la validation du `.env` et le transport vers le navigateur en découlent (module pur)
+    entetes.mjs           en-têtes de la façade (CORS, sécurité, cache)
+    smtp.mjs              LE PROTOCOLE SMTP à l'état pur (aucune dépendance) : le réseau et la configuration lui sont injectés sous forme d'un transport — il s'éprouve donc seul
+    courriel.mjs          COURRIEL, LA PART RÉSEAU : la socket (TCP ou TLS), la configuration SMTP, l'envoi et le journal des envois — le mot de passe SMTP ne sort jamais de ce module
+    signature.mjs         CLIENT DU PRESTATAIRE DE SIGNATURE : provisionne le document, ajoute les signataires, démarre le circuit, relit le statut — la clé d'API ne quitte jamais ce module
+    amorcage.mjs          amorçage du service (compte d'administration du `.env`, clés)
     schema.sql            tables sb_collection / sb_record / sb_journal / sb_etat + vues
     Dockerfile  README.md  env.example  package.json
 src/wiki.js               CONTENU du guide d'utilisation (texte, étapes, captures) et, pour l'assistant, le sommaire et le lien de chaque chapitre
@@ -2412,6 +2644,9 @@ src/ui/
   views/execution.js      EXÉCUTION & DÉLAIS : échéancier des formalités, recours (délai ouvert ou introduit), actes définitifs, pièces du dossier
   views/corbeille.js      CORBEILLE : actes et trames supprimés (restauration, suppression définitive)
   views/delegations.js    ORGANIGRAMME DES DÉLÉGATIONS : l'arbre des chaînes de signature (organigramme ou liste), et la fiche d'un acteur — pouvoir, étendue, décision, dates, signature obtenue. Visible par tous, modifiable par les seuls administrateurs et éditeurs
+  views/organigramme.js   ORGANIGRAMME DES ENTITÉS, DES SERVICES ET DES BUREAUX : la toile de l'écran des délégations, réemployée, mais pour la structure au nom de laquelle les actes sont pris — arbre ou liste, fiche d'une entité (forme, code, personnalité morale, rattachement, signataire principal), d'un service (bureaux) ou d'un bureau
+  views/chrono.js         CHRONO DE NUMÉROTATION : compteurs, filtres, tableau triable (rangs libres et numéros annulés compris), export CSV / XLSX, passage à l'année suivante et annulation d'un rang
+  views/api-reference.js  API REST : l'index des routes et la fiche de chacune, plus le PANNEAU DE COMMANDE (chemin, corps, jeton, envoi réel, réponse et durée, export cURL) et le mémento des rôles et des codes d'erreur
   views/referentiel.js  aide.js  connexion.js  comptes.js  docs.js
   views/comptes.js        COMPTES ET RÔLES : liste des comptes, création/modification (profil, périmètre, « Personne du référentiel — qui signe », compétence de réviseur, signature et rapprochement), matrice des droits (17 permissions)
   views/sans-acces.js     ÉCRAN « PAS D'ACCÈS » : compte authentifié sans rôle d'application (visiteur) — explique, donne le contact du service et renvoie vers l'espace public
@@ -2426,6 +2661,8 @@ src/tests/                TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR (`npm test`)
 src/scripts/
   verifier-syntaxe.mjs    `npm run lint` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance
   verifier-style.mjs      `npm run lint` : analyse de style sans dépendance — REFUSE `debugger` hors `scripts/`, SIGNALE `var` et `console.log` dans le code client (`--strict` pour en faire des erreurs)
+  generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`server/mysql/variables.mjs`)
+  generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
 src/github/
   ci.yml                  à recopier en `<racine>/.github/workflows/ci.yml` : syntaxe + tests, puis le service auto-hébergé
 src/package.json          MANIFESTE DU DÉPÔT (à recopier à la racine) : `npm run lint`, `npm test`, `npm run verifier`
@@ -2681,6 +2918,23 @@ distantes) — c'est ce qui sert à produire le fichier à diffuser.
   gestionnaire `blur` ne reconstruise le DOM en pleine mutation. La persistance passe
   toujours par `touch("config"|"trames"|"actes")`, avec `{ rerender: false }` quand un
   `redrawView()` suit (sinon on paie deux rendus pour un seul geste).
+- **Un redessin ne coûte jamais son curseur à l'agent** : la coquille (`ui/app.js`,
+  `renderRoot`) et la vue (`drawView`) passent par `avecCurseur()` (`ui/focus.js`), qui
+  reprend le champ, la sélection et le défilement après coup — sauf changement d'écran,
+  où la clé de route a changé et où rien n'est repris.
+- **L'état de la persistance ne refait pas l'écran** : `db.onStatus` ne remplace que la
+  pastille de l'en-tête (`rafraichirPastilleBase`, `ui/app.js`). Un écran qui l'affiche en
+  clair s'y abonne lui-même (voir `views/referentiel.js`).
+- **Un verdict d'écran survit au redessin** : ce qui vient d'être mesuré — le résultat d'un
+  essai de connexion, par exemple — est rangé dans `state.ui` et rendu par une fonction
+  pure (`renduEssai`), pour que le redessin provoqué par l'état qu'il vient de changer ne
+  l'efface pas. Un verdict qui s'efface tout seul ne sert à rien.
+- **Le service a TROIS fabriques de réponse d'erreur**, et elles n'ont pas la même signature :
+  `err(message, options)` dans `src/server/mysql/server.mjs`, `err(code, message)` dans
+  `comptes.mjs`, `err(statut, message)` dans `actes.mjs`. Les confondre ne casse pas le service :
+  ça envoie la phrase dans le vide et ne laisse que le code à l'écran (c'est ainsi que
+  « csrf_invalide » s'affichait seul, cf. CHANGELOG 1.3.2m). Vérifier l'ordre des arguments au
+  moment d'écrire, et lire le `.erreur` du corps pour savoir ce que l'agent verra.
 - Les styles de capture (mise en image de la page) supposent le CSS **inliné** : `app.js`
   recopie la feuille de style dans un `<style>` au démarrage.
 
@@ -2727,6 +2981,43 @@ directe »), en 390 × 844 et en 1600 × 950.
   Chrome lève alors `NotFoundError: Failed to execute 'removeChild' … Perhaps it was
   moved in a 'blur' event handler?`. `clear()` s'appuie sur `replaceChildren()` et
   `redrawView()` diffère/coalesce le rendu.
+- **Redessin et curseur** : un conteneur reconstruit pendant une saisie perd le champ et
+  la position du curseur. C'est repris par `avecCurseur()` (`ui/focus.js`), mais
+  **seulement** sur les chemins de rendu qui passent par lui (`renderRoot`, `drawView`).
+  Un `clear()` fait à la main — le `.paper` de l'éditeur de trame, par exemple
+  (`refreshPaper`, `views/editor.js`) — n'en bénéficie pas : n'y reconstruisez pas la zone
+  où l'agent écrit.
+- **L'état d'une base est un CONSTAT DATÉ** : `db.status()` dit ce que le dernier geste a
+  répondu, rien de plus — rien ne le recalcule en boucle. Un écran qui l'affiche doit donc
+  l'éprouver lui-même (`db.health()` à l'ouverture, et après un essai réussi), sinon il
+  montre une panne déjà réparée à côté d'un test qui réussit. Et **une santé qui répond ne
+  prouve pas qu'une écriture passe** : ces deux questions ont leurs routes, et seule une
+  synchronisation vide dit la seconde (voir `essaiEcriture`, `src/lib/db/service.js`).
+- **Un cookie n'est lisible que par les pages de SON hôte** (`document.cookie`). Une
+  application servie par un hôte et un service sur un autre envoient donc tous les cookies
+  (le navigateur les envoie) mais ne peuvent pas LIRE le jeton anti-CSRF : la session est
+  valide, les lectures passent, et chaque écriture est refusée. C'est pourquoi le jeton
+  voyage aussi dans le corps de `/v1/auth/session` **et de la connexion** et que
+  `src/lib/motdepasse.js` le garde (voir CHANGELOG 1.3.2m et 1.3.2n) : ne jamais dépendre
+  de la lecture d'un cookie pour cette valeur. Corollaire : deux `Set-Cookie` (session +
+  anti-CSRF) partent ensemble à la connexion — un en-tête à plusieurs valeurs doit rester un
+  TABLEAU jusqu'à `writeHead` (`entetesSurs`, `src/server/mysql/entetes.mjs`) ; jointes par
+  une virgule, elles forment une valeur invalide que les navigateurs ne lisent que par
+  tolérance.
+- **Un autre hôte et une autre ORIGINE ne demandent pas la même chose.** Un service sur
+  un autre *hôte* du même domaine fonctionne (les cookies partent), mais une autre
+  *origine* exige, côté service, `access-control-allow-credentials: true` en plus de
+  l'origine autorisée (`CORS_ORIGINS`) et de `x-csrf-token` dans
+  `access-control-allow-headers` — sans quoi le contrôle préalable échoue et l'écriture est
+  rangée en file comme une panne réseau (« Serveur de données injoignable »). `CORS_ORIGINS=*`
+  ne peut PAS transporter de session : la spécification interdit l'en-tête `credentials`.
+- **Le mode du service est un FAIT qui peut arriver en retard** : le pilote est bâti au
+  démarrage sur ce que la page annonce, et `GET /v1/auth/config` — qui fait autorité — peut
+  échouer (service en train de redémarrer). Un pilote ainsi bâti sans anti-CSRF refuse
+  chaque écriture pour toujours si rien ne redemande le mode : c'est le rôle de
+  `reparerPilote` (`src/lib/db/index.js`, appelé au premier refus `csrf_invalide` /
+  `session_absente` et par *Renvoyer maintenant*). Ne jamais construire un chemin
+  d'écriture qui suppose que le mode annoncé à l'initialisation est le bon.
 - **Dialogues** : `confirmDialog`/`promptDialog` doivent trancher la promesse **avant**
   de fermer la modale, car `close()` déclenche `onClose` (donc le refus) — sinon elles
   se résolvent toujours à `false`/`null` et l'action demandée ne se produit jamais.

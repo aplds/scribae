@@ -134,13 +134,18 @@ export function themeLabelDePublication(rec) {
 // l'acte qui l'adopte.
 export function notice(rec, v) {
   const informative = rec.informative === true;
+  // Un DOCUMENT NON JURIDIQUE (verbatim, déclaration, vœu) est publié au
+  // recueil, mais ne fait pas droit : sa notice le dit, et n'affiche pas
+  // d'entrée en vigueur — il n'en a pas.
+  const nonJuridique = rec.juridique === false;
   const titre = (v && v.docTitre) || rec.objet || rec.titre || rec.numero || "Acte";
   const theme = themeLabelDePublication(rec);
   const marques = h("div", { class: "recueil-notice__marques" },
     theme ? h("span", { class: "recueil-badge recueil-badge--theme", "data-theme-id": themeDePublication(rec), text: theme }) : null,
     rec.nature ? h("span", { class: "recueil-badge recueil-badge--nature", text: natureLabel(rec.nature) }) : null,
     h("span", { class: "recueil-badge recueil-badge--version", text: kindLong(rec.kind) }),
-    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (informative ? "texte en vigueur" : "version en vigueur") : "version antérieure" }));
+    nonJuridique ? h("span", { class: "recueil-badge recueil-badge--note", text: "document, non opposable" }) : null,
+    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (informative ? "texte en vigueur" : nonJuridique ? "dernière version" : "version en vigueur") : "version antérieure" }));
 
   const meta = h("dl", { class: "recueil-meta" });
   const champ = (label, valeur, cls) => {
@@ -160,7 +165,8 @@ export function notice(rec, v) {
   } else {
     champ("Date de l'acte", formatDate(rec.dateDocument));
     champ("Publié le", formatDate(rec.datePublication));
-    champ("Entrée en vigueur", formatDate(rec.dateOpposabilite));
+    if (nonJuridique) champ("Portée", "Document non opposable");
+    else champ("Entrée en vigueur", formatDate(rec.dateOpposabilite));
     champ("Recueil", rec.recueil);
   }
 
@@ -171,7 +177,9 @@ export function notice(rec, v) {
       ? h("p", { class: "recueil-notice__sous", text: [rec.entityName, informative ? "" : rec.auteur].filter(Boolean).join(" · ") }) : null,
     informative
       ? h("p", { class: "recueil-notice__info", text: "Texte publié à titre informatif. Il n'est pas signé et ne se publie pas pour lui-même : seule la décision qui l'adopte fait foi, et son texte suit l'original signé de cette décision." })
-      : null,
+      : nonJuridique
+        ? h("p", { class: "recueil-notice__info", text: "Document publié au recueil pour être porté à la connaissance de tous. Il n'a pas de portée juridique propre : il ne crée ni droits ni obligations, aucune entrée en vigueur ne s'y attache, et aucun délai de recours ne court à compter de sa publication." })
+        : null,
     meta);
 }
 

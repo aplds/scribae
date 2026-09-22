@@ -251,7 +251,7 @@ bis), parce qu'il engage le service lui-même :
 | Mode | Où il se règle | Ce qui se passe |
 |---|---|---|
 | **Comptes de l'application** (défaut) | référentiel | L'écran de connexion liste les comptes et un clic ouvre la session, **sans mot de passe** (simulation d'annuaire). C'est le mode de démonstration. |
-| **Annuaire de la collectivité (OIDC)** | référentiel | La session s'ouvre chez le fournisseur d'identité ; le rôle et le périmètre viennent des groupes de l'agent. Les comptes de démonstration sont **désactivés automatiquement**. |
+| **Annuaire de la collectivité (OIDC)** | référentiel | La session s'ouvre chez le fournisseur d'identité ; le rôle et le périmètre viennent des groupes de l'agent. Les comptes de démonstration sont **désactivés automatiquement**. Les **comptes locaux restent joignables** (voir ci-dessous). |
 | **Comptes locaux (mot de passe)** | `.env` (`AUTH_MODE=password`) | De **vrais comptes** : identifiant + mot de passe, vérifiés par le service, session dans un cookie. Le compte d'administration est créé au premier démarrage depuis le `.env`. C'est le mode d'une installation auto-hébergée **sans annuaire**. |
 
 **Le mode « comptes de l'application » n'est pas de la sécurité.** En service, il faut :
@@ -261,6 +261,18 @@ bis), parce qu'il engage le service lui-même :
    par le service, hors du navigateur ;
 3. et, dans tous les cas, **ne pas exposer l'application n'importe où** : la placer derrière le
    réseau de la collectivité, un VPN ou un portail d'authentification reste la première barrière.
+
+**Deux portes, pas une.** Brancher l'annuaire ferme les comptes de démonstration, mais **pas** les
+comptes locaux : sous le bouton de l'annuaire, l'écran de connexion offre un bloc « **Ou par un
+compte local** », par lequel entrent le **compte d'administration du `.env`** (`ADMIN_LOGIN` /
+`ADMIN_PASSWORD`, § 4.3 bis) et les comptes locaux créés à la main. C'est la **porte de service** de
+l'installation : sans elle, une panne du fournisseur d'identité — réseau, incident, rendez-vous
+manqué — laisserait la collectivité sans personne pour ouvrir une session, l'administrateur
+compris. Le service annonce lui-même cette disponibilité (`GET /v1/auth/config` → `comptesLocaux`,
+vrai dès que le service tient les mots de passe, c'est-à-dire hors mode démonstration) : c'est donc
+le **déploiement** qui décide, et non le navigateur. Pour la refermer tout à fait, il faudrait que le
+service ne détienne **aucun** compte local — ne pas créer de compte d'administration (`ADMIN_PASSWORD`
+vide) et n'attribuer de mot de passe à personne : la porte disparaît alors, avec ce qu'elle protège.
 
 ### 4.3 bis Comptes locaux (mot de passe) — sans annuaire
 
@@ -326,6 +338,7 @@ mal saisi » : l'écran de connexion l'annonce désormais en clair, parce qu'il 
 | --- | --- |
 | `adminAmorce` | `true` un compte d'administration peut se connecter ; `false` l'amorçage a échoué ; `null` sans objet (mode démo) |
 | `adminMotif` | pourquoi l'amorçage a échoué (mot de passe refusé, `ADMIN_LOGIN` vide, compte sans mot de passe…) |
+| `adminPanne` | cet échec est une **panne** — le référentiel des comptes était injoignable (schéma non appliqué, base absente) — et non un refus de configuration. L'écran le dit alors comme une panne de base, jamais « aucun compte d'administration installé » |
 | `adminAvertissement` | l'amorçage a réussi, mais avec une réserve (compte sans le rôle administrateur) |
 | `baseDisponible` | `true`/`false` la base répond ; `null` pas encore éprouvée |
 | `baseMessage` / `baseRemede` | le motif de l'indisponibilité, et le remède à appliquer |
@@ -348,6 +361,15 @@ se serait enfermé dehors :
 ```bash
 docker compose exec api node server.mjs --mot-de-passe admin   # demande le mot de passe (entrée masquée : stdin)
 ```
+
+Cette commande est la **porte de secours** : si le compte a **disparu du référentiel** — remise à
+zéro des collections, import de données sans les comptes —, elle **crée** le compte (rôle
+administrateur) au lieu de le refuser, et vérifie la politique du mot de passe avant toute
+écriture. Le service fait mieux encore, de lui-même : **au démarrage**, si le compte déclaré par
+`ADMIN_LOGIN` manque au référentiel alors que le service garde encore son mot de passe, il le
+**rétablit** — même identifiant, rôle administrateur, mot de passe **conservé** (jamais remplacé).
+C'est ce qui rouvre une installation que « Repartir d'un référentiel vierge » avait laissée sans
+personne pour se connecter (voir plus bas) : le redémarrage du service suffit.
 
 C'est aussi ainsi qu'on **remet un accès** à un agent : *Comptes et rôles* › bouton **Mot de passe**
 d'une ligne. Le service **engendre** alors un mot de passe provisoire (groupes de 4 caractères, sans
@@ -378,6 +400,14 @@ garde « choisir un compte » (pratique pour une recette, **à ne pas laisser en
 données fictives resteraient en place, et les publications au recueil public. Le geste est
 *Administration › Données › « Repartir d'un référentiel vierge »* : il vide le poste **et** le
 service (actes déposés, circuits de signature, publications).
+
+En mode « comptes locaux » (et en mode annuaire), ce geste **conserve les comptes** : leurs mots de
+passe sont gardés par le service (`sb_motdepasse`), hors du référentiel, et les effacer aurait
+laissé l'installation sans personne pour se connecter — le compte d'administration compris. Le
+service rétablit du reste son compte d'administration au démarrage si le référentiel l'a perdu et
+que son mot de passe est resté, et `node server.mjs --mot-de-passe <identifiant>` le recrée s'il
+n'existe plus (mot de passe lu sur l'entrée standard). Pour supprimer un compte, passez par
+*Comptes et rôles*.
 
 **Ce qu'il faut savoir avant de s'engager :**
 
@@ -502,6 +532,31 @@ un signataire signe sans conduire la publication, qui reste le fait du bureau co
 Le réglage est **propre au poste** : il n'est jamais exporté avec le référentiel. L'écran
 propose *Tester la connexion*, *Envoyer les données à la base*, *Récupérer depuis la base*.
 
+*Tester la connexion* répond sur **deux** lignes, et la seconde est celle qui compte :
+
+| Ligne | La question | Ce qu'elle éprouve |
+|---|---|---|
+| **Le service répond** | y a-t-il quelqu'un au bout ? | `GET /v1/db/health` — ni session, ni anti-CSRF, ni jeton |
+| **La base accepte les écritures** | peut-on enregistrer ? | `POST /v1/db/collections/meta/sync` **vide** : session, anti-CSRF, rôle et transaction compris, sans déposer le moindre enregistrement |
+
+Une pastille rouge peut donc vivre à côté d'un « le service répond » : c'est la **seconde** ligne
+qu'il faut lire. L'état affiché est un constat daté — ce que le dernier geste a répondu, rien de
+plus ; l'écran le reprend en compte à son ouverture et après un essai réussi.
+
+Quand une écriture n'a pas pu partir (service injoignable, base momentanément indisponible), l'écran
+dit **combien** attendent, **dans quelles collections**, **depuis quand**, et **ce que la base a
+répondu au dernier renvoi** — puis propose deux gestes : *Renvoyer maintenant*, ou *Abandonner ces
+écritures* (avec confirmation). Ces écritures sont **sur le poste**, pas dans la base : les autres
+postes ne les voient pas encore. Le renvoi est automatique (toutes les trente secondes, et au retour
+du réseau) ; un refus définitif — session expirée, anti-CSRF — ne se répare pas en attendant : il
+faut recharger la page, et se reconnecter si cela persiste.
+
+Si l'essai d'écriture est refusé avec `csrf_invalide`, l'écran dit **pourquoi** : le service et
+l'application ne sont pas sur le même hôte, et la page ne peut pas lire son jeton anti-CSRF (un
+cookie n'est lisible que par les pages de son hôte). Le remède est de **laisser l'adresse vide** —
+le service du déploiement est servi sur le même domaine, sous `/v1/` — et, côté service, de vérifier
+que `API_BASE` n'est pas renseigné pour rien. Voir `../server/mysql/README.md` § 4.
+
 ### 5.2 Variables du service
 
 Toutes les variables sont décrites dans `../server/env.example` et `../server/mysql/env.example`.
@@ -513,14 +568,14 @@ Les plus importantes :
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SOCKET` | — | accès à la base |
 | `DB_POOL` | `8` | connexions simultanées |
 | `API_TOKENS` | — | jetons d'écriture, en `libellé:empreinte_sha256` |
-| `CORS_ORIGINS` | `*` | origines autorisées à appeler l'API |
+| `CORS_ORIGINS` | *aucune* | origines autorisées à appeler l'API, séparées par des virgules. **Vide = aucune** (une API de service public n'a pas à être appelable en lecture de cookies depuis n'importe quel site). À renseigner seulement si l'application est servie par une **autre origine** que le service : `CORS_ORIGINS=https://actes.exemple.fr`. `*` reste possible, mais il ne transporte **aucune session** (la spécification interdit `access-control-allow-credentials` avec `*`) : il ne convient qu'à un accès sans cookie |
 | `MAX_BODY` | `8388608` | taille maximale d'une requête (8 Mio) |
 | `MAX_SYNC_RECORDS` | `4000` | enregistrements par synchronisation |
 | `MAX_STATE_CHARS` | `8000000` | capacité de l'état signature/publication |
 | `MAX_DOC` | `400000` | taille d'un acte déposé |
 | `RATE_MAX_WRITES` / `RATE_WINDOW_MS` | `600` / `60000` | limitation de débit des écritures, par IP |
 | `AUTO_MIGRATE` | `false` | appliquer `schema.sql` au démarrage |
-| `AUTH_MODE` | `demo` | `demo` (comptes de l'application + jetons) ou `password` (comptes locaux : mot de passe + session) — § 4.3 bis |
+| `AUTH_MODE` | `demo` dans le service, `password` dans le `.env` livré et le compose | `demo` (comptes de l'application + jetons) ou `password` (comptes locaux : mot de passe + session) — § 4.3 bis. Le `.env` livré pose `password` : c'est le mode d'une installation réelle. Un conteneur lancé **hors** du compose (sans `.env`) retombe, lui, sur `demo` |
 | `DEMO_ACCOUNTS` | `false` en mode password | laisse le raccourci « choisir un compte » ouvert (recette) |
 | `DEMO` | selon le mode | **commutateur de démonstration** : `true` installe le jeu fictif complet, `false` fait partir l'outil d'un **référentiel vierge**. Vide = `AUTH_MODE=demo` ou `DEMO_ACCOUNTS=true` l'allument, `password` l'éteint |
 | `ADMIN_LOGIN` / `ADMIN_PASSWORD` | `admin` / — | compte d'administration créé au **premier** démarrage |
@@ -540,6 +595,30 @@ Les plus importantes :
 | `SMTP_NOTIF_ACTIVE` | `true` | coupe-circuit général : `false` désactive tout envoi sans toucher au référentiel |
 | `SMTP_TLS_INSECURE` | `false` | `true` accepte un certificat non vérifié (dépannage seulement) |
 | `SMTP_HELO_NAME` / `SMTP_TIMEOUT_MS` | — / `15000` | nom annoncé en EHLO, délai d'un dialogue SMTP |
+
+**Le prestataire de signature** (§ 5.5 sexies) se règle par des variables de **référentiel** — le
+service les valide, puis les transmet au navigateur, qui les applique par-dessus le référentiel
+(elles apparaissent donc aussi dans *Administration › Signature*, où elles sont signalées comme
+posées par le déploiement) :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SCRIBA_SIGNATURE_API_TRANSPORT` | `service` | `service` (le service appelle le prestataire — la clé reste au serveur) ou `demonstration` (circuit simulé, aucun appel sortant) |
+| `SCRIBA_SIGNATURE_API_URL` | — | adresse de base de l'API du prestataire. **Vide, le circuit reste simulé** |
+| `SCRIBA_SIGNATURE_API_PRESTATAIRE` | `esup-signature` | identifiant technique du prestataire (en-têtes, journal) |
+| `SCRIBA_SIGNATURE_API_NIVEAU` | `avancee` | `simple`, `avancee` (certificat) ou `qualifiee` (eIDAS) |
+| `SCRIBA_SIGNATURE_API_NOTIFICATION` | — | adresse appelée par le prestataire après signature. Vide : l'adresse du service + `/v1/webhooks/signature` |
+| `SCRIBA_SIGNATURE_API_TIMEOUT` | `20000` | délai maximal d'un appel au prestataire (ms) |
+| `SCRIBA_SIGNATURE_API_CHEMIN_DOCUMENT` | `/documents` | point de terminaison qui reçoit le document |
+| `SCRIBA_SIGNATURE_API_CHEMIN_SIGNATAIRES` | `/documents/{document}/signataires` | ajout d'un signataire |
+| `SCRIBA_SIGNATURE_API_CHEMIN_DEMARRER` | `/documents/{document}/demarrer` | démarrage du circuit |
+| `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | `/documents/{document}` | relecture du statut |
+| `SCRIBA_SIGNATURE_API_CLE` | — | **SECRET.** La clé que le service présente au prestataire. Elle **ne quitte jamais le serveur** : ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel ou une sauvegarde de données |
+
+La clé et les points de terminaison dépendent du **produit** : commencez par `GET /v1/health` puis
+`GET /v1/config` (qui rend l'état du prestataire : actif ou non, son adresse, son niveau, et un
+booléen disant si la clé est là — **jamais la clé**), et éprouvez l'ouverture d'un circuit sur un
+acte d'essai avant de l'annoncer aux services.
 
 Variables du conteneur `web` : `HTTP_PORT`, `APP_DIR`, `API_BASE`, `API_TOKEN`,
 `CORS_ORIGINS` — plus `AUTH_MODE`, `DEMO_ACCOUNTS` et `DEMO`, qui servent seulement à annoncer le
@@ -563,17 +642,26 @@ s'exporte et s'importe.
 **Administration › Expérimentale** rassemble les fonctions livrées mais **éteintes par défaut**,
 activables d'un clic. Le réglage (`config.experimental`) suit le référentiel exporté et importé.
 
-La première est le **parapheur** — le **circuit de validation** d'un acte avant sa signature
-(étapes séquentielles, bon pour accord ou avis, ciblage trame / famille / entité). Il est
-**désactivé** à l'installation, car beaucoup de collectivités ont déjà leur propre circuit
-interne, en amont de « Envoyer en signature ». Éteint, il **n'existe pas** pour l'application :
-`circuitFor` ne résout aucun circuit, l'écran Parapheur et son entrée de menu, l'onglet
-« Circuits de validation » de l'Administration, le réglage de circuit d'une trame et la carte
-Parapheur d'un acte disparaissent, et la porte de validation ne s'applique plus (ni côté client,
-ni au dépôt auprès du service de signature). **L'activer reconstruit les actes de
-démonstration** — seuls les actes `acte-demo-*` sont concernés, un registre réel n'est jamais
-touché — pour que l'écran ne soit pas vide. Les circuits déjà enregistrés sont **conservés** :
-les réactiver les remet en service tels quels.
+Il n'y a plus qu'une fonction expérimentale : la **télétransmission au contrôle de légalité**
+(l'étape qui s'intercale entre le retour signé et la publication, avec l'accusé de réception de la
+préfecture). Le **parapheur**, lui, est **sorti du régime expérimental** : le **circuit de
+validation** d'un acte avant sa signature est une fonction ordinaire — l'écran Parapheur et son
+entrée de menu, l'onglet « Circuits de validation » de l'Administration, le réglage de circuit
+d'une trame et la carte Parapheur d'un acte sont toujours là. Un référentiel qui n'en veut pas
+écarte le circuit sur ses trames (« Aucune validation ») ou désactive le circuit concerné.
+
+Le circuit se compose de **trois natures d'étape**, choisies marche par marche :
+
+- la **Vérification** — le contrôle du dossier avant tout engagement. C'est la marche du
+  **réviseur**, et c'est elle qui ouvre le circuit général de la démonstration ;
+- le **Visa** — le « bon pour accord » qui engage le service ou la direction ;
+- la **Signature** — le signataire marque son accord, et le circuit s'achève.
+
+Chaque nature appelle un **rôle par défaut** (réviseur, éditeur, signataire), que l'administrateur
+peut changer, ainsi qu'un libellé et la restriction au service de l'acte. Un circuit ancien reste
+lu : une étape « bon pour accord » est tenue pour un visa, une étape « avis » pour une
+vérification. Le réglage `experimental.parapheur` n'est plus servi ; il reste lu (toujours vrai)
+pour ne pas casser un référentiel antérieur.
 
 Le parapheur éteint, le trajet d'un acte est : rédiger → signer → **publication automatique** au
 recueil (pour un acte publiable) → suivre les délais. Un acte individuel (trame non publiable)
@@ -827,6 +915,15 @@ un acteur ouvre sa **fiche** : le pouvoir reçu (délégant, organisation, déci
 son étendue (famille de trames, type d'acte, matières), ses dates, et **la signature que cela
 produira** — les lignes de qualité et les décisions visées, recalculées à la frappe.
 
+**Ne pas confondre les deux organigrammes.** Celui-ci montre les **chaînes de signature** ; l'écran
+**Organigramme**, lui, montre la **structure** — entité → service → bureau (voir `../SPEC.md`
+§ 2.7.1). Une entité peut y être déclarée **autonome** ou **rattachée** à une autre (une régie
+municipale, sans personnalité morale propre, mais avec son directeur, son service et ses actes), et
+porter un **signataire principal** : la personne qui signe ses actes **quand la trame n'en désigne
+aucun** — le maire pour la commune, la directrice pour le CCAS, le directeur pour la régie. Ce
+signataire par défaut ne remplace ni un signataire désigné sur la trame, ni une **délégation** : les
+deux se combinent, la chaîne de délégation restant souveraine quand elle existe.
+
 **Qui peut quoi.** L'écran est **visible par tous les comptes** : savoir qui peut signer n'est pas
 une donnée réservée. Le **modifier** est gardé par la permission `delegations.gerer`, accordée
 aux **administrateurs et aux éditeurs** ; un compte qui ne l'a pas lit exactement la même fiche,
@@ -932,6 +1029,50 @@ FROM` / `RCPT TO` / `DATA` avec le doublement des points, sujet encodé (RFC 204
 injecté** (`lireReponse`, `ecrire`, `demarrerTls`, `fermer`), ce qui permet de le tester sans
 réseau — et c'est ainsi qu'il a été vérifié. Le mot de passe n'apparaît dans aucun journal.
 
+### 5.5 sexies Le prestataire de signature (le circuit électronique par API)
+
+Le circuit électronique suppose un prestataire **joignable** : un parapheur, ESUP-Signature,
+l'outil de la collectivité. Deux choses le mettent en service : une **adresse**, et une **clé**.
+
+**Où cela se règle.** Dans *Administration › Signature*, encart **« API du prestataire (circuit
+électronique) »** ; ou, pour un déploiement, par les variables `SCRIBA_SIGNATURE_API_*` du
+`.env` (voir § 5.2) — qui **l'emportent** sur le référentiel, et que l'écran signale comme telles
+pour qu'on ne saisisse pas dans le vide. L'écran indique d'un coup d'œil si le circuit est
+**branché** ou **simulé**, et pourquoi.
+
+**La clé ne quitte jamais le serveur.** C'est la raison d'être du réglage `transport = "service"` :
+c'est le SERVICE qui appelle le prestataire (`server/mysql/signature.mjs`), jamais le poste de
+travail. La clé (`SCRIBA_SIGNATURE_API_CLE`, variable de **service**, marquée *secret*) n'est ni
+transmise au navigateur, ni journalisée, ni comprise dans l'export des données du référentiel. Un
+`transport = "demonstration"`, ou une **adresse vide**, laisse le circuit **simulé** : l'application
+joue le prestataire sur le poste, et rien ne sort de la collectivité. C'est l'état d'une
+installation qui n'a pas encore de prestataire — rien n'est cassé, mais aucun acte n'est
+réellement signé par un tiers.
+
+**Ce que le service appelle.** À l'ouverture d'un circuit (`POST /v1/actes/{id}/signature`), le
+service **provisionne le document**, **ajoute les signataires**, **démarre le circuit**, avec les
+quatre points de terminaison réglés (le jeton `{document}` y porte l'identifiant rendu au dépôt) et
+un **délai** d'attente. La réponse de l'application porte alors le `dossier`, le `lienSignature`
+(la fenêtre du prestataire, affichée à l'agent), et l'état du prestataire. En cas d'échec, le
+service répond `502 prestataire_indisponible` — adresse erronée, clé refusée, réponse illisible :
+c'est ce code qu'il faut chercher dans la console « API & journal », qui garde la requête, la
+réponse, le statut et la durée.
+
+**Comment l'éprouver.** Renseignez l'adresse, le prestataire, le niveau et la clé ; puis, sur un
+**acte d'essai** (jamais un acte réel), déclenchez « Envoyer en signature ». Trois vérifications
+dans l'ordre : (1) `GET /v1/config` annonce le prestataire `actif` avec `cle: true` ; (2) le
+journal « API & journal » montre un appel **sortant** vers l'adresse réglée, avec un statut
+`2xx` ; (3) l'agent voit la **fenêtre du prestataire** s'ouvrir, et non l'outil de démonstration
+embarqué. Si le journal montre une simulation, c'est que l'adresse est vide, le transport réglé
+sur `demonstration`, ou que le service n'a pas la clé.
+
+**Ce que le prestataire doit accepter.** L'adresse de **notification** : le prestataire la
+rappellera une fois l'acte signé (`POST /v1/webhooks/signature`). Laissée vide, le service
+compose l'adresse de son propre domaine, suivie de `/v1/webhooks/signature` ; elle doit être
+joignable **depuis l'extérieur**, en HTTPS, et la convention avec le prestataire doit prévoir le
+format de cette notification (l'application accepte le retour signé et **revérifie l'empreinte**
+du document avant de le tenir pour signé).
+
 ### 5.6 Numérotation : séquence interne, ou service externe
 
 Par défaut, l'application tient elle-même la **séquence** des numéros d'acte
@@ -966,6 +1107,34 @@ documents sensibles. Et le **relais HTTP vient de l'hébergement** : il existe d
 ligne, **pas dans le déploiement `src/server/`** — une installation auto-hébergée doit donc soit
 déclarer l'origine de l'application **origine de confiance** chez le service et utiliser l'appel
 direct, soit attendre un relais côté service (voir `src/TODO.md`).
+
+
+#### La séquence interne, et le chrono
+
+La séquence interne a son propre noyau (`src/lib/sequence.js`, module pur) : le **motif** du
+numéro, le remplissage, l'**année** de référence, la séquence, et sa **PORTÉE** — un seul chrono
+pour la collectivité (`global`, le défaut), un chrono **par entité** (`entite`), ou un chrono **par
+type d'acte** (`type`). Le réglage se fait dans *Administration › Numérotation*, qui en donne un
+aperçu (« Portée du chrono ») et ouvre l'écran du chrono. Une portée qui n'a pas encore de compteur
+part de la séquence générale : passer d'un chrono global à des chronos par entité ne demande rien
+à ressaisir.
+
+**Un numéro n'est jamais attribué deux fois.** Le numéro proposé par la réservation est un numéro
+**libre** : la séquence part du compteur et **avance** tant que le numéro composé est déjà porté par
+un acte, ou déclaré annulé. C'est ce qui rattrape un compteur resté en arrière — des numéros
+attribués hors de l'application, des données reprises d'un autre outil, un passage d'année. Le
+compteur ne **recule jamais**, et il est fixé **après** le rang réservé.
+
+**L'écran « Chrono de numérotation »** (menu de gauche, à côté des Actes) montre l'ensemble des
+numéros attribués — et, avec eux, les deux choses qui expliquent les trous : les **rangs jamais
+attribués** et les **numéros annulés**, avec leur motif. Compteurs en tête, filtres (année, entité,
+type d'acte, état, source, période, texte), **tri par colonne**, et **export CSV ou XLSX** du
+résultat filtré — l'export est engendré sans aucune dépendance, et le CSV porte son BOM pour
+qu'Excel reconnaisse les accents. Deux gestes d'administration s'y trouvent aussi : le **passage à
+l'année suivante** (l'année de référence change, la séquence repart au rang 1) et l'**annulation
+d'un rang** — qui ne rend pas le numéro disponible, mais l'inscrit au chrono comme annulé. Aucun
+geste ne renumérote : un numéro attribué est un fait.
+
 
 ---
 
@@ -1022,9 +1191,11 @@ direct, soit attendre un relais côté service (voir `src/TODO.md`).
 
 - `api` et `db` ne publient **aucun port** : ils ne sont joignables que sur le réseau interne
   Docker. Toute la surface exposée passe par la façade `web`.
-- **CORS** : quand tout est servi par la même origine (cas du déploiement fourni), `*` suffit.
-  Si un autre site doit appeler l'API, listez les origines exactes dans `CORS_ORIGINS` plutôt
-  que `*`.
+- **CORS** : quand tout est servi par la même origine (cas du déploiement fourni), **rien à
+  faire** : par défaut le service n'autorise aucune origine, et le navigateur n'en appelle
+  aucune autre. Si l'application est servie par une autre origine, listez-la **exactement**
+  dans `CORS_ORIGINS` (`https://actes.exemple.fr`) — `*` ne transporte aucune session, et les
+  écritures en mode « mot de passe » en ont une (voir § 4.3 bis).
 - Si la base est sur le réseau local, restreignez son écoute et l'origine des connexions
   (`'scriba'@'192.168.1.%'`), et n'ouvrez le port 3306 qu'aux hôtes concernés.
 
@@ -1124,9 +1295,22 @@ dans le `.env` du service, et le script serveur embarqué (démonstration) n'en 
 ```bash
 docker compose ps                  # état des trois services
 docker compose logs -f api         # journal du service
-docker compose restart api         # redémarrage du service (les données sont en base)
+docker compose restart api         # relance le service SANS relire le .env (les données sont en base)
+docker compose up -d --force-recreate api   # recrée le service : applique un .env modifié
 docker compose exec api node server.mjs --migrate   # appliquer schema.sql
 ```
+
+Le schéma s'applique **sans rien effacer** (`schema.sql` est idempotent). Si l'écran de
+connexion affiche `Table '…sb_record' doesn't exist`, la base répond mais n'a jamais reçu le
+schéma — le cas d'un dossier de données initialisé **avant** que `schema.sql` n'y soit monté
+(MariaDB ne rejoue ses scripts d'amorçage que sur un dossier vierge), ou d'une base externe
+fournie nue. La commande ci-dessus le corrige, `AUTO_MIGRATE=true` aussi (le temps d'un
+démarrage) ; `docker compose down -v`, lui, **efface** la base : il ne se justifie que si les
+données peuvent être perdues. **Recréez ensuite le service** (`docker compose up -d
+--force-recreate api`) : le compte d'administration du `.env` n'est créé qu'au démarrage — sans
+cette recréation, la connexion répondra « aucun compte d'administration installé » alors que le
+`.env` est correct. Attention : `docker compose restart` **relance le conteneur sans relire le
+`.env`** ; seul `up -d` (qui recrée) applique un fichier modifié.
 
 ### 7.2 Sonde de santé
 
@@ -1289,7 +1473,7 @@ sauvegarde mensuelle de longue durée, copie hors site.
 ## 9. Mise à jour
 
 1. Sauvegarder la base (§ 8) ;
-2. remplacer le dossier de l'application (le code) ;
+2. remplacer le dossier de l'application (le code) — dans un clone du dépôt : `git pull` ;
 3. `docker compose up -d --build` ;
 4. `docker compose exec api node server.mjs --migrate` si le schéma a changé ;
 5. vérifier `/v1/db/health` et ouvrir l'application.
@@ -1338,10 +1522,14 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
 | Symptôme | Cause probable | Remède |
 |---|---|---|
 | Bandeau « base hors ligne » | service injoignable | vérifier `docker compose ps` ; l'application continue sur son miroir local, les écritures sont mises en file |
+| « Aucun compte d'administration installé » **alors que** `ADMIN_LOGIN` et `ADMIN_PASSWORD` sont renseignés | le compte n'a pas pu être **créé** : soit la table des comptes n'existe pas (schéma non appliqué) — l'écran le dit comme une panne de base, remède compris —, soit le mot de passe **reçu par le service** ne respecte pas la politique (le journal donne le motif exact) | appliquer le schéma puis **recréer** le service (`docker compose up -d --force-recreate api`) ; l'amorçage n'a lieu qu'au démarrage |
+| Une valeur refusée au démarrage (« RÉGLAGE DE SERVICE REFUSÉ », « REFUSÉE ») qui **ne correspond pas** au `.env` | le conteneur a gardé l'environnement de sa **création** : `docker compose restart` relance le même conteneur sans relire le `.env` | `docker compose config` (ce que compose calcule, `.env` compris), `docker compose exec api env \| grep SCRIBA_` (ce que le conteneur porte), puis `docker compose up -d --force-recreate api` |
 | Message de conflit en enregistrant | un autre poste a modifié le même objet | la version de la base a été reprise ; ressaisir la modification |
-| Écritures qui ne partent pas | jeton refusé (401/403) | corriger le jeton dans le réglage du poste ; ces refus ne sont pas mis en file |
+| Écritures qui ne partent pas | jeton refusé (401/403) en mode à jeton | corriger le jeton dans le réglage du poste ; ces refus ne sont pas mis en file |
+| Écritures refusées **alors que les lectures passent**, et pastille « base : erreur » à chaque geste | le poste se présente avec un **jeton** là où le service attend une **session** (mode « mot de passe ») : l'écriture part sans l'anti-CSRF, et le service la refuse (`csrf_invalide`). Cas d'un `.env` muet sur `AUTH_MODE` : le navigateur n'est alors prévenu de rien | `docker compose logs web` dit le mode annoncé (« mode : password » ou « mode : référentiel ») ; poser `AUTH_MODE=password` dans le `.env` puis **recréer** le service `web`. Une application à jour (**1.3.2** et au-delà) reprend d'elle-même le mode que le service annonce, sans ce réglage |
 | Captures / guides sans images | ressources distantes bloquées | vérifier l'accès réseau aux images du guide |
-| L'application ne charge pas | `src/` mal monté côté `web` | `APP_DIR` doit désigner le dossier qui contient `src/` et `index.html` |
+| L'application ne charge pas (page inaccessible) | conteneur `web` arrêté, ou `src/` mal monté côté `web` | `docker compose ps` (les trois services doivent être *running*) et `docker compose logs web` ; `APP_DIR` doit désigner le dossier qui contient `src/` et `index.html`. Le service d'API, lui, peut être en refus de base sans empêcher la page de s'afficher |
+| `Access denied for user 'scriba'@…` après avoir modifié le `.env` | le mot de passe **en base** est celui de la **création** du dossier de données : changer `DB_PASSWORD` ne le change pas après coup (voir § 7.1 et le § 9 de `../server/README.md`) | remettre l'ancien `DB_PASSWORD`, ou repartir d'un dossier de données vierge (`docker compose down -v && docker compose up -d`) si les données peuvent être perdues |
 | Plus personne ne peut se connecter après avoir branché l'annuaire | fournisseur injoignable, ou adresse de retour refusée | ouvrir la **porte de secours** de l'écran de connexion (« L'annuaire est injoignable ? ») pour revenir aux comptes de l'application, puis corriger le réglage |
 | « Découverte impossible » dans Administration › Annuaire | découverte bloquée (réseau, CORS) | saisir les points de terminaison à la main, et autoriser l'adresse de l'application chez le fournisseur |
 | « Jeton d'identité refusé » à la connexion | émetteur, audience, horloge ou signature | lire l'encart de contrôle affiché après une connexion : il nomme le contrôle en échec |

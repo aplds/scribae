@@ -28,6 +28,509 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
+## [1.5.0] — 2026-09-22 — Les documents qui ne font pas droit, et le parapheur achevé
+
+### Ajouté
+
+- **Les documents non juridiques se publient au recueil.** Trois natures de
+  document nouvelles se choisissent sur une trame : le **verbatim d'assemblée**
+  (le compte rendu intégral d'une séance), la **déclaration** (un texte pris
+  devant ou par l'assemblée) et le **vœu** (une motion : l'assemblée demande,
+  elle ne décide pas). Ces documents se signent et se **publient comme les
+  actes** — ils reçoivent leur identifiant ELI et se consultent au recueil public,
+  où les administrés les cherchent —, mais ils **ne font pas droit** : leur
+  publication n'emporte **ni opposabilité, ni entrée en vigueur, ni délai de
+  recours**. Le recueil les présente comme des **documents** (encadré « Document
+  non opposable » à la place de la mention d'opposabilité, classement sous
+  « Documents »), leur notice porte la mention « document, non opposable », le
+  JSON-LD **omet** la date d'entrée en vigueur, la version Markdown dit la même
+  chose, et l'**attestation de non-recours** explique qu'aucun délai ne court à
+  leur encontre. Ni transmission au contrôle de légalité, ni notification aux
+  intéressés ne les concernent : l'écran du caractère exécutoire les présente
+  comme « Document — non opposable », sans échéance. Trois trames de
+  démonstration les illustrent (verbatim de séance, déclaration, vœu), dont deux
+  sont publiées au recueil de démonstration.
+- **Le rapport de conformité du réviseur suit la règle.** Un document qui ne fait
+  pas droit n'est plus jugé sur son « dispositif en articles » — le rapport
+  réclamait un article 1er que la nature du document exclut. Le contrôle porte
+  désormais sur ce qu'il doit porter : son **texte** (« Texte du document — n
+  paragraphe(s) »), et le rapport ne lui annonce ni opposabilité ni entrée en
+  vigueur (« Document publiable — déposé au recueil »). La marche de publication
+  du circuit de signature dit de même « Publié au recueil », et « En attente de
+  publication au recueil », au lieu de la formule de l'acte opposable.
+
+### Modifié
+
+- **Le parapheur a trois natures d'étape — vérification, visa, signature — et il
+  sort des fonctions expérimentales.** L'ancien couple « bon pour accord / avis »
+  est remplacé par une nature d'étape, choisie par l'administrateur pour chaque
+  marche du circuit :
+  - la **Vérification** — le contrôle du dossier avant tout engagement : c'est
+    la marche du **réviseur**, et elle ouvre désormais le circuit général ;
+  - le **Visa** — le « bon pour accord » qui engage le service ou la direction ;
+  - la **Signature** — le signataire marque son accord, et le circuit s'achève.
+  Chaque nature appelle un rôle par défaut (réviseur, éditeur, signataire), que
+  l'administrateur peut changer ; la restriction au service de l'acte suit la
+  nature. Les circuits anciens restent lus : une étape « bon pour accord » est
+  tenue pour un visa, une étape « avis » pour une vérification. Le circuit
+  général de la démonstration **s'ouvre par la vérification du réviseur**.
+- **Le parapheur n'est plus une fonction expérimentale.** Le circuit de
+  validation avant signature est désormais une fonction ordinaire : il n'est plus
+  masqué derrière un réglage, l'écran « Fonctions expérimentales » le présente
+  comme actif, et le réglage `experimental.parapheur` n'est plus servi — il reste
+  lu (toujours vrai) pour ne pas casser un référentiel antérieur. Un référentiel
+  qui ne veut pas de parapheur écarte le circuit sur ses trames
+  (« Aucune validation ») ou désactive le circuit concerné.
+- Le **signataire d'un circuit** se choisit par sa **fonction** dans l'acte, et
+  le circuit de l'office se termine par la marche de **signature** du signataire
+  de l'office, au lieu d'un visa.
+- Documentation (README, SPEC, wiki embarqué, ADMINISTRATION, GITHUB, DOCKER)
+  alignée sur les trois natures d'étape et sur la sortie du régime expérimental.
+
+### Corrigé
+
+- **L'écran « Signature & publication » ne plante plus à l'ouverture.** L'onglet
+  du référentiel de signature appelait une fonction sous un nom mal orthographié
+  et levait une erreur au premier affichage : la page « Circuit de signature » et
+  « API du prestataire » s'affichent désormais normalement.
+
+## [1.4.0] — 2026-09-22 — L'organigramme, le chrono, deux emblèmes et l'API documentée
+
+### Ajouté
+
+- **Le signataire principal d'une entité.** Chaque entité — la commune, un
+  établissement, une régie — peut désigner la personne qui signe ses actes quand
+  la trame n'en désigne aucun : son maire, son président, son directeur. La
+  qualité sous laquelle elle signe s'y ajoute, sans écraser un choix fait sur la
+  trame. C'est ce signataire que la compilation retient par défaut ; une entité
+  qui n'en a pas le signale, plutôt que de produire un acte sans signature.
+- **L'organigramme des entités, des services et des bureaux.** Un écran nouveau
+  (`Organigramme`, à côté des Délégations, dont il reprend la toile) montre la
+  structure au nom de laquelle les actes sont pris : l'entité, ses services, et
+  les bureaux auxquels les comptes sont rattachés — en arbre ou en liste, avec
+  une fiche par maille où tout se règle sans quitter l'écran. Une entité est
+  **autonome** (elle a sa personnalité morale : la commune, le CCAS, la caisse
+  des écoles, l'office) ou **rattachée** à une autre (le cas d'une régie
+  municipale — le cinéma, par exemple —, sans personnalité morale propre, mais
+  avec son directeur, son service et ses actes). L'écran dit aussi les entités
+  hors arbre : celles dont le rattachement forme une boucle, qu'il faut corriger.
+- **Le chrono de numérotation.** L'ensemble des numéros attribués se lit
+  désormais dans un écran : le rang, l'entité et le type d'acte, le numéro
+  composé, l'état de l'acte, ses dates et son rédacteur — et, avec eux, les
+  **rangs jamais attribués** et les **numéros annulés**, pour qu'un trou dans la
+  suite s'explique. Compteurs en tête, filtres (année, entité, type d'acte,
+  état, rédacteur, texte), tri par colonne, et **export CSV ou XLSX** du
+  résultat filtré, engendré sans aucune dépendance. Le passage à l'année
+  suivante s'y fait d'un bouton, et « Annuler le rang » libère une attribution
+  faite par erreur — le chrono ne renumérote jamais de lui-même.
+- **Deux emblèmes en en-tête des actes.** Outre le logo de gauche, la feuille de
+  style accepte un second emblème, à droite du filet (la marque de l'État, d'un
+  partenaire, d'une délégation), avec sa propre hauteur. Vide, l'emplacement
+  n'existe pas et le document se présente comme avant.
+- **L'autorité de l'acte peut être en gras.** Le réglage de la formule d'autorité
+  passe d'une case « italique » à un choix de graisse : normal, italique, gras,
+  ou gras italique. Une feuille enregistrée avant ce choix conserve exactement
+  son rendu — c'est « Hérité » qui le dit.
+- **Les réglages de l'API du prestataire de signature.** En production, le
+  circuit électronique se règle enfin : *Administration › Signature* reçoit un
+  bloc « API du prestataire » — transport, adresse, prestataire, niveau de
+  signature, adresse de notification, délai, et les quatre points de terminaison
+  (document, signataires, démarrage, statut). On le pose à la main, ou on le
+  déclare dans le `.env` du déploiement (`SCRIBA_SIGNATURE_API_*`), qui l'emporte.
+  Le service appelle alors réellement le prestataire pour ouvrir le circuit ; la
+  **clé d'API**, elle, ne quitte jamais le serveur (`SCRIBA_SIGNATURE_API_CLE`) et
+  n'apparaît nulle part dans le référentiel. Tant qu'aucune adresse n'est
+  renseignée, le circuit reste simulé — et l'écran le dit.
+- **La référence complète de l'API REST, avec son panneau de commande.** Un écran
+  `API REST` décrit toutes les routes du service — rôle exigé, paramètres, corps,
+  réponses, champs notables, exemple cURL —, et permet de **jouer la requête pour
+  de vrai** : on choisit l'opération, on ajuste le chemin et le corps, on envoie,
+  et la réponse s'affiche avec son code et sa durée. L'appel passe par le même
+  chemin que l'application : il figure donc dans « API & journal ». La même
+  description engendre `docs/API.md`, consultable dans *Documentation technique*,
+  et il n'y a qu'une source pour les deux : `src/lib/api-reference.js`.
+
+### Modifié
+
+- **Annuaire branché, comptes locaux toujours ouverts.** Activer `AUTH_MODE=oidc`
+  fermait la porte aux comptes créés à la main — le compte d'administration du
+  `.env` compris —, alors que c'est précisément ce compte qui sert quand
+  l'annuaire est injoignable. L'écran de connexion propose désormais, sous le
+  bouton de l'annuaire, un bloc **« Ou par un compte local »** : le compte du
+  `.env` et les comptes locaux y entrent, quel que soit le mode. La session
+  qu'ils ouvrent est reconnue par le service (`comptes_locaux` de
+  `GET /v1/auth/config`), et l'administration des comptes le dit.
+- **Le jeu de démonstration** porte ses signataires principaux, son drapeau
+  d'autonomie, et une entité rattachée de plus : la régie du cinéma municipal,
+  son directeur, son service et ses deux bureaux. Un référentiel de démonstration
+  déjà installé les reçoit par mise à niveau, sans être remis à zéro.
+
+### Corrigé
+
+- **Une couleur de marque illisible ne dégrade plus l'interface.** Une valeur
+  incomplète dans *Administration › Identité* (ou reprise d'un import) rendait
+  `var(--brand)` invalide : liens, pastilles et filets perdaient leur couleur
+  les uns après les autres, sans qu'aucun message ne le signale. L'application
+  retombe désormais sur le bleu de la République, comme si la couleur n'était
+  pas réglée.
+
+## [1.3.2f] — 2026-09-22 — La pastille de base ne dit plus « erreur » pendant la connexion
+
+### Corrigé
+
+- **« base : erreur » s'affichait alors que la base répondait.** La pastille de l'en-tête ne
+  connaissait que trois états et donnait le mot de l'erreur à tout ce qui n'était ni
+  « disponible » ni « injoignable » — y compris l'état d'un service qu'on interroge encore. Elle a
+  désormais un mot par état : « base partagée », « base hors ligne », « base : erreur », et
+  « base : connexion… » tant que la réponse n'est pas là. On ne crie plus à la panne avant
+  d'avoir demandé.
+- **Le motif d'une panne ne se lisait qu'en infobulle.** Sur *Administration › Base de données*,
+  l'état est maintenant suivi du message du service écrit noir sur blanc : un exploitant qui doit
+  recopier une erreur n'a plus à survoler une pastille.
+
+## [1.3.2g] — 2026-09-22 — Les écritures passent par la session dès que le service le dit
+
+### Corrigé
+
+- **Des écritures refusées (403) alors que les lectures passaient, la pastille au rouge à chaque
+  geste.** Le pilote de persistance est bâti au démarrage, sur le régime que la PAGE annonce (le
+  `.env` du déploiement, recopié dans `config.js`) ; le service, lui, ne dit le sien qu'ensuite
+  (`GET /v1/auth/config`). Quand les deux diffèrent — un `.env` muet sur `AUTH_MODE`, par
+  exemple —, l'application continuait de se présenter avec un jeton et SANS l'en-tête anti-CSRF :
+  le service, en mode « mot de passe », servait les LECTURES (il trouve la session dans le cookie)
+  mais refusait chaque ÉCRITURE (`csrf_invalide`) — la pastille passait au rouge, et rien ne
+  s'enregistrait sur la base. L'application refait désormais son pilote dès que le service a
+  annoncé son mode : la session et l'anti-CSRF entrent en service, et les écritures aboutissent.
+- **Le fichier compose annonçait au navigateur un mode VIDE quand le `.env` ne disait rien**, alors
+  que le service, lui, démarre en `password` : c'est précisément la divergence décrite ci-dessus.
+  Le service `web` porte désormais le même défaut que le service `api` (`AUTH_MODE` par défaut :
+  `password`).
+- Le `README` du service disait encore que `AUTH_MODE=demo` était le défaut : c'est `password`. Il
+  rappelle aussi que la variable vaut pour le service **et** pour la façade, qui l'annonce au
+  navigateur.
+- Le message d'un refus d'écriture dit maintenant ce que le service a répondu, au lieu de supposer
+  une session expirée.
+
+## [1.3.2h] — 2026-09-22 — Le jeton d'API n'est plus présenté comme nécessaire en mode « mot de passe »
+
+### Corrigé
+
+- **Le champ « Jeton d'API » s'affichait avec la valeur du gabarit (`0000…0`) sur une installation
+  qui n'en a pas besoin.** En mode « mot de passe », la porte est la session de l'agent : le jeton
+  du `.env` n'est ni lu ni envoyé, et celui que porte `env.example` (une suite de zéros) n'est
+  qu'un exemple. Le champ disparaît dans ce mode, remplacé par la phrase qui dit ce qui ouvre
+  vraiment.
+- **Le bouton « Tester la connexion » annonçait un échec à un service qui fonctionnait.** Il
+  éprouvait le jeton, que ce mode n'utilise pas ; il éprouve désormais ce qui ouvre : la session
+  (cookie) et l'anti-CSRF.
+
+## [1.3.2i] — 2026-09-22 — L'état de la base ne refait plus l'écran
+
+### Corrigé
+
+- **La page se redessinait à chaque changement d'état de la base, et la saisie en cours y perdait
+  son champ.** Chaque écriture qui aboutissait — ou qui échouait — faisait reconstruire
+  l'application entière : une base qui va et vient (un service qui refuse les écritures, un réseau
+  qui hésite) faisait donc clignoter l'écran toutes les quelques secondes, et le champ qu'un agent
+  était en train de remplir était désélectionné à chaque fois. Le changement d'état ne remplace plus
+  que la **pastille de l'en-tête** ; *Administration › Base de données*, seul écran qui montre
+  l'état en clair, continue de s'y tenir à jour sans reconstruire le reste.
+
+## [1.3.2j] — 2026-09-22 — Le curseur survit au redessin
+
+### Corrigé
+
+- **Compléter un champ était difficile : certains champs se redessinent pendant la saisie**, et le
+  curseur — avec la fin de ce qui était tapé — était perdu au milieu d'une adresse ou d'un intitulé.
+  Un redessin reprend désormais **le champ, la position du curseur, le texte sélectionné et le
+  défilement** ; changer d'écran, lui, commence bien en haut de page, sans rien reprendre de
+  l'écran qu'on quitte.
+
+## [1.3.2k] — 2026-09-22 — L'état de la base ne ment plus
+
+### Corrigé
+
+- **« Erreur de connexion » affiché pendant que « Tester la connexion » annonçait une réussite.** Les
+  deux ne parlaient pas de la même chose. L'état est un **constat daté** : il vient du dernier geste
+  qui a parlé à la base, et rien ne le recalculait — une pastille rouge vieille d'une panne déjà
+  réparée restait donc affichée. Le bouton, lui, n'interrogeait que la route de santé
+  (`/v1/db/health`), qui ne demande **ni session ni anti-CSRF** : elle répond 200 même quand le service
+  refuse ensuite chaque écriture. L'écran pouvait ainsi montrer, côte à côte, une pastille rouge,
+  « 75 écritures en attente » et « Connexion réussie » — aucune des trois lignes n'étant fausse, mais
+  chacune répondant à une question différente, et aucune n'expliquant quoi faire.
+- **L'état est repris en compte là où il s'affiche** : *Administration › Base de données* l'éprouve à
+  son ouverture (et après un essai réussi) au lieu de montrer un constat qui peut dater. Un service
+  qui ne rend aucun message n'y laisse plus une pastille rouge sans motif : le code HTTP est écrit.
+
+### Ajouté
+
+- **Le test de connexion éprouve désormais l'ÉCRITURE** — une synchronisation VIDE (aucun
+  enregistrement, donc rien de déposé), qui traverse toute la garde du service : session, anti-CSRF,
+  rôle, transaction. Le résultat tient en deux lignes : *Le service répond*, puis *La base accepte les
+  écritures* — c'est la seconde qui dit pourquoi un geste ne s'enregistre pas. L'essai porte sur le
+  réglage **en service**, ou sur celui **affiché** si l'on vient de modifier les champs, et il le
+  précise ; son résultat survit au redessin qui suit.
+
+## [1.3.2m] — 2026-09-22 — « csrf_invalide » ne se lit plus tout seul
+
+### Corrigé
+
+- **Un refus d'écriture s'affichait en CODE, sans phrase.** Le service a TROIS fabriques de réponse
+  d'erreur — celle des données (`err(message, options)`), celle des comptes (`err(code, message)`) et
+  celle des actes (`err(statut, message)`) — et les deux refus des routes de données
+  (`session_absente`, `csrf_invalide`) appelaient la première avec les arguments de la deuxième : la
+  phrase française partait dans le vide, l'écran ne montrait plus que « csrf_invalide », et le corps
+  de la réponse portait en prime des clés parasites (les lettres de la phrase éclatées une à une).
+  L'agent lisait un code sans savoir quoi faire. Les deux refus disent maintenant leur phrase, et le
+  code voyage à part (`code`), où l'écran peut le reconnaître sans l'afficher.
+
+### Ajouté
+
+- **Le jeton anti-CSRF ne dépend plus de l'hôte de la page.** `document.cookie` ne montre que les
+  cookies de l'hôte de la page : quand l'application est servie par un hôte et le service par un
+  autre — une « Adresse du service de données » renseignée, un `API_BASE` posé dans le `.env` —, le
+  navigateur envoie bien le cookie du service, mais le JavaScript de la page ne peut pas le lire. La
+  session était valide, les lectures passaient, et chaque ÉCRITURE était refusée (`csrf_invalide`)
+  sans que rien ne le dise — c'est exactement le « 77 écritures en attente » d'un poste qui ne peut
+  rien transmettre. Le service rend désormais le jeton **avec la session**
+  (`GET /v1/auth/session` ; la connexion le rendait déjà), et le repose en cookie s'il a disparu ;
+  l'application le garde et l'envoie dans l'en-tête à défaut du cookie. Le double envoi garde tout
+  son sens : aucun autre site ne peut lire cette réponse (aucun en-tête CORS ne l'y autorise).
+- **Un refus d'écriture nomme sa cause, et le geste qui la répare.** Exemple, pour un service sur un
+  autre hôte : « La page ne peut pas lire son jeton anti-CSRF : le service est sur l'hôte
+  « donnees… » et l'application sur « app… » — laissez l'Adresse du service de données vide (le
+  service du déploiement est servi sur le même domaine, sous /v1/) ». La même phrase s'affiche sous
+  les verdicts de *Tester la connexion* dès que l'essai d'écriture est refusé, et sous l'état quand
+  un renvoi de la file est refusé pour cette raison.
+
+## [1.3.2l] — 2026-09-22 — Les écritures en attente se voient, se renvoient, ou s'abandonnent
+
+### Corrigé
+
+- **La file des écritures en attente grossissait sans rien dire.** Un service injoignable une
+  demi-heure laissait soixante-quinze écritures à renvoyer — un battement de cœur toutes les
+  vingt-cinq secondes — sans que rien n'indique lesquelles, depuis quand, ni pourquoi elles ne
+  partaient pas. La file range maintenant **une écriture par collection** : toutes les différences
+  d'une même collection sont calculées sur le même index serveur, et rien n'en a été appliqué, si bien
+  que la plus récente porte tout ce que les précédentes demandaient. Soixante-quinze écritures d'un
+  même poste redeviennent une seule.
+- **Un renvoi qui échoue le dit.** Il ne laissait la pastille sur un état antérieur (« base
+  disponible » alors que rien ne passait) : il rapporte désormais ce que la base a répondu — un refus
+  définitif (session, anti-CSRF) ne se répare pas en attendant, une panne réseau si.
+- **Le renvoi ne dépend plus d'une lecture.** La file n'était rejouée que si une lecture ou un
+  contrôle de santé passaient par là : un poste laissé sur un écran immobile gardait ses écritures des
+  heures, même après le retour de la base. Elle est representée toutes les trente secondes, et au
+  retour du réseau.
+- **Un réglage enregistré ne conserve plus les clés de l'appel qui l'a posé** (`silent`, par
+  exemple) : la façade n'accepte que les trois réglages qu'elle connaît (`mode`, `url`, `token`), à
+  l'écriture comme à la relecture.
+
+### Ajouté
+
+- **L'écran montre la file, et permet d'agir.** Sous l'état : ce qui attend (par collection, avec les
+  libellés), depuis quand, et le motif du dernier refus — message du service et code HTTP compris.
+  Deux gestes : *Renvoyer maintenant* (qui refait le pilote au passage, pour qu'un refus d'anti-CSRF
+  ne se répète pas à l'identique) et *Abandonner ces écritures*, avec confirmation. L'écran dit aussi
+  ce qu'une file signifie : ces écritures ne sont **pas** dans la base, et les autres postes ne les
+  voient pas encore.
+
+## [1.3.2n] — 2026-09-22 — La file ne s'arrête plus au premier refus, et la connexion rend son jeton
+
+### Corrigé
+
+- **Une seule écriture définitivement refusée bloquait toute la file derrière elle.** Le renvoi
+  parcourait les écritures en attente dans l'ordre et s'arrêtait à la première qui échouait. Une
+  entrée que le service refuse par nature — une écriture de `users` ou de `config` mise de côté par
+  une session d'administrateur, rejouée après qu'un compte ordinaire a pris la place du poste :
+  `403 droit_requis` — ne repartait donc JAMAIS, et les collections suivantes (les actes que l'agent
+  venait d'écrire, son journal, sa présence) non plus. « Renvoyer maintenant » échouait à
+  l'identique, et il ne restait que « Abandonner ces écritures », qui perd le travail de tout le
+  monde. Chaque entrée est désormais essayée : celles qui échouent restent en attente (rien n'est
+  perdu), celles qui peuvent passer passent, et le motif dit le premier refus **et** ce qui a été
+  transmis malgré tout.
+- **Les deux cookies de la connexion partaient sur une seule ligne d'en-tête.** La session et son
+  jeton anti-CSRF sont posés ensemble (`Set-Cookie`), mais la protection d'en-têtes transformait
+  toute valeur en chaîne : les deux cookies se retrouvaient joints par une virgule —
+  « scribae_session=…; Path=/…,scribae_csrf=…; Path=/… » —, une valeur invalide (`Set-Cookie` est
+  le seul en-tête qu'on ne peut pas replier) que les navigateurs n'interprètent que par tolérance,
+  chacun avec son heuristique de découpage. Un en-tête à plusieurs valeurs reste maintenant un
+  tableau jusqu'à `writeHead` (Node écrit une ligne par valeur), et une valeur douteuse est écartée
+  seule au lieu d'emporter les autres.
+- **Une application servie par une autre ORIGINE que le service ne pouvait pas écrire.** Le service
+  déclarait bien les origines autorisées (`CORS_ORIGINS`), mais sans
+  `access-control-allow-credentials` : le navigateur refuse alors la réponse à toute requête en
+  `credentials: "include"` — c'est-à-dire à toutes les écritures en mode « mot de passe », où la
+  session vit dans un cookie. Le refus, côté navigateur, ressemblait à une panne réseau : l'écriture
+  était rangée en attente (« Serveur de données injoignable ») et l'exploitant cherchait une coupure
+  qui n'existait pas. L'en-tête est posé quand une origine précise est autorisée (jamais avec `*`,
+  que la spécification interdit de combiner avec les cookies), `x-csrf-token` est déclaré dans
+  `access-control-allow-headers` — sans quoi le contrôle préalable échoue et la requête n'atteint
+  jamais le service — et `DELETE`, utilisé pour retirer un mot de passe, dans
+  `access-control-allow-methods`.
+- **La connexion ne rendait pas son jeton anti-CSRF**, contrairement à `/v1/auth/session` (note
+  1.3.2m) : sur un service, l'application gardait donc un jeton vide jusqu'à sa première relecture
+  de session, et les écritures de DÉMARRAGE — celles qui suivent immédiatement la connexion —
+  partaient sans en-tête et étaient refusées. La connexion (et la connexion de démonstration)
+  rendent désormais le jeton dans leur réponse, comme la session, et le jeton gardé en mémoire est
+  oublié à la déconnexion.
+- **Un refus de rôle se lisait sans phrase.** `droit_requis` (une collection réservée aux
+  administrateurs) et `force_reserve_admin` n'avaient aucune explication : l'écran disait « la base
+  a refusé », et le seul conseil était de se reconnecter — alors que le geste juste est de se
+  reconnecter **en administrateur**, ou d'abandonner cette écriture-là. Ces refus ont maintenant
+  leur phrase, comme `csrf_invalide` ; `session_absente` dit aussi la piste du cookie (service sur
+  un autre site), `jeton_invalide` celle du jeton d'API, et l'écran *Base de données* nomme la
+  **collection** refusée dans le motif du dernier renvoi.
+- **Un pilote bâti pendant un redémarrage du service ne se réparait jamais.** Le mode du service est
+  lu au démarrage (`GET /v1/auth/config`) ; si cet appel échoue, le pilote reste bâti sur le seul
+  présage de la page, sans session ni anti-CSRF, et chaque écriture était refusée **pour toujours**
+  — aucune relecture du mode n'était prévue, seule une relecture de la page réparait. La façade
+  répare désormais à la demande (`reparerPilote`) : elle redemande son mode au service, relit la
+  session (dont le jeton anti-CSRF), refait le pilote si le régime a changé, et rejoue l'écriture
+  une fois — au premier refus `csrf_invalide` ou `session_absente`, comme au renvoi d'une écriture
+  en attente ou sur « Renvoyer maintenant ». La réparation est unique par renvoi (et espacée de
+  vingt secondes en automatique) pour ne pas marteler un service qui refuse, et le renvoi de la
+  file ne peut plus se demander à lui-même la réparation en cours.
+
+**Points ouverts, non corrigés ici** : l'audit ciblé du 2026-09-22 en laisse six, documentés et
+chiffrés dans `src/docs/AUDIT-BUGS-2026-09-22.md` — `GET /v1/db/health` publique qui décrit
+l'infrastructure, le mode « Service de démonstration » proposé en auto-hébergement, une entrée
+refusée réessayée toutes les trente secondes, les migrations d'administration tentées par un
+compte ordinaire, l'absence d'avertissement avant un montage inter-site, et la présence qui
+amplifie les états d'erreur.
+
+## [1.3.2p] — 2026-09-22 — Repartir de zéro ne ferme plus la porte
+
+### Corrigé
+
+- **« Repartir d'un référentiel vierge » effaçait les COMPTES du service — le compte
+  d'administration compris.** Le référentiel et les comptes vivent dans les mêmes collections :
+  le bouton vidait donc la collection `users`. Or les mots de passe ne sont pas dans le
+  référentiel : ils vivent chez le service (table `sb_motdepasse`), qui les garde. Le compte
+  d'administration disparaissait, son mot de passe restait orphelin — et l'installation n'avait
+  plus **personne** pour se connecter. Comme la documentation recommande de retirer
+  `ADMIN_PASSWORD` du `.env` une fois le mot de passe changé depuis l'application, plus rien ne
+  pouvait la réparer : ni l'amorçage (qui refuse de créer un compte sans mot de passe), ni la
+  commande `--mot-de-passe` (qui refusait un compte absent). Le geste laisse désormais les
+  comptes **intacts** quand ils appartiennent au déploiement — comptes locaux à mot de passe, ou
+  agents de l'annuaire (`comptesDuDeploiement`, `clearAll({ garderComptes })`) : la remise à zéro
+  efface le référentiel, les trames et les actes, pas les accès. En démonstration, les comptes
+  restent ceux du jeu fictif, et partent avec lui.
+- **Le service RÉTABLIT son compte d'administration au démarrage.** Si le référentiel n'a plus le
+  compte déclaré par `ADMIN_LOGIN` alors que le service garde encore son mot de passe, le compte
+  est réécrit — même identifiant, rôle administrateur, et le mot de passe **conservé**, jamais
+  remplacé. Une installation enfermée dehors se rouvre donc d'elle-même au redémarrage du
+  service, sans toucher au `.env`. La réparation ne joue que pour l'identifiant dérivé du login
+  d'`ADMIN_LOGIN` (celui que l'amorçage attribue) : un mot de passe resté sous un autre
+  identifiant n'invente aucun compte.
+- **La commande de secours crée le compte au lieu de le refuser.** `printf '%s' "$MDP" | node
+  server.mjs --mot-de-passe <identifiant>` refusait un compte absent du référentiel — c'est-à-dire
+  exactement le cas où l'on n'a plus que cette commande. Elle **crée** désormais le compte (rôle
+  administrateur, nom et adresse d'`ADMIN_NOM` / `ADMIN_EMAIL`), et vérifie la politique du mot de
+  passe **avant** toute écriture : un mot de passe refusé ne laisse pas derrière lui un compte sans
+  accès. Le refus de l'amorçage, lui, dit maintenant les deux gestes qui réparent vraiment
+  (`ADMIN_PASSWORD` dans le `.env`, **puis** recréation du conteneur — un redémarrage ne relit pas
+  le `.env` —, ou la commande de secours).
+
+### Modifié
+
+- **Les textes suivent le nouveau comportement** : la fenêtre de confirmation dit si les comptes
+  sont conservés et pourquoi, et le panneau « Données » ne promet plus d'effacer « tout, comptes
+  compris ».
+
+## [1.3.2o] — 2026-09-22 — L'emblème peut avoir sa variante pour le thème sombre
+
+### Ajouté
+
+- **Un second emblème, pour le fond sombre.** L'emblème du référentiel est dessiné pour un fond
+  blanc — un blason aux traits sombres, un logo noir détouré — et, posé sur le fond sombre de
+  l'application, il devenait illisible ou bavait dans le décor. L'administration peut donc
+  désormais prévoir **deux emblèmes** : celui du fond clair (`brand.logoUrl`, inchangé), et sa
+  variante (`brand.logoUrlDark`, Administration › Identité, « URL du logo en thème sombre »). La
+  variante prend la place de l'emblème ordinaire **partout où l'emblème s'affiche dans
+  l'application** : l'en-tête de l'atelier, l'écran de connexion (l'avatar de structure du
+  premier compte) et le recueil public. Laissée vide, elle ne change rien : l'emblème ordinaire
+  sert dans les deux thèmes, comme avant.
+- **Le déploiement peut la poser** (`SCRIBA_IDENTITE_EMBLEME_SOMBRE` du `.env`, ajoutée au
+  registre `src/server/mysql/variables.mjs` et au wiki `src/docs/VARIABLES.md`), comme les autres
+  réglages d'identité.
+- **Le jeu de démonstration porte les deux variantes de son blason** (`src/lib/seed.js`) : même
+  écu, mais le galon s'éclaircit — le reste du dessin (ciel, soleil, monts, eau) étant clair, il
+  tient sur les deux fonds. Un référentiel de démonstration qui n'a pas encore la variante la
+  reçoit par `migrateDemoLogoDark` (`src/lib/store.js`), sans toucher à un emblème choisi par
+  l'administrateur.
+
+### Modifié
+
+- **Le choix de l'emblème se fait au RENDU, pas par une requête média.** `prefers-color-scheme`
+  aurait été le raccourci tentant, et il est faux ici : le thème de l'application n'est pas celui
+  du système — l'agent peut l'imposer depuis le menu du compte, et la requête média l'ignorerait.
+  Chaque écran qui montre l'emblème l'appelle donc par `brandLogoUrl(brand)` (`src/lib/theme.js`)
+  et se redessine au changement d'apparence (`applyBrand`, `emit`), comme il le fait déjà pour la
+  couleur de marque.
+- **Le papier ne change pas.** Les pièces d'exécution et les documents compilés gardent l'emblème
+  ordinaire : une pièce imprimée sort sur du papier blanc, et son aperçu doit montrer le document
+  tel qu'il sera imprimé — c'est déjà la règle pour la couleur de marque.
+
+## [1.3.2] — 2026-09-22 — La connexion aboutit, et chaque panne du service est nommée
+
+### Corrigé
+
+- **« Erreur interne du service » à la connexion, avec les BONS identifiants.** L'ouverture d'une
+  session écrivait ses dates dans `sb_session` sous la forme ISO de JavaScript
+  (`2026-10-04T12:34:56.789Z`) ; un `DATETIME` de MySQL / MariaDB attend
+  `AAAA-MM-JJ hh:mm:ss[.fff]` et **refuse** cette forme — l'`INSERT` levait, et la connexion avec
+  lui. Le signe qui ne trompe pas : un mot de passe FAUX répondait normalement (« Identifiant ou mot
+  de passe incorrect », un 401), un mot de passe JUSTE tombait en erreur interne, puisque seule une
+  connexion réussie écrit une session. Le magasin remet désormais ses dates en objets `Date`, et la
+  connexion à la base est déclarée en UTC (`timezone: "Z"`) : les échéances font l'aller-retour
+  exactement, et la comparaison des délais reste juste. Le même défaut touchait la date de blocage
+  d'un compte (`bloque_jusqua`) et la purge des sessions échues — silencieusement, celle-là, parce
+  qu'elle est rattrapée.
+- **Un `.env` corrigé restait sans effet après un `docker compose restart`.** `restart` relance le
+  MÊME conteneur, avec l'environnement figé à sa création : seul `up -d` (qui recrée) applique un
+  fichier modifié. L'exploitant lisait donc des refus incompréhensibles — un `MDP_MIN_LONGUEUR`
+  refusé « valeur minimale : 8 » alors que le fichier portait 12, un `ADMIN_PASSWORD` refusé pour sa
+  longueur alors qu'il en comptait dix-huit. Le journal ajoute désormais, à côté de toute valeur
+  refusée, le rappel qui débloque : **recréer** le service, non le redémarrer. Le conseil
+  d'installation ne dit plus « redémarrer » là où il faut recréer (création du compte
+  d'administration, application du schéma), et le dépannage porte les deux commandes de
+  vérification — `docker compose config` (ce que compose calcule, `.env` compris) et
+  `docker compose exec api env` (ce que le conteneur porte) — pour comparer AVANT d'accuser le
+  fichier. Le `README` du service rappelait par ailleurs que `AUTH_MODE=demo` est le défaut : c'est
+  `password` (le `.env` livré et le compose le posent ainsi).
+- **« Access denied for user 'scriba'@… » après un `.env` corrigé, alors que la base répondait
+  AVANT.** Le mot de passe d'un compte MariaDB est posé à la **création** du dossier de données :
+  corriger `DB_PASSWORD` / `MARIADB_*` ensuite ne le change pas — et recréer l'API lui fait
+  présenter le mot de passe neuf, que la base refuse. Le service conseillait « vérifiez DB_USER /
+  DB_PASSWORD », ce qui n'aide pas quand on vient précisément de les vérifier. Il nomme maintenant
+  la cause, le geste qui répare **sans rien perdre** (remettre l'ancien mot de passe — il est encore
+  dans l'environnement du conteneur de base) et celui qui efface (dossier de données vierge). Le
+  dépannage porte la commande qui relit cet ancien mot de passe, et rappelle qu'un conteneur `web`
+  arrêté suffit à rendre la page inaccessible, indépendamment de la base.
+- **« Aucun compte d'administration installé », alors que `ADMIN_LOGIN` et `ADMIN_PASSWORD`
+  étaient bel et bien renseignés.** L'écran de connexion portait ce titre dès que l'amorçage avait
+  échoué, sans distinguer POURQUOI : il en accusait le `.env`, quand la cause était la base — un
+  référentiel de comptes injoignable, table des comptes absente (schéma non appliqué). L'agent
+  partait donc corriger une configuration qui n'avait rien de faux. Le service porte désormais le
+  fait (`adminPanne`, dans `GET /v1/auth/config`) et l'écran dit la même chose que devant une base
+  absente : « Base de données indisponible », le motif, et le remède. Un `ADMIN_PASSWORD`
+  réellement refusé par la politique garde, lui, son message et son écran. Le remède rappelle
+  aussi le geste qui complète : créer les tables ne suffit pas — le compte d'administration du
+  `.env` n'est créé **qu'au démarrage** du service, qu'il faut donc recréer.
+- **« Table 'scriba.sb_record' doesn't exist » ne proposait d'abord que l'effacement.** C'est
+  pourtant le symptôme d'une première installation à demi faite : la base répond, mais le schéma
+  n'y a jamais été appliqué — MariaDB ne rejoue ses scripts d'amorçage que sur un dossier de
+  données VIERGE, si bien qu'un dossier initialisé avant que `schema.sql` n'y soit monté reste
+  sans tables. Le bandeau de l'écran de connexion (et la réponse `503` de `/v1/db/health`, qui
+  porte le même texte) dit maintenant le geste exact — `node server.mjs --migrate`, qui n'efface
+  RIEN, ou `AUTO_MIGRATE=true` le temps d'un démarrage — et ne mentionne
+  `docker compose down -v`, destructeur, que pour le seul cas qui l'exige : un dossier de données
+  initialisé avant qu'on y monte le schéma, quand ces données peuvent être perdues. Un message qui
+  propose d'effacer la base avant de proposer de la compléter est un message dangereux. La cause
+  « la base n'existe pas » (`DB_NAME` qui ne correspond à rien) a son propre remède, distinct de
+  « les identifiants sont refusés » et de « le schéma manque » : trois pannes qu'un même conseil
+  confondait.
+
 ## [1.3.1] — 2026-09-22 — Délégations, service fiable, réglages déclaratifs
 
 ### Ajouté

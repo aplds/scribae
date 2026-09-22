@@ -40,9 +40,10 @@ import { createActesApi, emptyState } from "./actes.mjs";
 import * as courriel from "./courriel.mjs";
 import { loadState, saveState } from "./state.mjs";
 import { SERVICE_ID, entetesSurs, ecrireEntetes } from "./entetes.mjs";
-import { amorcerAdministrateur } from "./amorcage.mjs";
-import { createComptes, createStoreMysql, normaliserLogin } from "./comptes.mjs";
+import { amorcerAdministrateur, nomDe, slug } from "./amorcage.mjs";
+import { createComptes, createStoreMysql, normaliserLogin, motDePasseFaible } from "./comptes.mjs";
 import { lireVariables } from "./variables.mjs";
+import { createPrestataire } from "./signature.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVICE = "Scribae — service de la collectivité";
@@ -96,10 +97,22 @@ const CORS_ORIGINS = env("CORS_ORIGINS", "").split(",").map((s) => s.trim()).fil
 //             comptes de l'application choisis dans une liste (démonstration) ;
 //   password  une VRAIE connexion : identifiant, mot de passe, session. Les
 //             jetons d'API ne sont alors PLUS acceptés (le jeton est dans le
-//             navigateur, donc public : il ne peut pas protéger une donnée).
+//             navigateur, donc public : il ne peut pas protéger une donnée) ;
+//   oidc      l'annuaire de la collectivité (OpenID Connect). Les comptes LOCAUX
+//             restent ouverts — c'est ce qui permet de se connecter avec le
+//             compte d'administration déclaré ici (ADMIN_LOGIN/ADMIN_PASSWORD),
+//             même quand l'annuaire est en panne, ou pour un poste qui n'y a pas
+//             accès. Les deux portes coexistent : c'est le client qui les
+//             propose toutes les deux (voir src/lib/auth.js).
 // Voir src/server/mysql/comptes.mjs et src/server/README.md § « Comptes ».
 const AUTH_MODE = env("AUTH_MODE", "demo").trim().toLowerCase();
-const MOT_DE_PASSE = AUTH_MODE === "password";
+// Les comptes LOCAUX (identifiant + mot de passe, session par cookie) sont
+// ouverts dès que le mode n'est pas « demo ». En OIDC, l'annuaire s'ajoute à
+// eux sans les remplacer : la session reste le moyen d'accéder aux données, et
+// l'amorçage du compte d'administration garde tout son sens.
+const COMPTES_LOCAUX = AUTH_MODE !== "demo";
+// Le nom historique du réglage : « la porte est une session », et non un jeton.
+const MOT_DE_PASSE = COMPTES_LOCAUX;
 const ADMIN_LOGIN = env("ADMIN_LOGIN", "admin").trim();
 const ADMIN_PASSWORD = env("ADMIN_PASSWORD", "");
 const ADMIN_NOM = env("ADMIN_NOM", "Administrateur").trim();
@@ -151,6 +164,12 @@ const DB = {
   charset: "utf8mb4",
   connectionLimit: num("DB_POOL", 8),
   multipleStatements: false,
+  // Les DATETIME sont écrits et relus en UTC. MySQL / MariaDB attend
+  // « AAAA-MM-JJ hh:mm:ss[.fff] » et REFUSE la forme ISO de JavaScript
+  // (« …T…Z ») : une date de session écrite telle quelle faisait échouer
+  // l'INSERT, donc la connexion. Avec ce fuseau, un objet `Date` fait
+  // l'aller-retour exactement, dans les deux sens.
+  timezone: "Z",
 };
 
 // Rôles d'une clé d'API. Les quatre premiers forment une hiérarchie ; le
@@ -225,6 +244,34 @@ const comptes = createComptes({
   sessionRequise: MOT_DE_PASSE,
 });
 
+// ------------------------------------------------- le prestataire de signature
+// Les réglages de l'API du prestataire (circuit électronique) : ceux du `.env`
+// — les variables `SCRIBA_SIGNATURE_API_*` du registre, validées au démarrage —
+// complétés par le référentiel, que le client transmet au moment d'ouvrir un
+// circuit. La CLÉ, elle, n'existe qu'ici : elle est lue à la source et remise
+// au seul module qui appelle le prestataire (signature.mjs). Elle n'est jamais
+// journalisée, jamais transmise, jamais écrite au référentiel.
+const apiOpt = (k) => OPTIONS.valeurs["signature.api." + k];
+const SIGNATURE_API = {
+  transport: apiOpt("transport") || "service",
+  url: apiOpt("url") || "",
+  prestataire: apiOpt("prestataire") || "esup-signature",
+  niveau: apiOpt("niveau") || "avancee",
+  urlNotification: apiOpt("urlNotification") || "",
+  timeoutMs: apiOpt("timeoutMs") || 20000,
+  cheminDocument: apiOpt("cheminDocument") || "/documents",
+  cheminSignataires: apiOpt("cheminSignataires") || "/documents/{document}/signataires",
+  cheminDemarrer: apiOpt("cheminDemarrer") || "/documents/{document}/demarrer",
+  cheminStatut: apiOpt("cheminStatut") || "/documents/{document}",
+};
+const prestataireSignature = createPrestataire({
+  api: SIGNATURE_API,
+  cle: env("SCRIBA_SIGNATURE_API_CLE"),
+  // Une ligne par appel sortant : de quoi relire, dans les journaux du service,
+  // ce qui a été demandé au prestataire, et quand. Jamais le corps, jamais la clé.
+  journal: (e) => console.log("[prestataire]", JSON.stringify(e)),
+});
+
 // La session d'une requête HTTP (mode « mot de passe »), ou null. Toute la
 // vérification — expiration, compte désactivé, compte de démonstration — vit
 // dans `comptes.mjs` : le serveur HTTP ne fait que transporter le cookie.
@@ -234,8 +281,8 @@ async function sessionHTTP(req) {
   catch (e) { console.error("[session]", e.message); return null; }
 }
 
-const refusSession = () => ({ status: 401, headers: {}, body: err("session_absente", "Connexion requise : ouvrez une session (identifiant et mot de passe).") });
-const refusCsrf = () => ({ status: 403, headers: {}, body: err("csrf_invalide", "Jeton anti-CSRF absent ou incorrect : rechargez la page, puis réessayez.") });
+const refusSession = () => ({ status: 401, headers: {}, body: err("Connexion requise : ouvrez une session (identifiant et mot de passe).", { code: "session_absente" }) });
+const refusCsrf = () => ({ status: 403, headers: {}, body: err("Jeton anti-CSRF absent ou incorrect : rechargez la page, puis réessayez.", { code: "csrf_invalide" }) });
 
 // -------------------------------------------------- état de santé du service
 // Ce que l'écran de connexion doit pouvoir montrer AVANT toute session, plutôt
@@ -251,6 +298,13 @@ const etatService = {
   adminAmorce: null,     // null = pas encore tenté (ou mode « demo » : sans objet)
   adminMotif: "",
   adminAvertissement: "",
+  // L'échec de l'amorçage est-il une PANNE (référentiel des comptes injoignable)
+  // plutôt qu'un refus de configuration ? Les deux ne se réparent pas au même
+  // endroit : l'écran de connexion ne doit pas annoncer « aucun compte
+  // d'administration installé » — l'agent croirait son ADMIN_PASSWORD en cause,
+  // alors que c'est la base qu'il faut réparer (schéma non appliqué, par
+  // exemple). Voir src/ui/mot-de-passe.js.
+  adminPanne: false,
   // La base répond-elle ? Tant qu'on ne l'a pas éprouvée, on se tait.
   baseDisponible: null,  // null = inconnu ; true/false ensuite
   baseMessage: "",
@@ -262,16 +316,35 @@ const etatService = {
 function noterBase(disponible, message = "", e = null) {
   etatService.baseDisponible = !!disponible;
   etatService.baseMessage = disponible ? "" : String(message || (e && e.message) || "");
-  if (!disponible) {
-    const code = e && e.code;
-    const remede = code === "ER_ACCESS_DENIED_ERROR" || code === "ER_ACCESS_DENIED_NO_PASSWORD_ERROR"
-      ? "La base refuse les identifiants du service : vérifiez DB_USER / DB_PASSWORD (et MARIADB_* du compose s'il crée le dossier de données pour la première fois)."
-      : "Vérifiez la configuration DB_* / MARIADB_* du .env, puis « node server.mjs --migrate » (ou « docker compose down -v && docker compose up -d --build » pour rejouer schéma et amorçage sur un dossier de données vierge).";
-    etatService.baseRemede = remede;
-  } else {
-    etatService.baseRemede = "";
-  }
+  etatService.baseRemede = disponible ? "" : remedeBase(e && e.code);
 }
+
+// Le remède DIT le geste à faire, et dans le bon ordre. Un schéma absent
+// s'applique SANS RIEN EFFACER (`schema.sql` est idempotent) ; l'effacement du
+// dossier de données (« docker compose down -v ») n'est proposé que s'il est
+// vraiment la cause — un dossier initialisé AVANT que `schema.sql` n'y soit
+// monté. Confondre les deux ferait perdre les données d'un service en marche.
+function remedeBase(code) {
+  if (code === "ER_ACCESS_DENIED_ERROR" || code === "ER_ACCESS_DENIED_NO_PASSWORD_ERROR") {
+    return "La base refuse les identifiants du service. Le mot de passe d'un compte MariaDB est celui de la CRÉATION du dossier de données : corriger DB_PASSWORD / MARIADB_* dans le .env ne le change PAS après coup. Remettez l'ancien mot de passe (il est encore dans l'environnement du conteneur de base : « docker compose exec db env »), ou repartez d'un dossier de données vierge (« docker compose down -v && docker compose up -d » — au prix des données).";
+  }
+  if (CONNEXION_PERDUE.has(code)) {
+    return "Le service n'atteint pas la base : vérifiez DB_HOST / DB_PORT (et, sous Docker, que le service de base tourne — « docker compose ps », « docker compose logs db »).";
+  }
+  if (code === "ER_BAD_DB_ERROR" || code === "ER_NO_DB_ERROR") {
+    return `La base « ${DB.database} » n'existe pas : créez-la, ou posez DB_NAME sur une base existante (sous Docker, c'est MARIADB_DATABASE qui la crée au premier démarrage).`;
+  }
+  if (code === "ER_NO_SUCH_TABLE") {
+    return "La base répond, mais le SCHÉMA n'y est pas encore appliqué : lancez « node server.mjs --migrate » (ou posez AUTO_MIGRATE=true le temps d'un démarrage), PUIS recréez le service (« docker compose up -d --force-recreate api ») — le compte d'administration du .env n'est créé qu'au démarrage, et « docker compose restart » ne relit PAS le .env. Rien n'est effacé. Ne recréez le dossier de données (« docker compose down -v ») que si vous l'avez initialisé AVANT d'y monter schema.sql.";
+  }
+  return "Vérifiez la configuration DB_* / MARIADB_* du .env, puis « node server.mjs --migrate » pour appliquer le schéma (cette commande ne supprime rien), ou « docker compose down -v && docker compose up -d --build » pour rejouer schéma et amorçage sur un dossier de données vierge — au prix des données.";
+}
+
+// Les erreurs de LIAISON : elles ne se corrigent pas en appliquant le schéma,
+// et le dire évite d'envoyer l'exploitant migrer une base qu'il n'atteint pas.
+const CONNEXION_PERDUE = new Set([
+  "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "EHOSTUNREACH", "ETIMEDOUT", "PROTOCOL_CONNECTION_LOST",
+]);
 
 // Les erreurs qui disent « la base n'est pas là » (et non « cette requête a
 // échoué »). Elles font basculer l'état du service, pour que l'écran le montre,
@@ -289,14 +362,30 @@ function noterBaseSelonErreur(e) {
 // ------------------------------------------------------------------- réponses
 function corsHeaders(req) {
   const origin = req.headers.origin || "";
-  const allow = CORS_ORIGINS.includes("*") ? "*" : (CORS_ORIGINS.includes(origin) ? origin : "");
+  const wildcard = CORS_ORIGINS.includes("*");
+  const allow = wildcard ? "*" : (CORS_ORIGINS.includes(origin) ? origin : "");
   return {
     // Pas d'en-tête `access-control-allow-origin` quand l'origine n'est pas
     // autorisée : le navigateur bloque alors la réponse (le défaut « null »
     // laissait passer un appel depuis un site tiers).
     ...(allow ? { "access-control-allow-origin": allow } : {}),
-    "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type, authorization, idempotency-key",
+    // « Autoriser l'envoi des cookies » : sans cet en-tête, le navigateur
+    // REFUSE la réponse à une requête en `credentials: "include"` — c'est le cas
+    // de TOUTES les écritures en mode « mot de passe », où la session vit dans
+    // un cookie. Une application servie par une autre origine que le service
+    // (une « Adresse du service de données » distincte) n'aurait alors aucun
+    // accès : ses écritures étaient rangées en attente comme si le service était
+    // injoignable (« Serveur de données injoignable »), et l'exploitant
+    // cherchait une panne réseau qui n'existait pas. Avec `*`, on ne le pose PAS
+    // (la spécification l'interdit : le navigateur rejetterait la réponse), et
+    // `*` n'a de toute façon pas à transporter de session.
+    ...(allow && !wildcard ? { "access-control-allow-credentials": "true" } : {}),
+    // `DELETE` sert à retirer le mot de passe d'un compte.
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    // `x-csrf-token` est l'en-tête que TOUTE écriture porte : non déclaré ici, le
+    // contrôle préalable (OPTIONS) échoue, et la requête n'atteint jamais le
+    // service — un refus muet de plus, côté navigateur celui-là.
+    "access-control-allow-headers": "content-type, authorization, idempotency-key, x-csrf-token",
     "access-control-max-age": "600",
     vary: "Origin",
   };
@@ -528,7 +617,7 @@ function dbPaths() {
 function authPaths() {
   const gardeSession = { 401: { description: "Session absente ou expirée" } };
   return {
-    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, demoJeu: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application. `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le jeu fictif est installé ; éteint, l'outil est une page vierge (voir src/lib/demo.js). Il porte en outre l'état du déploiement, pour que l'écran de connexion montre un motif au lieu d'« Identifiant ou mot de passe incorrect » : `adminAmorce` (un compte d'administration peut-il se connecter ?), `adminMotif`, `adminAvertissement`, `baseDisponible`, `baseMessage` et `baseRemede`.", tags: ["Comptes"], responses: { 200: { description: "Mode du service et état du déploiement" } } } },
+    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, demoJeu: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application. `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le jeu fictif est installé ; éteint, l'outil est une page vierge (voir src/lib/demo.js). Il porte en outre l'état du déploiement, pour que l'écran de connexion montre un motif au lieu d'« Identifiant ou mot de passe incorrect » : `adminAmorce` (un compte d'administration peut-il se connecter ?), `adminMotif`, `adminPanne` (cet échec est-il une panne de la base, et non un refus de configuration ?), `adminAvertissement`, `baseDisponible`, `baseMessage` et `baseRemede`.", tags: ["Comptes"], responses: { 200: { description: "Mode du service et état du déploiement" } } } },
     "/v1/auth/connexion": { post: { operationId: "connexion", summary: "Ouvrir une session", description: "Vérifie l'identifiant et le mot de passe, puis pose deux cookies : la session (`HttpOnly`) et le jeton anti-CSRF. Message identique pour un identifiant inconnu et un mot de passe faux ; le compte se bloque progressivement après plusieurs échecs (429).", tags: ["Comptes"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["login", "motDePasse"], properties: { login: { type: "string" }, motDePasse: { type: "string", format: "password" } } } } } }, responses: { 200: { description: "Session ouverte" }, 401: { description: "Identifiants invalides" }, 429: { description: "Compte bloqué quelques instants" } } } },
     "/v1/auth/session": { get: { operationId: "sessionCourante", summary: "Session courante", description: "Rend le compte de la session ouverte, ou 401.", tags: ["Comptes"], responses: { 200: { description: "Compte de la session" }, ...gardeSession } } },
     "/v1/auth/deconnexion": { post: { operationId: "deconnexion", summary: "Fermer la session", description: "Efface la session en base et les cookies.", tags: ["Comptes"], responses: { 200: { description: "Session fermée" }, ...gardeSession } } },
@@ -544,7 +633,7 @@ function authPaths() {
 // Le contrat des réglages déclaratifs, tel qu'il apparaît dans la description.
 function deploiementPaths() {
   return {
-    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif). Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés et valeurs refusées" } } } },
+    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif), et l'ÉTAT DU PRESTATAIRE DE SIGNATURE (`prestataire` : transport, adresse, niveau, délai, chemins, et `cle` — un booléen, jamais la clé elle-même —, avec le `motif` quand le circuit électronique est simulé). Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés, valeurs refusées, et état du prestataire" } } } },
   };
 }
 
@@ -628,6 +717,11 @@ async function handle(req, res) {
       service: SERVICE_ID,
       variables: OPTIONS.valeurs,
       erreurs: OPTIONS.erreurs,
+      // L'état du prestataire de signature — SANS LA CLÉ, jamais : « cle »
+      // dit seulement si elle est là. L'Administration › Signature s'en sert
+      // pour annoncer si le circuit électronique est réellement branché, ou
+      // s'il est simulé, et pourquoi.
+      prestataire: prestataireSignature.etat(),
     });
     return;
   }
@@ -655,8 +749,21 @@ async function handle(req, res) {
         noterBase(false, "La configuration des comptes n'a pas pu être lue : " + e.message, e);
         base = { auth: MOT_DE_PASSE ? "password" : "demo", demo: !MOT_DE_PASSE };
       }
+      // LE MODE RÉEL DU DÉPLOIEMENT, tel qu'il est écrit dans le `.env` : en
+      // mode « oidc », l'annuaire de la collectivité est la porte ordinaire —
+      // MAIS les comptes locaux restent ouverts (`comptesLocaux`), et c'est ce
+      // qui permet d'entrer avec le compte d'administration déclaré ici. Le
+      // client affiche alors les DEUX portes. `session` dit que les données se
+      // lisent avec une session (cookie) et non un jeton d'API.
       send(req, res, 200, {
         ...base,
+        auth: AUTH_MODE,
+        session: COMPTES_LOCAUX,
+        comptesLocaux: COMPTES_LOCAUX,
+        oidc: AUTH_MODE === "oidc",
+        message: AUTH_MODE === "oidc"
+          ? "Le service accepte la connexion par l'annuaire de la collectivité (OIDC) ET par un compte local (identifiant et mot de passe)."
+          : base.message,
         // LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : le jeu fictif est-il
         // installé, ou l'outil est-il une page vierge ? Le navigateur en a besoin
         // AVANT toute session (il décide de semer ou non le référentiel), donc il
@@ -666,6 +773,7 @@ async function handle(req, res) {
         adminAmorce: MOT_DE_PASSE ? etatService.adminAmorce : null,
         adminMotif: MOT_DE_PASSE ? etatService.adminMotif : "",
         adminAvertissement: MOT_DE_PASSE ? etatService.adminAvertissement : "",
+        adminPanne: MOT_DE_PASSE ? etatService.adminPanne : false,
         baseDisponible: etatService.baseDisponible,
         baseMessage: etatService.baseMessage,
         baseRemede: etatService.baseRemede || "",
@@ -702,11 +810,13 @@ async function handle(req, res) {
       send(req, res, 200, await health());
     } catch (e) {
       // Le cas le plus fréquent d'une première installation : la base répond
-      // mais le schéma n'existe pas encore.
+      // mais le schéma n'existe pas encore. Le remède est celui du bandeau :
+      // une seule phrase pour la même panne, où qu'on la lise.
       noterBaseSelonErreur(e);
+      if (etatService.baseDisponible === null) noterBase(false, e.message, e);
       send(req, res, 503, err("La base de données n'est pas prête : " + e.message, {
         code: "base_indisponible",
-        remede: "Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate » pour créer les tables.",
+        remede: etatService.baseRemede,
       }));
     }
     return;
@@ -866,7 +976,10 @@ async function handle(req, res) {
       return;
     }
     const request = { method: req.method, path: pathname + url.search, headers: req.headers, body, ip };
-    const out = api.route(request, {
+    // `await` : un gestionnaire peut avoir à SORTIR sur le réseau — l'ouverture
+    // d'un circuit de signature auprès du prestataire (voir signature.mjs). Le
+    // routage rend alors une promesse, et l'état n'est écrit qu'après coup.
+    const out = await api.route(request, {
       authorize: (headers, regle) => {
         if (MOT_DE_PASSE) {
           if (!session) return { status: 401, headers: {}, body: refusSession().body };
@@ -953,8 +1066,15 @@ async function amorcerAdmin() {
     mdpMin: MDP_MIN,
     comptes,
   });
-  if (r.panne) noterBaseSelonErreur(r.panne);
+  if (r.panne) {
+    noterBaseSelonErreur(r.panne);
+    // Un référentiel de comptes injoignable EST une base indisponible : on ne
+    // laisse pas `baseDisponible` à `null` (l'écran n'aurait alors rien à
+    // montrer à l'agent, sinon un motif sans remède).
+    if (etatService.baseDisponible === null) noterBase(false, r.panne.message, r.panne);
+  }
   etatService.adminAmorce = r.ok;
+  etatService.adminPanne = !!r.panne;
   etatService.adminMotif = r.motif || "";
   etatService.adminAvertissement = r.avertissement || "";
   if (r.message) console.log(r.message);
@@ -966,6 +1086,14 @@ async function amorcerAdmin() {
 // Réinitialisation par la ligne de commande : le mot de passe est lu sur
 // l'entrée standard, jamais dans les arguments — il ne doit pas rester dans
 // l'historique du shell ni dans la liste des processus.
+//
+// C'est la PORTE DE SECOURS du service : si le compte a disparu du référentiel
+// (remise à zéro des collections, import de données sans les comptes), la
+// commande ne se contente pas de refuser — elle CRÉE le compte, avec le rôle
+// administrateur, puisque c'est le seul geste qui permette encore de rentrer.
+// Le geste demande un accès au conteneur du service : il n'est pas plus ouvert
+// que la base elle-même. Le mot de passe est vérifié AVANT toute écriture, pour
+// ne pas laisser derrière soi un compte sans mot de passe.
 async function motDePasseCLI(login) {
   const l = normaliserLogin(login || "");
   if (!l) {
@@ -973,8 +1101,6 @@ async function motDePasseCLI(login) {
     process.exitCode = 1;
     return;
   }
-  const compte = await comptes.lireCompteParLogin(l);
-  if (!compte) { console.error(`Aucun compte « ${l} » au référentiel.`); process.exitCode = 1; return; }
   let mdp = "";
   try { mdp = String(readFileSync(0, "utf8")).replace(/\r?\n$/, ""); } catch (e) { mdp = ""; }
   if (!mdp) {
@@ -982,6 +1108,22 @@ async function motDePasseCLI(login) {
     console.error(`Exemple : printf '%s' "$MDP" | node server.mjs --mot-de-passe ${l}`);
     process.exitCode = 1;
     return;
+  }
+  const faible = motDePasseFaible(l, mdp, MDP_MIN);
+  if (faible) { console.error("Mot de passe refusé : " + faible); process.exitCode = 1; return; }
+  let compte = await comptes.lireCompteParLogin(l);
+  if (!compte) {
+    const nom = nomDe(ADMIN_NOM || l);
+    compte = {
+      id: "u-" + (slug(l) || "admin"), civility: "",
+      firstName: nom.firstName, lastName: nom.lastName,
+      login: l, email: ADMIN_EMAIL, role: "administrateur", roles: ["administrateur"],
+      entityId: ADMIN_ENTITY, service: "", personId: "", memberships: [],
+      active: true, source: "local",
+      createdAt: new Date().toISOString(), lastLogin: "",
+    };
+    await comptes.ecrireCompte(compte);
+    console.warn(`Aucun compte « ${l} » au référentiel : il vient d'être CRÉÉ, avec le rôle administrateur — sinon la commande ne servirait à rien là où elle est le dernier recours.`);
   }
   const r = await comptes.definirMotDePasse(compte.id, mdp, { mustChange: false });
   if (!r.ok) { console.error(r.message); process.exitCode = 1; return; }
@@ -1014,7 +1156,7 @@ async function main() {
     // laisse `baseDisponible` à null : on ne dit pas « base injoignable » à tort.
     if (etatService.baseDisponible === null) noterBase(false, e.message, e);
     console.error("La base ne répond pas encore :", e.message);
-    console.error("Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate ».");
+    console.error(etatService.baseRemede || "Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate ».");
   }
   // Démarrage DÉGRADÉ, explicite : si l'état de signature/publication est
   // illisible, on ne sort PAS en `process.exit(1)` (le conteneur redémarrerait
@@ -1042,14 +1184,24 @@ async function main() {
     sha256,
     save: (json) => json.length <= MAX_STATE_CHARS,
     maxDoc: MAX_DOC, maxPublies: MAX_PUBLIES, maxSignatures: MAX_SIGNATURES, maxActes: MAX_ACTES,
+    prestataire: prestataireSignature,
   });
   console.log(`État du service : ${Object.keys(state.actes).length} acte(s), ${Object.keys(state.signatures).length} circuit(s), ${Object.keys(state.publies).length} publication(s).`);
   const etatCourriel = courriel.etat();
   console.log(etatCourriel.disponible
     ? `Courriel : notifications actives — ${etatCourriel.hote}:${etatCourriel.port} (${etatCourriel.securise}), expéditeur ${etatCourriel.expediteur}${etatCourriel.authentifie ? ", authentifié" : ", sans authentification"}.`
     : `Courriel : envoi inactif — ${etatCourriel.raison}`);
+  // Le prestataire de signature : branché, ou simulé — et POURQUOI. Un
+  // exploitant qui a posé SCRIBA_SIGNATURE_API_URL sans la clé doit le lire ici,
+  // plutôt que de découvrir la simulation au premier envoi en signature.
+  const etatSig = prestataireSignature.etat();
+  console.log(etatSig.actif
+    ? `Signature : prestataire « ${etatSig.prestataire} » branché — ${etatSig.url} (niveau ${etatSig.niveau}, délai ${etatSig.timeoutMs} ms, notification ${etatSig.urlNotification || "par défaut"}).`
+    : `Signature : circuit électronique SIMULÉ — ${etatSig.motif}.`);
   if (MOT_DE_PASSE) {
-    console.log("Authentification : comptes locaux (mot de passe). Les jetons d'API ne sont PAS acceptés dans ce mode.");
+    console.log(AUTH_MODE === "oidc"
+      ? "Authentification : annuaire de la collectivité (OIDC), ET comptes locaux (mot de passe) — le compte d'administration du .env reste accessible. Les jetons d'API ne sont PAS acceptés dans ce mode."
+      : "Authentification : comptes locaux (mot de passe). Les jetons d'API ne sont PAS acceptés dans ce mode.");
     if (DEMO_EFFECTIF) {
       console.warn("DEMO_ACCOUNTS=true : les comptes de démonstration peuvent ouvrir une session sans mot de passe. À éteindre en service.");
     }
@@ -1070,6 +1222,14 @@ async function main() {
   console.log(`Réglages déclaratifs du référentiel : ${Object.keys(OPTIONS.valeurs).length} variable(s) posée(s).`);
   for (const e of OPTIONS.erreurs) console.error(`  REFUSÉE : ${e.variable}=${e.valeur} — ${e.motif}`);
   for (const e of OPTIONS_SERVICE.erreurs) console.error(`  RÉGLAGE DE SERVICE REFUSÉ : ${e.variable} — ${e.motif}`);
+  // Le piège qui fait perdre le plus de temps : un conteneur ne relit PAS le
+  // `.env` quand on le redémarre. `restart` relance le MÊME conteneur, avec
+  // l'environnement figé à sa création ; seul `up -d` (qui recrée) applique un
+  // `.env` modifié. Une valeur refusée qui ne correspond pas au fichier est
+  // presque toujours cela — on le dit ici, dans le journal de l'exploitant.
+  if (OPTIONS.erreurs.length || OPTIONS_SERVICE.erreurs.length) {
+    console.error("  Une valeur refusée n'est jamais appliquée. Si elle ne correspond pas au .env, le conteneur a gardé l'environnement de sa CRÉATION : « docker compose up -d » (qui recrée) applique un .env modifié, « docker compose restart » NON.");
+  }
   server.listen(PORT, HOST, () => {
     console.log(`${SERVICE} à l'écoute sur http://${HOST}:${PORT}`);
     console.log(`Collections : ${COLLECTIONS.join(", ")}`);

@@ -57,17 +57,21 @@ Renseignez ensuite `.env` :
 | `HTTP_PORT` | port publié sur l'hôte (8080 par défaut) |
 | `APP_DIR` | dossier qui contient `src/` et `index.html` (`../../` par défaut) |
 | `API_BASE` | adresse de l'API vue par le navigateur — **vide** = même origine |
-| `CORS_ORIGINS` | origines autorisées ; `*` convient quand l'API est derrière la même façade |
+| `CORS_ORIGINS` | origines autorisées à appeler l'API, séparées par des virgules. **Vide = aucune** : inutile quand l'application est servie par le même domaine (cas du déploiement fourni — le navigateur n'appelle pas d'autre origine). À renseigner seulement si l'application est servie par une **autre origine** que le service (`CORS_ORIGINS=https://actes.exemple.fr`) ; `*` ne transporte aucune session, il ne convient qu'à un accès sans cookie |
 
-**Authentification.** Par défaut (`AUTH_MODE=demo`), l'application liste les comptes du référentiel
-et un clic ouvre la session — c'est le mode de démonstration, et le jeton ci-dessus est alors la
-seule barrière des écritures. Pour une installation réelle, activez les **comptes locaux** :
+**Authentification.** Par défaut (`AUTH_MODE=password`), l'application exige une **session** :
+identifiant et mot de passe vérifiés par le service, puis un cookie. Pour un **essai**, passez au
+mode de démonstration (`AUTH_MODE=demo`) : l'application liste alors les comptes du référentiel et
+un clic ouvre la session — le jeton ci-dessus est alors la seule barrière des écritures. La
+variable vaut pour le **service** *et* pour la **façade** : celle-ci l'annonce au navigateur, qui
+sait donc, dès son premier appel, si la porte est une session ou un jeton (les deux défauts doivent
+rester d'accord : `password`).
 
 | Variable | Rôle |
 |---|---|
 | `AUTH_MODE` | `password` : identifiant + mot de passe vérifiés par le service, session par cookie |
 | `DEMO_ACCOUNTS` | `true` laisse le raccourci « choisir un compte » ouvert (recette) ; `false` (défaut en mode password) le ferme |
-| `ADMIN_LOGIN`, `ADMIN_PASSWORD` | le compte d'administration, créé **au premier démarrage** (ensuite le mot de passe n'est plus relu) |
+| `ADMIN_LOGIN`, `ADMIN_PASSWORD` | le compte d'administration, créé **au premier démarrage** (ensuite le mot de passe n'est plus relu : il se change dans l'application). Si le compte **disparaît** du référentiel alors que le service garde son mot de passe, il est **rétabli au démarrage suivant** (mot de passe conservé) — voir § 5 |
 | `ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY` | son nom, son adresse, son entité de rattachement |
 | `SESSION_DAYS`, `MDP_MIN_LONGUEUR`, `SCRYPT_N` | durée de session, longueur minimale, coût du dérivé |
 | `COOKIE_SECURE` | `true` en production ; `false` **seulement** pour un essai en clair |
@@ -76,8 +80,13 @@ En mode `password`, les jetons d'API ne sont plus acceptés (`API_TOKENS` / `API
 rester vides), le compte d'administration crée les autres dans *Comptes et rôles*, et un
 administrateur enfermé dehors reprend la main avec
 `docker compose exec api node server.mjs --mot-de-passe <identifiant>` (le mot de passe est lu sur
-l'entrée standard). Le détail — ce qui est conservé, le blocage, les sessions, les sauvegardes —
-est dans **`../docs/ADMINISTRATION.md` § 4.3 bis et § 6.1 bis**.
+l'entrée standard). Cette commande est la **porte de secours** : si le compte a disparu du
+référentiel — une remise à zéro des collections, un import de données sans les comptes —, elle le
+**crée** (rôle administrateur) au lieu de refuser, et elle vérifie la politique du mot de passe
+avant d'écrire quoi que ce soit. Le service, de son côté, **rétablit son compte d'administration
+au démarrage** quand le référentiel l'a perdu et que son mot de passe est resté (le mot de passe
+est conservé, jamais remplacé). Le détail — ce qui est conservé, le blocage, les sessions, les
+sauvegardes — est dans **`../docs/ADMINISTRATION.md` § 4.3 bis et § 6.1 bis**.
 
 Le jeton en clair n'est **jamais** transmis à la base : le serveur ne connaît que son
 empreinte SHA-256. Il est en revanche servi au navigateur dans `config.js` (l'application est
@@ -96,7 +105,6 @@ SCRIBA_IDENTITE_NOM=Ville d'Exemple
 SCRIBA_IDENTITE_ADRESSE=https://actes.exemple.fr
 SCRIBA_DELAI_RECOURS_MOIS=2
 SCRIBA_RECUEIL_OPPOSABILITE=jours
-SCRIBA_PARAPHEUR=true
 ```
 
 - une variable **vide ou absente** ne change rien : le référentiel garde sa valeur ;
@@ -121,7 +129,7 @@ Pour diffuser Scribae sans le dossier du dépôt, `Dockerfile` (à la racine de 
 bâtit une **image unique** contenant le service, nginx et le code de l'application :
 
 ```bash
-docker build -f src/server/Dockerfile -t moncompte/scribae:1.3.1 .
+docker build -f src/server/Dockerfile -t moncompte/scribae:1.5.0 .
 ```
 
 Voir **`../docs/DOCKER.md`** : construction, publication sur un registre (Docker Hub, GHCR),
@@ -148,10 +156,16 @@ L'application répond sur `http://<serveur>:${HTTP_PORT}` (par défaut `http://l
 ## 4. Première ouverture
 
 1. Ouvrez l'application et connectez-vous :
-   - **`AUTH_MODE=demo`** (défaut) : avec un compte administrateur de démonstration ;
-   - **`AUTH_MODE=password`** : avec `ADMIN_LOGIN` / `ADMIN_PASSWORD` du `.env` — le service a créé
-     ce compte au démarrage (le journal de `api` le dit). Changez ce mot de passe dès la première
-     connexion si le `.env` a circulé, puis créez les autres comptes dans *Comptes et rôles* ;
+   - **`AUTH_MODE=demo`** (mode d'essai) : avec un compte administrateur de démonstration ;
+   - **`AUTH_MODE=password`** (le **défaut**) : avec `ADMIN_LOGIN` / `ADMIN_PASSWORD` du `.env` — le
+     service a créé ce compte au démarrage (le journal de `api` le dit ; s'il a refusé, il en donne
+     le motif). Changez ce mot de passe dès la première connexion si le `.env` a circulé, puis créez
+     les autres comptes dans *Comptes et rôles*.
+
+     > **Modifier le `.env` exige de RECRÉER le service** : `docker compose up -d --force-recreate
+     > api` (ou `up -d`). `docker compose restart` relance le même conteneur **sans relire le
+     > `.env`** — les anciennes valeurs restent en place, et le journal signale alors un refus qui
+     > ne correspond pas au fichier ;
 2. **Administration › Base de données** : le mode doit déjà être « **Serveur externe — MySQL /
    MariaDB** », l'adresse **vide** (même origine) et le jeton celui de `.env` (en mode `password`,
    aucun jeton n'est nécessaire — laissez le champ vide) ;
@@ -248,9 +262,12 @@ service.
 
 | Symptôme | Cause probable | Remède |
 |---|---|---|
-| `api` redémarre en boucle, log `Access denied for user` | `DB_PASSWORD` différent entre `db` et `api`, ou base initialisée avec un autre mot de passe | aligner `.env`, ou `docker compose down -v` **si** les données peuvent être perdues |
+| `api` en boucle, log `Access denied for user 'scriba'@…` | le mot de passe du compte applicatif **en base** est celui de la **création** du dossier de données : changer `DB_PASSWORD` / `MARIADB_PASSWORD` dans le `.env` ne le change pas. Signe qui ne trompe pas : le service joignait la base **avant** qu'on recrée le conteneur, et plus après. L'ancien mot de passe est encore dans l'environnement du conteneur `db` : `docker compose exec db env \| grep MARIADB_` | remettre l'**ancien** dans `DB_PASSWORD`, puis recréer l'API (`docker compose up -d --force-recreate api`). Ancien mot de passe perdu ? Repartir d'un dossier de données vierge : `docker compose down -v && docker compose up -d` — le schéma **et** les mots de passe du `.env` y sont (re)joués, au prix du volume |
 | L'application affiche « base hors ligne » | API ou base injoignable | `docker compose ps`, `docker compose logs api` ; l'application reste utilisable sur son miroir local |
 | `/v1/db/health` répond `503 base_indisponible` | schéma absent | `docker compose exec api node server.mjs --migrate` |
+| `Table '…sb_record' doesn't exist` sur l'écran de connexion | la base répond, mais le **schéma n'a jamais été appliqué** à CETTE base : dossier de données initialisé **avant** que `schema.sql` n'y soit monté (MariaDB ne rejoue ses scripts d'amorçage que sur un dossier vierge), ou base externe fournie sans schéma | `docker compose exec api node server.mjs --migrate` — `schema.sql` est idempotent et **n'efface rien** — puis **recréer le service** (`docker compose up -d --force-recreate api`) : le compte d'administration du `.env` n'est créé qu'au démarrage. `AUTO_MIGRATE=true` fait la même chose pour le schéma. `docker compose down -v` **seulement** si la base peut être perdue |
+| « Aucun compte d'administration installé » alors que `ADMIN_LOGIN`/`ADMIN_PASSWORD` sont renseignés | le compte n'a pas pu être créé : table des comptes absente (l'écran le dit comme une **panne**), ou mot de passe **reçu** non conforme (le journal donne le motif exact) | appliquer le schéma, **puis recréer le service** (l'amorçage n'a lieu qu'au démarrage) ; si le motif ne correspond pas au `.env`, voir la ligne suivante |
+| Une valeur refusée au démarrage (« RÉGLAGE DE SERVICE REFUSÉ », « REFUSÉE ») qui **ne correspond pas** au `.env` | le conteneur a gardé l'environnement de sa **création** : `docker compose restart` relance le même conteneur **sans relire le `.env`** | `docker compose config` (ce que compose calcule, `.env` compris) et `docker compose exec api env` (ce que le conteneur porte) pour comparer, puis `docker compose up -d --force-recreate api` |
 | Toutes les écritures répondent `503 jeton_non_configure` | `API_TOKENS` vide | générer un jeton (voir § 2) |
 | Écritures `403 jeton_invalide` | `API_TOKEN` ne correspond pas à l'empreinte de `API_TOKENS` | recalculer `printf '%s' "$API_TOKEN" \| sha256sum` |
 | Le navigateur bloque les appels (`CORS`) | application et API sur des origines différentes | renseigner `CORS_ORIGINS` avec l'origine de l'application |

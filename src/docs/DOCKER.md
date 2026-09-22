@@ -40,7 +40,7 @@ conserve à part. L'image se connecte à une base MariaDB / MySQL joignable
 Depuis la **racine du dépôt** (le dossier qui contient `src/`) :
 
 ```bash
-docker build -f src/server/Dockerfile -t scribae:1.3.1 .
+docker build -f src/server/Dockerfile -t scribae:1.5.0 .
 ```
 
 Le contexte est la racine du dépôt ; le Dockerfile ne copie que `src/`, donc la taille du
@@ -50,8 +50,8 @@ contexte n'entre pas dans l'image. Un fichier d'exclusion (`src/server/Dockerfil
 Vérifier ensuite :
 
 ```bash
-docker image ls scribae:1.3.1
-docker run --rm scribae:1.3.1 nginx -v
+docker image ls scribae:1.5.0
+docker run --rm scribae:1.5.0 nginx -v
 ```
 
 ## 4. Publier sur un registre
@@ -60,7 +60,7 @@ docker run --rm scribae:1.3.1 nginx -v
 
 ```bash
 REGISTRE=moncompte          # compte Docker Hub, ou ghcr.io/moncompte, ou un registre privé
-VERSION=1.3.1
+VERSION=1.5.0
 
 docker build -f src/server/Dockerfile -t "$REGISTRE/scribae:$VERSION" .
 docker tag "$REGISTRE/scribae:$VERSION" "$REGISTRE/scribae:latest"
@@ -83,7 +83,7 @@ docker buildx build \
 ```
 
 > Une étiquette `latest` mobile est commode, mais une installation de service gagne à
-> ÉPINGLER une version (`scribae:1.3.1`) : `docker pull` reproductible, et mise à jour
+> ÉPINGLER une version (`scribae:1.5.0`) : `docker pull` reproductible, et mise à jour
 > délibérée.
 
 ## 5. Lancer
@@ -158,7 +158,7 @@ services:
     volumes: [donnees:/var/lib/mysql]
 
   scribae:
-    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.3.1}
+    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.5.0}
     restart: unless-stopped
     environment:
       DB_HOST: db

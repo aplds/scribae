@@ -172,7 +172,17 @@ const err = (code, message, extra) => ({ erreur: message, code, ...(extra || {})
 // Persistance MySQL / MariaDB.
 //
 // Sept requêtes, rassemblées ici pour que la logique au-dessus les ignore.
+//
+// LES DATES. Un `DATETIME` de MySQL n'est pas une chaîne quelconque : il attend
+// « AAAA-MM-JJ hh:mm:ss[.fff] » et refuse l'ISO 8601 de JavaScript (« …T…Z »),
+// qu'une écriture en mode strict rejette — un `INSERT` de session échouait donc,
+// et la connexion avec lui. Le magasin remet ses dates sous forme d'objets
+// `Date`, et la connexion déclare `timezone: "Z"` (voir server.mjs) : MySQL les
+// formate et les relit en UTC, exactement dans le même repère que
+// `new Date().toISOString()`.
 // ============================================================================
+
+const quand = (v) => (v == null || v === "" ? null : new Date(v));
 export function createStoreMysql(pool) {
   return {
     async lireCompte(id) {
@@ -246,7 +256,7 @@ export function createStoreMysql(pool) {
 
     async majEchecs(userId, { echecs, bloqueJusqua }) {
       await pool.query("UPDATE sb_motdepasse SET echecs = ?, bloque_jusqua = ? WHERE user_id = ?", [
-        Number(echecs) || 0, bloqueJusqua || null, String(userId),
+        Number(echecs) || 0, quand(bloqueJusqua), String(userId),
       ]);
     },
 
@@ -266,7 +276,7 @@ export function createStoreMysql(pool) {
     async creerSession(s) {
       await pool.query(
         "INSERT INTO sb_session (token_hash, user_id, created_at, last_seen_at, expires_at, remote_ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [s.tokenHash, String(s.userId), s.at, s.at, s.expiresAt, s.ip || null, String(s.userAgent || "").slice(0, 255) || null],
+        [s.tokenHash, String(s.userId), quand(s.at), quand(s.at), quand(s.expiresAt), s.ip || null, String(s.userAgent || "").slice(0, 255) || null],
       );
     },
 
@@ -276,7 +286,7 @@ export function createStoreMysql(pool) {
     },
 
     async toucherSession(tokenHash, at) {
-      await pool.query("UPDATE sb_session SET last_seen_at = ? WHERE token_hash = ?", [at, tokenHash]);
+      await pool.query("UPDATE sb_session SET last_seen_at = ? WHERE token_hash = ?", [quand(at), tokenHash]);
     },
 
     async supprimerSession(tokenHash) {
@@ -284,7 +294,7 @@ export function createStoreMysql(pool) {
     },
 
     async purgerSessions(at) {
-      await pool.query("DELETE FROM sb_session WHERE expires_at < ?", [at]);
+      await pool.query("DELETE FROM sb_session WHERE expires_at < ?", [quand(at)]);
     },
   };
 }
@@ -550,14 +560,21 @@ export function createComptes({
         const headers = res.retryAfterSec ? { "retry-after": String(res.retryAfterSec) } : undefined;
         return ko(res.code === "trop_de_tentatives" ? 429 : 401, err(res.code, res.message), headers);
       }
-      return ok({ utilisateur: utilisateurPublic(res.utilisateur), mustChange: !!res.mustChange },
+      // LE JETON ANTI-CSRF VOYAGE AUSSI DANS LE CORPS, ici comme dans
+      // `GET /v1/auth/session` : le cookie n'est lisible que par les pages de SON
+      // hôte, et une application servie par un autre hôte que le service n'en
+      // verrait rien. Sans le jeton dans la réponse, ses PREMIÈRES écritures —
+      // celles du démarrage, juste après la connexion — partaient sans en-tête
+      // et étaient refusées (`csrf_invalide`), jusqu'à ce qu'une relecture de
+      // session le lui rende.
+      return ok({ utilisateur: utilisateurPublic(res.utilisateur), mustChange: !!res.mustChange, csrf: res.csrf },
         { "set-cookie": cookiesDeSession(res.jeton, res.csrf, { secure }) });
     }
 
     if (path === "/v1/auth/demo" && method === "POST") {
       const res = await connexionDemo({ userId: (req.body || {}).userId, ip, userAgent: (req.headers && req.headers["user-agent"]) || "" });
       if (!res.ok) return ko(res.code === "demonstration_desactivee" ? 403 : 401, err(res.code, res.message));
-      return ok({ utilisateur: utilisateurPublic(res.utilisateur), mustChange: false },
+      return ok({ utilisateur: utilisateurPublic(res.utilisateur), mustChange: false, csrf: res.csrf },
         { "set-cookie": cookiesDeSession(res.jeton, res.csrf, { secure }) });
     }
 
@@ -582,7 +599,22 @@ export function createComptes({
         await store.toucherSession(empreinte(courante.jeton), iso(now())).catch(() => {});
       }
       const mdp = await store.lireMdp(compte.id);
-      return ok({ utilisateur: utilisateurPublic(compte), mustChange: !!mdp?.must_change });
+      // LE JETON ANTI-CSRF VOYAGE AUSSI DANS LE CORPS. Il vit dans le cookie
+      // (double envoi), mais le JavaScript de la page ne peut lire que les
+      // cookies de SON hôte : quand l'application est servie par un autre hôte
+      // que le service, elle ne peut pas le lire, et chaque écriture était
+      // refusée (`csrf_invalide`) alors que la session, elle, était valide. Le
+      // service le rend donc ici : l'application le garde et le renvoie dans
+      // l'en-tête. Le cookie reste la source, et le double envoi garde son sens —
+      // un autre site ne peut pas lire cette réponse (aucun en-tête CORS ne
+      // l'autorise).
+      const csrf = courante.csrf || crypto.randomBytes(24).toString("base64url");
+      // Cookie absent (refusé par le navigateur, session ouverte par un autre
+      // outil) : on en repose un, sinon AUCUNE écriture ne passerait jusqu'à la
+      // prochaine connexion, sans autre issue que de se reconnecter.
+      const entetes = courante.csrf ? undefined
+        : { "set-cookie": serialiserCookie(COOKIE_CSRF, csrf, { httpOnly: false, secure, maxAge: Math.floor(ttlMs / 1000) }) };
+      return json(200, { utilisateur: utilisateurPublic(compte), mustChange: !!mdp?.must_change, csrf }, entetes);
     }
 
     if (path === "/v1/auth/deconnexion" && method === "POST") {

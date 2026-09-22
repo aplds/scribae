@@ -224,15 +224,18 @@ export function etatFormalitesHtml({ acte, doc, config, opts = {}, qui = "" }) {
   }).join("");
 
   const certificat = f.find((x) => x.certificat)?.certificat;
+  // Un document non juridique n'a ni date d'exécutoire ni délai de recours : on
+  // l'écrit « sans objet » plutôt que de laisser croire qu'il en manque une.
+  const sansPortee = st.code === "document";
   const situation = [
-    ["Date d'exécutoire", exe ? dateLongue(exe) : "Non atteinte : une formalité requise manque"],
+    ["Date d'exécutoire", exe ? dateLongue(exe) : sansPortee ? "Sans objet : le document ne fait pas droit" : "Non atteinte : une formalité requise manque"],
     ["Délai de recours contentieux", limite
       ? `${enMots(d.recoursMois)} mois à compter de l'exécutoire — jusqu'au ${dateLongue(limite)}`
-      : "Ne court pas : l'acte n'est pas encore exécutoire"],
+      : sansPortee ? "Ne court pas : le document ne fait pas droit" : "Ne court pas : l'acte n'est pas encore exécutoire"],
     ["Situation", st.label],
     ["Recours introduit", recours
       ? `${recoursTypeLabel(recours.type) || "Recours"} le ${dateLongue(recours.introduitLe)}${recours.demandeur ? " — demandeur : " + recours.demandeur : ""}${recours.ref ? " (réf. " + recours.ref + ")" : ""}`
-      : st.code === "brouillon" || st.code === "en_attente" ? "Sans objet" : "Aucun recours enregistré"],
+      : st.code === "brouillon" || st.code === "en_attente" || sansPortee ? "Sans objet" : "Aucun recours enregistré"],
   ];
 
   const corps = `
@@ -288,6 +291,8 @@ export function attestationNonRecoursHtml({ acte, doc, config, opts = {}, qui = 
       ? `un recours y est enregistré (${(recoursTypeLabel(recours.type) || "recours").toLowerCase()} du ${dateLongue(recours.introduitLe)})`
       : st.code === "executoire"
         ? `le délai de recours contentieux court encore, jusqu'au ${dateLongue(limite)}`
+        : st.code === "document"
+        ? "le document ne fait pas droit : aucune opposabilité, donc aucun délai de recours à faire courir"
         : st.code === "en_attente"
           ? "l'acte n'est pas encore exécutoire : une formalité requise manque"
           : "l'acte n'est pas signé";

@@ -143,12 +143,23 @@ export function setDeploiementAuth(source) {
     // d'avoir une session, et c'est donc le service qui les lui donne.
     comptes: Array.isArray(source.comptes) ? source.comptes : [],
     serveur: source.serveur !== false,
+    // LES COMPTES LOCAUX (identifiant + mot de passe) sont-ils ouverts, et les
+    // données se lisent-elles par une session plutôt qu'un jeton ? En mode
+    // « password », oui. En mode « oidc », l'annuaire est la porte ordinaire,
+    // mais le service garde les comptes locaux ouverts (`comptesLocaux`) : c'est
+    // par eux que passe le compte d'administration du `.env`, et c'est ce que
+    // l'écran de connexion doit proposer. Voir `accesLocal` et `sessionDeService`.
+    comptesLocaux: source.comptesLocaux === undefined ? null : !!source.comptesLocaux,
+    session: source.session === undefined ? null : !!source.session,
     // ÉTAT DU DÉPLOIEMENT, pour l'écran de connexion (voir mot-de-passe.js) :
     //   baseDisponible  la base répond-elle ? (`null` = pas encore éprouvée)
     //   baseMessage/baseRemede  le motif, et le remède à afficher ;
     //   adminAmorce     un compte d'administration peut-il se connecter ?
     //                   (`null` en mode « demo » : sans objet)
     //   adminMotif      pourquoi l'amorçage a échoué, le cas échéant ;
+    //   adminPanne      cet échec est-il une PANNE (référentiel des comptes
+    //                   injoignable) et non un refus de configuration ? Les
+    //                   deux ne se réparent pas au même endroit ;
     //   adminAvertissement  l'amorçage a réussi, mais avec une réserve.
     // Sans ces champs, un ADMIN_PASSWORD refusé ne se voyait QUE dans les
     // journaux du service — l'agent, lui, ne lisait qu'« Identifiant ou mot de
@@ -161,6 +172,7 @@ export function setDeploiementAuth(source) {
       ? null : !!source.adminAmorce,
     adminMotif: String(source.adminMotif || ""),
     adminAvertissement: String(source.adminAvertissement || ""),
+    adminPanne: !!source.adminPanne,
   };
   return deploiement;
 }
@@ -206,6 +218,54 @@ export function authConfig(config) {
 
 export const isOidc = (config) => authConfig(config).mode === "oidc";
 export const isPassword = (config) => authConfig(config).mode === "password";
+
+// ----------------------------------------------------------------------------
+// LES DEUX PORTES, QUAND L'ANNUAIRE EST BRANCHÉ.
+//
+// Le mode « oidc » n'éteint pas les comptes locaux : le service garde la
+// connexion par identifiant et mot de passe ouverte, parce que c'est par elle
+// qu'on entre avec le compte d'administration du `.env` — le jour où l'annuaire
+// est en panne, ou depuis un poste qui ne le joint pas. L'annuaire est la porte
+// ORDINAIRE ; le compte local est la porte de SERVICE.
+//
+// `accesLocal` dit si le formulaire « identifiant / mot de passe » doit être
+// proposé ; `sessionDeService` dit si les données se lisent par une session
+// (cookie) plutôt que par un jeton d'API — c'est ce que consultent la
+// persistance et l'API, qui n'ont pas le référentiel sous la main.
+// ----------------------------------------------------------------------------
+export function accesLocal(config) {
+  const a = authConfig(config);
+  if (a.mode === "password") return true;
+  if (a.mode !== "oidc") return false;
+  // Le service dit si les comptes locaux sont ouverts ; à défaut (service
+  // antérieur, aperçu hors ligne), un déploiement OIDC les garde toujours.
+  const dep = deploiement || deploiementDePage();
+  if (dep && dep.comptesLocaux === false) return false;
+  return true;
+}
+
+// La porte du service est-elle une SESSION (mot de passe, annuaire) plutôt
+// qu'un jeton d'API ? Faux en mode « demo » : là, un jeton, et une liste de
+// comptes sans mot de passe.
+export function sessionDeService(config) {
+  const dep = deploiement || deploiementDePage();
+  const mode = dep && dep.mode ? String(dep.mode) : (config ? authConfig(config).mode : "demo");
+  if (mode === "demo") return false;
+  // Le service fait autorité s'il s'est prononcé ; sinon, tout mode non-démo
+  // (password, oidc) passe par une session.
+  if (dep && dep.session !== null && dep.session !== undefined) return !!dep.session;
+  return true;
+}
+
+// Les COMPTES de l'application sont-ils ceux du DÉPLOIEMENT — comptes locaux
+// tenus par le service, ou agents de l'annuaire — plutôt que ceux du jeu de
+// démonstration ? La question commande un geste destructeur : « Repartir d'un
+// référentiel vierge » emporte les comptes du jeu fictif, mais PAS ceux d'un
+// service. Les mots de passe vivent chez lui (`sb_motdepasse`), hors du
+// référentiel : effacer les comptes ne les supprime pas, et l'installation s'en
+// trouvait sans personne pour se connecter — le compte d'administration compris.
+// Voir `clearAll` (src/lib/store.js) et src/ui/views/referentiel.js.
+export const comptesDuDeploiement = () => ["password", "oidc"].includes(modeDeploiement());
 
 // L'annuaire branché est l'annuaire d'essai intégré (ou aucun fournisseur n'est
 // encore renseigné : on ne bloque pas l'installation sur un écran de connexion

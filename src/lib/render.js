@@ -196,7 +196,8 @@ export function renderSheetText(text, doc, config, style) {
 }
 
 export function documentSheetHeader(style, doc, config) {
-  const box = el("div", "doc-sheet-header");
+  const droit = String(style.logoRightUrl || "").trim();
+  const box = el("div", "doc-sheet-header" + (droit ? " doc-sheet-header--duo" : ""));
   box.setAttribute("data-align", style.logoAlign || "left");
   if (style.logoUrl) {
     const img = el("img", "doc-sheet-logo");
@@ -206,6 +207,14 @@ export function documentSheetHeader(style, doc, config) {
   }
   const text = renderSheetText(style.headerText, doc, config, style);
   if (text) box.appendChild(el("p", "doc-sheet-headtext", text));
+  // Le second emblème, à DROITE du filet : la marque de l'État, d'un partenaire
+  // ou d'une délégation. Voir `logoRightUrl`, src/lib/styles.js.
+  if (droit) {
+    const img = el("img", "doc-sheet-logo doc-sheet-logo--right");
+    img.src = droit;
+    img.alt = "";
+    box.appendChild(img);
+  }
   return box;
 }
 

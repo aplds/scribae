@@ -61,9 +61,9 @@ test("les valeurs valides sont converties et rangées par chemin", () => {
     SCRIBA_IDENTITE_ADRESSE: "https://actes.exemple.fr/",
     SCRIBA_NUMERO_REMPLISSAGE: "4",
     SCRIBA_RECUEIL_AUTO: "non",
-    SCRIBA_PARAPHEUR: "1",
     SCRIBA_SIGNATURE_MODE: "externe",
     SCRIBA_IDENTITE_COULEUR: "#123abc",
+    SCRIBA_IDENTITE_EMBLEME_SOMBRE: "https://actes.exemple.fr/blason-clair.svg",
     SCRIBA_RECUEIL_OPPOSABILITE: "jours",
   });
   assert.deepEqual(r.erreurs, []);
@@ -71,9 +71,10 @@ test("les valeurs valides sont converties et rangées par chemin", () => {
   assert.equal(r.valeurs["brand.baseUri"], "https://actes.exemple.fr", "barre oblique finale retirée");
   assert.equal(r.valeurs["numbering.pad"], 4);
   assert.equal(r.valeurs["publication.auto"], false);
-  assert.equal(r.valeurs["experimental.parapheur"], true);
   assert.equal(r.valeurs["signature.mode"], "externe");
   assert.equal(r.valeurs["brand.color"], "#123abc");
+  assert.equal(r.valeurs["brand.logoUrlDark"], "https://actes.exemple.fr/blason-clair.svg",
+    "l'emblème du thème sombre se range à son propre chemin");
   assert.equal(r.valeurs["publication.opposabilite.mode"], "jours");
 });
 

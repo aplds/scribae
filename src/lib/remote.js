@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { hostSocketFactory } from "./hosts.js";
-import { modeDeploiement } from "./auth.js";
+import { sessionDeService } from "./auth.js";
 import { enteteCsrf } from "./motdepasse.js";
 
 const MAX_PAYLOAD = 900000;   // marge sous la limite de 1 Mio d'un message (transport socket)
@@ -165,7 +165,7 @@ async function httpRequest(request) {
   // SESSION du service, dans un cookie `HttpOnly` — il faut donc la demander
   // (`credentials: "include"`), et joindre le jeton anti-CSRF que le service a
   // posé dans un cookie lisible (double envoi). Voir src/lib/motdepasse.js.
-  const parSession = modeDeploiement() === "password";
+  const parSession = sessionDeService();
   const res = await fetch(apiBase() + request.path, {
     method: request.method,
     credentials: parSession ? "include" : "same-origin",

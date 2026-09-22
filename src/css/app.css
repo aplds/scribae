@@ -3236,3 +3236,125 @@ li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { 
   .org-bascule, .org-legende, .org-orph, .page-head__actions { display: none; }
   .org-node { break-inside: avoid; }
 }
+
+
+/* ==========================================================================
+   Organigramme des entités, services et bureaux (src/ui/views/organigramme.js).
+
+   Même toile que l'organigramme des délégations (voir plus haut) : la vue
+   réutilise ses règles « org- » sans les redéfinir. Ne figurent donc ici que
+   les mailles que les délégations n'ont pas — le SERVICE et le BUREAU.
+   ========================================================================== */
+/* Un service : la maille intermédiaire, entre l'entité et le bureau. Sa barre
+   d'accroche est neutre (ni la couleur d'une entité, ni celle d'un bureau). */
+.org-node--svc { width: 216px; border-left-color: var(--border-strong); background: var(--bg-alt); }
+.org-node--svc:hover { background: var(--bg); }
+/* Un bureau : la maille fine. Le nœud est plus étroit, et sans badge de pied
+   lorsque le nom du service suffit à le situer. */
+.org-node--petit { width: 194px; padding: 8px 10px; }
+.org-node--petit .org-node__nom { font-size: .8rem; font-weight: 500; }
+.org-node__init--svc { background: var(--bg-contrast); color: var(--ink-2); }
+.org-legende__i--svc::before { background: var(--border-strong); }
+
+/* --- les bureaux d'un service, dans la fiche ------------------------------- */
+.org-bureau-ligne { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dotted var(--border); }
+.org-bureau-ligne:last-child { border-bottom: 0; }
+
+/* ==========================================================================
+   Chrono de numérotation (src/ui/views/chrono.js).
+
+   Un tableau dense — un rang par ligne — précédé de ses compteurs et de ses
+   filtres. Les deux états qui ne sont PAS des actes ordinaires ont leur
+   présentation propre : le rang jamais attribué (italique grisé) et le numéro
+   annulé (barré) : un trou dans le chrono doit s'expliquer au premier regard.
+   ========================================================================== */
+.chrono-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; margin: 2px 0 16px; }
+.chrono-kpi {
+  display: flex; flex-direction: column; gap: 1px; padding: 10px 12px;
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.chrono-kpi__val { font-size: 1.42rem; font-weight: 700; line-height: 1.15; }
+.chrono-kpi__lab { font-size: .78rem; color: var(--ink-2); }
+.chrono-kpi__det { font-size: .7rem; color: var(--ink-muted); }
+.chrono-kpi--ok { border-color: var(--success); }
+.chrono-kpi--ok .chrono-kpi__val { color: var(--success); }
+.chrono-kpi--libre { border-color: var(--warning); }
+.chrono-kpi--libre .chrono-kpi__val { color: var(--warning); }
+.chrono-kpi--annule { border-color: var(--error); }
+.chrono-kpi--annule .chrono-kpi__val { color: var(--error); }
+
+.chrono-filtres { margin-bottom: 14px; }
+.chrono-filtres__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 10px 16px; margin-top: 10px; }
+.chrono-filtres__cases { flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+
+.chrono-table-wrap { overflow-x: auto; }
+.chrono-table th, .chrono-table td { vertical-align: middle; }
+.chrono-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.chrono-th:hover { color: var(--brand); }
+.chrono-th.is-sorted { color: var(--brand); }
+.chrono-th__sens { font-size: .68rem; }
+.chrono-th--act, .chrono-td--act { width: 1%; text-align: right; white-space: nowrap; }
+.chrono-objet { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chrono-tr--clic { cursor: pointer; }
+.chrono-tr--clic:hover { background: var(--bg-alt); }
+.chrono-tr--libre td { color: var(--ink-muted); font-style: italic; }
+.chrono-tr--annule td { color: var(--ink-muted); }
+.chrono-tr--annule td:first-child { text-decoration: line-through; }
+
+/* ==========================================================================
+   Référence de l'API REST et son panneau de commande
+   (src/ui/views/api-reference.js).
+
+   Deux colonnes : à gauche l'index des routes (groupes et opérations), à
+   droite la fiche de l'opération choisie. Sous 900 px, l'index passe au-dessus.
+   ========================================================================== */
+.api-ref { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.api-ref__side { position: sticky; top: 8px; max-height: calc(100vh - 40px); overflow: auto; }
+.api-ref__main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.api-ref__liste { padding: 10px 12px; }
+.api-ref__groupe { margin: 12px 0 6px; font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.api-ref__groupe:first-child { margin-top: 2px; }
+.api-ref__item {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: none; border: 0; border-radius: var(--radius); padding: 6px 8px;
+}
+.api-ref__item:hover { background: var(--bg-alt); }
+.api-ref__item.is-on { background: var(--brand-soft); }
+.api-ref__item.is-on .api-ref__item-nom { color: var(--brand); }
+.api-ref__item-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.api-ref__item-nom { font-size: .82rem; font-weight: 600; line-height: 1.25; }
+.api-ref__doc { min-width: 0; }
+.api-ref__tete { margin-bottom: 0; }
+.api-ref__chemin { font-size: .86rem; font-weight: 600; overflow-wrap: anywhere; }
+.api-ref__sous { margin: 16px 0 6px; font-size: .9rem; }
+.api-ref__commande { min-width: 0; }
+.api-ref__resultat { display: flex; flex-direction: column; gap: 6px; }
+.api-ref__corps, .api-ref__curl {
+  margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto;
+  background: var(--bg-contrast); border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: .78rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .api-ref { grid-template-columns: minmax(0, 1fr); }
+  .api-ref__side { position: static; max-height: 260px; }
+}
+
+/* ==========================================================================
+   LA PORTE DE SERVICE (src/ui/views/connexion.js).
+
+   Quand l'annuaire est branché, le formulaire de connexion par mot de passe
+   reste offert SOUS le bouton de l'annuaire, dans un bloc distinct, pour que le
+   compte d'administration du déploiement puisse entrer même si l'annuaire est
+   injoignable. Voir src/ui/oidc.js et src/lib/auth.js.
+   ========================================================================== */
+.connexion__local { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.connexion__local-titre { margin: 0 0 4px; font-size: .82rem; font-weight: 700; letter-spacing: .02em; }
+
+/* Les deux emblèmes d'un en-tête d'acte, quand le second est renseigné : le
+   logo de gauche, le texte au centre, la marque de droite repoussée à l'autre
+   bout du filet (le CSS livré avec la feuille, lui, est engendré par
+   src/lib/styles.js). */
+.doc-sheet-header--duo .doc-sheet-headtext { flex: 1 1 auto; }
+.doc-sheet-header--duo .doc-sheet-logo--right { margin-left: auto; }

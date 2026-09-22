@@ -43,6 +43,15 @@ export function bandeauEtatService() {
   if (d.baseDisponible === false) {
     out.push(alert("error", "Base de données indisponible",
       `${d.baseMessage || "Le service de la collectivité ne joint pas sa base de données."}${d.baseRemede ? " " + d.baseRemede : ""}`));
+  } else if (d.adminPanne) {
+    // L'amorçage a échoué parce que le référentiel des comptes était
+    // injoignable — et non parce que le `.env` est mal réglé. Annoncer « aucun
+    // compte d'administration installé » enverrait l'agent vérifier son
+    // ADMIN_PASSWORD, qui n'est pas en cause : c'est la base qu'il faut
+    // réparer. On dit donc la même chose que pour une base absente, remède
+    // compris.
+    out.push(alert("error", "Base de données indisponible",
+      `${d.adminMotif || "Le référentiel des comptes est injoignable : aucun compte d'administration n'a pu être installé."}${d.baseRemede ? " " + d.baseRemede : ""}`));
   } else if (d.adminAmorce === false) {
     out.push(alert("warning", "Aucun compte d'administration installé",
       `${d.adminMotif || "L'installation n'a pas encore de compte d'administration."} Sans lui, aucune connexion n'est possible.`));

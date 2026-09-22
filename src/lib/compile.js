@@ -4,7 +4,8 @@ import { overrideNode, ecarts as ecartsOf, reglagesEcarts } from "./redaction.js
 import { estSupprime, suppressions, ajoutsDe, sousSuppression } from "./structure.js";
 import { enrichirSignataire } from "./delegations.js";
 import { conseilPourActe, enrichirConseil } from "./conseils.js";
-import { champFonction, roleDeFonction } from "./fonctions.js";
+import { champFonction, roleDeFonction, fonctionRole } from "./fonctions.js";
+import { signatairePrincipal } from "./organigramme.js";
 import { abrogationsDe, blocsAbrogation } from "./abrogations.js";
 import { niveauDe, numeroNiveau, paramsBloc, appliquerFormule } from "./schema.js";
 import { annexesDe, adoptionDe, visaAdoption, nodeAnnexes } from "./annexes.js";
@@ -58,6 +59,14 @@ export function buildContext(config, values = {}, extra = {}) {
   // signataire tient sa délégation — une chaîne d'établissement autonome ne se
   // mêle pas à celle de la commune. Voir src/lib/delegations.js.
   const entId = values.__entityId || extra.entityId;
+  // LE SIGNATAIRE PRINCIPAL DE L'ENTITÉ (Administration › Entités, et écran
+  // Organigramme) : la personne désignée pour signer les actes de cette entité
+  // — son directeur, son maire, son président. Elle sert de signataire PAR
+  // DÉFAUT quand la trame n'en désigne aucun : un acte pris sans signataire
+  // explicite porte alors la signature de l'autorité de l'entité, au lieu de
+  // n'en porter aucune. La qualité désignée avec elle joue le rôle d'une
+  // fonction choisie (`fonction:`), sans écraser un choix du rédacteur.
+  const sigDefaut = signatairePrincipal(config, entId);
   // Le signataire est résolu AVANT les entités : sa qualité accordée alimente la
   // formule d'autorité de l'entité.
   //
@@ -67,10 +76,11 @@ export function buildContext(config, values = {}, extra = {}) {
   // (« signataireFonction »), le champ lui-même restant l'identifiant de la
   // personne — tout le reste de l'application continue de la lire ainsi.
   const champSig = (fields || []).find((f) => f.type === "signataire" || f.id === "signataire");
-  const cleFonction = values[champFonction(champSig?.id || "signataire")] || values.signataireFonction || "";
+  const cleFonction = values[champFonction(champSig?.id || "signataire")] || values.signataireFonction
+    || (sigDefaut?.roleId ? fonctionRole(sigDefaut.roleId) : "");
   ctx.signataire = enrichirSignataire(
     config,
-    personneDuReferentiel(config, values.signataire, ctx.signataire),
+    personneDuReferentiel(config, values.signataire || sigDefaut?.personne?.id, ctx.signataire),
     {
       familyId: trame?.familyId || "", actTypeId: trame?.actTypeId || "",
       entityId: entId || "", date: values.dateSignature || "",
@@ -601,7 +611,8 @@ export function compile(trame, values, config, opts = {}) {
   // exports ne le montrent. `estAnnexeDoc` est posé plus haut (l'atelier en a
   // déjà besoin pour écarter le champ « signataire »).
   const numero = estAnnexeDoc ? "" : (values.numero || "");
-  const seq = (String(numero).match(/^\d{4}-(\d+)/) || [])[1] || config.numbering.seq;
+  const seq = (String(numero).match(/^\d{4}-(\d+)/) || [])[1]
+    || sequenceCourante(config, { entity: ctx.entity, actTypeId: trame.actTypeId });
   const eliPattern = estAnnexeDoc ? "" : config.numbering.eliPattern
     .replace("{baseUri}", (config.brand.baseUri || "").replace(/\/$/, ""))
     .replace("{actTypeId}", trame.actTypeId || "acte")
@@ -665,17 +676,10 @@ export function compile(trame, values, config, opts = {}) {
   };
 }
 
-export function nextNumero(config, entity) {
-  const n = config.numbering;
-  // Numérotation externe : le numéro ne vient pas de la séquence locale, et
-  // l'application ne peut pas le deviner — il se demande au service, au moment
-  // de rédiger (voir src/lib/numbering.js). On ne propose donc rien ici.
-  if (n.source === "externe") return "";
-  const seq = String(n.seq).padStart(n.pad, "0");
-  return n.pattern
-    .replace("{year}", String(n.year))
-    .replace("{seq}", seq)
-    .replace("{entityCode}", entity?.code || "XX");
-}
+// Le numéro proposé par la séquence interne, et la relecture d'un numéro composé,
+// vivent dans le noyau pur `lib/sequence.js` (motif, portée, compteurs) : on les
+// réexporte ici, où les écrans les ont toujours trouvés.
+export { nextNumero, composerNumeroInterne, prochainNumeroLibre, numerosPris, seqDeNumero, anneeDeNumero, entiteCodeDeNumero, numberingSettings, incrementerSequence, fixerSequence, sequenceCourante, cleSequence, annulerNumero } from "./sequence.js";
+import { sequenceCourante } from "./sequence.js";
 
 export const blockingIssues = (issues) => (issues || []).filter((i) => i.level === "blocking");

@@ -1,8 +1,9 @@
-import { state, touch, navigate, redrawView, parapheurActif, can } from "../state.js";
+import { state, touch, navigate, redrawView, can } from "../state.js";
 import { h, clear, button, icon, toast, modal, badge, textInput } from "../dom.js";
 import { cadreZoom } from "../zoom.js";
-import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
-import { compile, buildContext, interpolate, nextNumero } from "../../lib/compile.js";
+import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
+import { compile, buildContext, interpolate } from "../../lib/compile.js";
+import { prochainNumeroLibre } from "../../lib/numbering.js";
 import { renderDocument, applyPaper, MARQUE_STYLE } from "../../lib/render.js";
 import { stylesOf } from "../../lib/styles.js";
 import { checkExpr, safeEval } from "../../lib/expr.js";
@@ -710,7 +711,8 @@ function sampleValues(trame) {
   // que verra le rédacteur avant de demander le numéro.
   // Une annexe n'en a pas : l'exemple le dit en le laissant vide (voir
   // src/lib/annexes.js).
-  values.numero = natureDe(trame) === "annexe" ? "" : (nextNumero(state.config, state.config.entities?.[0]) || "…");
+  values.numero = natureDe(trame) === "annexe" ? ""
+    : (prochainNumeroLibre(state.config, { entity: state.config.entities?.[0], actes: state.actes }).numero || "…");
   return values;
 }
 
@@ -1982,14 +1984,16 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     choiceField({
       label: "Nature du document", value: natureDe(trame),
       options: ACTE_NATURES.map((n) => ({ value: n.id, label: n.label })),
-      help: "Une ANNEXE est un document adopté par un autre : un règlement intérieur adopté par une délibération, un tableau tarifaire adopté par une décision. Elle ne se signe ni ne se publie pour elle-même — c'est l'acte qui l'adopte qui est signé, et son texte suit cet acte. Les actes issus d'une trame d'annexe ne sont pas modifiés comme les autres — voir la fiche de l'acte, « Modifier l'annexe ».",
+      help: natureDocs(natureDe(trame)).hint
+        + " — Les documents NON JURIDIQUES (verbatim d'assemblée, déclaration, vœu) se publient au recueil comme les actes, mais leur publication ne les rend ni opposables ni exécutoires : le recueil les présente comme des documents, sans entrée en vigueur, et les formalités d'exécution ne s'y appliquent pas."
+        + (natureDe(trame) === "annexe" ? " Les actes issus d'une trame d'annexe ne sont pas modifiés comme les autres — voir la fiche de l'acte, « Modifier l'annexe »." : ""),
       onChange: (v) => { trame.nature = v; softSave(); redraw(); },
     }),
     h("label", { class: "fr-check" }, (() => {
       const c = h("input", { type: "checkbox", checked: trame.assemblee === true });
       c.addEventListener("change", () => { trame.assemblee = c.checked; softSave(); redraw(); });
       return c;
-    })(), "Acte d'assemblée — délibération"),
+    })(), "Acte d'assemblée (délibération, verbatim de séance, déclaration, vœu…)"),
     trame.assemblee
       ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "L'acte émane d'une ASSEMBLÉE délibérante (conseil municipal, conseil d'administration) : sa ligne d'autorité est celle de l'assemblée (« Le conseil municipal de … »), non celle d'une personne, tandis qu'il est signé par le président de cette assemblée — le maire, ou le président du conseil d'administration. Le jeton {{autorite}} rend la formule de l'assemblée. Les assemblées et leur signataire se règlent dans Administration › Assemblées." })
       : null,
@@ -2025,7 +2029,9 @@ function renderTrameInspector(root, trame, redraw, softSave) {
       return c;
     })(), "Publiable au recueil des actes administratifs"),
     h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: tramePublishable(trame)
-      ? "Les actes issus de cette trame sont signés puis publiés : le service leur attribue un identifiant ELI et ils deviennent opposables à leur entrée en vigueur."
+      ? (natureJuridiqueDe(trame)
+        ? "Les actes issus de cette trame sont signés puis publiés : le service leur attribue un identifiant ELI et ils deviennent opposables à leur entrée en vigueur."
+        : `Ce document non juridique (${natureDocs(natureDe(trame)).label.toLowerCase()}) se publie au recueil comme un acte — il y reçoit son identifiant ELI et s'y consulte —, mais sa publication ne le rend NI opposable NI exécutoire : le recueil le présente comme un document, sans entrée en vigueur, et les délais d'exécution ne s'y appliquent pas.`)
       : "Trame non publiable : les actes issus de cette trame (actes individuels — revalorisation d'un traitement, sanction, etc.) sont rédigés, signés et conservés au registre, mais jamais déposés au recueil." }),
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Signature" }),
     selectField({
@@ -2044,9 +2050,9 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     h("p", { class: "fr-small fr-muted", style: { margin: "0" }, text: "Un texte long ne se compose pas seulement d'articles : il se range en livres, titres, chapitres, sections… L'échelle ci-dessous est celle de CETTE trame : les mots et la numérotation sont libres. Dans le document, une « Division » prend l'un de ces échelons ; l'échelon 1 est le plus haut." }),
     echelleEditor(trame, redraw, softSave),
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Validation et formalités" }),
-    // Le parapheur est une fonction expérimentale : éteint, la trame n'a pas de
-    // circuit à choisir (voir Administration › Expérimentale).
-    ...(parapheurActif() ? [
+    // Le circuit de validation s'applique à toutes les trames : un référentiel
+    // sans circuit n'a simplement rien à choisir ici.
+    ...[
       selectField({
         label: "Circuit de validation (parapheur)",
         value: trame.circuitId || "",
@@ -2065,19 +2071,19 @@ function renderTrameInspector(root, trame, redraw, softSave) {
           ? `Circuit appliqué : « ${force.label} » — ${(force.steps || []).length} étape(s).`
           : "Aucun circuit ne s'applique à cette trame : les actes partent en signature sans validation préalable.";
       })() }),
-    ] : []),
-    choiceField({
+    ],
+    natureJuridiqueDe(trame) ? choiceField({
       label: "Transmission au contrôle de légalité", value: trame.transmission || "",
       options: DISPENSES.map((d) => ({ value: d.id, label: d.label })),
       help: "Presque toujours requise : c'est elle qui fait courir le délai de deux mois du représentant de l'État.",
       onChange: (v) => { trame.transmission = v; softSave(); },
-    }),
-    choiceField({
+    }) : null,
+    natureJuridiqueDe(trame) ? choiceField({
       label: "Notification aux intéressés", value: trame.notification || "",
       options: DISPENSES.map((d) => ({ value: d.id, label: d.label })),
       help: "Requise pour un acte individuel (revalorisation, sanction, nomination…), qui ne se publie pas et n'est opposable qu'une fois notifié.",
       onChange: (v) => { trame.notification = v; softSave(); },
-    }),
+    }) : h("p", { class: "fr-small fr-muted", text: "Document NON JURIDIQUE : il n'est ni transmis au contrôle de légalité, ni notifié aux intéressés, et aucun délai d'exécution ne court à sa publication. Ses formalités n'ont donc pas lieu d'être réglées ici." }),
     h("p", { class: "fr-small fr-muted", text: "Auteur : " + (trame.owner || "—") + " — la trame appartient au service qui la tient à jour, pas à l'agent qui l'a saisie." }),
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Service et bureau" }),
     h("p", { class: "fr-small fr-muted", text: trame.serviceId ? targetLabel(state.config, trame.serviceId, trame.bureauId) : "Trame générale : tous les services peuvent la remplir." }),

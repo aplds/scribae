@@ -122,6 +122,14 @@ Dans l'application : **Administration › Base de données** →
 Le réglage est **propre au poste** (il n'est pas exporté avec le référentiel) : chaque poste
 vise la même base. La **session** de connexion, elle, reste locale.
 
+> **Adresse vide = même hôte, et c'est le réglage à préférer.** Les cookies ne sont lisibles que
+> par les pages de leur hôte : si l'application est servie par un hôte et le service par un autre,
+> le navigateur envoie bien les cookies, mais le JavaScript de la page **ne peut pas lire le jeton
+> anti-CSRF** — et chaque écriture est refusée (`csrf_invalide`) alors que les lectures passent. Le
+> service rend donc aussi le jeton dans le corps de `GET /v1/auth/session` (et il le repose en
+> cookie s'il a disparu), ce qui rend ce montage *possible* ; mais le déploiement fourni — nginx de
+> la même origine, `/v1/` en proxy — est le seul qui n'expose pas à ce piège.
+
 ## 5. Liste de contrôle avant mise en service
 
 - **Mode d'authentification** : `AUTH_MODE=demo` (démonstration, jetons d'API) ou
@@ -134,8 +142,13 @@ vise la même base. La **session** de connexion, elle, reste locale.
 - **TLS obligatoire** : placez le service derrière un reverse-proxy HTTPS (nginx, Caddy,
   Traefik). Le jeton circule en clair dans l'en-tête sinon — et, en mode `password`, le mot de
   passe de l'agent aussi.
-- **CORS** : en auto-hébergement, application et API partagent l'origine — `*` convient ;
-  sinon, listez les origines exactes dans `CORS_ORIGINS`.
+- **CORS** : rien à faire quand application et API partagent l'origine (le déploiement fourni) —
+  le défaut est de n'autoriser **aucune** origine. Si l'application est servie par une **autre
+  origine**, listez-la exactement dans `CORS_ORIGINS` (`https://actes.exemple.fr`) : le service
+  renvoie alors `access-control-allow-credentials`, sans quoi le navigateur refuse la réponse à
+  toute écriture (`credentials: "include"`, la session étant dans un cookie) et l'écriture est
+  rangée en attente comme une panne réseau. `*` ne transporte aucune session : il ne convient
+  qu'à un accès sans cookie.
 - **Sauvegardes** : `mariadb-dump scriba | gzip > scriba-$(date +%F).sql.gz`, planifié ; test
   de restauration annuel — le dump doit inclure `sb_motdepasse` et `sb_session`.
 - **Droits** : l'utilisateur SQL n'a besoin que de `SELECT, INSERT, UPDATE, DELETE`.

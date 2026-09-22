@@ -157,6 +157,11 @@ export function buildWebVersion({ doc, config, record }) {
   // comme celle d'un acte : pas d'opposabilité, pas de « publié le », pas de
   // renvoi à un original signé — c'est la décision d'adoption qui fait foi.
   const info = r.informative === true;
+  // DOCUMENT NON JURIDIQUE (verbatim d'assemblée, déclaration, vœu) : publié au
+  // recueil, mais sans portée juridique propre — donc sans opposabilité, sans
+  // entrée en vigueur et sans délai de recours. La page le dit à sa place, au
+  // lieu de la mention d'opposabilité.
+  const nonJuridique = r.juridique === false;
   // Version CONSOLIDÉE : elle ne remplace pas l'original signé, qui seul fait
   // foi. Le renvoi à l'original est un lien ELI (« eli:/fr/… ») : l'application
   // comme le service le traduisent en ADRESSE de l'acte visé (voir
@@ -210,6 +215,9 @@ a{color:var(--brand)}
 .side li{margin:2px 0;overflow-wrap:anywhere}
 .oppo{border-left:4px solid #0b5a2b;background:#f2f8f4;padding:10px 12px;border-radius:3px;margin:0 0 14px}
 .oppo strong{display:block;font-size:.95rem}
+/* Un document non juridique (verbatim, déclaration, vœu) : publié, mais sans
+   opposabilité. Le bandeau reste, sa couleur dit qu'il n'y a rien à exécuter. */
+.oppo--doc{border-left-color:#5a6472;background:#f7f8fa}
 .formats{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .formats span{border:1px solid #c7cfdb;border-radius:3px;padding:2px 7px;font-size:.76rem;color:#3a3a3a}
 /* Le corps de l'acte est habillé par sa charte graphique (feuille de style) :
@@ -250,7 +258,7 @@ ${A4_BREAK_CSS}
   <span class="hdr__rep">${esc(r.recueil || settings.recueil)}</span>
   <span class="badge">${esc(r.nature || "Acte")} ${esc(r.numero || "")}</span>
 </div></div>
-<div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
+<div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : nonJuridique ? "Documents" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
 <div class="main"><div class="grid">
   <div class="paper"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
   <div class="pub-aside">
@@ -270,6 +278,9 @@ ${A4_BREAK_CSS}
     </div>
     ${info ? `<div class="side"><h3>Texte informatif</h3>
       <p style="margin:0">Ce texte est publié A TITRE INFORMATIF. Il n'est pas signé et ne se publie pas pour lui-même : il tient son autorité de la décision qui l'adopte, dont l'original signé est suivi de son texte. Seule cette décision fait foi.</p>
+    </div>` : nonJuridique ? `<div class="oppo oppo--doc">
+      <strong>Document non opposable</strong>
+      Ce document est publié au recueil pour être porté à la connaissance de tous — c'est un <em>${esc(r.natureDoc === "verbatim" ? "verbatim de séance" : r.natureDoc === "declaration" ? "texte de déclaration" : r.natureDoc === "voeu" ? "vœu de l'assemblée" : "document")}</em>. Il n'a pas de portée juridique propre : il ne crée ni droits ni obligations, aucune entrée en vigueur ne s'y attache, et aucun délai de recours ne court à compter de sa publication.
     </div>` : `<div class="oppo">
       <strong>${r.kind === "consolidee" ? "Version consolidée — ne fait pas foi" : "Opposabilité"}</strong>
       ${r.kind === "consolidee"
@@ -328,7 +339,10 @@ export function publicationJsonLd(record) {
     "eli:type_document": r.actTypeId || "",
     "eli:date_document": r.dateDocument || "",
     "eli:date_publication": r.datePublication || "",
-    "eli:first_date_entry_in_force": r.dateOpposabilite || "",
+    // Un document non juridique (verbatim, déclaration, vœu) n'a pas d'entrée en
+    // vigueur : la clé est alors OMISE, plutôt que publiée vide — un consommateur
+    // du JSON-LD ne doit pas lire une date d'entrée en vigueur qui n'existe pas.
+    "eli:first_date_entry_in_force": r.dateOpposabilite || undefined,
     "eli:published_in": { "@type": "eli:OfficialJournal", "dcterms:title": r.recueil || "" },
     "eli:passed_by": { "@id": r.entityId || undefined, "schema:name": r.entityName || "" },
     "eli:jurisdiction": "FR",

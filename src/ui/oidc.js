@@ -303,6 +303,17 @@ export function annuairePanel(save, redraw, card) {
     h("div", { style: { marginTop: "10px" } }, helpLink("annuaire", "Comment brancher l'annuaire")),
   ));
 
+  // LE DÉPLOIEMENT IMPOSE L'ANNUAIRE — et les comptes locaux restent ouverts.
+  // On le DIT ici : sans cette phrase, un administrateur pouvait croire que
+  // brancher l'annuaire fermait la porte du compte d'administration du `.env`,
+  // et se retrouver enfermé dehors le jour où le fournisseur d'identité est
+  // injoignable. Voir src/lib/auth.js (`accesLocal`) et src/server/mysql/server.mjs.
+  if (impose === "oidc") {
+    wrap.appendChild(card("Comptes locaux — la porte de service",
+      "Ce déploiement impose la connexion par l'annuaire (AUTH_MODE=oidc). Les comptes LOCAUX restent néanmoins ouverts : c'est la porte de service, celle du compte d'administration déclaré dans le fichier .env (ADMIN_LOGIN / ADMIN_PASSWORD). Elle sert le jour où l'annuaire est injoignable, ou depuis un poste qui ne le joint pas. L'écran de connexion propose les deux portes.",
+      h("p", { class: "fr-small fr-muted", text: "L'annuaire attribue rôle et périmètre à chaque connexion ; les comptes locaux sont l'accès d'administration et de secours. Leur mot de passe se pose dans « Comptes et rôles », et leur rôle se règle comme celui de tout compte." })));
+  }
+
   if (a.mode !== "oidc" || impose === "password") {
     wrap.appendChild(card("Comptes de démonstration",
       demoOuverts

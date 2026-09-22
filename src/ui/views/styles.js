@@ -47,6 +47,13 @@ const SELECTS = {
   numPosition: [{ value: "inline", label: "À la suite du titre" }, { value: "block", label: "Au-dessus du titre" }, { value: "margin", label: "Dans la marge de gauche" }],
   headingRule: [{ value: "none", label: "Aucune" }, { value: "line", label: "Filet simple" }, { value: "dotted", label: "Souligné pointillé" }, { value: "box", label: "Encadré" }],
   visasLabel: [{ value: "plain", label: "Normal" }, { value: "italic", label: "Italique" }, { value: "bold", label: "Gras" }, { value: "smallcaps", label: "Petites capitales" }],
+  authorityWeight: [
+    { value: "", label: "Hérité (italique si la feuille le portait déjà)" },
+    { value: "normal", label: "Normal" },
+    { value: "italic", label: "Italique" },
+    { value: "bold", label: "Gras" },
+    { value: "italic-bold", label: "Gras italique" },
+  ],
   listMarker: [{ value: "disc", label: "Puces ●" }, { value: "circle", label: "Cercle ○" }, { value: "square", label: "Carré ▪" }, { value: "dash", label: "Tiret –" }, { value: "none", label: "Aucune" }],
   listNumbering: [
     { value: "decimal", label: "1. 2. 3." },
@@ -128,7 +135,7 @@ const GROUPS = [
     fields: [
       f("authorityAlign", "Alignement", "select", { options: SELECTS.align3 }),
       f("authoritySize", "Taille (em)", "num"),
-      f("authorityItalic", "Italique", "bool"),
+      f("authorityWeight", "Graisse", "select", { options: SELECTS.authorityWeight, help: "Normal, italique, gras, ou gras italique. « Hérité » conserve le réglage d'italique des feuilles enregistrées avant ce choix." }),
     ],
   },
   {
@@ -218,8 +225,10 @@ const GROUPS = [
     sub: "Le logo et la ligne de recueil qui coiffent chaque page du document. " + TOKENS,
     fields: [
       f("showHeader", "Afficher un en-tête", "bool"),
-      f("logoUrl", "URL ou image du logo", "text", { wide: true, help: "Une URL, ou une image encodée (data URL). Vide = pas de logo." }),
-      f("logoHeight", "Hauteur du logo (px)", "num"),
+      f("logoUrl", "URL ou image du logo (gauche)", "text", { wide: true, help: "Une URL, ou une image encodée (data URL). Vide = pas de logo à gauche." }),
+      f("logoHeight", "Hauteur du logo de gauche (px)", "num"),
+      f("logoRightUrl", "URL ou image du logo (droite)", "text", { wide: true, help: "Second emblème, à droite du filet : la marque de l'État, d'un partenaire ou d'une délégation. Vide = un seul logo." }),
+      f("logoRightHeight", "Hauteur du logo de droite (px)", "num", { help: "Vide : la hauteur du logo de gauche." }),
       f("logoAlign", "Alignement de l'en-tête", "select", { options: SELECTS.logoAlign }),
       f("headerText", "Texte de l'en-tête", "text", { wide: true, placeholder: "{{entity.name}} — recueil des actes administratifs" }),
       f("headerRule", "Filet sous l'en-tête", "bool"),

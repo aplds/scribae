@@ -49,19 +49,33 @@
 
 ```js
 {
-  brand:      { name, shortName, color, colorDark, documentFont, baseUri, logoUrl },
+  brand:      { name, shortName, color, colorDark, documentFont, baseUri, logoUrl, logoUrlDark },
   vocab:      { enact:"DÉCIDE", articleLabel:"Article", recitalsLabel:"Considérant",
                 visasLabel:"Vu", recoursLabel, publicationLabel },
   numbering:  { pattern:"{year}-{seq}-{entityCode}", seq:400, pad:3, year:2026,
                 eliPattern:"{baseUri}/eli/{actType}/{year}/{seq}/{entityCode}",
                 source:"interne",        // "interne" | "externe" (voir § 2.1 bis)
+                portee:"global",         // "global" | "entite" | "type" — la portée du CHRONO (voir § 2.1 bis)
+                sequences:{},            // compteurs des portées non globales : { "VSL": 12, "arrete": 30 }
+                annules:[ { numero, seq, annee, entityCode, motif, at, par } ],
+                                         // numéros annulés : le rang n'est pas recyclé, le chrono les montre
                 externe:{ transport:"relais", url, method:"POST", headers, body,
                           valeur:"records[0].id", reference, pattern:"", timeoutMs:15000 } },
-  entities:   [ { id, code, name, legalName, seatCity, kind, orgRefs:[refId], tribunal } ],
+  entities:   [ { id, code, name, nameWithArt, authorityFormula, legalName, seatCity, kind,
+                  orgRefs:[refId], tribunal,
+                  parentId,          // l'entité à laquelle celle-ci est RATTACHÉE ("" si aucune)
+                  autonome,          // personnalité morale propre (défaut : vrai) — une régie est fausse
+                  signerPersonId,    // le SIGNATAIRE PRINCIPAL : la personne qui signe ses actes à défaut de trame
+                  signerRoleId } ],  // la qualité sous laquelle elle signe (facultative)
   people:     [ { id, civility, firstName, lastName, entityId, roles:[roleId],
                   accord:"",  // ""|"m"|"f" — force l'accord en genre de la qualité
                   fondementRefId,  // refId de la décision fondant son pouvoir de signer (autorité de tête)
                   refs:[{ kind, label }] } ],
+  signature:  { mode:"electronique",     // "electronique" | "simple" | "externe" (le circuit ordinaire)
+                api:{ transport, url, prestataire, niveau, urlNotification, timeoutMs,
+                      cheminDocument, cheminSignataires, cheminDemarrer, cheminStatut } },
+                                         // réglages du PRESTATAIRE de signature (voir § 2.6). La CLÉ n'est PAS ici :
+                                         // elle vit au service (SCRIBA_SIGNATURE_API_CLE) et n'y entre jamais
   services:   [ { id, code, name, entityId, bureaux:[ { id, name } ] } ],
   roles:      [ { id, label, m, f } ],   // deux formes : « maire »/« maire », « directeur… »/« directrice… »
   delegations:[ { id, fromId, toId, qualiteM, qualiteF, matieres, familyId, actTypeId,
@@ -73,17 +87,22 @@
   families:   [ { id, label, description } ],  // famille de trames = « thème » du recueil : `description`
                                                // est la phrase de présentation publique du thème (accueil du recueil)
   circuits:   [ { id, label, description, active, trameIds:[], familyIds:[], entityIds:[],
-                  steps:[ { id, label, role:"editeur"|"administrateur",
-                            kind:"accord"|"avis", serviceScoped, optional, help } ] } ],
-                                            // n'ont d'effet que si `experimental.parapheur` (ci-dessous)
+                  steps:[ { id, label, role:"reviseur"|"editeur"|"administrateur"|"signataire",
+                            kind:"verification"|"visa"|"signature", serviceScoped, optional, help } ] } ],
+                                            // le circuit de validation (parapheur) est une fonction
+                                            // ORDINAIRE : trois natures d'étape — vérification
+                                            // (marche du réviseur, qui ouvre le circuit), visa (le bon
+                                            // pour accord qui engage) et signature (l'accord du
+                                            // signataire, qui achève le circuit). Un circuit ancien
+                                            // (« accord » / « avis ») reste lu : voir § 2.8.1
   delais:     { recoursMois:2, transmissionJours:15, publicationJours:10, notificationJours:8 },
-  experimental:{ parapheur:false, controleLegalite:false },
+  experimental:{ parapheur:true, controleLegalite:false },
                                             // fonctions expérimentales (Administration › Expérimentale) :
-                                            // le parapheur est ÉTEINT par défaut — `circuitFor` ne
-                                            // résout alors aucun circuit (voir § 2.8.1) ; la
-                                            // transmission au contrôle de légalité est ÉTEINTE par
-                                            // défaut — l'étape ne s'intercale pas entre la signature
-                                            // et la publication (voir § 2.8.2 bis)
+                                            // seule la transmission au contrôle de légalité l'est encore
+                                            // — l'étape ne s'intercale pas entre la signature et la
+                                            // publication quand elle est éteinte (voir § 2.8.2 bis).
+                                            // `parapheur` reste lu pour ne pas casser un référentiel
+                                            // antérieur, mais il vaut toujours vrai (voir § 2.8.1)
   styles:     [ { id, label, general, entityIds:[], familyIds:[], …présentation } ],
   actTypes:   [ { id, label, aknElement } ],
   colors:     [...]
@@ -147,6 +166,77 @@ une ligne.
 référentiel** : elle part dans les sauvegardes JSON et, en base partagée, dans la base commune.
 Il faut donc une clé restreinte au strict nécessaire (création sur la seule table de
 numérotation).
+
+#### La séquence interne (`src/lib/sequence.js`)
+
+La séquence interne est un **noyau pur**, sans aucune importation — c'est ce qui évite un cycle
+entre la compilation et la numérotation externe. Il porte le motif, le remplissage, l'année, la
+séquence et sa **portée**, ainsi que deux choses que l'écran du chrono rend visibles :
+
+| Portée | Ce que cela veut dire |
+|---|---|
+| `global` (défaut) | un seul chrono pour la collectivité : `numbering.seq` |
+| `entite` | un chrono par **code d'entité** : `numbering.sequences["VSL"]`, `["CCAS"]`… |
+| `type` | un chrono par **type d'acte** : `numbering.sequences["arrete"]`… |
+
+Une portée qui n'a pas encore de compteur part de la séquence générale (`numbering.seq`) :
+passer d'un chrono global à des chronos par entité ne demande rien à ressaisir. La portée se
+règle dans Administration › Numérotation, qui en donne un aperçu (« Portée du chrono »).
+
+**Un numéro ne se donne pas deux fois.** Le numéro proposé par la réservation est un numéro
+**libre** : on part du compteur et l'on avance tant que le numéro composé est déjà porté par un
+acte, ou annulé au chrono (`prochainNumeroLibre`). Le compteur ne **recule jamais**, et il est
+fixé APRÈS le rang réservé (`fixerSequence(config, rang, { entity, actTypeId })` — le seul
+endroit où la séquence avance ; `incrementerSequence` en est le cas ordinaire, +1). Sans cette
+garde, un compteur resté en arrière — numéros attribués hors de l'application, données reprises
+d'un autre outil, passage d'année — proposerait un numéro déjà pris, et le registre porterait
+deux actes du même numéro. Le geste de réservation est celui du rédacteur : dans l'atelier de
+rédaction, et dans « Modifier un acte » pour l'acte modificatif.
+
+**Un numéro ANNULÉ ne revient pas.** `annulerNumero(config, { numero, seq, annee, entityCode,
+motif, par })` range le rang dans `numbering.annules` : le numéro n'est plus proposé (il est
+enjambe comme un numéro pris), et il entre au chrono comme « annulé », avec son motif et son
+auteur. Une séquence administrative ne revient pas en arrière : c'est ce qui fait foi.
+
+**Relire un numéro composé.** Le motif est retourné en expression régulière
+(`motifVersRegex`) : `seqDeNumero`, `anneeDeNumero` et `entiteCodeDeNumero` retrouvent ainsi le
+rang, l'année et le code d'entité d'un numéro déjà composé — y compris sous un motif
+surnuméraire (« VSL/arrete/2026/7 »). C'est ce qui permet au chrono de classer, filtrer et
+repérer les trous sans que l'administration décrive deux fois son motif.
+
+#### Le chrono de numérotation (écran `chrono`)
+
+L'écran, bâti sur `src/lib/chrono.js` (module pur), présente **l'ensemble des numéros
+attribués** — et, avec eux, ce que les actes seuls ne montrent pas :
+
+| Ce qui entre au chrono | D'où cela vient |
+|---|---|
+| un **acte numéroté** (une ligne par numéro) | le registre des actes (`numero`, état de l'acte, dates, rédacteur, entité, type, trame, source, référence externe) |
+| un **numéro annulé** | `numbering.annules`, avec son motif |
+| un **rang libre** — jamais attribué | les rangs manquants entre 1 et le plus haut rang atteint d'une année (on ne devine rien au-delà : un chrono qui s'arrête à 412 n'a pas 413 à 500 en réserve) |
+
+Un acte **sans numéro** n'entre pas au chrono : le chrono EST la suite des numéros.
+
+- **Compteurs** en tête : actes numérotés, dernier rang, prochain numéro, rangs libres, numéros
+  annulés.
+- **Filtres** : année, entité, type d'acte, état, source (interne / externe), période de
+  signature, texte libre — et deux cases, « rangs libres » et « numéros annulés », qui les
+  montrent ou les masquent.
+- **Tri par colonne** : un clic sur un en-tête trie, un second inverse le sens.
+- **Export CSV et XLSX** du résultat filtré, engendré sans aucune dépendance
+  (`src/lib/xlsx.js` : vrai classeur, archive ZIP en magasin ; le CSV porte son BOM, pour
+  qu'Excel reconnaisse l'UTF-8).
+- Les **deux états qui ne sont pas des actes ordinaires** se voient : le rang libre est grisé et
+  en italique, le numéro annulé est barré — un trou dans le chrono doit s'expliquer au premier
+  regard.
+- **Passage à l'année suivante** : quand le chrono est resté sur une année passée, un bouton
+  (réservé à qui peut gérer le référentiel) reporte l'année de référence et repart du rang 1 —
+  l'année et, si la séquence est par entité ou par type, tous les compteurs.
+- **Annuler le rang** : le geste libère une attribution faite par erreur — le numéro entre au
+  chrono comme annulé, avec son motif ; rien n'est renuméroté.
+
+Le tableau de l'écran et les exports lisent **la même déclaration de colonnes**
+(`COLONNES_CHRONO`) : ce qu'on voit et ce qu'on exporte ne peuvent pas diverger.
 
 ### 2.2 Trame (`trame`)
 
@@ -582,6 +672,58 @@ déploiement serveur).
 tel** : elle reste la partie annexée de l'acte qui l'adopte, et rien de plus. Le drapeau est le seul
 qui décide, et il ne vaut que pour une annexe.
 
+#### 2.2.4 quater Les documents qui ne font pas droit
+
+Tout ce qu'une collectivité publie n'est pas un acte. Le **verbatim d'une séance** (le compte rendu
+intégral des débats), une **déclaration** prise devant ou par l'assemblée, un **vœu** (une motion :
+l'assemblée demande, elle ne décide pas) sont des **documents** — les administrés les cherchent au
+recueil — mais ils **ne créent ni droits ni obligations**. `schema.js` les nomme :
+
+```js
+ACTE_NATURES = [ { id:"acte",      juridique:true  },
+                 { id:"annexe",    juridique:true  },
+                 { id:"verbatim",  juridique:false },   // le compte rendu intégral d'une séance
+                 { id:"declaration", juridique:false }, // un texte pris devant ou par l'assemblée
+                 { id:"voeu",      juridique:false } ]  // une motion : l'assemblée demande
+
+natureDe(trame)          // l'identifiant, tout inconnu ramené à « acte »
+natureDocs(id)           // le descripteur (libellé, juridique, hint)
+natureJuridiqueDe(trame) // FAIT-IL DROIT ? — faux pour les trois documents ci-dessus
+```
+
+La nature se choisit sur la **trame** (« Nature du document », onglet « Trame »). À la différence
+d'une annexe, ces documents **vivent par eux-mêmes** : ils se **signent** comme un acte, se
+**numérotent**, reçoivent un **identifiant ELI** et se **publient au recueil**. Ce qui change, c'est
+la **portée** de la publication : `juridique:false` voyage **avec la publication** (`record.juridique`)
+et commande, partout :
+
+- **Aucune opposabilité, aucune entrée en vigueur, aucun délai de recours.** `publier`
+  (`src/ui/views/signature.js`) n'inscrit pas de date d'opposabilité et **aucune règle d'entrée en
+  vigueur** ; le service (`src/server/mysql/actes.mjs` et l'émulateur `index.html`) force
+  `dateOpposabilite: ""` **côté service**, même si un client en proposait une — le service ne croit
+  pas le client sur ce point.
+- **Aucune formalité d'exécution.** `formalites` (`src/lib/execution.js`) tient la transmission au
+  contrôle de légalité et la notification pour **non requises** ; `statutExecution` rend un état
+  propre, **« Document — non opposable »** (`code:"document"`), sans échéance ; `dateExecutoire` et
+  `dateLimiteRecours` rendent **vide** ; l'**état des formalités** et l'**attestation de
+  non-recours** disent qu'aucun délai ne court (voir 2.8.2, 2.8.2 ter).
+- **Le recueil les présente comme des documents.** La version en ligne (`buildWebVersion`,
+  `src/lib/eli.js`) troque la mention d'opposabilité contre un encadré **« Document non opposable »**
+  (`.oppo--doc`) et classe le fil d'Ariane sous **« Documents »** ; la **notice**
+  (`src/ui/views/acte-publie.js`) porte la marque « document, non opposable » et le champ
+  **« Portée »** au lieu de « Entrée en vigueur » ; le **JSON-LD** (`publicationJsonLd`) **omet** la
+  clé `eli:first_date_entry_in_force` ; le **Markdown** et l'entête du recueil le disent, et
+  l'écran « Publications » n'affiche pas de date d'opposabilité.
+- **Le rapport de conformité suit la règle.** Le contrôle du réviseur ne réclame pas de **dispositif
+  en articles** — la nature du document l'exclut — et vérifie ce qu'il doit porter : son **texte**
+  (« Texte du document — n paragraphe(s) », `rapportConformite`, `src/lib/conformite.js`). Le rapport
+  ne lui annonce ni opposabilité ni entrée en vigueur, et la **marche de publication** du circuit de
+  signature dit « **Publié au recueil** » au lieu de « Publié et opposable ».
+
+Rien n'est codé pour un document en particulier : la nature est une **donnée** de la trame, et
+c'est elle — non le logiciel — qui décide de la portée. Une collectivité qui publie ses verbatims au
+recueil n'a donc rien à paramétrer : elle choisit la nature, et le reste suit.
+
 #### 2.2.5 Commentaires : annoter un article, citer un passage
 
 Un commentaire (`Note`) est posé sur un **bloc** de la trame — un article, un paragraphe, un
@@ -646,7 +788,9 @@ Acte = { id, trameId, numero, objet, entityId, serviceId, bureauId, dateSignatur
          overrides: { [adresse]: "texte source" },   // recopie lisible de __overrides
          ecarts:    [ { addr, label, original, current } ],
          issues: [], eli, createdAt, updatedAt,
-         nature: "acte" | "annexe",          // la nature du document (§ 2.2.4)
+         nature: "acte" | "annexe" | "verbatim" | "declaration" | "voeu",
+                                             // la nature du document (§ 2.2.4) — les trois dernières
+                                             // sont des documents NON JURIDIQUES : publiés, non opposables
          adoptePar: Ident | null,            // annexe : l'acte qui l'adopte
          annexes: [ Ident ],                 // acte : les documents annexés
          numeroSource: { source:"externe", ref, valeur, at, par, parName } | null,  // § 2.1 bis : numéro attribué par un service
@@ -965,6 +1109,50 @@ et il le fait aussi quand le service répond `409 version_signee_absente` ou
 `409 conformite_non_certifiee` alors qu'il détient lui-même la pièce et l'attestation :
 la publication porte ce que le client a.
 
+#### 2.6 bis.1 Les réglages de l'API du prestataire de signature
+
+Le circuit électronique suppose un prestataire **joignable** : un parapheur, ESUP-Signature,
+l'outil de la collectivité. Jusqu'ici, seule la démonstration le simulait : en production, il n'y
+avait **nulle part** où régler son adresse, son niveau de signature ni ses points de
+terminaison. Ces réglages existent maintenant, dans `config.signature.api` (Administration ›
+Signature) — et, pour un déploiement, dans le `.env` (`SCRIBA_SIGNATURE_API_*`, qui l'emporte,
+voir § 2.7 bis.3).
+
+| Réglage | Rôle |
+|---|---|
+| `transport` | `service` (c'est le **service** de la collectivité qui appelle le prestataire — seul moyen de garder la clé côté serveur) ou `demonstration` (aucun appel sortant : le circuit est simulé) |
+| `url` | adresse de base de l'API du prestataire. **Vide, le circuit reste simulé** : rien ne sort de la collectivité |
+| `prestataire` | nom technique du prestataire (en-têtes, journal) |
+| `niveau` | niveau demandé : `simple`, `avancee` (certificat) ou `qualifiee` (eIDAS) |
+| `urlNotification` | l'adresse que le prestataire appellera une fois l'acte signé. Vide : l'adresse du service, suivie de `/v1/webhooks/signature` |
+| `timeoutMs` | délai d'attente d'un appel au prestataire |
+| `cheminDocument`, `cheminSignataires`, `cheminDemarrer`, `cheminStatut` | les quatre points de terminaison, relatifs à `url`. Le jeton `{document}` y porte l'identifiant rendu au dépôt. Les mêmes jetons que la numérotation externe : `{document}` `{signature}` `{acte}` `{numero}` |
+
+**La clé n'est jamais dans le référentiel.** Elle vit au **service**, sous la variable
+`SCRIBA_SIGNATURE_API_CLE` (portée « service », `secret: true` dans le registre des variables) :
+elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans un export ou une
+sauvegarde du référentiel. C'est la raison du `transport: "service"` — l'appel sortant part du
+serveur, jamais du poste de travail.
+
+**Ce que fait le service.** `createPrestataire({ api, cle, fetchImpl, journal })`
+(`src/server/mysql/signature.mjs`) provisionne le document, ajoute les signataires, démarre le
+circuit et relit le statut — en `Authorization: Bearer`, avec un `AbortController` pour le
+délai, et une lecture défensive des réponses (les prestataires n'ont pas tous la même forme de
+réponse). Sur `POST /v1/actes/{id}/signature`, le service ouvre donc un **vrai** circuit quand
+`api.transport != "demonstration"` **et** que la clé est présente ; il répond `502
+prestataire_indisponible` quand l'appel échoue (adresse, clé, réponse), et la réponse porte le
+`dossier`, le `lienSignature` (la fenêtre du prestataire) et l'état du prestataire. Sinon, le
+circuit est **simulé** — l'application joue le prestataire, sans rien faire sortir.
+
+**L'application le dit.** `GET /v1/config` rend l'état du prestataire (`prestataire` :
+`actif`, `url`, `niveau`, `cle` — un booléen, **jamais la clé** —, `motif`), que
+`prestataireDeploye()` (`src/lib/deploiement-config.js`) rend disponible. L'écran
+Administration › Signature annonce donc « circuit branché » ou « circuit simulé », avec le motif,
+et l'atelier de signature ouvre le **lien réel** du prestataire quand il est branché, l'outil de
+démonstration embarqué sinon (`circuitElectroniqueSimule`, `motifCircuitSimule`,
+`src/lib/externe.js`). Un champ posé par le `.env` est signalé comme tel
+(`poseParLeDeploiement`) : l'administrateur ne saisit pas dans le vide.
+
 #### 2.6 ter Le circuit de signature externe (papier, ou outil tiers)
 
 Le circuit électronique suppose un prestataire joignable en API. Ce n'est pas toujours le
@@ -1035,8 +1223,8 @@ les pièces à certifier. Un acte dont la version signée attend certification e
 aux réviseurs compétents même hors de leur périmètre** (comme l'est un acte soumis à
 révision) : sans quoi leur contrôle ne pourrait pas s'exercer.
 
-**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **soixante-six
-actes** sur **vingt et une trames**, dont **quarante-neuf rédigés et posés comme signés** (document
+**Jeu de démonstration.** Le registre est livré garni (`src/lib/demo-actes.js`) : **soixante-neuf
+actes** sur **vingt-cinq trames**, dont **cinquante-deux rédigés et posés comme signés** (document
 compilé depuis sa trame, exporté en Akoma Ntoso, signé par `buildSignedPackage` — certificat,
 ECDSA P-256, horodatage, donc vérifiables), quatorze prêts à signer, trois brouillons incomplets, un
 acte **en attente de révision** et un acte **rejeté** en révision, revenu en brouillon avec son
@@ -1050,7 +1238,15 @@ citoyenne, et les documents joints à une manifestation (plan de circulation et 
 programme de la fête du village, stationnement et déroulé de la cérémonie du 11 novembre). L'annexe
 porte le visa de son acte d'adoption, l'acte l'annonce en fin de dispositif, et **l'original signé
 de l'acte est suivi du texte de l'annexe** : l'annexe ne se signe ni ne se publie pour elle-même.
-**Quinze** actes sont publiés au recueil (voir `src/ui/demo-publications.js`), dont quatre **à la
+**Trois** actes illustrent les **documents qui ne font pas droit** (§ 2.2.4 quater) : un verbatim de
+séance du conseil municipal (`acte-demo-467`) et un vœu de l'assemblée (`acte-demo-469`), **publiés
+au recueil**, et une déclaration (`acte-demo-468`), signée mais encore en attente de publication. Ils
+sont signés comme les actes, numérotés, et leurs trames (`tpl-verbatim`, `tpl-declaration`,
+`tpl-voeu`, famille `fam-seances`) portent la nature qui commande la portée de leur publication : au
+recueil, ils se lisent comme des **documents**, sans opposabilité, sans entrée en vigueur et sans
+délai de recours.
+
+**Dix-sept** actes sont publiés au recueil (voir `src/ui/demo-publications.js`), dont quatre **à la
 une** : le règlement de la restauration scolaire, la grille tarifaire, la fête du village et le
 marché de Noël — deux annexes, deux événements. Leurs
 **transmissions au
@@ -1543,6 +1739,53 @@ Les services/bureaux se décrivent dans **Administration › Services** ; le pé
 **Comptes et rôles** (colonne « Périmètre », éditeur à cases, boutons « tous les services » /
 « retirer tous les accès »). Supprimer un service retire les rattachements correspondants.
 
+#### L'organigramme : entités, services, bureaux (écran `organigramme`)
+
+Un cran au-dessus des services, il y a **l'entité** : la personne morale (ou la structure qui
+agit sous son nom) au nom de laquelle les actes sont pris. L'écran **Organigramme** — qui
+reprend la toile de l'écran Délégations — montre les trois niveaux :
+
+```
+ENTITÉ    la commune, le CCAS, la caisse des écoles, l'office… ou une régie
+  └── SERVICE   « Direction générale des services », « Action sociale »…
+        └── BUREAU   « Pilotage des services », « Accueil de la rentrée »…
+```
+
+Une entité est **autonome** — elle a sa personnalité morale (`autonome: true`, le défaut) — ou
+**rattachée** à une autre (`autonome: false`, `parentId`). C'est le cas d'une **régie
+municipale** (la régie du cinéma, par exemple) : elle n'a pas de personnalité morale propre,
+mais elle a son **directeur**, son ou ses **services**, ses bureaux et ses actes. Le rattachement
+se lit sur l'ENTITÉ (jamais sur le service) ; les deux informations se combinent — un
+établissement public autonome peut être rattaché à la commune pour la présentation de
+l'organigramme sans cesser d'être une personne morale distincte. Un rattachement qui forme une
+**boucle** ne fait jamais boucler l'arbre : les entités concernées sont listées à part
+(« Entités hors arbre »), pour qu'on corrige la fiche.
+
+Trois niveaux, trois fiches : celle d'une **entité** (forme, code, nom, dénomination légale, ville
+du siège, tribunal, personnalité morale, rattachement, **signataire principal**), celle d'un
+**service** (code, nom, entité de rattachement, et ses **bureaux**, qu'on ajoute et retire sur
+place) et celle d'un **bureau**. L'écran se lit en **arbre** ou en **liste** ; il est ouvert à
+tous les comptes (`organigramme: null` dans `VIEW_PERMS` — savoir qui existe n'est pas un secret
+d'administration), la modification passant par les gestes habituels des écrans d'administration.
+
+**Le SIGNATAIRE PRINCIPAL d'une entité** (`entite.signerPersonId`, et la **qualité** sous
+laquelle elle signe, `signerRoleId`) est la personne qui signe les actes de cette entité **quand
+la trame n'en désigne aucun** : le maire pour la commune, la directrice pour le CCAS, la
+présidente pour la caisse des écoles, le président du conseil d'administration pour l'office, le
+directeur pour la régie. La compilation s'en sert comme signataire par défaut
+(`buildContext`, `src/lib/compile.js`) ; il **n'écrase pas** un signataire désigné sur la trame,
+et il ne se substitue pas à une chaîne de délégation (les décisions de nomination et de
+délégation restent portées par l'arbre des délégations, § 2.7.2). Une entité qui n'a pas de
+signataire principal est **signalée** sur sa fiche et dans le compteur de l'écran, plutôt que de
+produire un acte sans signature.
+
+Le référentiel de démonstration porte ces réglages : la commune (le maire), le CCAS (la
+directrice), la caisse des écoles (sa présidente), l'office (le président de son conseil
+d'administration), et la **régie du cinéma municipal** — rattachée à la commune, sans
+personnalité morale, avec son directeur, son service et ses deux bureaux. Une installation de
+démonstration déjà en service les reçoit par **mise à niveau** (`migrateDemoOrganigramme`,
+`src/lib/store.js`), sans être remise à zéro.
+
 Les **migrations** sont **additives** (`store.js`) : un référentiel antérieur à cette notion
 reçoit les services de démonstration — les trames de démonstration existantes y sont rattachées
 — et les comptes de démonstration sans `memberships` sont re-semés. `SEED_VERSION` reste
@@ -1999,10 +2242,20 @@ dans les métadonnées publiées. Le premier écran affiche une invitation (« R
 `viergeNotice()`, `src/ui/notice.js`) qui mène à Administration › Identité.
 
 **Sortir de la démonstration.** `Administration › Données › « Repartir d'un référentiel vierge »`
-efface le référentiel, les trames, les actes et les comptes du poste, **et** — sur le service
+efface le référentiel, les trames et les actes du poste, **et** — sur le service
 partagé — les actes déposés, les circuits de signature et les publications (`POST /v1/admin/purge`,
 réservé à l'administration) : le recueil public lit le service, donc vider le seul navigateur
 laisserait la fiction en ligne.
+
+**Les COMPTES, eux, suivent leur propriétaire** (note 1.3.2p, `comptesDuDeploiement()` dans
+`src/lib/auth.js`). En démonstration — et sans service —, ils font partie du jeu fictif et partent
+avec lui. Sur un service (comptes locaux à mot de passe, ou annuaire), ils sont **conservés** :
+leurs mots de passe vivent chez le service (`sb_motdepasse`), **hors du référentiel**, si bien que
+les effacer ne supprimait aucun accès et laissait l'installation sans personne pour se connecter —
+le compte d'administration compris. Le service **rétablit de lui-même** son compte
+d'administration au démarrage si le référentiel l'a perdu et que son mot de passe est resté (mot de
+passe conservé, jamais remplacé), et `node server.mjs --mot-de-passe <identifiant>` **crée** le
+compte s'il n'existe plus (`src/server/mysql/amorcage.mjs`, `server.mjs`).
 
 ### 2.7 bis.3 Les réglages déclaratifs du référentiel
 
@@ -2010,7 +2263,7 @@ Le `.env` du déploiement peut **poser** des réglages qui, sinon, se saisissent
 l'interface : identité de la collectivité (nom, sigle, adresse de base, couleur, emblème,
 polices, service de contact), vocabulaire des actes, numérotation, délais et formalités
 d'exécution, recueil public (titre, publication automatique, opposabilité), circuit de
-signature, et fonctions (parapheur, contrôle de légalité, assistants). Ces variables —
+signature, et fonctions (contrôle de légalité, assistants). Ces variables —
 préfixe `SCRIBA_` pour le référentiel — sont **déclaratives**.
 
 Une seule déclaration les décrit : le registre **`src/server/mysql/variables.mjs`**, qui porte,
@@ -2036,19 +2289,30 @@ mais ne sont jamais transmises au navigateur ; leurs secrets ne sont jamais rend
 
 ### 2.8.1 Circuit de validation (le parapheur)
 
-Le parapheur est une **fonction expérimentale, éteinte par défaut** (§ 2.1
-`experimental.parapheur`) : on l'active dans `Administration › Expérimentale`. Éteint, il
-**n'existe pas** pour l'application — `circuitFor` ne résout aucun circuit, l'écran
-Parapheur, son entrée de menu, l'onglet « Circuits de validation » de l'Administration, le
-réglage de circuit d'une trame et la carte Parapheur de la fiche d'un acte disparaissent
-(gardés par `parapheurActif`, `src/lib/validation.js`), la porte de signature ne
-s'applique plus, et l'état de validation n'est pas transmis au dépôt. Activer l'option
-**régénère les actes de démonstration** (`regenerateDemoActes`, `src/ui/state.js`) : ils
-portent, ou non, leur passage au parapheur (`src/lib/demo-actes.js`), et la validation ne
-se génère que si l'option est active. Les circuits enregistrés sont conservés ; le réglage
-suit le référentiel exporté/importé.
+Le circuit de validation (le parapheur) est une **fonction ordinaire** : il est toujours là,
+l'écran Parapheur et son entrée de menu, l'onglet « Circuits de validation » de
+l'Administration, le réglage de circuit d'une trame et la carte Parapheur de la fiche d'un acte
+sont toujours affichés. `parapheurActif` (`src/lib/validation.js`) rend donc toujours vrai ; le
+réglage `experimental.parapheur` n'est plus servi, mais il reste **lu** (toujours vrai) pour ne
+pas casser un référentiel antérieur. Un référentiel qui n'en veut pas écarte le circuit sur ses
+trames (« Aucune validation ») ou désactive le circuit concerné.
 
-Actif, un acte n'est pas signé à l'issue de sa rédaction : il franchit un **circuit de validation**,
+Le circuit se compose de **trois natures d'étape** :
+
+- la **Vérification** (`verification`) — le contrôle du dossier avant tout engagement : c'est la
+  marche du **réviseur**, et c'est elle qui ouvre le circuit général de la démonstration ;
+- le **Visa** (`visa`) — le « bon pour accord » qui engage le service ou la direction ;
+- la **Signature** (`signature`) — le signataire marque son accord, et le circuit s'achève.
+
+Chaque nature appelle un **rôle par défaut** (vérification → `reviseur`, visa → `editeur`,
+signature → `signataire`), ainsi qu'un libellé et la restriction au service de l'acte : ce sont
+les valeurs proposées quand on ajoute une étape, et l'administrateur peut les changer. Un circuit
+**ancien** reste lu sans migration : `natureEtape` ramène `accord` à `visa` et `avis` à
+`verification`. Les circuits du jeu de démonstration, eux, sont mis au nouveau vocabulaire par
+`migrateCircuitsNatures` (`src/lib/store.js`), et régénérés avec les actes quand `SEED_VERSION`
+change.
+
+Un acte n'est pas signé à l'issue de sa rédaction : il franchit un **circuit de validation**,
 défini dans le référentiel (§ 2.1 `circuits`) et résolu par `circuitFor` — le circuit désigné
 par la trame, sinon le plus **spécifique** des circuits actifs correspondant à la trame, à sa
 famille d'actes et à l'entité signataire. Sans circuit applicable, l'acte part directement en
@@ -2057,7 +2321,8 @@ signature (comportement historique préservé).
 ```js
 Validation = { circuitId, circuitLabel, statut:"en_cours"|"valide"|"refuse"|"renvoye",
                demarreLe, demarrePar, demarreParNom, empreinte, closLe,
-               steps:[ { id, label, role, kind:"accord"|"avis", serviceScoped, optional,
+               steps:[ { id, label, role:"reviseur"|"editeur"|"administrateur"|"signataire",
+                         kind:"verification"|"visa"|"signature", serviceScoped, optional,
                          statut:"en_attente"|"valide"|"refuse"|"renvoye"|"passe",
                          by, byName, at, comment } ] }
 ```
@@ -2065,7 +2330,8 @@ Validation = { circuitId, circuitLabel, statut:"en_cours"|"valide"|"refuse"|"ren
 Règles :
 
 - le circuit est **séquentiel** : seule l'étape ouverte est proposée à la décision ;
-- une étape **facultative** peut être passée (`passe`) ; une étape d'**avis** est consultative ;
+- une étape **facultative** peut être passée (`passe`) ; une **vérification** éclaire sans engager
+  (elle constate que le dossier est complet, l'acte conforme et les visas réunis) ;
 - un **renvoi** ou un **refus** doit être **motivé** (l'observation est obligatoire) ;
 - le circuit est **achevé** quand toutes les étapes obligatoires sont `valide` ou `passe` ;
 - l'**empreinte du texte validé** porte sur `values` + `overrides` (FNV-1a 2×32 bits). Si
@@ -2578,6 +2844,12 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    « Sombre ». C'est une **préférence de poste de travail**, rangée dans le navigateur, pas dans
    le référentiel : elle vaut pour le poste, pas pour la collectivité. Le **papier des actes
    reste blanc** — seul l'habillage de l'application change. (tous les comptes)
+   Le référentiel peut prévoir un **second emblème** (`brand.logoUrlDark`) pour le fond sombre :
+   un logo dessiné pour le blanc devient illisible sur le fond sombre, et c'est la variante
+   sombre qui prend alors sa place partout où l'emblème s'affiche — en-tête, écran de connexion,
+   recueil public. Vide, l'emblème ordinaire sert dans les deux thèmes (voir `brandLogoUrl`,
+   src/lib/theme.js). La variante **ne touche pas au papier** : les pièces imprimées gardent
+   l'emblème ordinaire, sur fond blanc.
 2. **Trames** — liste **filtrée par le périmètre du compte**, création (avec choix du service
    gestionnaire et, au besoin, du bureau), duplication, **import d'un document Word (.docx) ou
    LibreOffice (.odt)** en trame, **mise à disposition** des services (brouillon / mise à
@@ -2613,12 +2885,12 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    flèches sur le bloc, ou un glisser par la poignée ⠿ ou par le numéro de l'article/division —
    et l'ordre choisi renumérote le dispositif, sans rien changer à la trame (§ 2.4.1). Export
    bloqué seulement par un contrôle
-   bloquant de la trame. Si le parapheur est actif, l'en-tête indique **où en est l'acte dans
-   son circuit de validation** (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la
-   fiche de l'acte porte la carte du parapheur ; éteint, rien de tout cela n'apparaît.
-4 bis. **Parapheur** (seulement si `experimental.parapheur`, voir 2.8.1) — l'écran du valideur :
-   *à valider par moi*, *en cours*,
-   *validés*, *renvoyés ou refusés*. On y donne son **bon pour accord** (ou son avis), on
+   bloquant de la trame. L'en-tête indique **où en est l'acte dans son circuit de validation**
+   (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la fiche de l'acte porte la carte
+   du parapheur (voir 2.8.1).
+4 bis. **Parapheur** (voir 2.8.1) — l'écran du valideur : *à valider par moi*, *en cours*,
+   *validés*, *renvoyés ou refusés*. On y **vérifie** un dossier, on donne son **visa** (bon pour
+   accord) ou l'on **marque son accord pour signer**, selon la nature de l'étape — on
    **renvoie** l'acte en rédaction, on le **refuse**, ou on **reprend** un circuit — chaque
    décision étant motivée par une observation. Un acte validé puis **réécrit** voit sa
    validation devenir **caduque** : l'écran le dit et propose de reprendre le circuit.
@@ -2650,8 +2922,7 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    lisent la même fiche, sans les champs de saisie.
 5. **Actes** — registre **filtré par le périmètre du compte** : numéro, objet, nature
    (d'origine / modificatif / consolidée / importé), conformité à la trame (« conforme » ou
-   « N écart(s) »), entité, **service et bureau**, signature, statut, **parapheur** (colonne
-   présente seulement si la fonction expérimentale est active),
+   « N écart(s) »), entité, **service et bureau**, signature, statut, **parapheur**,
    **exécution** ; « Reprendre » rouvre le document, « Voir » l'affiche, « Modifier » lance un
    acte modificatif. Le registre signale ce qui attend un geste (actes à valider, formalités en
    retard, actes à la corbeille) et permet de **mettre un acte à la corbeille** (suppression
@@ -2693,6 +2964,20 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    (écran distinct), retour de l'acte signé par notification, suivi du circuit. Un
    onglet « API & journal » montre la description OpenAPI et chaque échange (requête,
    réponse, statut, durée), y compris les appels sortants vers le prestataire.
+7 bis. **La référence de l'API REST, avec son panneau de commande** — l'écran
+   **Aide › API REST** décrit *toute* la surface du service, à partir d'une description
+   unique (`src/lib/api-reference.js`) : les groupes, chaque opération (méthode, chemin,
+   rôle minimal, paramètres, corps, réponses, champs notables), les **rôles** et les
+   **codes d'erreur** en clair, et un **exemple cURL** prêt à recoller. Le **panneau de
+   commande** permet de **jouer la requête pour de vrai** : on choisit l'opération, on
+   ajuste le chemin, le corps JSON et le jeton, on envoie, et la réponse s'affiche avec
+   son **code** et sa **durée**. L'appel emprunte le même chemin que l'application
+   (`call()`, `src/lib/remote.js`) : il figure donc dans « API & journal » comme
+   n'importe quel échange. La même description engendre **`src/docs/API.md`**
+   (`node src/scripts/generer-api.mjs`), que l'écran *Documentation technique* rend : le
+   document livré et l'écran ne peuvent pas diverger. Écran ouvert à qui peut voir la
+   documentation (`docs.voir`). Un appel d'écriture **modifie réellement les données** —
+   l'écran le dit avant d'envoyer.
 8. **Publications** — onglet « Publication (ELI) » : versement de la version en ligne au
    recueil, attribution de l'**identifiant ELI**, date de publication et date
    d'opposabilité, conservation de l'original signé. L'écran « Publications (ELI) » est
@@ -2750,6 +3035,8 @@ autonome à transmettre aux collègues.
 | Faire valider un acte (le parapheur) | le circuit de validation avant la signature | tous |
 | Faire réviser un acte avant sa signature | le contrôle du réviseur : rapport de conformité, correction, validation ou rejet motivé | tous |
 | Retrouver un acte | le registre, les statuts, reprendre un brouillon | tous |
+| Le chrono de numérotation | tous les numéros attribués — et les rangs libres et les numéros annulés : lire, filtrer, trier, exporter | tous |
+| L'organigramme : entités, services et bureaux | la structure au nom de laquelle les actes sont pris, l'entité autonome ou rattachée, le signataire principal | tous |
 | Faire signer un acte | le circuit de signature, le prestataire, l'original signé | tous |
 | Publier l'acte (ELI et opposabilité) | version en ligne, identifiant ELI, dates, recueil public | tous |
 | Modifier un acte déjà écrit | acte modificatif, version consolidée, import | tous |
@@ -2759,6 +3046,7 @@ autonome à transmettre aux collègues.
 | Glossaire | tous les termes, en une phrase | tous |
 | Dépannage | les petits ennuis et leur solution | tous |
 | Fiche mémo | une page à afficher près du poste | tous |
+| L'API REST : brancher un autre logiciel | les routes du service, les clés d'API et leurs rôles, les codes d'erreur, et le panneau de commande pour essayer un appel | administrateurs |
 
 Principes rédactionnels (à respecter si on complète `src/wiki.js`) : phrases courtes, un
 geste par étape commençant par un verbe, pas de jargon sans explication, et toujours

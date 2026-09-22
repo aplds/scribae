@@ -21,7 +21,7 @@ import { h, icon } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
-import { isOidc, isPassword, demoAccountsDisabled } from "../../lib/auth.js";
+import { isOidc, isPassword, demoAccountsDisabled, accesLocal } from "../../lib/auth.js";
 import { loginPanel } from "../oidc.js";
 import { comptesGroupes } from "../comptes-liste.js";
 import { panneauMotDePasse, bandeauEtatService } from "../mot-de-passe.js";
@@ -29,12 +29,28 @@ import { panneauMotDePasse, bandeauEtatService } from "../mot-de-passe.js";
 export function renderConnexion(root) {
   const oidc = isOidc(state.config);
   const mdp = isPassword(state.config);
+  // LA PORTE LOCALE. En mode « mot de passe », c'est la porte unique. En mode
+  // « oidc », l'annuaire est la porte ordinaire, MAIS le service garde la
+  // connexion par identifiant et mot de passe ouverte : c'est par elle qu'on
+  // entre avec le compte d'administration du `.env` le jour où l'annuaire est
+  // en panne, ou depuis un poste qui ne le joint pas. Les deux portes sont donc
+  // proposées ensemble (voir src/lib/auth.js, `accesLocal`).
+  const local = accesLocal(state.config);
   const users = state.users.filter((u) => u.active !== false);
   // En mode mot de passe, le référentiel est protégé : les comptes de
   // démonstration — quand le déploiement les laisse ouverts — sont ceux que le
   // SERVICE annonce dans `GET /v1/auth/config` (voir src/lib/motdepasse.js).
-  const demoUsers = mdp ? (state.deploiement?.comptes || []) : [];
+  const demoUsers = (mdp || oidc) ? (state.deploiement?.comptes || []) : [];
   const demoOuverts = !demoAccountsDisabled(state.config);
+
+  // Le formulaire « identifiant / mot de passe », quand la porte locale est
+  // ouverte — seul (mode mot de passe) ou derrière l'annuaire (mode OIDC).
+  const blocLocal = () => (mdp
+    ? panneauMotDePasse({ demoUsers: demoOuverts ? demoUsers : [] })
+    : h("div", { class: "connexion__local" },
+      h("p", { class: "connexion__local-titre", text: "Ou par un compte local" }),
+      h("p", { class: "fr-small fr-muted", text: "Le compte d'administration du déploiement, ou un compte remis par l'administrateur, entre par ici — même quand l'annuaire est injoignable." }),
+      panneauMotDePasse({ demoUsers: demoOuverts ? demoUsers : [] })));
 
   const box = h("div", { class: "connexion" },
     demoNotice(),
@@ -55,9 +71,9 @@ export function renderConnexion(root) {
             h("p", { class: "connexion__tag", text: APP_TAGLINE }),
           ),
         ),
-        h("h1", { class: "connexion__title", text: oidc ? "Connexion à l'annuaire" : mdp ? "Connexion" : "Qui se connecte ?" }),
+        h("h1", { class: "connexion__title", text: oidc ? "Connexion" : mdp ? "Connexion" : "Qui se connecte ?" }),
         h("p", { class: "connexion__sub", text: oidc
-          ? "L'application ouvre la session par l'annuaire de la collectivité. Votre rôle et votre périmètre (services et bureaux) sont ceux de vos groupes."
+          ? "L'application ouvre la session par l'annuaire de la collectivité. Votre rôle et votre périmètre (services et bureaux) sont ceux de vos groupes. Un compte local reste possible ci-dessous : c'est la porte de service, celle du compte d'administration du déploiement."
           : mdp
             ? "Identifiez-vous avec le compte que l'administrateur vous a remis. Votre rôle et votre périmètre (services et bureaux) décident de ce que vous verrez."
             : "Choisissez un compte pour entrer. Les écrans, les actions et les trames accessibles dépendent du rôle et du périmètre (services et bureaux) du compte." }),
@@ -71,12 +87,12 @@ export function renderConnexion(root) {
             on: { click: (e) => { e.preventDefault(); navigate("recueil"); } },
           }, icon("globe", 15), h("span", { text: "Consulter le recueil public" }))),
         oidc
-          ? loginPanel()
+          ? h("div", { class: "fr-stack" }, loginPanel(), local ? blocLocal() : null)
           : mdp
             ? panneauMotDePasse({ demoUsers: demoOuverts ? demoUsers : [] })
             : comptesGroupes(users, (u) => login(u.id)),
         h("p", { class: "connexion__note", text: oidc
-          ? "Les comptes de démonstration sont désactivés tant que l'annuaire est branché : aucune session ne peut être ouverte sans passer par lui. C'est un réglage du référentiel (Administration › Annuaire)."
+          ? "Les comptes de démonstration sont désactivés tant que l'annuaire est branché : on entre par l'annuaire, ou par un compte local. Le mode et le compte d'administration se règlent dans le fichier .env du déploiement (AUTH_MODE=oidc)."
           : mdp
             ? "Le mot de passe est vérifié par le service de la collectivité, qui garde la session dans un cookie — l'application ne conserve aucun mot de passe. Le mode et le compte d'administration se règlent dans le fichier .env du déploiement (AUTH_MODE=password)."
             : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Administration › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),

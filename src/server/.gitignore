@@ -1,0 +1,11 @@
+# Dépendances
+node_modules/
+
+# Secrets de déploiement — jamais commités (voir src/server/env.example)
+.env
+.env.local
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+*~

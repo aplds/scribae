@@ -21,6 +21,32 @@ const base = () => String(globalThis.__SCRIBA_API_BASE__ ?? "").replace(/\/+$/, 
 
 export const COOKIE_CSRF = "scribae_csrf";
 
+// Le jeton anti-CSRF, en mémoire, tel que le SERVICE l'a rendu.
+//
+// Le cookie reste la source (double envoi) : c'est lui que le navigateur renvoie
+// et que le service compare à l'en-tête. Mais `document.cookie` ne montre QUE les
+// cookies de l'hôte de la page : quand l'application est servie par un autre hôte
+// que le service (une « Adresse du service de données » distincte, un `API_BASE`
+// posé), la page ne peut PAS lire ce cookie — le navigateur l'envoie, la session
+// est valide, les lectures passent, et chaque ÉCRITURE est refusée
+// (`csrf_invalide`) sans que rien ne le dise. Le service rend donc le jeton aussi
+// dans le corps de `/v1/auth/session` (et de la connexion) : on le garde ici, et
+// on l'envoie à défaut du cookie.
+let jetonMemorise = "";
+
+export const retenirJeton = (valeur) => {
+  if (typeof valeur === "string" && valeur) jetonMemorise = valeur;
+  return jetonMemorise;
+};
+
+// Le jeton d'une session FERMÉE ne doit pas survivre : on l'oublie à la
+// déconnexion. Le cookie, lui, est effacé par le SERVICE — seul à pouvoir le
+// toucher —, mais le jeton gardé en mémoire, non : sans cet oubli, une écriture
+// faite après une reconnexion par un autre compte (dont le service n'aurait pas
+// rendu le jeton, ou avant que la session n'ait été relue) partirait avec le
+// jeton de la session précédente, et serait refusée.
+export const oubliJeton = () => { jetonMemorise = ""; return jetonMemorise; };
+
 // Les cookies ne sont lisibles ici que par leur nom, et seulement s'ils ne sont
 // pas `HttpOnly` — c'est exactement le cas du jeton anti-CSRF, et jamais celui
 // de la session.
@@ -35,7 +61,12 @@ export function lireCookie(nom) {
   return "";
 }
 
-export const jetonCsrf = () => lireCookie(COOKIE_CSRF);
+// Le jeton tel qu'il doit partir : le cookie s'il est lisible (c'est le plus
+// frais — une autre fenêtre a pu rouvrir une session), sinon celui que le
+// service a rendu.
+export const jetonCsrf = () => lireCookie(COOKIE_CSRF) || jetonMemorise;
+// La page peut-elle lire le cookie ? (diagnostic d'un refus « csrf_invalide »)
+export const jetonCsrfLisible = () => !!lireCookie(COOKIE_CSRF);
 export const enteteCsrf = () => {
   const j = jetonCsrf();
   return j ? { "x-csrf-token": j } : {};
@@ -58,6 +89,9 @@ async function appel(method, chemin, corps) {
   }
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
+  // Le service rend le jeton anti-CSRF avec la session : on le garde, pour
+  // pouvoir écrire même si le cookie n'est pas lisible par cette page.
+  if (data && data.csrf) retenirJeton(data.csrf);
   return { ok: res.ok, status: res.status, body: data || {}, headers: res.headers };
 }
 
@@ -78,7 +112,9 @@ export const configService = () => appel("GET", "/v1/config");
 export const connexion = (login, motDePasse) => appel("POST", "/v1/auth/connexion", { login, motDePasse });
 export const connexionDemo = (userId) => appel("POST", "/v1/auth/demo", { userId });
 export const sessionCourante = () => appel("GET", "/v1/auth/session");
-export const deconnexion = () => appel("POST", "/v1/auth/deconnexion");
+// La fermeture vide aussi le jeton gardé en mémoire (voir `oubliJeton`) : les
+// cookies, eux, sont effacés par le service.
+export const deconnexion = () => appel("POST", "/v1/auth/deconnexion").then((r) => { oubliJeton(); return r; });
 export const changerMotDePasse = (ancien, nouveau) => appel("POST", "/v1/auth/mot-de-passe", { ancien, nouveau });
 
 // ------------------------------------------------------- administration

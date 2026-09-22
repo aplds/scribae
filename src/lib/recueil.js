@@ -783,6 +783,11 @@ export function jsonDePublication(rec, config) {
     datePublication: r.datePublication || "",
     dateOpposabilite: r.dateOpposabilite || "",
     opposabiliteRule: r.opposabiliteRule || "",
+    // Un document NON JURIDIQUE (verbatim, déclaration, vœu) : publié au recueil,
+    // mais sans opposabilité ni entrée en vigueur. `juridique: false` le dit aux
+    // agents comme au recueil public.
+    juridique: r.juridique === false ? false : undefined,
+    natureDoc: r.natureDoc || undefined,
     kind: r.kind || "originale",
     enVigueur: r.latest !== false,
     // Mis en avant sur la page d'accueil du recueil (bande « À la une ») : le
@@ -889,7 +894,9 @@ function enteteMarkdown(rec) {
     rec.themeLabel ? `- Thème : ${rec.themeLabel}` : "",
     `- Date de l'acte : ${rec.dateDocument ? formatDate(rec.dateDocument, "date-long") : "—"}`,
     `- Publié le : ${rec.datePublication ? formatDate(rec.datePublication, "date-long") : "—"}`,
-    `- Entrée en vigueur : ${rec.dateOpposabilite ? formatDate(rec.dateOpposabilite, "date-long") : "—"}`,
+    rec.juridique === false
+      ? "- Document non opposable : publié pour être porté à la connaissance de tous, il ne crée ni droits ni obligations, et aucune entrée en vigueur ne s'y attache."
+      : `- Entrée en vigueur : ${rec.dateOpposabilite ? formatDate(rec.dateOpposabilite, "date-long") : "—"}`,
     `- Adresse : ${adresseActe(rec.cle)}`,
     "",
     "---",

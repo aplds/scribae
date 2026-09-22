@@ -393,7 +393,7 @@ function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
 }
 
 // La part PUBLIQUE d'un original signé : sans son dossier interne (adresse du
@@ -460,9 +460,9 @@ function openapi() {
     "/v1/actes/{id}/signature": {
       post: {
         operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
-        description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état.",
+        description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Ces réglages viennent du référentiel (Administration › Signature). La CLÉ du prestataire ne figure jamais ici : elle ne vit qu'auprès du service (SCRIBA_SIGNATURE_API_CLE).",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (transport, adresse, identifiant, niveau, notification, délai, points de terminaison). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
         responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé, ou circuit de validation non achevé (code `validation_incomplete`), ou révision non achevée (code `revision_incomplete`)" }, 401: { description: "Jeton absent" } },
       },
     },
@@ -508,9 +508,9 @@ function openapi() {
     "/v1/actes/{id}/publication": {
       post: {
         operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
-        description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
+        description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable à son dépôt (acte individuel, code `acte_non_publiable`) ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Le champ `juridique: false` publie un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) : le service n'inscrit alors AUCUNE date d'opposabilité — il l'impose vide, quel que soit ce que le client propose — et le recueil public le présente comme un document, sans opposabilité ni délai de recours. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé (paquet du circuit électronique, ou — circuit externe — un original de substitution décrit par `originalExterne`)" }, originalExterne: { type: "object", nullable: true, description: "Circuit externe : la version signée déposée (PDF) et la certification de conformité du réviseur. Requise (409 `version_signee_absente`) ; la certification doit être « conforme » (409 `conformite_non_certifiee`) quand l'acte a été déclaré avec `certificationRequise`.", properties: { url: { type: "string" }, sha256: { type: "string" }, nom: { type: "string" }, taille: { type: "integer" }, deposeLe: { type: "string" }, deposePar: { type: "string" }, deposeParNom: { type: "string" }, certification: { type: "object", nullable: true } } } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, juridique: { type: "boolean", description: "false : document non juridique (verbatim, déclaration, vœu) — publié sans opposabilité, la date d'opposabilité est imposée vide par le service." }, natureDoc: { type: "string", enum: ["verbatim", "declaration", "voeu"], description: "La nature du document non juridique, pour la notice du recueil." }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé (paquet du circuit électronique, ou — circuit externe — un original de substitution décrit par `originalExterne`)" }, originalExterne: { type: "object", nullable: true, description: "Circuit externe : la version signée déposée (PDF) et la certification de conformité du réviseur. Requise (409 `version_signee_absente`) ; la certification doit être « conforme » (409 `conformite_non_certifiee`) quand l'acte a été déclaré avec `certificationRequise`.", properties: { url: { type: "string" }, sha256: { type: "string" }, nom: { type: "string" }, taille: { type: "integer" }, deposeLe: { type: "string" }, deposePar: { type: "string" }, deposeParNom: { type: "string" }, certification: { type: "object", nullable: true } } } } } } } },
         responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, acte déclaré non publiable, ou acte non transmis au contrôle de légalité" }, 422: { description: "Version en ligne manquante" } },
       },
     },
@@ -843,12 +843,27 @@ function hEnvoyerEnSignature(ctx) {
   }
   const b = ctx.body || {};
   const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
+  // Les RÉGLAGES DU PRESTATAIRE viennent du référentiel (Administration ›
+  // Signature) et sont transmis par le client : transport, adresse, identifiant,
+  // niveau, notification, délai, points de terminaison. Ce service de
+  // démonstration ne peut pas sortir sur le réseau : il les ÉCHOUE, et reste en
+  // simulation. En production (src/server/mysql/server.mjs), c'est le service
+  // qui appelle réellement le prestataire — avec sa clé, qui ne quitte pas le
+  // serveur et ne figure donc jamais ici.
+  const api = b.api && typeof b.api === "object" ? b.api : {};
+  const niveau = b.niveau || api.niveau || "avancee";
+  const urlPrestataire = String(api.url || "");
   const id = nextId("SIG", db.signatures);
   const sig = {
     id, acteId: acte.id, numero: acte.numero, acteSha256: acte.sha256,
-    statut: "en_attente", signataires, niveau: b.niveau || "avancee",
-    urlNotification: b.urlNotification || "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
-    prestataire: "esup-signature", creeLe: nowIso(), documentSigne: null,
+    statut: "en_attente", signataires, niveau,
+    urlNotification: b.urlNotification || api.urlNotification || "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
+    prestataire: api.prestataire || "esup-signature",
+    // Les réglages sont conservés avec le circuit : un dossier se relit plus tard
+    // et doit dire d'où venait son numéro et son lien. Jamais de clé : elle
+    // n'est même pas transmise par le client.
+    api: { ...api },
+    simulation: true, creeLe: nowIso(), documentSigne: null,
   };
   db.signatures[id] = sig;
   acte.statut = "en_signature";
@@ -856,18 +871,24 @@ function hEnvoyerEnSignature(ctx) {
   evince(db.signatures, MAX_SIGNATURES, "creeLe");
   journaliser("signature_ouverte", id + " — acte " + acte.id + " — " + signataires.map((s) => s.nom || "?").join(", "));
   if (!saveDb(db)) { delete db.signatures[id]; acte.statut = "depose"; return err(507, "Le service n'a plus de place disponible."); }
-  const base = "https://signature.valmont-sur-loire.fr/api/v1";
+  const base = urlPrestataire || "https://signature.valmont-sur-loire.fr/api/v1";
   return ok(202, {
     signatureId: id,
     statut: "en_attente",
     acteId: acte.id,
     empreinte: acte.sha256,
     signataires,
+    niveau,
+    simulation: true,
+    dossier: id,
     lienSignature: base + "/signature/" + id,
     relevé_apres_secondes: 20,
     prestataire: {
-      id: "esup-signature", nom: "ESUP-Signature (simulation)", baseUrl: base, niveau: sig.niveau,
-      document: "/documents", signataires: "/documents/{id}/signataires", demarrer: "/documents/{id}/demarrer", statut: "/documents/{id}",
+      id: sig.prestataire, nom: sig.prestataire + " (simulation)", baseUrl: base, niveau: sig.niveau, demonstration: true,
+      document: api.cheminDocument || "/documents",
+      signataires: api.cheminSignataires || "/documents/{document}/signataires",
+      demarrer: api.cheminDemarrer || "/documents/{document}/demarrer",
+      statut: api.cheminStatut || "/documents/{document}",
     },
     notifications: { url: sig.urlNotification, evenement: "signature.terminee" },
   }, { location: "/v1/signatures/" + id });
@@ -1085,8 +1106,12 @@ function hPublier(ctx) {
     numero: b.numero || (informative ? "" : acte.numero), nature: b.nature || acte.nature, objet: b.objet || acte.objet,
     themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
     entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
-    dateDocument, datePublication, dateOpposabilite: b.dateOpposabilite || "",
+    // Un document NON JURIDIQUE (verbatim, déclaration, vœu) n'a PAS d'entrée en
+    // vigueur : on n'en retient aucune date, même si un client en proposait une.
+    dateDocument, datePublication, dateOpposabilite: b.juridique === false ? "" : (b.dateOpposabilite || ""),
     opposabiliteRule: b.opposabiliteRule || "", recueil: b.recueil || "", auteur: b.auteur || "",
+    juridique: b.juridique === false ? false : undefined,
+    natureDoc: b.natureDoc || undefined,
     kind: b.kind || "originale", brandName: b.brandName || "",
     // Une publication INFORMATIVE (le règlement consolidé d'une annexe) et, pour
     // toute publication, l'acte qui l'adopte s'il y en a un : le recueil s'en
@@ -1161,6 +1186,8 @@ function hPublier(ctx) {
     recueil: rec.recueil,
     epingle: rec.epingle === true,
     informative: rec.informative === true,
+    juridique: rec.juridique === false ? false : undefined,
+    natureDoc: rec.natureDoc || undefined,
     adoption: rec.adoption || null,
     versions,
     ressource: "/v1/publications/" + encodeURIComponent(cle),

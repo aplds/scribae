@@ -26,11 +26,29 @@
 //
 // Le module est PUR : rien n'y écrit dans le référentiel. C'est l'appelant
 // (l'écran de rédaction) qui enregistre le numéro et incrémente la séquence.
+//
+// La SÉQUENCE elle-même — motif, remplissage, portée (globale, par entité ou par
+// type d'acte), compteurs, numéros annulés, relecture d'un numéro composé — vit
+// dans `lib/sequence.js`, sans aucune importation : c'est ce qui évite un cycle
+// entre la compilation et ce module. Ici on la réexporte, pour que les écrans
+// n'aient qu'un seul module à connaître.
 // ============================================================================
 import { getPath, todayIso } from "./util.js";
-import { nextNumero } from "./compile.js";
+import {
+  EXTERNE_DEFAUT, GABARIT_GRIST, PORTEES, numberingSettings, estExterne,
+  cleSequence, sequenceCourante, incrementerSequence, fixerSequence, annulerNumero,
+  motifVersRegex, seqDeNumero, anneeDeNumero, entiteCodeDeNumero, nextNumero,
+  composerNumeroInterne, numerosPris, prochainNumeroLibre,
+} from "./sequence.js";
 import { recordExternal, beginFlow } from "./remote.js";
 import { hostSuperFetch } from "./hosts.js";
+
+export {
+  EXTERNE_DEFAUT, GABARIT_GRIST, PORTEES, numberingSettings, estExterne,
+  cleSequence, sequenceCourante, incrementerSequence, fixerSequence, annulerNumero,
+  motifVersRegex, seqDeNumero, anneeDeNumero, entiteCodeDeNumero, nextNumero,
+  composerNumeroInterne, numerosPris, prochainNumeroLibre,
+};
 
 export const SOURCES = [
   { value: "interne", label: "Séquence interne de l'application" },
@@ -65,50 +83,6 @@ export const JETONS = [
   ["{actTypeId}", "le type d'acte (arrêté, décision…)"],
 ];
 
-export const EXTERNE_DEFAUT = {
-  transport: "relais",
-  url: "",
-  method: "POST",
-  headers: "Authorization: Bearer VOTRE_CLE_API\nContent-Type: application/json",
-  body: '{"records":[{"fields":{"Objet":"{objet}","Annee":{year},"Entite":"{entityCode}"}}]}',
-  valeur: "records[0].id",
-  reference: "records[0].id",
-  pattern: "",
-  timeoutMs: 15000,
-};
-
-// Le gabarit d'un document Grist. L'API de Grist n'accepte pas l'en-tête
-// Authorization depuis un navigateur (elle ne l'autorise que pour les origines
-// qu'on lui a déclarées) : le relais est donc le transport qui marche.
-export const GABARIT_GRIST = {
-  transport: "relais",
-  url: "https://docs.getgrist.com/api/docs/VOTRE_DOCUMENT/tables/Numerotation/records",
-  method: "POST",
-  headers: "Authorization: Bearer VOTRE_CLE_API\nContent-Type: application/json",
-  body: '{"records":[{"fields":{"Objet":"{objet}","Annee":{year},"Entite":"{entityCode}"}}]}',
-  valeur: "records[0].id",
-  reference: "records[0].id",
-  pattern: "",
-  timeoutMs: 15000,
-};
-
-// Le réglage complet, complété par les défauts : un référentiel antérieur à la
-// numérotation externe s'ouvre sans migration, comme une charte ancienne reste
-// imprimable (voir src/lib/styles.js).
-export function numberingSettings(config) {
-  const n = config?.numbering || {};
-  return {
-    ...n,
-    source: n.source === "externe" ? "externe" : "interne",
-    pattern: n.pattern || "{year}-{seq}-{entityCode}",
-    pad: Number(n.pad) || 3,
-    year: Number(n.year) || new Date().getFullYear(),
-    externe: { ...EXTERNE_DEFAUT, ...(n.externe || {}) },
-  };
-}
-
-export const estExterne = (config) => numberingSettings(config).source === "externe";
-
 // ------------------------------------------------ gabarits : jetons et chemins
 
 export function remplacerJetons(gabarit, jetons) {
@@ -129,7 +103,7 @@ export function jetonsNumerotation(config, ctx = {}) {
   const brut = ctx.valeur;
   return {
     year: String(n.year),
-    seq: String(n.seq).padStart(n.pad, "0"),
+    seq: String(sequenceCourante(config, { entity, actTypeId: ctx.actTypeId })).padStart(n.pad, "0"),
     entityCode: entity.code || "XX",
     entity: entity.name || "",
     objet: String(ctx.objet || ""),
@@ -252,14 +226,26 @@ export async function demanderNumero(config, ctx = {}, opts = {}) {
 }
 
 // Le point d'entrée de l'écran de rédaction : quelle que soit la source, il rend
-// le même objet. La séquence interne n'est PAS incrémentée ici (l'appelant
-// l'enregistre), pour que l'écriture du référentiel reste au même endroit.
+// le même objet. La séquence interne n'est PAS avancée ici (l'appelant
+// l'enregistre, par `fixerSequence`, qui connaît la portée du chrono).
+//
+// Le numéro interne proposé est un numéro LIBRE : la réservation saute les rangs
+// déjà portés par un acte, ou annulés au chrono (voir `prochainNumeroLibre`). Le
+// compteur peut en effet être resté en arrière — numéros attribués hors de
+// l'application, données reprises d'un autre outil, passage d'année. L'appelant
+// doit donc passer les actes connus (`ctx.actes`), et fixer la séquence au rang
+// RENDU (`res.seq`), et non au suivant du rang courant.
 export async function reserverNumero(config, entity, ctx = {}) {
   if (!estExterne(config)) {
-    return { numero: nextNumero(config, entity), source: "interne", ref: "", valeur: "" };
+    const libre = prochainNumeroLibre(config, {
+      entity,
+      actTypeId: ctx.actTypeId,
+      actes: ctx.actes,
+    });
+    return { numero: libre.numero, seq: libre.seq, sautes: libre.sautes, source: "interne", ref: "", valeur: "" };
   }
   const r = await demanderNumero(config, { ...ctx, entity }, {
     label: ctx.label || `Attribution du numéro — ${entity?.name || "acte"}`,
   });
-  return { numero: r.numero, source: "externe", ref: r.ref, valeur: String(r.valeur ?? ""), reponse: r.reponse };
+  return { numero: r.numero, seq: null, sautes: 0, source: "externe", ref: r.ref, valeur: String(r.valeur ?? ""), reponse: r.reponse };
 }

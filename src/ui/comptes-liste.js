@@ -17,6 +17,7 @@ import { h, icon } from "./dom.js";
 import { state } from "./state.js";
 import { ROLES, ROLE_ORDER, fullName, initialsOf, sortName, primaryRoleId, badgesOf } from "../lib/users.js";
 import { primaryServiceName } from "../lib/scope.js";
+import { brandLogoUrl } from "../lib/theme.js";
 
 // Rend un tableau (au sens de `frag`) de groupes et de lignes, prêt à insérer.
 // `onPick(u)` est appelé au clic sur une ligne.
@@ -39,7 +40,10 @@ export function comptesGroupes(users, onPick) {
 
 function ligneCompte(u, onPick) {
   const entity = (state.config.entities || []).find((e) => e.id === u.entityId);
-  const entLogo = u.entityId === state.config.entities?.[0]?.id ? state.config.brand?.logoUrl : "";
+  // L'emblème de la structure, en avatar du premier compte : ici aussi, la
+  // variante du thème courant (l'écran de connexion porte le sélecteur
+  // d'apparence, et se redessine au changement).
+  const entLogo = u.entityId === state.config.entities?.[0]?.id ? brandLogoUrl(state.config.brand) : "";
   const cumul = badgesOf(u).slice(1);
   return h("button", {
     class: "connexion__user", type: "button",

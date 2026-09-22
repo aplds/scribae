@@ -234,6 +234,12 @@ test("la connexion ouvre une session : cookie HttpOnly pour le jeton, cookie lis
   assert.ok(c[COOKIE_SESSION].attributs.includes("Secure"));
   assert.ok(c[COOKIE_SESSION].attributs.includes("SameSite=Lax"));
   assert.equal(c[COOKIE_CSRF].attributs.includes("HttpOnly"), false, "le jeton anti-CSRF doit être lisible par la page");
+  // Le jeton anti-CSRF voyage AUSSI dans le corps, dès la connexion. Le cookie
+  // n'est lisible que par les pages de SON hôte : une application servie par un
+  // autre hôte que le service n'en verrait rien, et ses PREMIÈRES écritures —
+  // celles du démarrage, juste après la connexion — partaient sans en-tête et
+  // étaient refusées, jusqu'à ce qu'une relecture de session le lui rende.
+  assert.equal(res.res.body.csrf, c[COOKIE_CSRF].valeur, "la connexion rend le jeton anti-CSRF, comme /v1/auth/session");
 });
 
 test("sans session, tout ce qui touche aux comptes est refusé", async () => {
@@ -245,7 +251,7 @@ test("sans session, tout ce qui touche aux comptes est refusé", async () => {
   }
 });
 
-test("la session rendue par /v1/auth/session dit le compte et l'état de son mot de passe", async () => {
+test("la session rendue par /v1/auth/session dit le compte, l'état de son mot de passe, et rend le jeton anti-CSRF", async () => {
   const b = await banc();
   await poserMdp(b, "u-red", MDP_RED, true);
   const s = await connecter(b, "p.dubois", MDP_RED);
@@ -253,6 +259,32 @@ test("la session rendue par /v1/auth/session dit le compte et l'état de son mot
   assert.equal(res.status, 200);
   assert.equal(res.body.utilisateur.id, "u-red");
   assert.equal(res.body.mustChange, true);
+  // Le jeton anti-CSRF voyage AUSSI dans le corps. Il vit dans le cookie (double
+  // envoi), mais `document.cookie` ne montre que les cookies de l'hôte de la
+  // page : une application servie par un autre hôte que le service ne peut pas le
+  // lire, et sans ce jeton elle n'écrirait jamais (voir CHANGELOG, note 1.3.2m).
+  assert.equal(res.body.csrf, s.csrf);
+});
+
+test("une session dont le cookie anti-CSRF a disparu en reçoit un neuf", async () => {
+  const b = await banc();
+  await poserMdp(b, "u-admin", MDP_ADMIN);
+  const s = await connecter(b, "j.mercier", MDP_ADMIN);
+  // Cookie de session SEUL : le navigateur a refusé le cookie anti-CSRF (essai en
+  // clair avec COOKIE_SECURE=true), ou la session a été ouverte par un autre
+  // outil. Sans ce rattrapage, aucune écriture ne passerait avant la prochaine
+  // connexion, sans autre issue que de se reconnecter.
+  const seul = `${COOKIE_SESSION}=${cookies(s.res)[COOKIE_SESSION].valeur}`;
+  const res = await b.route("GET", "/v1/auth/session", { headers: { cookie: seul } });
+  assert.equal(res.status, 200);
+  assert.ok(res.body.csrf, "un jeton neuf est rendu");
+  assert.match(String([].concat(res.headers["set-cookie"] || [])[0] || ""), new RegExp(COOKIE_CSRF + "="), "et reposé en cookie");
+  // Le navigateur garde le cookie reposé : l'écriture suivante passe.
+  const neuf = { cookie: `${seul}; ${COOKIE_CSRF}=${res.body.csrf}`, csrf: res.body.csrf };
+  const ecriture = await b.route("POST", "/v1/auth/mot-de-passe", {
+    body: { ancien: MDP_ADMIN, nouveau: "Renouvele-2026" }, headers: { cookie: neuf.cookie, "x-csrf-token": neuf.csrf },
+  });
+  assert.equal(ecriture.status, 200);
 });
 
 test("une session expirée est refusée, puis effacée", async () => {

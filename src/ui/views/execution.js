@@ -168,7 +168,9 @@ function ficheActe({ a, st, alertes, opts }, paint) {
         st.recours
           ? `${recoursTypeLabel(st.recours.type) || "Recours"} introduit le ${formatDate(st.recours.introduitLe)} : le délai de recours contentieux est clos, l'acte est contesté.`
           : limite ? `Délai de recours contentieux : ${jours >= 0 ? jours + " jour(s) restant(s)" : "échu depuis " + Math.abs(jours) + " jour(s)"} (jusqu'au ${formatDate(limite)}).` : "")
-      : h("p", { class: "fr-small fr-muted", text: "L'acte n'est pas encore exécutoire : au moins une formalité requise manque." }),
+      : h("p", { class: "fr-small fr-muted", text: st.code === "document"
+        ? "Document non juridique : publié au recueil, il ne fait pas droit — aucune opposabilité, aucun délai de recours."
+        : "L'acte n'est pas encore exécutoire : au moins une formalité requise manque." }),
     h("div", { class: "fr-row" },
       button("Voir l'acte", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
       can("actes.gerer") ? button("Modifier", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => import("./modifier.js").then((m) => m.modifierFromActe(a)) }) : null,
@@ -207,7 +209,9 @@ function ficheActe({ a, st, alertes, opts }, paint) {
 
   box.appendChild(h("div", { class: "fr-card fr-card--soft" },
     h("h3", { class: "fr-card__title", text: "À quoi sert cet écran" }),
-    h("p", { class: "fr-small", text: "La transmission au contrôle de légalité fait courir le délai de deux mois du représentant de l'État. La publication rend l'acte opposable aux tiers. La notification le rend opposable à la personne concernée." }),
+    h("p", { class: "fr-small", text: st.code === "document"
+      ? "Un document qui ne fait pas droit — verbatim de séance, déclaration, vœu — se publie pour être donné à lire : aucune formalité ne conditionne son opposabilité, puisqu'il n'en a pas, et aucun délai de recours ne court à son encontre."
+      : "La transmission au contrôle de légalité fait courir le délai de deux mois du représentant de l'État. La publication rend l'acte opposable aux tiers. La notification le rend opposable à la personne concernée." }),
     h("p", { class: "fr-small fr-muted", text: "L'application ne peut pas savoir seule qu'un courrier est parti : chaque formalité est une constatation, horodatée et signée de son auteur, conservée au journal." }),
   ));
   return box;

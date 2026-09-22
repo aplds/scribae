@@ -3,9 +3,10 @@
 //
 // Un acte ne passe pas directement de la rédaction à la signature : il est
 // soumis à un CIRCUIT, défini dans le référentiel (`config.circuits`), fait
-// d'ÉTAPES successives. Chaque étape est confiée à un rôle (et, si on le veut, à
-// un agent du service concerné), et demande soit un BON POUR ACCORD, soit un
-// simple AVIS.
+// d'ÉTAPES successives. Chaque étape a une NATURE — une VÉRIFICATION, un VISA ou
+// la SIGNATURE (voir `STEP_KINDS`) — et un RÔLE qui la porte. Le geste du
+// papier est retrouvé : on vérifie, on vise, on signe. En principe, un circuit
+// s'ouvre donc par une vérification confiée au RÉVISEUR, avant la signature.
 //
 // Deux principes :
 //
@@ -36,26 +37,68 @@ import { inScope } from "./scope.js";
 import { hasRole } from "./users.js";
 
 // Rôles pouvant porter une étape. Les intitulés viennent de src/lib/users.js
-// (le rôle est celui du COMPTE, pas celui des personnes du référentiel).
+// (le rôle est celui du COMPTE, pas celui des personnes du référentiel). Le
+// RÉVISEUR et le SIGNATAIRE y figurent : leurs qualités se cumulent avec les
+// autres, et une étape de vérification est en principe la leur.
 export const STEP_ROLES = [
+  { id: "reviseur", label: "Réviseur (contrôle avant la signature)" },
   { id: "editeur", label: "Éditeur (chef de service, rédacteur en chef)" },
   { id: "administrateur", label: "Administrateur (direction, secrétariat général)" },
+  { id: "signataire", label: "Signataire (celui qui signe l'acte)" },
 ];
 
+// LES TROIS NATURES D'UNE ÉTAPE. Un parapheur de papier passe par trois
+// gestes, et dans cet ordre : on VÉRIFIE que le dossier est complet et l'acte
+// conforme, on donne son VISA (on engage son accord), et l'on SIGNE. Chaque
+// nature a son rôle naturel — le réviseur pour la vérification, l'éditeur ou le
+// chef de service pour le visa, le signataire pour la signature —, mais rien
+// n'est imposé : une étape dit sa nature ET son rôle.
+//
+//   • vérification — un contrôle. Elle vérifie, elle n'engage pas sur le fond.
+//     C'est la nature de l'étape que le RÉVISEUR tient par défaut, avant la
+//     signature (voir src/lib/revision.js pour le contrôle de conformité).
+//   • visa — un accord. Son porteur approuve, et la suite en dépend.
+//   • signature — la dernière étape : l'acte est présenté au signataire. Elle
+//     clôt le circuit, et l'acte peut alors être envoyé en signature.
 export const STEP_KINDS = [
-  { id: "accord", label: "Bon pour accord" },
-  { id: "avis", label: "Avis (consultatif)" },
+  {
+    id: "verification", label: "Vérification", role: "reviseur", verdict: "Vérifié", action: "Vérifier",
+    hint: "Un contrôle : l'étape vérifie que le dossier est complet et l'acte conforme. Son porteur ne se prononce pas sur le fond, et un refus renvoie l'acte en rédaction. C'est le geste du réviseur, et l'étape qui ouvre un circuit.",
+  },
+  {
+    id: "visa", label: "Visa (bon pour accord)", role: "editeur", verdict: "Bon pour accord donné", action: "Donner mon visa",
+    hint: "Un accord : l'étape engage son porteur, qui approuve l'acte avant la signature. C'est le geste d'un chef de service ou d'une direction.",
+  },
+  {
+    id: "signature", label: "Signature", role: "signataire", verdict: "Prêt à signer", action: "Marquer prêt à signer",
+    hint: "La dernière étape : l'acte est présenté au signataire, qui marque son accord pour signer. Elle clôt le circuit — l'acte passe alors à la signature proprement dite, qui reste l'affaire de l'écran de signature.",
+  },
 ];
+
+// Les natures héritées (avant les trois ci-dessus) : un « bon pour accord »
+// devient un visa ; un « avis » consultatif devient un visa FACULTATIF, qui
+// n'empêche pas la signature (c'était déjà le cas quand il était déclaré
+// facultatif). Cette passerelle évite qu'un référentiel enregistré cesse de
+// fonctionner : les circuits anciens restent lisibles et applicables.
+export const kindEtape = (kind) => (STEP_KINDS.some((k) => k.id === kind) ? kind : "visa");
+// Le descripteur d'une nature. Une nature inconnue — ou héritée — est lue comme
+// un visa : c'est la lecture la plus proche de l'ancien « bon pour accord ».
+export const natureEtape = (id) => STEP_KINDS.find((k) => k.id === id) || etiquetteEtape(id);
+export const etiquetteEtape = (kind) => STEP_KINDS.find((k) => k.id === kindEtape(kind)) || STEP_KINDS[1];
+// Le libellé du geste positif, selon la nature : « Vérifié », « Bon pour
+// accord donné », « Prêt à signer » — et le verbe du bouton.
+export const verdictDe = (kind) => etiquetteEtape(kind).verdict;
+export const actionDe = (kind) => etiquetteEtape(kind).action;
 
 // Sentinelle : une trame peut refuser explicitement tout circuit.
 export const AUCUN_CIRCUIT = "aucun";
 
-// Le parapheur est une fonction EXPÉRIMENTALE (Administration › Expérimentale) :
-// éteint par défaut, car beaucoup de collectivités ont déjà leur propre circuit
-// de validation interne, en amont de l'envoi en signature. Tant qu'il est
-// éteint, aucun circuit du référentiel ne s'applique, les actes partent
-// directement en signature, et l'écran du parapheur n'est pas proposé.
-export const parapheurActif = (config) => !!config?.experimental?.parapheur;
+// Le parapheur n'est plus une fonction EXPÉRIMENTALE : c'est une pièce
+// ordinaire de l'application, toujours disponible (1.5.0). Ce qui l'allume,
+// c'est la présence de circuits dans le référentiel : un référentiel sans
+// circuit n'a aucun parapheur, et les actes partent directement en signature —
+// le comportement historique est donc préservé pour qui n'en veut pas.
+export const parapheurActif = () => true;
 
 export const VALIDATION_STATUTS = {
   en_cours: { label: "En cours de validation", color: "info" },
@@ -72,19 +115,32 @@ export const ETAPE_STATUTS = {
   passe: { label: "Étape passée", color: "info" },
 };
 
+// Une étape : sa nature (vérification, visa, signature) commande ses défauts —
+// le rôle qui la porte en principe, et le fait qu'elle soit ou non liée au
+// service de l'acte. Le RÉVISEUR contrôle des actes qui ne sont pas les siens
+// (un service des affaires juridiques, par exemple) : sa vérification n'est donc
+// PAS liée au service, alors que le visa d'un chef de service l'est.
+const DEFAUTS_NATURE = {
+  verification: { label: "Vérification par le réviseur", role: "reviseur", serviceScoped: false },
+  visa: { label: "Visa du chef de service", role: "editeur", serviceScoped: true },
+  signature: { label: "Signature de l'acte", role: "signataire", serviceScoped: false },
+};
+
+// Les valeurs par défaut d'une nature, exposées pour que l'éditeur de circuit
+// (Administration › Circuits) fasse suivre le rôle et l'intitulé quand on
+// change la nature d'une étape, sans réécrire ces défauts de son côté.
+export const etapeDefauts = (kind) => DEFAUTS_NATURE[natureEtape(kind).id];
+
 export function newStep(patch = {}) {
+  const nature = natureEtape(patch.kind).id;
   return {
     id: uid("etp"),
-    label: "Bon pour accord du chef de service",
-    role: "editeur",
-    kind: "accord",
-    // Le validateur doit relever du service de l'acte (et non de tout
-    // l'établissement) : c'est le cas courant — le chef du service qui a
-    // préparé l'acte le contresigne avant la direction.
-    serviceScoped: true,
+    kind: nature,
+    ...DEFAUTS_NATURE[nature],
     optional: false,
     help: "",
     ...patch,
+    kind: nature,
   };
 }
 
@@ -100,7 +156,12 @@ export function newCircuit(patch = {}) {
     trameIds: [],
     familyIds: [],
     entityIds: [],
-    steps: [newStep()],
+    // Le circuit neuf montre le trajet complet : on vérifie, on vise, on
+    // signe. L'administrateur retire les étapes qui ne le concernent pas.
+    steps: [
+      newStep({ kind: "verification" }),
+      newStep({ kind: "visa" }),
+    ],
     ...patch,
   };
 }
@@ -196,7 +257,7 @@ export function demarrerValidation(acte, circuit, user) {
       id: s.id,
       label: s.label || "Étape",
       role: s.role || "editeur",
-      kind: s.kind === "avis" ? "avis" : "accord",
+      kind: natureEtape(s.kind).id,
       serviceScoped: !!s.serviceScoped,
       optional: !!s.optional,
       statut: "en_attente",
@@ -223,9 +284,12 @@ export function etapeActive(v) {
   return steps.find((s) => s.statut === "en_attente") || null;
 }
 
-// Un compte peut-il agir sur l'étape ouverte ?
+// Un compte peut-il agir sur l'étape ouverte ? Les rôles qui peuvent PORTER une
+// étape : le réviseur (vérification), l'éditeur (visa), l'administrateur (le
+// recours), le signataire.
 export function peutValider(user) {
-  return !!user && user.active !== false && (hasRole(user, "administrateur") || hasRole(user, "editeur"));
+  if (!user || user.active === false) return false;
+  return STEP_ROLES.some((r) => hasRole(user, r.id));
 }
 
 export function etapePour(acte, user, config) {

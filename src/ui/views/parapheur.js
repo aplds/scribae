@@ -13,16 +13,15 @@
 // que ce qui a été approuvé.
 // ============================================================================
 import {
-  state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById, parapheurActif,
+  state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById, etapeAParachever,
 } from "../state.js";
 import { h, button } from "../dom.js";
 import { emptyState, helpLink } from "../components.js";
 import { formatDate } from "../../lib/util.js";
-import { targetLabel, inScope } from "../../lib/scope.js";
+import { targetLabel } from "../../lib/scope.js";
 import {
-  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, peutValider,
+  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, etiquetteEtape, STEP_ROLES,
 } from "../../lib/validation.js";
-import { hasRole, primaryRoleId } from "../../lib/users.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
 import { docOfActe } from "./modifier.js";
 
@@ -36,17 +35,6 @@ const TABS = [
 ];
 
 export function renderParapheur(root, params) {
-  // Fonction expérimentale éteinte : l'écran n'est pas proposé, mais un lien
-  // ancien peut encore y mener — on l'explique plutôt que d'afficher un vide.
-  if (!parapheurActif()) {
-    root.appendChild(emptyState(
-      "Le parapheur est une fonction expérimentale, désactivée dans cette installation. Les actes partent directement en signature depuis « Signature & publication ».",
-      button("Ouvrir les fonctions expérimentales", {
-        variant: "secondary",
-        onClick: () => { state.ui = { ...(state.ui || {}), refTab: "experimental" }; navigate("referentiel"); },
-      })));
-    return;
-  }
   const ui = (state.parapheur = state.parapheur || { tab: "aMoi", acteId: "" });
   const config = state.config;
   const file = fileParapheur();
@@ -58,7 +46,7 @@ export function renderParapheur(root, params) {
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: "Parapheur" }),
-      h("p", { class: "page-head__sub", text: "Le circuit de validation des actes : chaque étape est un bon pour accord ou un avis, confié à un rôle du référentiel. Tant que le circuit n'est pas achevé, l'acte ne part pas en signature." }),
+      h("p", { class: "page-head__sub", text: "Le circuit de validation des actes : chaque étape est une vérification, un visa ou la signature, confiée à un rôle du référentiel. En principe, le circuit s'ouvre par une vérification du réviseur, et se clôt par la signature. Tant que le circuit n'est pas achevé, l'acte ne part pas en signature." }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("parapheur", "Comment faire ?"),
@@ -124,18 +112,11 @@ export function renderParapheur(root, params) {
 
 const etapeMienne = (a) => !!state.user && !!etapePourUI(a);
 
-// `etapePour` du module validation a besoin du config ; on factorise l'appel.
-// Les rôles se lisent par `hasRole` (un compte peut en cumuler) : l'étape est
-// mienne si je tiens le rôle de l'étape — l'administrateur tient toutes les
-// étapes, comme recours.
-function etapePourUI(a) {
-  const etape = (a.validation?.steps || []).find((s) => s.statut === "en_attente");
-  if (!etape) return null;
-  if (!peutValider(state.user)) return null;
-  if (!hasRole(state.user, "administrateur") && etape.role !== primaryRoleId(state.user)) return null;
-  if (etape.serviceScoped && a.serviceId && !inScope(state.config, state.user, a)) return null;
-  return etape;
-}
+// L'étape que le compte courant peut franchir sur cet acte. On délègue à
+// `etapeAParachever` (src/ui/state.js) : c'est LUI qui sait lire les rôles — y
+// compris les qualités cumulées du réviseur et du signataire —, et l'écran du
+// parapheur ne redéfinit pas cette règle de son côté.
+const etapePourUI = (a) => etapeAParachever(a);
 
 function resume(n, label, color) {
   return h("div", { class: "parapheur-resume__item" + (n && color === "primary" ? " is-hot" : "") },
@@ -143,8 +124,14 @@ function resume(n, label, color) {
     h("span", { text: label }));
 }
 
-function videDe(tab) {
-  if (tab === "aMoi") return "Rien ne vous attend : aucun acte de votre périmètre n'est à votre étape.";
+// Le nom court du rôle d'une étape, tel qu'on le lit dans une phrase : la
+// première partie de l'intitulé de `STEP_ROLES` (« Réviseur », « Éditeur »…).
+function libelleRole(role) {
+  const r = STEP_ROLES.find((x) => x.id === role);
+  return (r ? r.label.split(" (")[0] : role || "valideur").toLowerCase();
+}
+
+function videDe(tab) {  if (tab === "aMoi") return "Rien ne vous attend : aucun acte de votre périmètre n'est à votre étape.";
   if (tab === "enCours") return "Aucun acte en attente d'un autre valideur.";
   if (tab === "valides") return "Aucun acte validé en attente de signature.";
   return "Aucun acte renvoyé ni refusé.";
@@ -218,7 +205,7 @@ function carteActe(a, paint) {
     const suivante = etapeActive(v);
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small", text: suivante
-        ? `L'étape ouverte est « ${suivante.label} » (${suivante.role === "administrateur" ? "administrateur" : "éditeur"}${suivante.serviceScoped ? ", du service concerné" : ""}). Elle n'est pas de votre ressort.`
+        ? `L'étape ouverte est « ${suivante.label} » (${etiquetteEtape(suivante.kind).label.toLowerCase()} — ${libelleRole(suivante.role)}${suivante.serviceScoped ? ", du service concerné" : ""}). Elle n'est pas de votre ressort.`
         : "Toutes les étapes sont franchies." })));
   }
   if (v.statut === "valide" && !caduque) {
@@ -242,6 +229,7 @@ function carteActe(a, paint) {
 
 function etapeEl(s, i, v) {
   const info = ETAPE_STATUTS[s.statut] || ETAPE_STATUTS.en_attente;
+  const nature = etiquetteEtape(s.kind);
   const ouverte = s.statut === "en_attente" && etapeActive(v)?.id === s.id;
   return h("div", { class: "sig-step" + (s.statut === "valide" || s.statut === "passe" ? " is-done" : "") + (ouverte ? " is-open" : "") },
     h("span", { class: "sig-step__dot", text: s.statut === "en_attente" ? String(i + 1) : (s.statut === "refuse" ? "✗" : s.statut === "renvoye" ? "↩" : "✓") }),
@@ -249,7 +237,7 @@ function etapeEl(s, i, v) {
       h("p", { class: "sig-step__title" },
         s.label,
         h("span", { class: "fr-badge fr-badge--" + info.color, style: { marginLeft: "6px" }, text: info.label }),
-        s.kind === "avis" ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "avis" }) : null,
+        h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: nature.label }),
         s.optional ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "facultative" }) : null,
       ),
       h("p", { class: "sig-step__line", text: s.at ? `${s.byName || "—"} · le ${formatDate(String(s.at).slice(0, 10))}` : (ouverte ? "Étape ouverte" : "En attente") }),

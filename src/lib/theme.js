@@ -108,8 +108,30 @@ export const lighten = (hex, amount = 0.5) => mix(hex, "#ffffff", amount);
 
 // La couleur de marque telle qu'elle doit apparaître dans le thème courant.
 export function brandColors(brandColor, { dark = isDark(), darkBg = "#1b1e26" } = {}) {
-  const base = brandColor || "#000091";
+  // Une couleur illisible — saisie incomplète dans Administration › Identité,
+  // valeur reprise d'un import — rendrait `var(--brand)` invalide partout où il
+  // sert, et l'interface se dégraderait en silence (liens, pastilles, filets).
+  // On retombe alors sur le bleu de la République, comme si rien n'était réglé.
+  const base = hex2rgb(brandColor) ? String(brandColor).trim() : "#000091";
   if (!dark) return { brand: base, soft: "" };
   return { brand: lighten(base, 0.56), soft: mix(base, darkBg, 0.8) };
+}
+
+// ------------------------------------------------------- emblème du thème
+// Un emblème se dessine pour un fond : un blason aux traits sombres, un logo noir
+// sur fond transparent. Posé sur le fond sombre de l'application, il devient
+// illisible ou bave dans le décor. Le référentiel peut donc porter un SECOND
+// emblème (`brand.logoUrlDark`), employé quand le poste de travail est en thème
+// sombre — et à défaut, c'est l'emblème ordinaire qui sert dans les deux thèmes,
+// si bien qu'une installation qui n'en déclare qu'un ne change pas d'un pixel.
+//
+// Le choix se fait AU RENDU, et non par une requête média `prefers-color-scheme` :
+// le thème de l'application n'est pas celui du système — l'agent peut l'imposer
+// (menu du compte), et la requête média l'ignorerait. Chaque écran qui montre
+// l'emblème le demande donc ici, et se redessine au changement de thème
+// (`applyBrand` puis `emit`, voir src/ui/state.js et src/ui/theme.js).
+export function brandLogoUrl(brand, { dark = isDark() } = {}) {
+  const b = brand || {};
+  return (dark ? b.logoUrlDark : "") || b.logoUrl || "";
 }
 

@@ -48,6 +48,11 @@ const DOCUMENTS = [
     desc: "Toutes les variables du fichier .env — service et référentiel —, leur rôle, leur type et leurs bornes. Document engendré.",
   },
   {
+    id: "api", group: "Exploitation",
+    path: "src/docs/API.md", title: "API REST — référence",
+    desc: "Toutes les routes de l'API : rôle exigé, paramètres, corps, réponses, champs et exemple cURL. Document engendré.",
+  },
+  {
     id: "docker", group: "Exploitation",
     path: "src/docs/DOCKER.md", title: "Construire une image Docker autonome",
     desc: "Bâtir une image unique (service + façade + application), la publier sur un registre, et la lancer.",

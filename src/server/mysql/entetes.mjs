@@ -32,11 +32,34 @@ const journalDefaut = (message) => console.error(message);
 // Rend une copie des en-têtes où ne subsistent que les couples nom/valeur
 // valides. Toute valeur écartée est signalée au journal — jamais silencieusement
 // transmise.
+//
+// Un en-tête peut porter PLUSIEURS valeurs (un tableau) : c'est le cas des
+// cookies, et il ne faut surtout pas les joindre par une virgule. `Set-Cookie`
+// est le seul en-tête qu'on ne peut pas replier : « scribae_session=…; Path=/…,
+// scribae_csrf=…; Path=/… » sur une même ligne est une valeur invalide, que les
+// navigateurs n'interprètent que par tolérance (chacun son heuristique de
+// découpage) et qu'un mandataire peut refuser. Or c'est exactement le couple que
+// le service pose à la connexion : la session et son jeton anti-CSRF. Node
+// accepte un tableau et écrit une ligne par valeur — on le lui rend tel quel.
 export function entetesSurs(entetes, { journal = journalDefaut } = {}) {
   const surs = {};
   for (const [nom, valeur] of Object.entries(entetes)) {
+    if (!RFC7230_NOM.test(nom)) {
+      journal(`[entete] nom refusé : « ${nom} » (caractère hors « token » RFC 7230) — en-tête écarté.`);
+      continue;
+    }
+    if (Array.isArray(valeur)) {
+      const bonnes = valeur
+        .map((v) => (v === null || v === undefined ? "" : String(v)))
+        .filter((v) => RFC7230_VALEUR.test(v));
+      if (bonnes.length !== valeur.length) {
+        journal(`[entete] une valeur de « ${nom} » (caractère non ASCII ou de contrôle) : valeur écartée.`);
+      }
+      if (bonnes.length) surs[nom] = bonnes;
+      continue;
+    }
     const v = valeur === null || valeur === undefined ? "" : String(valeur);
-    if (!RFC7230_NOM.test(nom) || !RFC7230_VALEUR.test(v)) {
+    if (!RFC7230_VALEUR.test(v)) {
       journal(`[entete] valeur refusée pour « ${nom} » (caractère non ASCII ou de contrôle) : en-tête écarté.`);
       continue;
     }

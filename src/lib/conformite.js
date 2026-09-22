@@ -25,6 +25,7 @@
 import { interpolate } from "./compile.js";
 import { articlesOf } from "./amend.js";
 import { formatDate } from "./util.js";
+import { estNatureJuridique, natureDocs, natureDe } from "./schema.js";
 
 export const NIVEAUX = {
   erreur: { label: "Erreur", color: "error", icone: "✗" },
@@ -63,6 +64,16 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
   // signé (voir src/lib/annexe-docs.js). Les contrôles de signature sont donc
   // sans objet pour elle, et le rapport ne les réclame pas.
   const estAnnexe = meta.nature === "annexe";
+  // Un DOCUMENT QUI NE FAIT PAS DROIT (verbatim de séance, déclaration, vœu)
+  // rapporte, déclare ou demande : il ne décide rien. Les contrôles de l'acte qui
+  // décide — le dispositif en articles, la date d'effet — ne le concernent donc
+  // pas, et le rapport ne les réclame pas : il vérifie que le document porte bien
+  // SON texte, et il ne lui promet aucune opposabilité.
+  // La nature se lit sur la TRAME (et, à défaut, sur l'acte) : `meta.nature` de
+  // la compilation dit la forme du document (« acte » ou « annexe »), non la
+  // nature choisie dans le référentiel.
+  const nature = natureDe(trame || acte);
+  const estDocument = !estAnnexe && !estNatureJuridique(nature);
   const parId = {};
   const groupes = GROUPES.map((g) => (parId[g.id] = { ...g, checks: [] }));
   const check = (groupe, id, niveau, label, detail = "") =>
@@ -99,6 +110,9 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
       `Entrée en vigueur le ${formatDate(dateEffet, "date-long")}, signature le ${formatDate(dateSignature, "date-long")}.`);
   } else if (dateEffet) {
     check("identite", "date-effet", "ok", "Date d'effet renseignée", formatDate(dateEffet, "date-long"));
+  } else if (estDocument) {
+    check("identite", "date-effet", "info", "Aucune entrée en vigueur",
+      "Un document qui ne fait pas droit n'a pas d'entrée en vigueur : sa publication au recueil ne le rend ni opposable ni exécutoire.");
   } else {
     check("identite", "date-effet", "info", "Aucune date d'effet",
       "L'entrée en vigueur suivra la règle générale : le lendemain de la publication, sauf disposition contraire.");
@@ -192,9 +206,20 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
   // Les articles du dispositif, divisions comprises : un règlement rangé en
   // Titres et Chapitres a bien un dispositif, et il compte.
   const articles = articlesOf(doc);
-  check("structure", "dispositif", articles.length ? "ok" : "erreur",
-    articles.length ? `Dispositif composé de ${articles.length} article(s)` : "Aucun article au dispositif",
-    articles.length ? articles.map((x) => x.numLabel).filter(Boolean).join(" · ") : "Un acte sans dispositif ne décide rien.");
+  if (estDocument) {
+    // Le document n'a pas de dispositif : il porte son TEXTE, donné à lire tel
+    // quel. On vérifie donc la matière — les paragraphes, hors intitulé, ligne
+    // d'autorité et bloc de signature.
+    const horsTexte = new Set(["title", "authority", "signature"]);
+    const paragraphes = nodes.filter((n) => !horsTexte.has(n.type) && String(n.text || "").trim() !== "");
+    check("structure", "dispositif", paragraphes.length ? "ok" : "erreur",
+      paragraphes.length ? `Texte du document — ${paragraphes.length} paragraphe(s)` : "Document sans texte",
+      paragraphes.length ? "" : `Un ${natureDocs(nature).label.toLowerCase()} publié au recueil doit porter son texte : ce sont les mots de l'assemblée ou de son auteur qui sont donnés à lire.`);
+  } else {
+    check("structure", "dispositif", articles.length ? "ok" : "erreur",
+      articles.length ? `Dispositif composé de ${articles.length} article(s)` : "Aucun article au dispositif",
+      articles.length ? articles.map((x) => x.numLabel).filter(Boolean).join(" · ") : "Un acte sans dispositif ne décide rien.");
+  }
 
   const sansContenu = articles.filter((x) => !(x.blocks || []).some((b) => (
     (b.type === "list" ? (b.items || []).length : b.type === "table" ? (b.rows || []).length : String(b.text || "").trim() !== "") )));
@@ -253,8 +278,10 @@ export function rapportConformite(doc, { config = {}, trame = null, acte = null,
     }
   }
   if (publiable) {
-    check("publicite", "publiable", "info", "Acte publiable — déposé au recueil",
-      `Il recevra son identifiant ELI (${meta.eli || "à composer"}) et sera opposable à sa publication.`);
+    check("publicite", "publiable", "info", estDocument ? "Document publiable — déposé au recueil" : "Acte publiable — déposé au recueil",
+      estDocument
+        ? `Il recevra son identifiant ELI (${meta.eli || "à composer"}) et sera publié au recueil pour être porté à la connaissance de tous : sa publication ne le rend ni opposable ni exécutoire.`
+        : `Il recevra son identifiant ELI (${meta.eli || "à composer"}) et sera opposable à sa publication.`);
   } else {
     check("publicite", "non-publiable", "info", "Acte individuel non publiable",
       "La trame est déclarée non publiable : l'acte est conservé au registre et notifié à l'intéressé, sans passer par le recueil.");

@@ -33,12 +33,19 @@ const INTERDITS = new Set(["__proto__", "constructor", "prototype"]);
 // Le déploiement connu : `{ variables, erreurs }`, ou `null` si aucun
 // déploiement ne parle (aperçu en ligne, page statique).
 let deploiement = null;
+// L'ÉTAT DU PRESTATAIRE DE SIGNATURE, tel que le service le rend (`ETAT` de la
+// réponse : transport, adresse, niveau, chemins — et `cle`, un booléen, jamais
+// la clé). C'est le SERVICE qui sait si le circuit électronique est réellement
+// branché : lui seul détient la clé. L'Administration › Signature s'en sert
+// pour le dire, plutôt que de laisser croire à une simulation.
+let prestataire = null;
 
 const estObjet = (o) => !!o && typeof o === "object" && !Array.isArray(o);
 
 // Enregistre ce que le service a rendu sur `GET /v1/config`. Rend le
 // déploiement retenu, ou `null` si la source ne dit rien d'exploitable.
 export function setDeploiementConfig(source) {
+  prestataire = estObjet(source) && estObjet(source.prestataire) ? source.prestataire : null;
   if (!estObjet(source) || !estObjet(source.variables)) { deploiement = null; return null; }
   const variables = {};
   for (const [chemin, valeur] of Object.entries(source.variables)) {
@@ -60,6 +67,9 @@ export function setDeploiementConfig(source) {
 
 export const optionsDeployees = () => deploiement;
 export const aDesOptionsDeployees = () => !!deploiement && Object.keys(deploiement.variables).length > 0;
+// L'état du prestataire de signature tel que le SERVICE le voit, ou null quand
+// aucun service ne parle (aperçu en ligne, page statique).
+export const prestataireDeploye = () => prestataire;
 
 // Le réglage est-il POSÉ par le déploiement (et non par le référentiel) ? Sert à
 // l'interface : un champ fixé par le `.env` se signale plutôt que de laisser

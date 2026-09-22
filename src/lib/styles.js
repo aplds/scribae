@@ -148,6 +148,11 @@ export function emptyStyle(patch = {}) {
 
     // --- formule d'autorité (« Le maire de… »)
     authorityAlign: "left",
+    // Graisse de la formule d'autorité : « normal », « italic » (italique),
+    // « bold » (gras), « italic-bold » (gras italique). Vide ou inconnue, on
+    // retombe sur le réglage historique `authorityItalic` — une feuille
+    // enregistrée avant ce choix reste donc présentée à l'identique.
+    authorityWeight: "",
     authorityItalic: false,
     authoritySize: "1",
 
@@ -210,8 +215,15 @@ export function emptyStyle(patch = {}) {
 
     // --- en-tête et pied de page
     showHeader: false,
+    // Le logo de GAUCHE (le logo principal, `logoUrl` — inchangé) et, en plus,
+    // le logo de DROITE : beaucoup d'actes portent deux marques, celle de la
+    // collectivité à gauche et celle de l'État, d'un partenaire ou d'une
+    // délégation à droite. Laissé vide, le second emplacement n'existe pas et
+    // le document se présente comme avant.
     logoUrl: "",
     logoHeight: "42",
+    logoRightUrl: "",
+    logoRightHeight: "",   // vide = même hauteur que le logo de gauche
     logoAlign: "left",
     headerText: "",
     headerRule: true,
@@ -733,9 +745,15 @@ export function styleCss(style, config, { scope = "" } = {}) {
   if (s.titleRule === "box") { rule2(A(".doc-title"), "padding:.5em .8em"); ruleBox(A(".doc-title"), s.titleBoxSides, `${W} ${border} ${rule}`); }
 
   // -- formule d'autorité
+  // La graisse se choisit (normal, italique, gras, gras italique). Une feuille
+  // enregistrée avant ce réglage n'a que `authorityItalic` : on le traduit.
+  const poidsAutorite = s.authorityWeight
+    || (s.authorityItalic ? "italic" : "normal");
   rule2(A(".doc-authority"),
     `text-align:${AUTHORITY_ALIGN[s.authorityAlign] || "left"};font-size:${emv(s.authoritySize, "1em")}`
-    + (s.authorityItalic ? ";font-style:italic" : ""));
+    + (poidsAutorite === "italic" ? ";font-style:italic"
+      : poidsAutorite === "bold" ? ";font-weight:700"
+        : poidsAutorite === "italic-bold" ? ";font-weight:700;font-style:italic" : ""));
 
   // -- visas et considérants
   rule2(A(".doc-visas"), `list-style:${s.visasBullet ? "disc" : "none"};padding-left:${pxv(s.visasIndent, "0px")}`);
@@ -835,6 +853,12 @@ export function styleCss(style, config, { scope = "" } = {}) {
   rule2(A(".doc-sheet-header") + '[data-align="center"]', "justify-content:center;text-align:center");
   rule2(A(".doc-sheet-header") + '[data-align="right"]', "justify-content:flex-end;text-align:right");
   rule2(A(".doc-sheet-logo"), `height:${pxv(s.logoHeight, "42px")};width:auto;max-width:45%;flex:none`);
+  // Deux logos : la marque de gauche, le texte au centre, la marque de droite
+  // à l'autre bout du filet. L'emplacement de droite prend la hauteur réglée
+  // pour lui, ou celle du logo de gauche.
+  rule2(A(".doc-sheet-logo--right"), `height:${pxv(s.logoRightHeight || s.logoHeight, "42px")}`);
+  rule2(A(".doc-sheet-header--duo .doc-sheet-logo--right"), "margin-left:auto");
+  rule2(A(".doc-sheet-header--duo .doc-sheet-headtext"), "flex:1 1 auto;text-align:center");
   rule2(A(".doc-sheet-headtext"),
     `margin:0;font-family:${headingFont};font-size:${emv(s.headerSize, "0.86em")};color:${muted}`
     + (s.headerItalic ? ";font-style:italic" : "")

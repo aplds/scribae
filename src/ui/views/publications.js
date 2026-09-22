@@ -102,9 +102,9 @@ function renderRegistre(root) {
       h("td", { text: p.objet || "" }),
       h("td", { class: "fr-mono fr-small", text: p.eliUri || "" }),
       h("td", { class: "fr-small", text: formatDate(p.datePublication) }),
-      h("td", { class: "fr-small", text: formatDate(p.dateOpposabilite) }),
+      h("td", { class: "fr-small", text: p.juridique === false ? "non opposable" : formatDate(p.dateOpposabilite) }),
       h("td", {},
-        h("span", { class: "fr-badge fr-badge--" + (p.latest ? "success" : "info"), text: p.latest ? "en vigueur" : "antérieure" }),
+        h("span", { class: "fr-badge fr-badge--" + (p.latest ? "success" : "info"), text: p.latest ? (p.juridique === false ? "dernière version" : "en vigueur") : "antérieure" }),
         h("div", { class: "fr-small fr-muted", text: kindLabelOf(p.kind) })),
       h("td", {}, button("Consulter", { variant: "secondary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(p.cle)) })),
     ));

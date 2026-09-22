@@ -9,18 +9,18 @@ Livré en une fois, quatre manques qui tenaient ensemble (un acte n'était ni
 validé, ni exécutoire, ni retrouvable, ni partagé) :
 
 - **Parapheur** — `src/lib/validation.js` (circuit = donnée du référentiel :
-  étapes séquentielles, rôle, bon pour accord ou avis, ciblage trame / famille /
+  étapes séquentielles, **trois natures d'étape** — vérification, visa, signature —
+  chacune appelant un rôle par défaut modifiable, ciblage trame / famille /
   entité) ; `src/ui/views/parapheur.js` (file « à valider par moi / en cours /
   validés / renvoyés ») ; `src/ui/parapheur-actions.js` (les gestes partagés par
   l'écran et par la fiche d'acte) ; décisions, observations, reprise de circuit,
   et **empreinte du texte validé** : réécrire l'acte après validation rend celle-ci
   caduque. Le service de signature refuse (409 `validation_incomplete`) d'ouvrir un
   circuit sur un acte non validé.
-  C'est une **fonction expérimentale, éteinte par défaut** (`experimental.parapheur`,
-  Administration › Expérimentale) : beaucoup de collectivités ont déjà leur propre
-  circuit interne, en amont de « Envoyer en signature ». Éteint, `circuitFor` ne
-  résout aucun circuit et tout le parapheur disparaît de l'interface ; l'activer
-  régénère les actes de démonstration pour que l'écran ne soit pas vide.
+  C'est une **fonction ordinaire** (elle n'est plus expérimentale) : le circuit
+  général s'ouvre par la **vérification du réviseur**, puis le visa de la direction.
+  Un référentiel qui n'en veut pas écarte le circuit sur ses trames (« Aucune
+  validation »).
 - **Révision** — `src/lib/revision.js` (rôle « Réviseur » **cumulable**, compétence
   par compte ou portée par un service — ou certains de ses bureaux —, ciblage
   services / familles / trames / types d'actes / entités ; `en_attente`, `valide`,
@@ -160,7 +160,7 @@ publication → ELI) fonctionne sans serveur, y compris après rechargement.
       se revider après un rechargement, alors que le registre local dit toujours les actes publiés.
       Le générateur **enregistré** (service « natif ») et l'**auto-hébergement** (MariaDB,
       `sb_etat`) ne sont pas concernés — et l'**édition statique** (`src/pages/host.js`, IndexedDB,
-      sans budget de calcul) publie les quinze actes en treize secondes et les conserve d'un
+      sans budget de calcul) publie les dix-sept actes en treize secondes et les conserve d'un
       rechargement à l'autre : c'est cette forme-là qu'il faut montrer.
 
 ## Auto-hébergement (chantier livré — suite possible)
@@ -261,6 +261,27 @@ Reste à faire, par ordre d'intérêt :
 - [ ] **Pilote local plus riche.** Le mode local repose sur le stockage du
       navigateur (IndexedDB). Un pilote SQLite/OPFS donnerait des requêtes locales — utile
       seulement si le mode local devait devenir autre chose qu'une démonstration.
+- [ ] **Points ouverts de l'audit ciblé du 22/09/2026** (session, anti-CSRF, file
+      d'attente ; détails et propositions dans `src/docs/AUDIT-BUGS-2026-09-22.md`) :
+      `GET /v1/db/health` est publique et décrit l'hôte, le port et la version de la
+      base — la protéger par une session demande de traiter son `401` comme « session
+      requise », et non comme une panne, dans `src/ui/app.js` ; le mode « Service de
+      démonstration » reste proposé en auto-hébergement alors qu'il n'y a pas de
+      socket (limite de taille plus basse, essai d'écriture absent) ; une entrée
+      définitivement refusée est réessayée toutes les trente secondes — à suspendre
+      jusqu'à un geste explicite ; les migrations de `bootstrap()` écrivent `users` ou
+      `config` même pour un compte ordinaire (refus légitime, mais affiché comme une
+      erreur) ; rien n'avertit avant un montage inter-**site**, où le cookie de session
+      `SameSite=Lax` ne traverse pas ; la présence (25 s) amplifie les états d'erreur
+      à l'écran.
+- [ ] **Les mots de passe des comptes supprimés restent chez le service.** Supprimer
+      un compte depuis « Comptes et rôles » retire son enregistrement de la collection
+      `users`, mais laisse sa ligne dans `sb_motdepasse`. Elle ne peut plus servir
+      (la connexion part du compte), mais un compte RECRÉÉ avec le même identifiant
+      reprendrait l'ancien mot de passe — et c'est un reste qui traîne dans les
+      sauvegardes. La suppression d'un compte devrait donc retirer aussi son mot de
+      passe (`retirerMotDePasse` existe déjà : route
+      `DELETE /v1/auth/comptes/<id>/mot-de-passe`, utilisée par l'écran du compte).
 
 ## Éditeur de trame : l'intuitivité (chantier en cours)
 
@@ -576,7 +597,15 @@ Restent ouverts :
 - [ ] **Word `.docx` / PDF natif.** L'export Word livré est un `.doc` (HTML balisé pour Word,
       section A4) : un `.docx` natif, et un PDF produit sans passer par l'imprimante du
       navigateur, restent à faire.
-- [ ] Signature réellement qualifiée (brancher le prestataire de la collectivité).
+- [ ] **Signature réellement qualifiée.** Les réglages sont là (`config.signature.api` :
+      transport, adresse, prestataire, niveau, notification, délai et les quatre points de
+      terminaison — Administration › Signature, ou les variables `SCRIBA_SIGNATURE_API_*` du
+      `.env`), et c'est le **service** qui appelle le prestataire (`server/mysql/signature.mjs`,
+      clé `SCRIBA_SIGNATURE_API_CLE`). Reste à l'éprouver contre un prestataire **réel**
+      (ESUP-Signature, un parapheur) : le format exact des jetons du document, des signataires
+      et du démarrage diffère d'un produit à l'autre, et la notification entrante
+      (`POST /v1/webhooks/signature`) mérite d'être vérifiée de bout en bout avec un certificat
+      de signature. Point d'entrée : `createPrestataire` (`server/mysql/signature.mjs`).
 - [ ] Bibliothèque de trames partagée par URL publique.
 - [x] **Gestion des feuilles de style des actes.** Livré : `src/lib/styles.js` (modèle,
       résolution trame → entité → famille → feuille générale, préréglages, CSS) et l'écran
@@ -594,15 +623,20 @@ Restent ouverts :
       dans le navigateur, `auto`/`light`/`dark`, application avant tout rendu depuis
       `index.html`), palettes dans `src/css/app.css` (jetons `[data-theme="dark"]`), bouton dans
       l'en-tête et choix dans le menu du compte (`src/ui/theme.js`) ; la couleur de marque est
-      éclaircie en mode sombre (`--brand`) tandis que le papier reste blanc (`--brand-light`).
+      éclaircie en mode sombre (`--brand`) tandis que le papier reste blanc (`--brand-light`), et
+      le référentiel peut porter un **second emblème** pour le fond sombre (`brand.logoUrlDark`,
+      résolu par `brandLogoUrl`), qui prend alors la place du logo dans l'en-tête, à l'écran de
+      connexion et sur le recueil public — jamais sur le papier.
       Piste : mémoriser la préférence **par compte** (aujourd'hui par poste/navigateur), pour
       la retrouver en changeant de machine.
 
 ## Jeu de démonstration (livré — pistes)
 
-Livré : `src/lib/demo-actes.js` pose **soixante-six actes** au premier démarrage, dont
-**quarante-neuf signés** (vérifiables) — trois d'entre eux illustrent la **révision** (un acte en
-attente, un acte révisé et validé, un acte rejeté, revenu en brouillon), deux sont des **actes
+Livré : `src/lib/demo-actes.js` pose **soixante-neuf actes** au premier démarrage, dont
+**cinquante-deux signés** (vérifiables) — trois d'entre eux illustrent la **révision** (un acte en
+attente, un acte révisé et validé, un acte rejeté, revenu en brouillon), trois sont des **documents
+non juridiques** (verbatim de séance, déclaration, vœu : publiés au recueil, sans opposabilité — voir
+`SPEC.md` § 2.2.4 quater), deux sont des **actes
 individuels non publiables** (trame `tpl-revalorisation`, `publishable: false`), et **sept** forment
 le cas de l'**annexe** : un document adopté (règlement intérieur du conseil, règlement d'accès à la
 restauration scolaire, grille tarifaire des services municipaux, charte de la participation
@@ -661,7 +695,7 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       route — le service émulé semble prélever un instantané de `state` sans égard pour le
       gestionnaire en cours, et il est tenu à un **budget de calcul soutenu** (≈ 250 ms par
       seconde). Deux mesures atténuent déjà le second point : la pause entre deux actes de
-      l'amorçage (`PAUSE_AMORCAGE`) et le choix de **quinze actes publiés** plutôt que vingt-huit.
+      l'amorçage (`PAUSE_AMORCAGE`) et le choix de **dix-sept actes publiés** plutôt que tous.
       Une troisième, mesurée, couvre le premier : la **reprise** de l'amorçage (voir ci-dessus)
       rattrape l'appel perdu quand la page était occupée — l'attente de vingt secondes de
       `ready()` (src/lib/remote.js) expire alors que le canal s'ouvre normalement, et la reprise
@@ -687,8 +721,10 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       (`src/server/mysql/actes.mjs`) n'expose pas cette route — sur une pile auto-hébergée, le
       geste aboutit à une erreur. À ajouter là-bas (même règle : motif exigé, trace au journal,
       l'acte redevient *signé*), et à couvrir par `actes.test.mjs`.
-- [x] **Actes de démonstration plus variés.** Fait (SEED_VERSION 45/46) : le jeu couvre
-      **vingt et une trames** et **soixante-six actes** — nomination, délégation, permis de
+- [x] **Actes de démonstration plus variés.** Fait (SEED_VERSION 45/46, puis 53 pour les
+      documents non juridiques) : le jeu couvre
+      **vingt-cinq trames** et **soixante-neuf actes** — verbatim de séance, déclaration, vœu,
+      nomination, délégation, permis de
       construire, marché d'un établissement autonome, régie, subvention, revalorisation
       (non publiable), délibération, règlements (conseil, restauration scolaire), grille
       tarifaire, police, manifestation et événement, convention, avenant, engagement de
@@ -758,3 +794,58 @@ délégations, comptes, référentiel, feuilles de style, recherche, assistants,
       dédié (qui imprime lui-même) ou téléchargement.
 - [x] **JSON-LD ELI : `eli:type_document` vide** (la nature de l'acte n'y est pas reportée).
       **Livré (`1.3.1j`)** : le type d'acte et l'entité voyagent avec la publication.
+
+## Organigramme, chrono, API documentée et signature par API (1.4.0 — livré)
+
+Livrés en une fois, sur demande : le signataire principal, l'organigramme des entités, le chrono
+de numérotation, deux emblèmes en en-tête, l'autorité en gras, les réglages de l'API du
+prestataire, la référence de l'API REST, et l'accès local en mode annuaire.
+
+- [x] **Signataire principal d'une entité.** `entite.signerPersonId` / `signerRoleId` (fiche de
+      l'entité, onglet Entités de l'Administration), lu par `signatairePrincipal`
+      (`src/lib/organigramme.js`) et employé par la compilation comme signataire par défaut
+      (`buildContext`, `src/lib/compile.js`). Une entité sans signataire principal est signalée,
+      plutôt que de produire un acte sans signature.
+- [x] **Organigramme entités → services → bureaux.** `src/lib/organigramme.js` (module pur) et
+      `src/ui/views/organigramme.js` (route `organigramme`, même toile que les Délégations).
+      Une entité est **autonome** (personnalité morale : commune, CCAS, caisse des écoles,
+      office) ou **rattachée** (`parentId` + `autonome: false` : une régie sans personnalité
+      morale propre, mais avec son directeur, son service et ses actes). Entités hors arbre
+      (rattachement cyclique) signalées.
+- [x] **Chrono de numérotation.** `src/lib/chrono.js` + `src/ui/views/chrono.js` (route
+      `chrono`) : tous les rangs attribués, les rangs jamais attribués et les numéros annulés,
+      compteurs, filtres, tri, export **CSV et XLSX sans dépendance** (`src/lib/xlsx.js`),
+      passage à l'année suivante et annulation d'un rang. Le noyau de la séquence vit désormais
+      dans `src/lib/sequence.js` (portée globale / par entité / par type d'acte, relecture d'un
+      numéro composé) et **un numéro n'est plus jamais attribué deux fois**
+      (`prochainNumeroLibre` : on enjambe les rangs déjà pris ou annulés).
+- [x] **Deux emblèmes en en-tête** (`logoRightUrl`, `logoRightHeight`) et **autorité en gras**
+      (`authorityWeight` : normal, italique, gras, gras italique — les feuilles antérieures
+      gardant leur rendu par « Hérité »).
+- [x] **Réglages de l'API du prestataire de signature** (Administration › Signature et
+      `SCRIBA_SIGNATURE_API_*`), appel réel par le service (`server/mysql/signature.mjs`), clé
+      jamais exposée.
+- [x] **Référence de l'API REST + panneau de commande** (`src/lib/api-reference.js`,
+      `src/ui/views/api-reference.js`, et `src/docs/API.md` engendré par
+      `scripts/generer-api.mjs`).
+- [x] **Mode annuaire : les comptes locaux restent joignables** (`comptesLocaux` rendu par
+      `GET /v1/auth/config`, bloc « Ou par un compte local » à la connexion, `accesLocal` /
+      `sessionDeService` dans `src/lib/auth.js`).
+
+Ce qui reste ouvert, dans le prolongement :
+
+- [ ] **Le chrono exporté en PDF, et signé.** L'export livré est CSV / XLSX ; un état du chrono
+      en PDF (avec la charte de la collectivité) manque, alors qu'un greffe le joint volontiers
+      à un dossier.
+- [ ] **Rattachement d'un SERVICE à un bureau d'une autre entité.** L'organigramme descend
+      entité → service → bureau ; un service partagé entre deux entités (une direction commune)
+      demanderait un rattachement multiple, que le modèle ne porte pas.
+- [ ] **Numéros en double dans les données existantes.** `prochainNumeroLibre` empêche d'en
+      créer de nouveaux, mais rien ne signale les numéros DÉJÀ en double dans un registre
+      repris d'un autre outil : le chrono pourrait les mettre en évidence.
+- [ ] **Signataire principal et délégations.** Le signataire principal d'une entité sert de
+      défaut ; il ne se substitue pas encore à une chaîne de délégation (le visa des décisions
+      de nomination et de délégation reste porté par l'arbre des délégations).
+- [ ] **Rôles d'annuaire pour les entités rattachées.** Les revendications OIDC donnent un rôle
+      et un périmètre ; rattacher un agent à une entité RATTACHÉE (la régie du cinéma) passe
+      encore par le compte, à la main.

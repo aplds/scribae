@@ -481,7 +481,7 @@ function resumeDates(p) {
   return [
     p.dateDocument ? "acte du " + formatDate(p.dateDocument) : "",
     p.datePublication ? "publié le " + formatDate(p.datePublication) : "",
-    p.dateOpposabilite ? "entrée en vigueur le " + formatDate(p.dateOpposabilite) : "",
+    p.dateOpposabilite ? "entrée en vigueur le " + formatDate(p.dateOpposabilite) : (p.juridique === false ? "document non opposable" : ""),
   ].filter(Boolean).join(", ") || "dates non renseignées";
 }
 

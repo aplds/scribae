@@ -5,7 +5,7 @@
 // ce module-ci produit les ACTES qui peuplent le registre (voir SEED_VERSION
 // dans src/lib/store.js, qui décide quand le jeu est posé).
 //
-// SOIXANTE-SIX ACTES peuplent le registre, pour une collectivité d'une
+// SOIXANTE-NEUF ACTES peuplent le registre, pour une collectivité d'une
 // certaine importance — la ville fictive de Valmont-sur-Loire et ses
 // établissements. La plupart sont rédigés ET signés : ce ne sont pas des
 // coquilles vides, le document est compilé depuis sa trame, exporté en Akoma
@@ -36,10 +36,16 @@
 //     par un arrêté du maire, avec leur emprise, leurs mesures de police et
 //     leurs annexes. Ce sont les actes qu'un administré vient consulter.
 //
-// Quinze actes sont enfin PUBLIÉS, c'est-à-dire que la fiction leur donne une
+// Deux d'entre eux ne font PAS droit : un verbatim de séance, une déclaration et
+// un vœu (voir la fin de `SPECS`). Ils se publient au recueil — les administrés
+// les y cherchent —, mais leur publication ne les rend ni opposables ni
+// exécutoires : le recueil les présente comme des documents, sans entrée en
+// vigueur ni délai de recours. C'est la nature de leur trame qui le dit.
+//
+// Dix-sept actes sont enfin PUBLIÉS, c'est-à-dire que la fiction leur donne une
 // constatation de publication au recueil (voir `execution.publication`) :
 // l'amorçage de démonstration les dépose au service, qui tient le recueil public
-// (src/ui/demo-publications.js). Le choix de ces quinze-là n'est pas un hasard :
+// (src/ui/demo-publications.js). Le choix de ces dix-sept-là n'est pas un hasard :
 // ils couvrent les deux familles mises en avant (les six annexes publiées, les
 // trois événements) et une dizaine d'autres documents, de la délégation de
 // signature au plan de stationnement ; le recueil public montre ainsi toute la
@@ -83,6 +89,7 @@ import { renderDocument } from "./render.js";
 import { styleForDoc } from "./styles.js";
 import { buildSignedPackage, PRESTATAIRE } from "./signature.js";
 import { locateAddr } from "./redaction.js";
+import { natureDe } from "./schema.js";
 import { circuitFor, demarrerValidation, appliquerDecision, empreinteTexte } from "./validation.js";
 import { demanderRevision, validerRevision, rejeterRevision } from "./revision.js";
 import { enregistrerFormalite, enregistrerRecours } from "./execution.js";
@@ -104,6 +111,7 @@ const DOC = [
   "DOC-0036-F2D0", "DOC-0037-9B53", "DOC-0038-1C7E", "DOC-0039-60A2", "DOC-0040-E4B8",
   "DOC-0041-7F95", "DOC-0042-2B17", "DOC-0043-D0C6", "DOC-0044-84E1", "DOC-0045-3A29",
   "DOC-0046-C95F", "DOC-0047-1E74", "DOC-0048-5B08", "DOC-0049-A73C", "DOC-0050-2F61",
+  "DOC-0051-7C2A", "DOC-0052-E4B7", "DOC-0053-9F18",
 ];
 
 const SPECS = [
@@ -267,8 +275,8 @@ const SPECS = [
       moyensPaiement: ["cheque", "virement"],
       plafondCheque: 500,
     },
-    // Passé au parapheur la veille : le bon pour accord du chef de service est
-    // donné, le visa de la direction générale attend encore.
+    // Passé au parapheur la veille : la vérification du réviseur est faite,
+    // le visa de la direction générale attend encore.
     parapheur: [{ comment: "Bon pour accord sur le fond et l'imputation budgétaire." }, null],
     revisions: 2,
   },
@@ -360,7 +368,7 @@ const SPECS = [
       partVariable: 1800,
       motif: "",
     },
-    // Validé par le parapheur (un seul bon pour accord pour un acte individuel),
+    // Validé par le parapheur (une seule vérification pour un acte individuel),
     // puis ENVOYÉ AU RÉVISEUR : le contrôle du service des affaires juridiques
     // attend. C'est l'acte que l'écran « Révision » met en tête de sa file.
     parapheur: [{}],
@@ -1209,8 +1217,8 @@ const SPECS = [
       redevance: "",
       conditions: "",
     },
-    // En attente du visa de la direction générale : le bon pour accord du chef de
-    // bureau Urbanisme est donné, l'étape suivante attend.
+    // En attente du visa de la direction générale : la vérification du réviseur
+    // est faite, le visa attend.
     parapheur: [{ comment: "Emprise conforme au plan de circulation transmis par l'entreprise." }, null],
     revisions: 2,
   },
@@ -1470,8 +1478,8 @@ const SPECS = [
       plafondCheque: 1000,
       abroge: "2021-118-VSL",
     },
-    // Le bon pour accord du chef de service est donné ; le visa de la direction
-    // générale attend encore.
+    // La vérification du réviseur est faite ; le visa de la direction générale
+    // attend encore.
     parapheur: [{ comment: "Le plafond du chèque suit celui de la régie principale : cohérent." }, null],
     revisions: 3,
   },
@@ -1742,6 +1750,94 @@ const SPECS = [
       transmission: { at: "2026-11-16", ref: "2026-11-FIN-0402", mode: "ctes", recuLe: "2026-11-16T10:41:00", byName: "Isabelle DAVAL" },
     },
   },
+
+  // ==========================================================================
+  // LES DOCUMENTS D'ASSEMBLÉE QUI NE FONT PAS DROIT.
+  //
+  // Un verbatim de séance, une déclaration et un vœu : trois documents que la
+  // collectivité PUBLIE au recueil — les administrés les y cherchent — sans
+  // qu'ils ne créent jamais de droits. Leur trame porte la nature qui le dit
+  // (`verbatim`, `declaration`, `voeu`), et la publication s'y conforme : ni
+  // opposabilité, ni entrée en vigueur, ni délai de recours (voir src/lib/eli.js
+  // et src/lib/execution.js). Deux d'entre eux sont publiés — le recueil public
+  // montre ainsi des « documents » à côté des actes —, le troisième attend sa
+  // publication et figure dans la file de l'écran « Signature & publication ».
+  //
+  // Ils suivent le circuit général de la commune (vérification du réviseur, puis
+  // visa de la direction) : c'est ce que montre le parapheur dès le premier
+  // écran, et c'est le circuit que la fiction leur prête.
+  // ==========================================================================
+  {
+    // Le VERBATIM de la séance du 22 septembre 2026 : le compte rendu intégral
+    // des débats. C'est le document le plus volumineux de la démonstration — des
+    // paragraphes longs, pour que le texte ait de la place.
+    id: "acte-demo-467",
+    trameId: "tpl-verbatim",
+    signed: true,
+    at: "2026-09-24T08:50:00",
+    createdBy: "u-leclerc", createdByName: "Sophie LECLERC",
+    api: { acteId: "ACT-0050", signatureId: "SIG-0050", docId: DOC[50], deposeLe: "2026-09-24T08:27:00" },
+    values: {
+      numero: "2026-470-VSL",
+      objet: "compte rendu intégral de la séance du conseil municipal du 22 septembre 2026",
+      dateSignature: "2026-09-24",
+      signataire: "p-faure",
+      dateSeance: "2026-09-22",
+      numeroSeance: "Séance ordinaire du 22 septembre 2026",
+      presidence: "Monsieur le maire",
+      ordreDuJour: "1. Approbation du procès-verbal de la séance du 23 juin 2026. 2. Décision modificative n° 2 du budget 2026. 3. Convention de mutualisation avec la communauté de communes. 4. Rénovation énergétique du groupe scolaire Jean-Moulin. 5. Questions diverses.",
+      compteRendu: "Monsieur le maire ouvre la séance à 18 h 30, après avoir constaté que le quorum est atteint : vingt-trois membres sont présents sur les trente-trois que compte l'assemblée. Le procès-verbal de la séance du 23 juin 2026 est approuvé à l'unanimité.\n\nMadame la première adjointe présente la décision modificative n° 2 du budget 2026. Elle expose que l'augmentation du coût de l'énergie impose d'abonder le chapitre des charges de fonctionnement de 84 000 euros, et que la recette exceptionnelle versée par la caisse d'allocations familiales au titre du contrat enfance jeunesse permet d'en couvrir 31 000. Monsieur Roussel demande si le reste à charge sera financé par prélèvement sur l'excédent de l'exercice précédent ; Madame la première adjointe le confirme. La délibération est adoptée par vingt-deux voix pour, une abstention.\n\nMonsieur le maire présente ensuite la convention de mutualisation avec la communauté de communes, qui met en commun le service instructeur des autorisations d'urbanisme. Plusieurs conseillers s'interrogent sur le devenir du personnel communal affecté à l'instruction : Madame la directrice générale des services précise que les trois agents conservent leur emploi, leur grade et leur ancienneté, l'application de la convention ne valant ni mutation ni changement de situation. Après ces explications, la convention est adoptée à l'unanimité.\n\nLe dossier de la rénovation énergétique du groupe scolaire Jean-Moulin donne lieu à un débat nourri. Le maître d'œuvre propose la pose d'une isolation extérieure et le remplacement de la chaudière fioul par une pompe à chaleur, pour un montant estimé à 1 240 000 euros hors taxes. Madame Bernard souligne que l'établissement accueille deux cent quarante élèves et que les travaux devront être conduits pendant les vacances scolaires. Le conseil approuve l'engagement des études et autorise Monsieur le maire à solliciter les subventions de l'État et de la région. La délibération est adoptée par trente voix pour, deux abstentions.\n\nAux questions diverses, Monsieur Masson évoque l'état de la voirie rue des Ormes ; le service technique est saisi. L'ordre du jour étant épuisé, Monsieur le maire lève la séance à 20 h 55.",
+    },
+    // Un document qui ne fait pas droit n'est pas transmis au contrôle de
+    // légalité : cette formalité ne concerne que les actes administratifs. Seule
+    // la publication au recueil est constatée.
+    execution: {
+      publication: { at: "2026-09-28", ref: "RAA n° 2026-20 du 28 septembre 2026", mode: "recueil", byName: "Sophie LECLERC" },
+    },
+  },
+  {
+    // La DÉCLARATION de l'assemblée au sujet de la fermeture annoncée d'une
+    // trésorerie : un texte pris devant le conseil, publié pour être lu — mais
+    // qui n'engage que son autorité, pas la collectivité. Elle attend encore sa
+    // publication : c'est la file « Actes signés, prêts à publier ».
+    id: "acte-demo-468",
+    trameId: "tpl-declaration",
+    signed: true,
+    at: "2026-10-06T19:05:00",
+    createdBy: "u-leclerc", createdByName: "Sophie LECLERC",
+    api: { acteId: "ACT-0051", signatureId: "SIG-0051", docId: DOC[51], deposeLe: "2026-10-06T18:40:00" },
+    values: {
+      numero: "2026-471-VSL",
+      objet: "déclaration du conseil municipal sur le projet de fermeture de la trésorerie municipale",
+      dateSignature: "2026-10-06",
+      signataire: "p-faure",
+      auteurDeclaration: "le conseil municipal, à l'unanimité de ses membres présents",
+      contexte: "Alors que l'administration fiscale a annoncé le regroupement des trésoreries au chef-lieu du département à compter du 1er janvier 2027, le conseil municipal souhaite exprimer solennellement sa position en séance publique.",
+      texte: "Le conseil municipal de Valmont-sur-Loire exprime sa vive préoccupation devant l'annonce de la fermeture de la trésorerie municipale au 1er janvier 2027. Il relève que l'éloignement du service public de proximité aura pour effet d'imposer aux administrés, aux artisans et aux associations des déplacements de plus de vingt-cinq kilomètres pour l'accomplissement de démarches courantes, alors même que la commune ne dispose pas d'une desserte ferroviaire.\n\nLe conseil constate en outre que le personnel de la trésorerie assure une mission d'accueil et de conseil dont la disparition dégraderait le service rendu, en particulier aux personnes âgées et aux habitants dépourvus d'accès numérique.\n\nIl exprime son attachement au maintien d'un service public fiscal de proximité et demande que les décisions annoncées soient reconsidérées en concertation avec la commune et sa population.",
+    },
+  },
+  {
+    // Le VŒU de l'assemblée : elle demande, elle ne décide pas. Publié au recueil
+    // comme la position de l'assemblée, sans force exécutoire.
+    id: "acte-demo-469",
+    trameId: "tpl-voeu",
+    signed: true,
+    at: "2026-10-06T19:20:00",
+    createdBy: "u-leclerc", createdByName: "Sophie LECLERC",
+    api: { acteId: "ACT-0052", signatureId: "SIG-0052", docId: DOC[52], deposeLe: "2026-10-06T18:58:00" },
+    values: {
+      numero: "2026-472-VSL",
+      objet: "vœu de l'assemblée relatif au maintien de la ligne de bus interurbaine vers la gare",
+      dateSignature: "2026-10-06",
+      signataire: "p-faure",
+      destinataire: "Monsieur le président du conseil régional",
+      expose: "La ligne 7 reliant Valmont-sur-Loire à la gare de Saint-Romain a transporté, pendant l'année écoulée, près de 48 000 voyageurs. Elle constitue le seul moyen de transport en commun pour les élèves du lycée de Saint-Romain, et pour les habitants qui travaillent en dehors de la commune. La suppression de deux des six allers-retours quotidiens a été annoncée pour la prochaine refonte du réseau.",
+      demande: "Le conseil municipal émet le vœu que la desserte de Valmont-sur-Loire soit maintenue à son niveau actuel, et que la ligne 7 conserve ses six allers-retours quotidiens. Il demande que la commune soit associée à la concertation préalable à la refonte du réseau, et que la situation des élèves du lycée de Saint-Romain y fasse l'objet d'un examen particulier.",
+    },
+    execution: {
+      publication: { at: "2026-10-12", ref: "RAA n° 2026-24 du 12 octobre 2026", mode: "recueil", byName: "Sophie LECLERC" },
+    },
+  },
 ];
 
 // L'auteur du document tel que l'écran de signature le construit : le
@@ -1810,8 +1906,10 @@ function identifiantDeDemo({ ref, designation }, config, trameOf) {
 // travailler : la directrice des affaires juridiques (éditrice transverse) donne
 // les bons pour accord, l'administrateur de la DSI les visas de direction.
 const ACTEURS_PARAPHEUR = {
+  reviseur: { id: "u-roussel", firstName: "", lastName: "Amandine ROUSSEL" },
   editeur: { id: "u-daval", firstName: "", lastName: "Isabelle DAVAL" },
   administrateur: { id: "u-dubois", firstName: "", lastName: "Yann DUBOIS" },
+  signataire: { id: "u-mercier", firstName: "", lastName: "Julien MERCIER" },
 };
 const nomme = (id, name) => ({ id, firstName: "", lastName: name || "" });
 
@@ -1979,7 +2077,7 @@ export async function seedActes(config, trames) {
       // rédaction : une ANNEXE est adoptée par un autre acte (`adoptePar`), un
       // acte ordinaire annonce ceux qu'il annexe (`annexes`). Voir
       // src/lib/annexes.js.
-      nature: trame.nature === "annexe" ? "annexe" : "acte",
+      nature: natureDe(trame),
       adoptePar: values.__adoption || null,
       annexes: values.__annexes || [],
       // Un acte ÉPINGLÉ est mis en avant sur l'accueil du recueil public (bande

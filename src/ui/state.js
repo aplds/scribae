@@ -1,8 +1,8 @@
 import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, initStorage } from "../lib/store.js";
+import * as db from "../lib/db/index.js";
 import { seedConfigVierge } from "../lib/seed.js";
 import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
-import { demoAccountsDisabled, isOidc, isPassword, authConfig, setDeploiementAuth, deploiementAuth } from "../lib/auth.js";
-import { demoActif } from "../lib/demo.js";
+import { demoAccountsDisabled, isOidc, sessionDeService, authConfig, setDeploiementAuth, deploiementAuth } from "../lib/auth.js";
 import { setDeploiementConfig, appliquerOptions } from "../lib/deploiement-config.js";
 import * as motdepasse from "../lib/motdepasse.js";
 import { applyOidcUser } from "../lib/oidc.js";
@@ -13,7 +13,6 @@ import { styleRuntimeCss, generalPageCss } from "../lib/styles.js";
 import { isDark, brandColors, lighten } from "../lib/theme.js";
 import { debounce } from "../lib/util.js";
 import * as collab from "../lib/collab.js";
-import { seedActes } from "../lib/demo-actes.js";
 import { circuitFor, etapePour, validationAJour, validationPourSignature, parapheurActif as parapheurActifConfig } from "../lib/validation.js";
 import { circuitPour, modeSignature, certificationDe as certificationDeActe, certificationRequise as certificationRequiseActe, publicationExternePossible, versionSignee as versionSigneeDe } from "../lib/externe.js";
 import {
@@ -122,7 +121,8 @@ export async function chargerModeDeploiement() {
 }
 
 // La marque de la collectivité avant toute session : le service la rend dans
-// `GET /v1/auth/config` (nom, sous-titre, logo), parce que le référentiel — qui
+// `GET /v1/auth/config` (nom, sous-titre, emblème — et sa variante pour le thème
+// sombre), parce que le référentiel — qui
 // la porte vraiment — n'est lisible qu'une fois connecté. C'est ce qui permet à
 // l'écran de connexion, et au recueil public, de porter les couleurs de la
 // collectivité au lieu de celles de la démonstration.
@@ -134,6 +134,7 @@ function appliquerMarqueDeploiement(config) {
     ...(m.name ? { name: m.name } : {}),
     ...(m.tagline ? { tagline: m.tagline } : {}),
     ...(m.logoUrl ? { logoUrl: m.logoUrl } : {}),
+    ...(m.logoUrlDark ? { logoUrlDark: m.logoUrlDark } : {}),
     demo: false,
   };
   return appliquerOptions(config);
@@ -173,6 +174,14 @@ export async function init() {
   // mode « mot de passe », les données ne sont servies qu'à une session ouverte,
   // et l'application ne doit donc rien demander avant de s'être identifiée.
   const dep = await chargerModeDeploiement();
+  // Le service vient de dire sous quel régime il tourne : si le pilote de
+  // persistance a été bâti sur un autre présage (la page n'annonçait rien, ou
+  // annonçait autre chose), on le refait maintenant. En mode « mot de passe »,
+  // un pilote à jeton laisserait partir chaque écriture SANS l'anti-CSRF : le
+  // service la refuserait (403) tout en servant les lectures — l'état passait
+  // au rouge à chaque geste, et rien ne s'enregistrait sur la base. Voir
+  // `rafraichirPilote` (src/lib/db/index.js).
+  await db.rafraichirPilote().catch(() => {});
   if (dep && dep.mode === "password") {
     // On se donne une identité NEUTRE (le vrai référentiel est protégé) : c'est
     // assez pour dessiner l'écran de connexion, et le service en fournit le nom.
@@ -293,11 +302,11 @@ export async function loginWithClaims(claims) {
 export async function logout() {
   // On quitte proprement : notre présence est retirée (les autres postes ne nous
   // attendent pas 70 secondes), le verrou de rédaction tombe avec elle, et — en
-  // mode mot de passe — la SESSION est fermée côté service (le cookie HttpOnly
+  // mode à session (mot de passe, annuaire) — la SESSION est fermée côté service (le cookie HttpOnly
   // ne peut pas être effacé par le JavaScript de la page : c'est le service qui
   // le fait, et qui invalide le jeton en base).
   await collab.arreter().catch(() => {});
-  if (isPassword(state.config)) await motdepasse.deconnexion().catch(() => {});
+  if (sessionDeService(state.config)) await motdepasse.deconnexion().catch(() => {});
   state.user = null;
   state.motDePasseAChanger = false;
   await saveSession(null);
@@ -511,9 +520,11 @@ export async function journaliser(entry) {
 }
 
 // --------------------------------------------------------------- parapheur
-// Le parapheur est une fonction expérimentale (Administration › Expérimentale) :
-// éteint par défaut. Quand il est éteint, aucun circuit ne s'applique et tout ce
-// qui le concerne disparaît de l'interface (voir src/lib/validation.js).
+// Le circuit de validation (le « parapheur ») n'est plus une fonction
+// expérimentale (1.5.0) : il est toujours disponible, et ce sont les circuits
+// enregistrés dans le référentiel qui décident. Un référentiel sans circuit
+// n'a aucun parapheur — les actes partent alors directement en signature.
+// `parapheurActif()` reste le point d'entrée du reste de l'interface.
 export const parapheurActif = () => parapheurActifConfig(state.config);
 
 // La transmission automatique au contrôle de légalité est elle aussi une
@@ -531,28 +542,6 @@ export const publicationAuto = () => publicationSettings(state.config).auto !== 
 // La transmission enregistrée sur un acte : la formalité et, si elle a été
 // faite par l'API d'envoi, son certificat.
 export const transmissionDe = (acte) => acte?.execution?.transmission || null;
-
-// Le jeu de démonstration suit le réglage du parapheur : les actes de
-// démonstration PORTENT (ou non) leur passage au circuit de validation (voir
-// src/lib/demo-actes.js), et la validation ne se génère que si le parapheur est
-// actif. Bascule le réglage sans reconstruire les actes laisserait l'écran du
-// parapheur sans exemple : on les régénère donc. Réservé au jeu de
-// démonstration — un registre réel, ou repris à la main, n'est jamais touché.
-export async function regenerateDemoActes() {
-  if (!demoActif(state.config)) return false;
-  const demoOnly = state.actes.length && state.actes.every((a) => String(a.id).startsWith("acte-demo-"))
-    && state.trames.length && state.trames.every((t) => String(t.id).startsWith("tpl-"));
-  if (!demoOnly) return false;
-  try {
-    state.actes = await seedActes(state.config, state.trames);
-    await saveActes(state.actes);
-    emit();
-    return true;
-  } catch (e) {
-    console.warn("Actes de démonstration non régénérés :", e);
-    return false;
-  }
-}
 
 // Le circuit applicable à un acte : celui de sa trame, résolu dans le référentiel.
 export const circuitDe = (acte) => circuitFor(state.config, { trame: trameById(acte?.trameId), acte });
@@ -582,7 +571,7 @@ export function parapheur() {
 }
 
 // Un acte peut-il être envoyé en signature du point de vue du parapheur ?
-// Parapheur éteint : la question ne se pose pas — la réponse est oui.
+// Aucun circuit applicable : la question ne se pose pas — la réponse est oui.
 export const pretPourParapheur = (acte) => (parapheurActif() ? validationPourSignature(acte) : { ok: true, raison: "" });
 
 // --------------------------------------------------------------- révision

@@ -25,6 +25,7 @@
 // ============================================================================
 
 import { formatDate } from "./util.js";
+import { natureJuridiqueDe } from "./schema.js";
 
 export const DELAIS_DEFAUT = {
   recoursMois: 2,          // délai de recours contentieux (deux mois)
@@ -122,11 +123,17 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
   // c'est de sa signature que court le délai de recours — l'annexe n'ayant pas
   // de vie propre (voir src/lib/annexe-docs.js).
   const annexe = trame?.nature === "annexe";
+  // Un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) n'est pas
+  // un acte administratif : sa publication au recueil le donne à lire, elle ne
+  // le rend ni exécutoire ni opposable. Ni transmission au contrôle de légalité,
+  // ni notification aux intéressés ne le concernent — seule la publication est
+  // requise (voir src/lib/schema.js, ACTE_NATURES).
+  const nonJuridique = trame ? !natureJuridiqueDe(trame) : false;
   // Dispense déclarée par la trame : « aucune » écarte la formalité, « requise »
   // la rend obligatoire même là où la règle générale ne l'exigerait pas.
   const dispense = (v) => (v === "aucune" ? false : v === "requise" ? true : null);
-  const transmissionRequise = annexe ? false : (dispense(trame?.transmission) ?? true);
-  const notificationRequise = annexe ? false : (dispense(trame?.notification) ?? !publiable);
+  const transmissionRequise = (annexe || nonJuridique) ? false : (dispense(trame?.transmission) ?? true);
+  const notificationRequise = (annexe || nonJuridique) ? false : (dispense(trame?.notification) ?? !publiable);
 
   return [
     {
@@ -188,6 +195,9 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
 // Date à laquelle l'acte devient exécutoire : la plus tardive des formalités
 // requises accomplies. Vide tant qu'il en manque une.
 export function dateExecutoire(acte, opts = {}) {
+  // Un document non juridique n'a pas de caractère exécutoire : il n'entre en
+  // vigueur pour personne, et aucune date ne s'y attache (voir statutExecution).
+  if (opts.trame && !natureJuridiqueDe(opts.trame)) return "";
   const requises = formalites(acte, opts).filter((f) => f.requis);
   if (requises.some((f) => !f.fait || !f.at)) return "";
   const dates = requises.map((f) => f.at).filter(Boolean).sort();
@@ -196,6 +206,8 @@ export function dateExecutoire(acte, opts = {}) {
 
 // Fin du délai de recours contentieux, à compter de l'exécutoire.
 export function dateLimiteRecours(acte, config, opts = {}) {
+  // Pas de délai de recours contre un document qui ne fait pas droit.
+  if (opts.trame && !natureJuridiqueDe(opts.trame)) return "";
   const d = dateExecutoire(acte, opts);
   if (!d) return "";
   return addMonths(d, delais(config).recoursMois);
@@ -260,6 +272,9 @@ export function effacerRecours(acte) {
 
 export const STATUTS_EXECUTION = {
   brouillon: { label: "En préparation", color: "warning" },
+  // Un document non juridique publié ne devient pas « exécutoire » : il est au
+  // recueil, un point c'est tout. C'est ce que dit cet état.
+  document: { label: "Document — non opposable", color: "info" },
   en_attente: { label: "Formalités en cours", color: "info" },
   executoire: { label: "Exécutoire — recours ouvert", color: "success" },
   recours: { label: "Recours introduit — contentieux en cours", color: "warning" },
@@ -270,6 +285,12 @@ export function statutExecution(acte, config, opts = {}) {
   const f = formalites(acte, opts);
   const signe = f.find((x) => x.id === "signature")?.fait;
   if (!signe) return { ...STATUTS_EXECUTION.brouillon, code: "brouillon", formalites: f };
+  // Un document non juridique signé et publié ne « devient » rien : il est au
+  // recueil, sans opposabilité ni délai de recours. On le dit d'un état à part,
+  // plutôt que de le faire passer pour exécutoire.
+  if (opts.trame && !natureJuridiqueDe(opts.trame)) {
+    return { ...STATUTS_EXECUTION.document, code: "document", formalites: f };
+  }
   const requises = f.filter((x) => x.requis);
   const manquantes = requises.filter((x) => !x.fait);
   if (manquantes.length) return { ...STATUTS_EXECUTION.en_attente, code: "en_attente", manquantes, formalites: f };
@@ -360,6 +381,9 @@ export function alertes(acte, config, opts = {}) {
 export function resumeExecution(acte, config, opts = {}) {
   const st = statutExecution(acte, config, opts);
   const exe = dateExecutoire(acte, opts);
+  if (st.code === "document") {
+    return { code: st.code, label: st.label, color: st.color, exe: "", limite: "", texte: "document publié au recueil, non opposable" };
+  }
   if (st.code === "recours") {
     const r = st.recours || {};
     return {

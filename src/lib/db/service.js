@@ -29,6 +29,11 @@ export function create({
 } = {}) {
   const base = String(baseUrl || "").replace(/\/+$/, "");
   const entetesCsrf = () => (typeof csrf === "function" ? csrf() : (csrf || {}));
+  // La collection que l'essai d'écriture traverse : elle est au contrat, et
+  // elle n'est réservée à aucun rôle (voir `COLLECTIONS_ADMIN` côté service),
+  // si bien qu'un compte ordinaire peut l'éprouver sans que le test confonde un
+  // refus de rôle avec un refus de la base.
+  const COLLECTION_ESSAI = "meta";
 
   async function request(method, path, body) {
     const payload = body === undefined ? null : body;
@@ -70,6 +75,10 @@ export function create({
     if (!res.ok) {
       const e = new Error((res.body && (res.body.erreur || res.body.message)) || `${what} : erreur ${res.status}`);
       e.status = res.status;
+      // Le CODE du refus (`csrf_invalide`, `session_absente`, `droit_requis`…)
+      // dit la CAUSE, là où le message ne dit que le fait : on le garde, pour
+      // que l'appelant puisse expliquer et proposer le geste qui répare.
+      if (res.body && res.body.code) e.code = String(res.body.code);
       throw e;
     }
     return res.body;
@@ -116,5 +125,30 @@ export function create({
     }
   }
 
-  return { id, label, shared: true, transport, baseUrl: base, read, write, remove, health };
+  // Éprouve la voie d'ÉCRITURE — sans rien écrire.
+  //
+  // La route de santé (`/v1/db/health`) ne demande ni session ni anti-CSRF :
+  // elle répond 200 même quand le service refuse ensuite chaque écriture. Un
+  // « test de connexion » qui ne l'interrogeait qu'elle annonçait donc
+  // « Connexion réussie » pendant qu'aucun geste ne s'enregistrait, et que la
+  // file des écritures en attente grossissait — l'écran se contredisait (voir
+  // CHANGELOG, note 1.3.2k).
+  //
+  // Un lot VIDE traverse pourtant toute la garde — session, anti-CSRF, rôle,
+  // transaction — et ne touche AUCUN enregistrement : c'est exactement ce qu'il
+  // faut éprouver. Le transport « socket » est celui du service de démonstration
+  // de la plateforme (état durable limité) : on ne l'interroge pas par une
+  // écriture, même vide.
+  async function essaiEcriture() {
+    if (transport !== "http") return null;
+    try {
+      const res = await request("POST", `/v1/db/collections/${COLLECTION_ESSAI}/sync`, { upserts: [], deletes: [], force: false });
+      const body = check(res, "Écriture d'essai");
+      return { ok: true, status: res.status, code: "", detail: body.message || "La base accepte les écritures." };
+    } catch (e) {
+      return { ok: false, status: (e && e.status) || 0, code: (e && e.code) || "", detail: (e && e.message) || String(e) };
+    }
+  }
+
+  return { id, label, shared: true, transport, baseUrl: base, read, write, remove, health, essaiEcriture };
 }

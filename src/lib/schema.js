@@ -1,6 +1,7 @@
 import { uid } from "./util.js";
 import { emptyAuth } from "./auth.js";
 import { EXTERNE_DEFAUT } from "./numbering.js";
+import { SIGNATURE_API_DEFAUT } from "./externe.js";
 import { ABROGATION_DEFAUT } from "./abrogations.js";
 import { mentionsParDefaut } from "./recueil.js";
 
@@ -56,12 +57,49 @@ export const NUM_STYLES = [
 // une décision qui vit par elle-même. Une « annexe » est un document ADOPTÉ par
 // un autre — un règlement intérieur adopté par une délibération, un tableau
 // tarifaire adopté par une décision : l'annexe ne se signe ni ne se publie pour
-// elle-même, c'est l'acte qui l'adopte qui est signé, et son original est suivi
-// du texte de l'annexe (voir src/lib/annexes.js et src/lib/annexe-docs.js).
+// LES NATURES DE DOCUMENT. Deux familles, et une frontière qui compte : ce qui
+// FAIT DROIT — l'acte, et l'annexe qu'un acte adopte — et ce qui SE PUBLIE
+// SANS FAIRE DROIT : le verbatim d'une séance, une déclaration, un vœu. Les
+// seconds sont des documents de la collectivité : ils ont leur place au recueil,
+// où les administrés les cherchent, mais ils ne sont ni opposables ni exécutoires
+// — ils ne créent pas de droits, et ne se glissent donc pas dans le circuit des
+// délais (contrôle de légalité, recours). `juridique: false` le dit, et toute la
+// publication s'y conforme (voir src/lib/eli.js, `buildWebVersion`).
+//
+// Une ANNEXE est adoptée par un autre acte : elle ne se signe pas pour
+// elle-même, et son texte suit l'acte qui l'adopte (voir src/lib/annexes.js).
+// Un VERBATIM, une DÉCLARATION, un VŒU vivent, eux, par eux-mêmes : ils se
+// signent comme un acte, se numérotent s'il y a lieu, et se publient au recueil.
 export const ACTE_NATURES = [
-  { id: "acte", label: "Acte", hint: "Une décision qui vit par elle-même." },
-  { id: "annexe", label: "Annexe", hint: "Un document adopté par un autre : il ne se signe pas, et son texte suit l'acte qui l'adopte." },
+  {
+    id: "acte", label: "Acte", juridique: true,
+    hint: "Une décision qui fait droit par elle-même : elle se signe, s'oppose, et entre en vigueur.",
+  },
+  {
+    id: "annexe", label: "Annexe", juridique: true,
+    hint: "Un document adopté par un autre : il ne se signe pas, et son texte suit l'acte qui l'adopte.",
+  },
+  {
+    id: "verbatim", label: "Verbatim d'assemblée", juridique: false,
+    hint: "Le compte rendu intégral d'une séance : le texte des débats, publié pour être lu. Il ne fait pas droit, et n'est donc pas opposable.",
+  },
+  {
+    id: "declaration", label: "Déclaration", juridique: false,
+    hint: "Une déclaration prise devant ou par l'assemblée (déclaration d'un groupe, d'un élu, déclaration liminaire) : un document publié, sans portée juridique propre.",
+  },
+  {
+    id: "voeu", label: "Vœu", juridique: false,
+    hint: "Un vœu de l'assemblée — une motion, une prise de position — adopté et publié, mais qui n'a pas de force exécutoire. L'assemblée demande, elle ne décide pas.",
+  },
 ];
+
+// Les natures qui ne font pas droit : leur publication au recueil est
+// INFORMATIVE en ce sens qu'elle n'emporte ni opposabilité ni délais.
+export const estNatureJuridique = (nature) => natureDocs(nature).juridique !== false;
+
+// Le descripteur d'une nature, avec le défaut historique (« acte ») : une trame
+// enregistrée avant l'introduction des natures de document reste un acte.
+export const natureDocs = (id) => ACTE_NATURES.find((n) => n.id === id) || ACTE_NATURES[0];
 
 // ---------------------------------------------------------------------------
 // Paramètres propres aux blocs de texte.
@@ -198,7 +236,11 @@ export function appliquerFormule(formule, texte) {
   if (nf.endsWith("e") && (df.startsWith(nf.slice(0, -1) + "'") || df.startsWith(nf.slice(0, -1) + "\u2019"))) return t;
   return f + " " + t;
 }
-export const natureDe = (trame) => ((trame && trame.nature === "annexe") ? "annexe" : "acte");
+export const natureDe = (trame) => (ACTE_NATURES.some((n) => n.id === trame?.nature) ? trame.nature : "acte");
+// La nature de document du point de vue du DROIT : un verbatim, une déclaration
+// ou un vœu ne font pas droit — leur publication au recueil n'emporte ni
+// opposabilité ni délais d'exécution.
+export const natureJuridiqueDe = (trame) => estNatureJuridique(natureDe(trame));
 
 // L'échelle d'une trame : la sienne, ou celle livrée avec l'application. Une
 // échelle vide n'est pas « aucune division » — c'est l'échelle ordinaire.
@@ -473,6 +515,10 @@ export const emptyConfig = () => ({
     documentFont: "Georgia, 'Times New Roman', serif",
     baseUri: "https://exemple.fr",
     logoUrl: "",
+    // Emblème de rechange, employé quand le poste de travail est en thème sombre
+    // (voir `brandLogoUrl`, src/lib/theme.js). Vide : l'emblème ordinaire sert
+    // dans les deux thèmes.
+    logoUrlDark: "",
     uiFont: "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
     supportName: "",
     supportPhone: "",
@@ -588,18 +634,21 @@ export const emptyConfig = () => ({
   // hors de l'application, puis déposé en PDF ; le réviseur certifie la
   // conformité avant publication). Une trame peut trancher autrement — imposer
   // ou autoriser le circuit externe — par son réglage `signature`. Voir
-  // src/lib/externe.js et Administration › Signature.
-  signature: { mode: "electronique" },
+  // src/lib/externe.js et Administration › Signature. Le bloc `api` porte les
+  // réglages du PRESTATAIRE (adresse, niveau, points de terminaison) : la clé,
+  // elle, reste au service et n'est jamais écrite ici.
+  signature: { mode: "electronique", api: { ...SIGNATURE_API_DEFAUT } },
   // Mode d'authentification : comptes de l'application (démonstration) ou
   // annuaire de la collectivité (OIDC). Brancher l'annuaire désactive
   // automatiquement les comptes de démonstration. Voir src/lib/auth.js.
   auth: emptyAuth(),
   // Fonctions expérimentales : livrées, mais éteintes par défaut, et activées
   // depuis Administration › Expérimentale.
-  //   • `parapheur` fait passer les actes par un circuit de validation de
-  //     l'établissement avant la signature (voir src/lib/validation.js) :
-  //     beaucoup de collectivités ont déjà leur propre circuit, en amont de
-  //     « Envoyer en signature » — d'où le défaut éteint.
+  //   • `parapheur` n'est PLUS une fonction expérimentale (1.5.0) : le circuit
+  //     de validation est toujours disponible, et ce sont les circuits du
+  //     référentiel qui décident (`config.circuits`, voir src/lib/validation.js).
+  //     Le drapeau est conservé, toujours vrai, pour ne pas relire comme faux un
+  //     référentiel enregistré avant ce changement.
   //   • `controleLegalite` transmet l'acte signé au représentant de l'État par
   //     une API d'envoi, entre le retour signé et la publication : l'accusé de
   //     réception du contrôle de légalité est déposé sur le document, puis
@@ -607,7 +656,7 @@ export const emptyConfig = () => ({
   //     télétransmission suppose une convention et des identifiants auprès de
   //     la préfecture ; l'administration de la formalité reste possible à la
   //     main depuis l'échéancier.
-  experimental: { parapheur: false, controleLegalite: false },
+  experimental: { parapheur: true, controleLegalite: false },
   // Assistants — deux aides en langage naturel, livrées avec l'application :
   //   • « Plume », dans l'atelier, qui explique le MODE D'EMPLOI de l'outil —
   //     et ne reçoit jamais le contenu d'un acte (voir src/lib/assistant.js) ;
@@ -627,6 +676,11 @@ export const emptyConfig = () => ({
     { id: "decision", label: "Décision", aknElement: "act" },
     { id: "reglement", label: "Règlement intérieur", aknElement: "act" },
     { id: "deliberation", label: "Délibération", aknElement: "act" },
+    // Les documents d'assemblée qui se publient sans faire droit : le type
+    // nomme le document, la nature de la trame dit sa portée (voir ACTE_NATURES).
+    { id: "compte-rendu", label: "Compte rendu", aknElement: "doc" },
+    { id: "declaration", label: "Déclaration", aknElement: "doc" },
+    { id: "voeu", label: "Vœu", aknElement: "doc" },
   ],
   audit: [],
 });

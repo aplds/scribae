@@ -1,0 +1,18 @@
+{
+  "name": "scribae",
+  "version": "1.3.2",
+  "private": true,
+  "description": "Scribae — éditeur de trames et d'actes administratifs. Racine du dépôt : la vérification de syntaxe et les tests qui s'exécutent sans navigateur se lancent d'ici.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "lint": "node src/scripts/verifier-syntaxe.mjs && node src/scripts/verifier-style.mjs",
+    "syntaxe": "node src/scripts/verifier-syntaxe.mjs",
+    "style": "node src/scripts/verifier-style.mjs --strict",
+    "test": "node --test src/tests/ src/server/mysql/",
+    "verifier": "npm run lint && npm test"
+  }
+}

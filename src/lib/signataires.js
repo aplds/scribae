@@ -30,9 +30,22 @@
 // Ce module est PUR : ni DOM, ni état de l'application.
 // ============================================================================
 import { chaineDeSignature, delegationsVers, enVigueur } from "./delegations.js";
+import { signatairePrincipal } from "./organigramme.js";
 import { hasRole, rolesOf, setRoles } from "./users.js";
 
 export const ROLE_SIGNATAIRE = "signataire";
+
+// Le signataire EFFECTIF d'un acte : celui que la rédaction a désigné
+// (`values.signataire`), ou, à défaut, le SIGNATAIRE PRINCIPAL de l'entité de
+// l'acte (Administration › Entités). C'est ce que la compilation emploie aussi
+// (voir src/lib/compile.js), et ce qui rend la chaîne de signature — et donc
+// la compétence des signataires — cohérente avec le document produit.
+export function signataireEffectif(config, acte, trame) {
+  const choisi = acte?.values?.signataire || acte?.signataireId || "";
+  if (choisi) return choisi;
+  const entityId = acte?.entityId || trame?.entityId || "";
+  return signatairePrincipal(config, entityId)?.personne?.id || "";
+}
 
 // --------------------------------------------------------- personne ↔ compte
 // La personne du référentiel qui porte la qualité, et le compte qui la tient.
@@ -133,7 +146,7 @@ export const comptesSignataires = (users) =>
 // (organisation, famille de la trame, type d'acte, date de signature) — une
 // délégation limitée à un autre service ou à une famille ne s'y invite pas.
 export function etapesDeSignature(config, acte, trame) {
-  const sigId = acte?.values?.signataire || acte?.signataireId || "";
+  const sigId = signataireEffectif(config, acte, trame);
   if (!sigId) return [];
   return chaineDeSignature(config, sigId, {
     entityId: acte?.entityId || trame?.entityId || "",

@@ -17,6 +17,7 @@ import { textField, selectField, emptyState, helpLink, confirmDialog } from "../
 import { docOfActe, natureOf } from "./modifier.js";
 import { natureOfActe, appellationAnnexe, estReglement } from "../../lib/annexes.js";
 import { licenceReutilisation } from "../../lib/recueil.js";
+import { natureDe, natureDocs, natureJuridiqueDe } from "../../lib/schema.js";
 import { annexesJointes } from "../../lib/annexe-docs.js";
 import { exportAkn, printHtml, documentCss, exportMarkdown, exportStandaloneHtml } from "../../lib/export.js";
 import { renderDocument, applyPaper, documentToText } from "../../lib/render.js";
@@ -36,6 +37,7 @@ import {
   circuitPour, circuitsDisponibles, modeSignature, modeLabel, MODES_TRAME, trameModeLabel,
   versionSignee, certificationDe, estCertifie, publicationExternePossible,
   statutExterneLabel, statutExterneColor, dossierSimple, signeeSimple,
+  reglagesPrestataire, circuitElectroniqueSimule, motifCircuitSimule,
 } from "../../lib/externe.js";
 import { enregistrerFormalite } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE, verifierCertificatTransmission } from "../../lib/legalite.js";
@@ -49,6 +51,24 @@ import {
   placeDansChaine, competenceDuCompte,
 } from "../../lib/signataires.js";
 import { fileSignature as fileSignatureDe } from "../state.js";
+
+// ---------------------------------------------- publier, oui ; faire droit, non
+// Un verbatim de séance, une déclaration, un vœu se publient au recueil sans
+// jamais devenir opposables. Ces trois aides disent la chose d'un seul endroit,
+// pour que les marches du circuit, le journal et la notification s'accordent :
+// quand la publication porte `juridique:false`, on n'annonce ni opposabilité ni
+// date d'entrée en vigueur — on dit « publié », et « document non opposable ».
+const pubNonJuridique = (p) => !!p && p.juridique === false;
+const titreEtapePublication = (p) => (pubNonJuridique(p) ? "Publié au recueil" : "Publié et opposable");
+const lignesEtapePublication = (p) => [`ELI ${p.eliUri}`, pubNonJuridique(p) ? "Document non opposable" : `Opposable le ${formatDate(p.dateOpposabilite)}`];
+// La publication pas encore franchie : elle n'existe pas encore, mais la nature
+// du document dit déjà ce qu'elle sera — un verbatim, une déclaration, un vœu
+// se publient « au recueil », sans opposabilité. Sans cela, la marche porterait
+// « Publié et opposable » avant même que l'acte ne soit publié.
+const publicationAttendue = (acte) => acte.publication || { juridique: natureJuridiqueDe(acte) };
+const lignesAttentePublication = (p) => (pubNonJuridique(p)
+  ? ["En attente de publication au recueil", "Document non opposable"]
+  : ["En attente de publication"]);
 
 const STATUTS = {
   brouillon: ["Brouillon", "warning"],
@@ -127,8 +147,8 @@ export function renderSignature(root, params) {
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: "Signature & publication" }),
       h("p", { class: "page-head__sub", text: signataire
-        ? "Vous signez avec votre compte, rapproché de votre compte sur l'outil de signature. L'acte signé devient opposable à sa publication."
-        : "L'acte signé devient opposable à sa publication. Le service de publication attribue alors son identifiant ELI." }),
+        ? "Vous signez avec votre compte, rapproché de votre compte sur l'outil de signature. L'acte signé part au recueil, où il reçoit son identifiant ELI : un acte qui fait droit y devient opposable, un document s'y donne à lire."
+        : "L'acte signé part au recueil, où le service lui attribue son identifiant ELI : un acte qui fait droit y devient opposable, un document s'y donne à lire." }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("signature", "Comment faire ?"),
@@ -355,7 +375,7 @@ function elementSignatureExterne(a, doc, paint, blocking, raison) {
 }
 
 // Les portes que l'acte doit avoir franchies avant la signature : parapheur
-// (fonction expérimentale) puis révision. On les interroge sans redessiner.
+// puis révision. On les interroge sans redessiner.
 // Dans le circuit externe, la RÉVISION ne se place pas ici : le contrôle du
 // réviseur porte sur la pièce signée, après coup (certification de conformité).
 function pretPourSignatureAction(a) {
@@ -424,8 +444,8 @@ function renderCircuit(root, ctx) {
   // Le passage au parapheur conditionne l'envoi en signature : le service
   // refuse d'ouvrir un circuit sur un acte dont le circuit de validation n'est
   // pas achevé (voir hEnvoyerEnSignature dans index.html).
-  // Le parapheur est une fonction expérimentale : éteint, il ne conditionne
-  // rien et n'apparaît pas dans le circuit (Administration › Expérimentale).
+  // Le parapheur n'est plus expérimental (1.5.0) : il conditionne l'envoi dès
+  // qu'un circuit s'applique à l'acte.
   const parapheur = parapheurActif();
   const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
   const paraAvancement = avancement(acte.validation);
@@ -471,7 +491,7 @@ function renderCircuit(root, ctx) {
         h("span", { class: "fr-small fr-muted", text: circuitSig.source === "trame" ? "réglé par la trame" : "réglage général" })),
       h("div", { class: "sig-steps" },
         // Les étapes sont numérotées par POSITION : la marche « Parapheur »
-        // disparaît quand la fonction expérimentale est éteinte, sans trou dans la
+        // disparaît quand aucun circuit ne s'applique, sans trou dans la
         // numérotation.
         ...(externe
           ? etapesExterne({
@@ -644,7 +664,7 @@ function stepEl(n, title, done, lines) {
 
 // Les marches du circuit de signature, dans l'ordre — SANS numérotation : le
 // numéro est la position dans cette liste. La marche « Parapheur » n'y figure
-// que si la fonction expérimentale est active, et la marche « Transmis au
+// que si un circuit s'applique à l'acte, et la marche « Transmis au
 // contrôle de légalité » que si la sienne l'est : la liste, plutôt qu'une suite
 // d'appels numérotés à la main, évite un trou dans la numérotation.
 function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, signed, publiable, rev, controleLegalite, transmission }) {
@@ -717,11 +737,9 @@ function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, b
   }
   etapes.push(publiable
     ? {
-      title: "Publié et opposable",
+      title: titreEtapePublication(publicationAttendue(acte)),
       done: acte.statut === "publie" && !!acte.publication,
-      lines: acte.publication
-        ? [`ELI ${acte.publication.eliUri}`, `Opposable le ${formatDate(acte.publication.dateOpposabilite)}`]
-        : ["En attente de publication"],
+      lines: acte.publication ? lignesEtapePublication(acte.publication) : lignesAttentePublication(publicationAttendue(acte)),
     }
     : {
       title: "Non publié (acte individuel)",
@@ -819,11 +837,9 @@ function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, b
     });
   etapes.push(publiable
     ? {
-      title: "Publié et opposable",
+      title: titreEtapePublication(publicationAttendue(acte)),
       done: acte.statut === "publie" && !!acte.publication,
-      lines: acte.publication
-        ? [`ELI ${acte.publication.eliUri}`, `Opposable le ${formatDate(acte.publication.dateOpposabilite)}`]
-        : ["En attente de publication"],
+      lines: acte.publication ? lignesEtapePublication(acte.publication) : lignesAttentePublication(publicationAttendue(acte)),
     }
     : {
       title: "Non publié (acte individuel)",
@@ -1032,11 +1048,9 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
   });
   etapes.push(publiable
     ? {
-      title: "Publié et opposable",
+      title: titreEtapePublication(publicationAttendue(acte)),
       done: acte.statut === "publie" && !!acte.publication,
-      lines: acte.publication
-        ? [`ELI ${acte.publication.eliUri}`, `Opposable le ${formatDate(acte.publication.dateOpposabilite)}`]
-        : ["En attente de publication"],
+      lines: acte.publication ? lignesEtapePublication(acte.publication) : lignesAttentePublication(publicationAttendue(acte)),
     }
     : {
       title: "Non publié (acte individuel)",
@@ -1980,8 +1994,8 @@ async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } 
   // Porte du parapheur : l'acte signé doit être l'acte approuvé. Le service
   // applique la même règle (409 « validation_incomplete »), mais on évite un
   // aller-retour voué à l'échec et on explique le motif à l'agent.
-  // Parapheur éteint (fonction expérimentale) : aucune porte de ce côté, et
-  // l'état de validation n'est pas transmis au service.
+  // Aucun circuit applicable : aucune porte de ce côté, et l'état de validation
+  // n'est pas transmis au service.
   const parapheur = parapheurActif();
   const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
   if (!para.ok) { toast(para.raison, "warning"); return; }
@@ -2042,20 +2056,41 @@ async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } 
       signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, compte: auteur.compteOutil || "" }],
       niveau: "avancee",
       urlNotification: "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
+      // Les réglages du prestataire, tels qu'ils sont réglés dans cette
+      // installation (Administration › Signature, éventuellement recouverts par
+      // le .env). Le service en a besoin pour appeler le bon prestataire, avec
+      // le bon niveau et les bons points de terminaison. AUCUNE CLÉ n'y figure :
+      // elle ne vit qu'auprès du service.
+      api: reglagesPrestataire(config),
     }, { token, flow, label: "Envoi en signature (ouverture du circuit)" });
     if (!sig.ok) { toast(errorMessage(sig), "error"); return; }
     const signatureId = sig.body.signatureId;
 
-    // Passerelle vers le prestataire : en production ces appels sortants sont
-    // émis par le service ; dans la démonstration, ils partent d'ici.
-    const d = await prestataire.creerDocument({ xml: akn, titre: acte.objet || doc.meta?.objet || "", reference: acte.numero || "", flow });
-    await prestataire.ajouterSignataire({ docId: d.id, signataire: auteur, flow });
-    const started = await prestataire.demarrer({ docId: d.id, flow });
+    // Passerelle vers le prestataire. DEUX CAS, et ils ne se mélangent pas :
+    //
+    //   • le SERVICE est branché sur un prestataire (il détient la clé) : c'est
+    //     LUI qui vient de déposer le document et d'ouvrir le circuit, avec les
+    //     réglages qu'on lui a transmis. Le poste n'invente rien : il reprend
+    //     le dossier et le lien de signature que le service a rendus ;
+    //   • sinon, la démonstration : c'est l'application qui joue le prestataire,
+    //     ici, en trois appels simulés.
+    const simule = circuitElectroniqueSimule();
+    let docId = sig.body.dossier || "";
+    let lienSignature = sig.body.lienSignature || "";
+    if (simule) {
+      const d = await prestataire.creerDocument({ xml: akn, titre: acte.objet || doc.meta?.objet || "", reference: acte.numero || "", flow });
+      await prestataire.ajouterSignataire({ docId: d.id, signataire: auteur, flow });
+      const started = await prestataire.demarrer({ docId: d.id, flow });
+      docId = d.id;
+      lienSignature = started.lienSignature || lienSignature;
+    }
 
     acte.api = {
-      acteId: apiActeId, signatureId, docId: d.id, statut: "en_attente",
-      sha256: dep.body.sha256, lienSignature: started.lienSignature || sig.body.lienSignature,
+      acteId: apiActeId, signatureId, docId, statut: "en_attente",
+      sha256: dep.body.sha256, lienSignature,
       signataire: auteur.nom, deposeLe: dep.body.deposeLe,
+      simulation: simule,
+      prestataire: sig.body.prestataire || null,
     };
     acte.statut = "en_signature";
     touch("actes", { rerender: false });
@@ -2100,10 +2135,44 @@ async function releverStatut(acte, ctx) {
   } catch (e) { toast(String((e && e.message) || e), "error"); }
 }
 
-// L'écran du prestataire de signature : volontairement distinct de
+// Le circuit est mené par un prestataire RÉELLEMENT branché sur le service : la
+// signature se donne CHEZ LUI, dans son outil, et non dans cette page. On ne
+// montre donc pas l'écran de démonstration : on donne le lien, et le geste qui
+// relève le statut (c'est le prestataire qui prévient le service, par le
+// webhook, quand la signature est donnée).
+function ouvrirLienPrestataire(acte, ctx, autoOpen) {
+  const url = acte.api?.lienSignature || "";
+  const infos = acte.api?.prestataire || {};
+  const m = modal({
+    title: "Signature chez le prestataire",
+    body: h("div", { class: "fr-stack" },
+      h("p", { text: "Cet acte a été déposé auprès du prestataire de signature. C'est dans SON outil, et non ici, que la signature est donnée : l'application ne reçoit jamais le document avant qu'il ne revienne signé, et il revient par la notification du prestataire — vérifiée par son empreinte." }),
+      h("p", { class: "fr-small fr-muted", text: [
+        infos.nom ? "Prestataire : " + infos.nom : "",
+        acte.api?.docId ? "dossier " + acte.api.docId : "",
+        acte.api?.signatureId ? "circuit " + acte.api.signatureId : "",
+      ].filter(Boolean).join(" · ") }),
+      url
+        ? h("p", {}, h("a", { class: "deleg-lien", href: url, target: "_blank", rel: "noopener noreferrer", text: url }))
+        : h("p", { class: "fr-small fr-muted", text: "Le prestataire n'a pas rendu de lien de signature : ouvrez son outil, ou relevez le statut du circuit." }),
+      h("p", { class: "fr-small fr-muted", text: "Quand la signature sera donnée, le prestataire préviendra le service : le premier « Relever le statut » fera revenir l'acte signé." })),
+    actions: (close) => [
+      button("Relever le statut", { variant: "secondary", icon: "refresh", onClick: async () => { close(); await releverStatut(acte, ctx); } }),
+      button("Fermer", { variant: "secondary", onClick: close }),
+    ],
+  });
+  // Le geste d'envoi ouvre le prestataire de lui-même : c'est ce que l'agent
+  // attend en cliquant « Envoyer en signature ».
+  if (autoOpen && url) { try { window.open(url, "_blank", "noopener"); } catch (e) { /* le lien reste dans la fenêtre */ } }
+  return m;
+}
+
+// L'écran du prestataire de signature (SIMULÉ) : volontairement distinct de
 // l'application (autre en-tête, autre vocabulaire) — c'est un autre service.
 async function ouvrirOutil(acte, doc, ctx, autoOpen) {
   if (!acte.api?.docId) { toast("Aucun circuit ouvert pour cet acte.", "error"); return; }
+  // Prestataire réellement branché : la signature n'est pas donnée ici.
+  if (!circuitElectroniqueSimule() && acte.api?.lienSignature) { ouvrirLienPrestataire(acte, ctx, autoOpen); return; }
   const config = state.config;
   const auteur = auteurDe(acte, doc);
   let dossier = prestataire.dossier(acte.api.docId);
@@ -2384,7 +2453,7 @@ function renderPublication(root, ctx) {
 
   left.appendChild(h("div", { class: "fr-card" },
     h("h2", { class: "fr-card__title", text: "Actes signés, prêts à publier" }),
-    h("p", { class: "fr-small fr-muted", text: "La publication dépose la version en ligne, attribue l'identifiant ELI et fixe la date d'opposabilité. Un acte non signé ne peut pas être publié : le service refuse l'appel (409)." }),
+    h("p", { class: "fr-small fr-muted", text: "La publication dépose la version en ligne, attribue l'identifiant ELI et fixe la date d'opposabilité d'un acte qui fait droit. Un document (verbatim, déclaration, vœu) se publie pour être donné à lire : il n'en reçoit ni opposabilité ni entrée en vigueur. Un acte non signé ne peut pas être publié : le service refuse l'appel (409)." }),
   ));
 
   if (!aSigner.length) {
@@ -2394,6 +2463,11 @@ function renderPublication(root, ctx) {
 
   for (const a of aSigner) {
     const doc = docs.get(a.id);
+    const trame = trameById(a.trameId);
+    // Un document non juridique (verbatim, déclaration, vœu) se publie sans
+    // jamais devenir opposable : la carte de publication ne propose donc ni
+    // règle d'entrée en vigueur, ni aperçu d'opposabilité.
+    const nonJuridique = !natureJuridiqueDe(trame);
     const eliU = doc ? eliUriOf({ config, actTypeId: doc.meta?.actTypeId, numero: a.numero || doc.meta?.numero, entityCode: doc.meta?.entity?.code }) : "—";
     const url = doc ? normalizeUrl(doc.meta?.eli) : "";
     const card = h("div", { class: "fr-card" },
@@ -2407,21 +2481,27 @@ function renderPublication(root, ctx) {
         textField({ label: "Recueil", value: form.recueil, onChange: (v) => { form.recueil = v; } }),
         textField({ label: "Date de publication", type: "date", value: form.datePublication, onChange: (v) => { form.datePublication = v; paint(); } }),
       ),
-      h("div", { class: "fr-grid fr-grid--2" },
-        selectField({
-          label: "Entrée en vigueur", value: form.mode,
-          options: [{ value: "lendemain", label: "Le lendemain de la publication" }, { value: "jours", label: "Après un nombre de jours" }],
-          onChange: (v) => { form.mode = v; paint(); },
-        }),
-        form.mode === "jours" ? textField({ label: "Nombre de jours", type: "number", value: form.jours, onChange: (v) => { form.jours = Number(v) || 0; paint(); } }) : null,
-      ),
+      // Un document non juridique n'a pas d'entrée en vigueur : on n'en règle ni
+      // la règle ni le délai — la publication le donne à lire, un point c'est tout.
+      nonJuridique
+        ? h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" }, text: `Document non juridique (${natureDocs(natureDe(trame)).label.toLowerCase()}) : publié au recueil pour être porté à la connaissance de tous, il n'a ni opposabilité ni entrée en vigueur.` })
+        : h("div", { class: "fr-grid fr-grid--2" },
+          selectField({
+            label: "Entrée en vigueur", value: form.mode,
+            options: [{ value: "lendemain", label: "Le lendemain de la publication" }, { value: "jours", label: "Après un nombre de jours" }],
+            onChange: (v) => { form.mode = v; paint(); },
+          }),
+          form.mode === "jours" ? textField({ label: "Nombre de jours", type: "number", value: form.jours, onChange: (v) => { form.jours = Number(v) || 0; paint(); } }) : null,
+        ),
       h("p", { class: "fr-small", style: { margin: "0 0 6px" } },
         h("strong", { text: "Nature publiée : " }),
         kindLabel(a) + (a.kind === "modificatif" ? " — l'acte modificatif est publié sous son propre identifiant ELI." : ".")),
       consolidationNotice(a, form, paint),
       h("div", { class: "oppo-preview" },
-        h("strong", { text: "Opposabilité" }),
-        h("span", { text: `Entrée en vigueur le ${formatDate(opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } }))} (${opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } })})` })),
+        h("strong", { text: nonJuridique ? "Portée" : "Opposabilité" }),
+        h("span", { text: nonJuridique
+          ? "Document non opposable : publié pour être porté à la connaissance de tous, il ne crée ni droits ni obligations."
+          : `Entrée en vigueur le ${formatDate(opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } }))} (${opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } })})` })),
       dateIncoherente(a, doc, form) ? h("div", { class: "fr-alert fr-alert--warning" },
         h("p", { class: "fr-alert__title", text: "Date de publication incohérente" }),
         h("p", { class: "fr-small", text: `L'acte est signé le ${formatDate(a.dateSignature || doc?.meta?.dateSignature)} : la publication ne peut pas le précéder. Le service refusera l'appel (422).` })) : null,
@@ -2531,7 +2611,7 @@ function renderPublication(root, ctx) {
       h("div", {},
         h("strong", { text: `${p.numero} — ${p.objet || ""}` }),
         h("p", { class: "fr-mono fr-small", text: p.eliUri }),
-        h("p", { class: "fr-small fr-muted", text: `Publié le ${formatDate(p.datePublication)} · opposable le ${formatDate(p.dateOpposabilite)} · ${p.recueil}` })),
+        h("p", { class: "fr-small fr-muted", text: [`Publié le ${formatDate(p.datePublication)}`, pubNonJuridique(p) ? "document non opposable" : `opposable le ${formatDate(p.dateOpposabilite)}`, p.recueil].filter(Boolean).join(" · ") })),
       h("div", { class: "fr-row" },
         button("Consulter", { variant: "secondary", size: "sm", icon: "eye", onClick: () => navigate("publication/" + encodeURIComponent(p.cle)) }),
         button("Registre", { variant: "tertiary", size: "sm", onClick: () => navigate("publications") }),
@@ -2545,7 +2625,7 @@ function renderPublication(root, ctx) {
     h("p", { class: "fr-small", text: "1. L'acte est déposé : le service en calcule l'empreinte SHA-256." }),
     h("p", { class: "fr-small", text: "2. Le prestataire signe : l'empreinte est signée par le certificat du signataire et horodatée." }),
     h("p", { class: "fr-small", text: "3. Le service vérifie lui-même que le document signé a bien la même empreinte que le document déposé — sinon il refuse (409)." }),
-    h("p", { class: "fr-small", text: "4. La publication attribue l'ELI, fixe la date de publication et la date d'opposabilité, et conserve l'original signé." }),
+    h("p", { class: "fr-small", text: "4. La publication attribue l'ELI, fixe la date de publication — et, pour un acte qui fait droit, la date d'opposabilité —, et conserve l'original signé." }),
     h("p", { class: "fr-small", text: "5. Les actes individuels (revalorisation d'un traitement, sanction…) relèvent d'une trame déclarée non publiable : signés et conservés, mais jamais déposés au recueil. Le service refuse de les publier (409)." }),
     h("p", { class: "fr-small", text: "6. Une annexe (un règlement intérieur adopté par une délibération) ne se signe ni ne se publie pour elle-même : c'est l'acte qui l'adopte qui est signé, et l'original de cet acte est suivi du texte de l'annexe." }),
   ));
@@ -2602,8 +2682,15 @@ async function publier(acte, doc, form, paint) {
   const trame = state.trames.find((t) => t.id === acte.trameId);
   const eliU = eliUriOf({ config, actTypeId: doc.meta?.actTypeId, numero: acte.numero || doc.meta?.numero, entityCode: doc.meta?.entity?.code });
   const url = normalizeUrl(doc.meta?.eli);
-  const dateOpposabilite = opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } });
-  const rule = opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } });
+  // FAIT DROIT ou NON ? Un verbatim, une déclaration, un vœu se publient, mais
+  // ne créent pas de droits : leur publication n'emporte ni opposabilité, ni
+  // délais d'exécution. On le dit à la publication elle-même (`juridique`), et
+  // l'on n'inscrit aucune date d'entrée en vigueur — le recueil, la version en
+  // ligne et le JSON-LD s'y conforment (voir src/lib/eli.js).
+  const juridique = !trame || natureJuridiqueDe(trame);
+  const natureDoc = trame ? natureDe(trame) : "acte";
+  const dateOpposabilite = juridique ? opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } }) : "";
+  const rule = juridique ? opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } }) : "";
   const theme = themeDe(acte, doc);
   // L'« original » : le paquet signé du circuit électronique, ou — circuit
   // externe — la pièce signée déposée (le PDF), avec la certification du
@@ -2630,6 +2717,9 @@ async function publier(acte, doc, form, paint) {
     objet: acte.objet || doc.meta?.objet || "", entityName: doc.meta?.entity?.name || "",
     dateDocument: acte.dateSignature || doc.meta?.dateSignature || "", datePublication: form.datePublication,
     dateOpposabilite, opposabiliteRule: rule, recueil: form.recueil, kind: kindFor(acte),
+    // Le document FAIT-IL DROIT ? `false` pour un verbatim, une déclaration, un
+    // vœu : le recueil les présente comme des documents, sans opposabilité.
+    juridique, natureDoc,
     auteur: auteurDe(acte, doc).nom, originalSha256: (original && original.document && original.document.sha256) || "",
     originalExterne,
     // Le certificat de transmission au contrôle de légalité, s'il y en a un :
@@ -2657,6 +2747,10 @@ async function publier(acte, doc, form, paint) {
     entityCode: doc.meta?.entity?.code || "", brandName: config.brand.name,
     dateDocument: record.dateDocument, datePublication: form.datePublication, dateOpposabilite,
     opposabiliteRule: rule, recueil: form.recueil, auteur: record.auteur, kind,
+    // La publication dit si le document FAIT DROIT : le service la range telle
+    // quelle, et le recueil s'en sert pour ne pas présenter un verbatim ou un
+    // vœu comme un acte opposable (voir src/server/mysql/actes.mjs).
+    juridique, natureDoc,
     html, akn, jsonld, md, texte, original, transmission: record.transmission,
     // Un acte ÉPINGLÉ (mis en avant depuis l'onglet « Actes ») dépose son
     // drapeau avec sa version en ligne : le recueil public le présentera dans sa
@@ -2702,7 +2796,7 @@ async function publier(acte, doc, form, paint) {
     dire(`Acte publié — ELI ${eliU}`, "success");
     await journaliser({
       action: "publication.publie", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
-      detail: `publié sous l'ELI ${eliU}, opposable le ${dateOpposabilite}`,
+      detail: juridique ? `publié sous l'ELI ${eliU}, opposable le ${dateOpposabilite}` : `publié au recueil sous l'ELI ${eliU} (document non opposable)`,
       to: [acte.createdBy, "role:editeur"],
     });
     // La notification de publication : par courriel quand le service de courriel
@@ -2710,7 +2804,9 @@ async function publier(acte, doc, form, paint) {
     await envoyerNotification("acte_publie", {
       config, acte, doc, brand: config.brand.name,
       destinataires: destinatairesAdministration(acte),
-      complement: `L'acte est publié au recueil sous l'identifiant ${eliU}. Il devient opposable le ${dateOpposabilite}.`,
+      complement: juridique
+        ? `L'acte est publié au recueil sous l'identifiant ${eliU}. Il devient opposable le ${dateOpposabilite}.`
+        : `Le document est publié au recueil sous l'identifiant ${eliU}. Il ne fait pas droit : il n'est pas opposable.`,
     });
     // Un acte qui prévoyait des abrogations peut désormais les faire courir :
     // elles prennent effet au jour de son ENTRÉE EN VIGUEUR (voir
@@ -2882,6 +2978,16 @@ async function publierConsolide(cons, form, { token, flow }) {
       niveau: "avancee",
     }, { token, flow, label: "Circuit de signature de la version consolidée" });
     if (!circ.ok) { toast("Version consolidée — circuit : " + errorMessage(circ), "error"); return; }
+
+    // Prestataire réellement branché : c'est le SERVICE qui a déposé le document
+    // et ouvert le circuit, et la signature se donne chez le prestataire. Le
+    // poste ne peut donc pas simuler la signature ici : on donne le lien, et
+    // l'acte reviendra signé par la notification du prestataire.
+    if (!circuitElectroniqueSimule()) {
+      toast("Version consolidée : le circuit est ouvert auprès du prestataire. La signature s'y donne ; l'acte reviendra signé par sa notification.", "info");
+      if (circ.body && circ.body.lienSignature) { try { window.open(circ.body.lienSignature, "_blank", "noopener"); } catch (e) { /* le lien reste au journal */ } }
+      return;
+    }
 
     // La consolidation est une compilation : elle est signée du même signataire
     // que l'acte modifié, et horodatée au moment de sa publication.
