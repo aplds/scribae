@@ -49,10 +49,13 @@ export function createActesApi({
   // transmet que si le client le lui a demandé au dépôt (`controleLegalite`), et
   // refuse alors de publier un acte dont la transmission manque. Mêmes règles,
   // mêmes mentions que le service de la plateforme (voir index.html).
+  // L'adresse est un EXEMPLE : la transmission du service est simulée
+  // (`simule: true`), et un déploiement réel pointe vers son propre point de
+  // terminaison @ctes.
   const CONTROLE_LEGALITE = {
     destinataire: "Préfecture — contrôle de légalité",
     mode: "ctes",
-    apiUrl: "https://api.ctes.valmont-sur-loire.fr/v1/transmissions",
+    apiUrl: "https://api.ctes.exemple.fr/v1/transmissions",
   };
   const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
@@ -231,6 +234,7 @@ export function createActesApi({
             responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé" }, 422: { description: "Version en ligne manquante" } },
           },
         },
+        "/v1/admin/purge": { post: { operationId: "purgerService", summary: "Remettre le service à zéro", description: "Vide les actes déposés, les circuits de signature et les publications — le pendant côté service du bouton « Repartir d'un référentiel vierge ». Le recueil public lit le service : vider le seul navigateur laisserait les publications de démonstration en ligne. Exige `{ \"confirmation\": \"repurge\" }` : un appel accidentel ne doit pas l'emporter. Réservé à l'administration.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["confirmation"], properties: { confirmation: { type: "string", description: "Le mot « repurge »" } } } } } }, tags: ["Administration"], responses: { 200: { description: "Service purgé" }, 400: { description: "Confirmation absente (code `confirmation_absente`)" }, 403: { description: "Rôle insuffisant" } } } },
         "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
         "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
         "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" } } } },
@@ -1096,6 +1100,27 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     return ok(200, corps, entetes);
   }
 
+  // ---------------------------------------------------- remise à zéro du service
+  // Le pendant côté SERVICE du bouton « Repartir d'un référentiel vierge » (voir
+  // src/ui/views/referentiel.js). Le recueil public lit le service : vider le
+  // seul navigateur laisserait les publications de démonstration en ligne. La
+  // purge vide actes déposés, circuits de signature et publications — et exige un
+  // mot de confirmation explicite, pour qu'un appel accidentel ne l'emporte pas.
+  function hPurger(ctx) {
+    const corps = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+    if (String(corps.confirmation || "") !== "repurge") {
+      return err(400, "Confirmation absente : envoyer {\"confirmation\": \"repurge\"}.", { code: "confirmation_absente" });
+    }
+    const avant = { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publies: Object.keys(db.publies).length };
+    db.actes = {};
+    db.signatures = {};
+    db.publies = {};
+    db.idem = {};
+    db.seq = 0;
+    persist();
+    return ok(200, { purge: true, avant });
+  }
+
   const ROUTES = [
     { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
     { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
@@ -1134,6 +1159,7 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     // clé dédiée au PRESTATAIRE (`API_TOKENS="prestataire|prestataire:<hash>"`),
     // ou la clé d'administration.
     { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
+    { m: "POST", p: /^\/v1\/admin\/purge$/, role: { min: "administrateur" }, ecrit: true, f: hPurger },
     { m: "GET", p: /^\/v1\/publications$/, f: () => {
         const all = Object.keys(db.publies).map((k) => db.publies[k]);
         const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));

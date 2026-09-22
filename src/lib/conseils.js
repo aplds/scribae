@@ -11,7 +11,7 @@
 // Une assemblée se décrit donc, dans le référentiel, par :
 //   • son ENTITÉ de rattachement (le conseil municipal est celui de la commune) ;
 //   • sa FORMULE D'AUTORITÉ — la ligne d'en-tête de l'acte (« Le conseil
-//     municipal de Valmont-sur-Loire ») ;
+//     municipal de … ») ;
 //   • la QUALITÉ QUI SIGNE — la fonction du signataire appelée par l'assemblée
 //     (« maire », « président du conseil d'administration »…) : c'est un rôle du
 //     référentiel, donc configurable par conseil, sans toucher au code.

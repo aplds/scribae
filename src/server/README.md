@@ -83,6 +83,50 @@ Le jeton en clair n'est **jamais** transmis à la base : le serveur ne connaît 
 empreinte SHA-256. Il est en revanche servi au navigateur dans `config.js` (l'application est
 publique — voir « Sécurité » dans `../docs/ADMINISTRATION.md`).
 
+## 2 bis. Les réglages déclaratifs (identité, vocabulaire, numérotation…)
+
+Le `.env` ne fait pas que brancher le service : il peut aussi **poser des réglages de
+référentiel** qui, sinon, se saisissent un clic après l'autre dans l'interface. Ils sont
+déclarés une fois — dans le registre [`mysql/variables.mjs`](mysql/variables.mjs) —, validés
+par le service au démarrage, et transmis au navigateur par `GET /v1/config`, qui les applique
+**par-dessus le référentiel** :
+
+```
+SCRIBA_IDENTITE_NOM=Ville d'Exemple
+SCRIBA_IDENTITE_ADRESSE=https://actes.exemple.fr
+SCRIBA_DELAI_RECOURS_MOIS=2
+SCRIBA_RECUEIL_OPPOSABILITE=jours
+SCRIBA_PARAPHEUR=true
+```
+
+- une variable **vide ou absente** ne change rien : le référentiel garde sa valeur ;
+- une valeur **refusée** (type, choix, borne) n'est pas appliquée, et le motif est journalisé
+  par le service (`docker compose logs api`) et rendu par `GET /v1/config` ;
+- le **`.env` l'emporte** sur l'interface à chaque démarrage ; le référentiel enregistré, lui,
+  n'est pas modifié — retirer la variable suffit à rendre la main à l'administrateur.
+
+La référence complète (les deux portées — service et référentiel —, avec rôle, type, bornes
+et exemple) est dans **`../docs/VARIABLES.md`**, engendrée depuis le registre :
+
+```bash
+node src/scripts/generer-variables.mjs
+```
+
+Pour ajouter une variable : un descripteur dans le registre, une ligne dans `env.example`,
+et régénérer le wiki. Le service la valide et la transporte sans autre code.
+
+## 2 ter. Publier une image autonome
+
+Pour diffuser Scribae sans le dossier du dépôt, `Dockerfile` (à la racine de `src/server/`)
+bâtit une **image unique** contenant le service, nginx et le code de l'application :
+
+```bash
+docker build -f src/server/Dockerfile -t moncompte/scribae:1.3.1 .
+```
+
+Voir **`../docs/DOCKER.md`** : construction, publication sur un registre (Docker Hub, GHCR),
+multi-architecture, lancement et exploitation.
+
 ## 3. Démarrer
 
 ```bash
@@ -255,6 +299,10 @@ déposée étant celle que le recueil montre. Comme pour un acte, les adresses `
 src/server/
   docker-compose.yml   les trois services (db, api, web)
   nginx.conf           façade : application + proxy /v1/ (monté dans le conteneur web)
+  Dockerfile           IMAGE AUTONOME : service + façade + application en un conteneur
+  nginx.standalone.conf  la façade de l'image autonome (API sur 127.0.0.1)
+  standalone-entrypoint.sh  l'amorçage de l'image autonome (Node + nginx)
+  Dockerfile.dockerignore  ce qui n'entre pas dans le contexte de construction
   env.example          modèle de .env (à copier en .env)
   web/                 l'édition auto-hébergée de l'application
     index.html           coquille (remplace l'index.html d'origine)
@@ -263,7 +311,10 @@ src/server/
     entrypoint.sh        prépare /srv/www
     favicon.svg
   mysql/               le service (Node) et le schéma
-    server.mjs           HTTP : /v1/db/… (données) et /v1/… (signature/publication)
+    server.mjs           HTTP : /v1/db/… (données), /v1/… (signature/publication),
+                         /v1/auth/… (comptes), /v1/config (réglages déclaratifs)
+    variables.mjs        REGISTRE DES VARIABLES DU .env (source de vérité du wiki)
+    variables.test.mjs   tests du registre (`npm test`)
     actes.mjs            domaine signature/publication (sans dépendance à Node)
     comptes.mjs          domaine des comptes locaux : mots de passe, sessions (sans
                          dépendance à Node — le port de crypto lui est injecté)

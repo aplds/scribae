@@ -8,17 +8,193 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 
 - **Une version n'existe qu'une fois figée**, c'est-à-dire déposée sur GitHub. On
   incrémente le numéro et on ouvre l'entrée datée **au moment de livrer**, pas avant.
-- Le travail en cours n'a pas de numéro : il se décrit sous **Non publié**, et cette
-  section est vidée dans la nouvelle entrée au moment de figer.
+- **Entre deux livraisons GitHub**, chaque correction achevée reçoit une **note de
+  version intermédiaire** : le correctif du moment, suivi d'une **lettre** — `1.3.1a`,
+  `1.3.1b`, … — et datée. Ce ne sont pas des publications : elles ne touchent pas
+  `APP_VERSION`, et la livraison GitHub suivante les reprend sous sa propre entrée,
+  sans les lettres.
+- Le travail en cours se décrit sous **Non publié** tant qu'il n'a pas reçu sa note
+  intermédiaire ; cette section est vide le reste du temps.
 - Le numéro courant est celui de `APP_VERSION` dans `src/lib/version.js` — c'est la
-  source unique du numéro. **La première entrée datée de ce fichier doit lui
-  correspondre** ; en cas de divergence, c'est ce fichier qui dit la vérité.
+  source unique du numéro. **La première entrée datée SANS lettre de ce fichier doit
+  lui correspondre** ; en cas de divergence, c'est ce fichier qui dit la vérité. Les
+  entrées intermédiaires, plus récentes, viennent au-dessus d'elle.
 - Rubriques : `Ajouté`, `Modifié`, `Corrigé`, `Retiré`, `Sécurité`. Une entrée ne
   garde que les rubriques qu'elle utilise.
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
 ## [Non publié]
+
+Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
+
+## [1.3.1] — 2026-09-22 — Délégations, service fiable, réglages déclaratifs
+
+### Ajouté
+
+- **Le guide a un chapitre « Les délégations de signature ».** L'assistant Plume répondait « je ne
+  sais pas » à « comment créer une délégation de signature ? » : la matière existait, mais noyée
+  dans le chapitre « Préparer et faire évoluer une trame », trop long pour tenir dans ce que
+  l'assistant reçoit d'un chapitre. Le chapitre lui est consacré — créer une délégation, les deux
+  décisions qui la fondent, la suspendre, les établissements autonomes — et il est désigné comme le
+  chapitre de l'écran Délégations.
+- **L'organigramme des délégations est un canvas.** On le déplace en le saisissant au curseur, la
+  molette règle le cran, et une barre flottante fait les deux — `−`, pourcentage, `+`,
+  « Ajuster ». L'arbre s'ouvre à 100 % (le réduire pour le faire tenir entier rendrait ses noms
+  illisibles) ; « Ajuster » en donne la vue d'ensemble d'un clic. Un appui sans mouvement reste un
+  clic : la fiche de l'acteur s'ouvre comme avant.
+- **Le document en rédaction et la trame ouverte se zooment.** Même barre sur la feuille ;
+  Ctrl + molette (ou le pincement d'un pavé tactile) y règle aussi le cran, tandis que la molette
+  nue continue de faire défiler la page. La feuille s'ajuste d'elle-même à la largeur disponible au
+  premier affichage, comme avant, mais le cran choisi ne se perd plus d'un redessin à l'autre.
+- **La démonstration est un SEUL commutateur : `DEMO` (déploiement, `.env`).** Jusqu'ici, deux
+  notions distinctes cohabitaient : le déploiement décidait de la **connexion** (`AUTH_MODE`,
+  `DEMO_ACCOUNTS`), et le référentiel (`brand.demo`) du **bandeau**. Résultat : même en service
+  réel, l'application semait et affichait une collectivité fictive. Désormais `DEMO=true` (ou le
+  mode « demo », ou `DEMO_ACCOUNTS=true`) installe le jeu livré ; `DEMO=false` fait de l'outil une
+  **page vierge** : aucune entité, assemblée, service, personne, rôle, référence, famille, trame,
+  acte ni compte, et **aucune mention de la collectivité fictive** nulle part — identité neutre,
+  emblème neutre, aide et métadonnées comprises. La première page invite à construire le
+  référentiel.
+- **« Repartir d'un référentiel vierge »** (Administration › Données) : efface le référentiel, les
+  trames, les actes et les comptes du poste, **et** — sur le service partagé — les actes déposés,
+  les circuits de signature et les publications (route `POST /v1/admin/purge`, réservée à
+  l'administration). C'est la sortie de démonstration : sans elle, basculer `DEMO=false` laisserait
+  les données fictives en place, et les publications au recueil public.
+- Le champ `DEMO` et le commutateur sont documentés dans les `env.example`, le guide et
+  `docs/ADMINISTRATION.md`.
+- **Les réglages du référentiel se déclarent dans le `.env`.** Jusqu'ici, l'identité de la
+  collectivité, le vocabulaire des actes, la numérotation, les délais, le recueil public et les
+  fonctions expérimentales ne se réglaient qu'un clic après l'autre dans l'interface. Le
+  déploiement peut désormais les **poser** — `SCRIBA_IDENTITE_NOM`, `SCRIBA_DELAI_RECOURS_MOIS`,
+  `SCRIBA_RECUEIL_OPPOSABILITE`, `SCRIBA_PARAPHEUR`… — et ils s'appliquent par-dessus le référentiel
+  à chaque démarrage, sans qu'un administrateur ait à les saisir. Une variable vide ou absente ne
+  change rien ; une valeur **refusée** (type, choix, borne) n'est **jamais** appliquée en silence :
+  elle est journalisée par le service et rendue par `GET /v1/config`.
+- **Un registre unique décrit les variables.** `src/server/mysql/variables.mjs` porte, pour chaque
+  variable du `.env`, sa portée (service ou référentiel), son type, ses bornes et son rôle. Pour en
+  ajouter une : un descripteur, une ligne dans `env.example`, puis régénérer le wiki. La validation
+  et le transport au navigateur en découlent — rien à tenir en double.
+- **Un wiki des variables.** `src/docs/VARIABLES.md` est **engendré** depuis ce registre
+  (`node src/scripts/generer-variables.mjs` : 89 variables) et se lit dans l'application
+  (*Documentation technique › Variables de déploiement*). Les secrets (`SMTP_PASS`, `ADMIN_PASSWORD`,
+  `API_TOKEN`…) n'y montrent jamais de valeur.
+- **Une image Docker autonome.** `src/server/Dockerfile` bâtit un conteneur UNIQUE — service Node,
+  façade nginx et code de l'application — publiable sur un registre (Docker Hub, GHCR) et lançable
+  d'une commande, sans le dossier du dépôt. `src/docs/DOCKER.md` détaille construction, publication
+  (mono- et multi-architecture), lancement et exploitation.
+- **Le service valide aussi ses propres variables.** Les réglages de service (`COOKIE_SECURE`,
+  `DEMO_ACCOUNTS`, `DEMO`, `AUTO_MIGRATE`) sont lus par le registre : il n'existe plus qu'une
+  interprétation par variable, et une valeur douteuse tombe sur le défaut au lieu d'être devinée.
+
+### Modifié
+
+- **L'éditeur de trame occupe désormais toute la fenêtre.** Sa coquille s'allongeait avec son
+  contenu (une longue page), si bien que les volets — plan, inspecteur, feuille — ne défilaient
+  jamais sur place, alors qu'ils sont écrits pour cela. Ils défilent maintenant dans la fenêtre, et
+  le canvas de la feuille a une vraie fenêtre à déplacer.
+- **`config.brand.demo` survit comme miroir du déploiement** (il voyage avec les données exportées et
+  importées) mais ne décide plus de rien : toutes les décisions passent par `demoActif()`
+  (`src/lib/demo.js`). Quand aucun déploiement ne parle (aperçu en ligne, page statique), c'est lui
+  qui fait foi. La démonstration active ne change pas d'un iota : même jeu, même bandeau, mêmes
+  comptes.
+- **`GET /v1/config`** rend les réglages posés (chemins pointés) et les valeurs refusées ; route
+  publique, sans secret. L'administration (onglet « Données ») signale combien de réglages le
+  déploiement impose.
+- **La configuration de l'image Compose suit le registre** : le service `api` reçoit tout le `.env`
+  (`env_file`), si bien qu'une variable `SCRIBA_*` ajoutée n'a plus à être recopiée dans le
+  `docker-compose.yml`.
+
+### Corrigé
+
+- **Les refus du service s'affichaient « Erreur 403 », sans le motif.** Le service répond
+  `{ erreur: "…" }` ; l'application ne lisait que `message` et `error.message`, si bien que
+  TOUT refus — service non provisionné, clé invalide, rôle insuffisant, acte non signé — se
+  réduisait à un code, muet sur ce qu'il fallait faire. Le motif du service s'affiche désormais tel
+  quel. C'est ce qui rend lisible, par exemple, « Ce service n'est pas encore provisionné : aucune
+  clé d'écriture n'a été déposée… ».
+- **Impossible de créer une délégation de signature quand la décision se saisit à la main.** L'écran
+  Délégations demande bien deux décisions — la nomination, puis la délégation —, chacune devant
+  porter son **intitulé** ET son **lien**. Mais le champ d'adresse n'apparaissait qu'après avoir
+  choisi « Lien externe » : laissée sur « Non renseignée » (l'état initial), la décision laissait
+  remplir l'intitulé sans offrir où que ce soit pour écrire l'adresse — et « Créer la délégation »
+  refusait alors la délégation en réclamant ce lien, sans que rien ne dise où le saisir. L'adresse
+  se saisit désormais chaque fois que la source choisie n'en fournit pas : décision encore sans
+  source, ou **référence du référentiel qui ne porte pas la sienne**. Saisir une adresse fait de la
+  décision un **lien externe**, et la pastille « D'où vient la décision » le dit à la frappe.
+- **La fiche d'une délégation neuve ignorait le délégataire qu'on venait de choisir.** Sa tête
+  continuait d'afficher « Délégataire à choisir » — et la section « Compte et signature
+  électronique » ne s'ouvrait pas — tant que la fiche n'était pas refermée puis rouverte ; elle
+  suit désormais le choix, comme l'aperçu de signature qui, lui, était juste.
+- **La fiche d'une délégation suspendue annonçait « Aucune décision renseignée », alors que les deux
+  décisions étaient bel et bien saisies** : c'est la suspension qui les neutralise. Elle dit
+  maintenant qu'elle est **hors d'effet**, pourquoi (suspendue, échue, à venir), et comment la
+  rétablir.
+- **« Ajouter une sous-délégation » refermait la fiche du parent** qu'on était en train de lire pour
+  ouvrir un formulaire neuf : la chaîne sous les yeux était perdue. La nouvelle fiche s'ouvre
+  **par-dessus**, et la première se redessine — la sous-délégation créée comprise — quand la seconde
+  se referme. « Échap » ne referme plus que la fenêtre du dessus.
+- **L'épinglage disait mal son état.** Le bouton d'un acte déjà à la une gardait le libellé
+  « Épingler à la une du recueil public ». Le drapeau vit sur la **publication** pour un acte publié
+  — c'est elle que lit le visiteur — et sur l'**acte** pour un acte encore en circuit, et les deux
+  peuvent diverger (publication reprise du service, par exemple). Le libellé, la punaise allumée et
+  la pastille « à la une » se lisent maintenant sur l'un **ou** l'autre.
+- **« Signataire sans adresse » renvoyait au mauvais écran.** Le message envoyait renseigner
+  l'adresse « au référentiel », où le référentiel des personnes n'a **pas** de champ courriel :
+  l'adresse vit sur le **compte** (« Comptes et rôles »), ou vient de l'annuaire. Le message dit
+  désormais ce qui manque au juste — le compte, son courriel, ou le rapprochement — et ouvre
+  l'écran où le corriger.
+- **Les compteurs s'accordent.** « 1 règles », « 1 champs » : les compteurs de la liste des trames et
+  de l'atelier de trame accordaient au pluriel quel que soit le nombre. Ils s'accordent désormais, et
+  la phrase « Il manque ici décision de nomination… » porte son article : « la décision de nomination
+  (intitulé et lien) et la décision de délégation (lien) ».
+- **« Imprimer / PDF » n'immobilise plus l'éditeur.** L'impression partait d'un `window.print()`
+  **dans la page de l'application** quand l'onglet dédié n'avait pas pu s'ouvrir ; ce geste bloque
+  le fil d'exécution de la page qui l'appelle, si bien que l'aperçu de l'éditeur restait figé tant
+  que la boîte d'impression était ouverte. Le document n'est plus jamais imprimé depuis la page : il
+  part dans un onglet — qui déclenche lui-même son impression — ou, si le navigateur refuse la
+  fenêtre, au **téléchargement** (« ouvrez la page et imprimez-la »).
+- **La fiche JSON-LD publiée avec chaque acte portait `"eli:type_document": ""`,** et son autorité
+  sans identifiant : le **type d'acte** et l'**entité** n'étaient pas repris dans l'enregistrement
+  de publication. Ils le sont.
+- **L'amorçage de démonstration ne publiait les actes de la fiction que si TOUS les actes du
+  registre étaient des actes de démonstration** : une seule rédaction d'essai — même un brouillon —
+  suffisait à laisser le recueil public **vide**, alors que l'écran « Publications (ELI) » en
+  listait neuf. Le critère porte désormais sur la **provenance de chaque acte** : seuls les actes
+  `acte-demo-…` sont publiés par l'amorçage, quelle que soit la composition du reste du registre.
+  La mise à la une, que le service porte sur la publication, est en outre reprise sur l'acte local.
+- **Le service auto-hébergé terminait sur CHAQUE réponse.** Une valeur d'en-tête HTTP ne peut pas
+  contenir de caractère non-ASCII, et le service signait toutes ses réponses du nom
+  « Scribae — service de la collectivité » (tiret cadratin, accents) : `res.writeHead` levait
+  `ERR_INVALID_CHAR`, l'exception n'était pas rattrapée, et le processus sortait. Le conteneur
+  redémarrait en boucle, nginx servait une page 502, et l'écran de connexion affichait « Le service
+  des comptes a refusé la demande. » au lieu d'un vrai refus d'identifiants. L'en-tête porte
+  désormais un jeton ASCII (`x-service: scribae`) ; **toutes** les valeurs d'en-tête passent par un
+  filtre qui écarte celles qu'un serveur refuserait, et un en-tête refusé se rabat sur un jeu
+  minimal au lieu d'abattre le service. Une requête quelconque ne termine donc plus le processus.
+- **Un compte d'administration non créé le restait en silence.** Quand `ADMIN_PASSWORD` ne
+  satisfaisait pas la politique (12 caractères, trois classes de caractères, ni l'identifiant, ni un
+  mot de passe courant), le service refusait de créer le compte et se contentait de l'écrire dans
+  ses journaux : l'agent ne voyait qu'« Identifiant ou mot de passe incorrect ». L'état de
+  l'amorçage est maintenant **porté jusqu'à l'écran de connexion** (compte d'administration créé ?
+  sinon, pourquoi) — comme l'état de la base, quand elle est injoignable ou que son schéma manque.
+- **Un démarrage dégradé ne se confond plus avec un registre vide.** Si la base ne répond pas, le
+  service le journalise, le dit au client, et ne laisse pas croire à une installation sans données.
+- **Un écran ne casse plus quand la réponse n'est pas du JSON.** Une réponse en 502 (page HTML de
+  nginx) posait un corps illisible, et « Le recueil est momentanément indisponible » devenait
+  « Cannot read properties of null (reading 'publications') ».
+- **Le provisionnement d'un service neuf échouait sans recours quand le service se reconstruisait.**
+  Le canal se ferme en cours d'opération (code 1011 : l'environnement d'édition recharge son état),
+  et le geste se soldait par « WebSocket closed (code 1011) » — sans dire que rien n'avait été écrit,
+  ni qu'il suffisait de réessayer. Le provisionnement **rejoue désormais la même clé** (en tirer une
+  autre laisserait le service ouvert avec une clé que le poste ne détient pas), reconnaît un service
+  « déjà provisionné » quand c'est bien **sa** clé qui l'a ouvert (la réponse a pu se perdre alors
+  que le dépôt avait abouti), et, s'il échoue encore, le dit en français. Le service, lui, se
+  **reconnecte de lui-même** après une fermeture 1011, au lieu de laisser l'application en erreur
+  jusqu'au geste suivant.
+- **Les tests du webhook de signature étaient rouges** avant ces travaux (le webhook est devenu
+  authentifié, et la réponse au dépôt est devenue concise) : ils portent désormais leur jeton, et
+  vérifient aussi qu'un webhook non authentifié est refusé.
 
 ## [1.3.0] — 2026-09-21 — Les actes d'assemblée
 

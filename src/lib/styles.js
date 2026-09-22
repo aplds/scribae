@@ -358,7 +358,7 @@ export const paperPadding = (style) => paperMarginCss(style);
 
 // Emblème du CCAS (SVG embarqué, comme celui de la commune) : il illustre la
 // charte propre à une entité — un logo différent sur les mêmes actes.
-export const LOGO_CCAS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CCAS de Valmont-sur-Loire">
+export const LOGO_CCAS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Emblème du centre communal d'action sociale">
   <circle cx="32" cy="32" r="30" fill="#eef7f2" stroke="#1f7a5a" stroke-width="3"/>
   <path d="M32 46s-14-8.6-14-18a8 8 0 0114-5 8 8 0 0114 5c0 9.4-14 18-14 18z" fill="#1f7a5a" opacity=".92"/>
   <path d="M22 24h20" stroke="#0f4d38" stroke-width="3" stroke-linecap="round"/>

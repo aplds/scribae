@@ -14,7 +14,7 @@
 import { state, navigate, redrawView, can, currentUser, touch, journaliser } from "../state.js";
 import { h, button, toast, modal, icon } from "../dom.js";
 import { emptyState, helpLink } from "../components.js";
-import { get, post, apiStatus, errorMessage, beginFlow } from "../../lib/remote.js";
+import { get, post, apiStatus, errorMessage, beginFlow, bodyOf } from "../../lib/remote.js";
 import { verifySignedPackage } from "../../lib/signature.js";
 import { download, copyText, formatDate } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
@@ -69,7 +69,7 @@ function renderRegistre(root) {
   if (!st.liste && !st.chargement) {
     st.chargement = true;
     get("/v1/publications", { label: "Registre des publications", source: "lecture" })
-      .then((r) => { st.liste = r.ok ? r.body.publications || [] : []; st.erreur = r.ok ? null : (r.body && r.body.erreur); })
+      .then((r) => { st.liste = r.ok ? bodyOf(r).publications || [] : []; st.erreur = r.ok ? null : bodyOf(r).erreur; })
       .catch((e) => { st.erreur = String(e.message || e); st.liste = []; })
       .finally(() => { st.chargement = false; redrawView(); });
   }

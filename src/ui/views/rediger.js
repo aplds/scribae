@@ -22,6 +22,7 @@ import { ajouterRevision } from "../../lib/historique-brouillons.js";
 import { demarrerValidation, etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
 import { etatRevision } from "../../lib/revision.js";
 import { h, clear, button, icon, toast, modal, fitPaper } from "../dom.js";
+import { cadreZoom } from "../zoom.js";
 import { compile, interpolate } from "../../lib/compile.js";
 import { applyPaper, personSignatureName, renderDocument } from "../../lib/render.js";
 import { styleForDoc } from "../../lib/styles.js";
@@ -437,10 +438,11 @@ export function renderRediger(root, params) {
       " — ce n'est pas bloquant : adapter une rédaction est parfois nécessaire.",
     ),
   ));
-  const paperBox = h("div", { class: "paper-box" });
   const paper = h("div", { class: "paper paper--edit" });
   paper.style.fontFamily = config.brand.documentFont || "";
-  paperBox.appendChild(paper);
+  // Le document est un CANVAS : la molette (Ctrl) ou la barre règle le cran, et
+  // le fond se déplace au curseur — voir src/ui/zoom.js.
+  const paperBox = cadreZoom(paper, { mode: "feuille", cle: "redaction", classe: "paper-box" });
   docCol.appendChild(annexeCard());
   docCol.appendChild(paperBox);
   // Le TEXTE des documents annexés : il suit l'acte, mais il ne se rédige pas
@@ -481,16 +483,14 @@ export function renderRediger(root, params) {
   // dans leur zone morte. Voir la fin de `renderRediger`.
 
   // ------------------------------------------------------------------ rendu
-  function paintPaper(refit = false) {
+  function paintPaper() {
     doc = compileDoc();
     majSourcesAbrogations();
     clear(paper);
     applyPaper(paper, doc, config);
     paper.appendChild(buildRedactionDoc(rx));
-    requestAnimationFrame(() => fitPaper(paperBox, paper));
     paintAnnexesParts();
     paintBadge();
-    if (refit) requestAnimationFrame(() => fitPaper(paperBox, paper));
   }
 
   // Le texte des documents ANNEXÉS, en lecture seule, à la suite du document :
@@ -2141,7 +2141,7 @@ export function renderRediger(root, params) {
 
   // Le premier rendu de l'écran — une fois TOUT le corps de la fonction évalué
   // (voir le commentaire plus haut, à la place des colonnes).
-  paintPaper(true);
+  paintPaper();
   paintPalette();
   paintStatus();
   paintPanel();

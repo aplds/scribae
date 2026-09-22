@@ -1,4 +1,4 @@
-import { esc, slug } from "./util.js";
+import { esc, slug, download } from "./util.js";
 import { parseExpr } from "./expr.js";
 import { renderDocument, personSignatureName, personRoleLines, documentToHtml } from "./render.js";
 import { amendmentMentions, amendmentMention } from "./amend.js";
@@ -922,38 +922,52 @@ ${wordLayout}
 }
 
 // Impression d'une page HTML autonome (acte compilé, original signé, version en
-// ligne) : on privilégie un onglet dédié, où l'utilisateur imprime ou enregistre
-// en PDF. Repli : iframe cachée + window.print(), pour un navigateur de bureau.
-// Toutes ces pages portent le même `@page A4` (`paper.js`), donc le PDF obtenu a
-// toujours le format du papier.
-export function printHtml(html) {
+// ligne) : le document part dans un ONGLET DÉDIÉ, qui déclenche lui-même la
+// boîte d'impression. C'est là tout l'intérêt : imprimer depuis la page de
+// l'application (l'ancien repli « iframe cachée + window.print() ») FIGEAIT
+// l'aperçu de l'éditeur tant que la boîte d'impression restait ouverte —
+// `window.print()` bloque le fil d'exécution de la page qui l'appelle, et
+// c'était donc celle de l'agent. Le repli n'imprime donc JAMAIS depuis ici : il
+// télécharge la page, à charge pour l'agent de l'ouvrir et de l'imprimer.
+//
+// Renvoie le mode employé : "onglet", "telechargement" ou "echec".
+export function printHtml(html, { titre = "" } = {}) {
+  const page = avecImpressionAuto(html);
   let win = null;
   try { win = window.open("", "_blank"); } catch (e) { win = null; }
-  if (win && win.document) {
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 500);
-    return "onglet";
+  if (win) {
+    try {
+      win.document.open();
+      win.document.write(page);
+      win.document.close();
+      try { win.focus(); } catch (e) { /* le navigateur décide */ }
+      return "onglet";
+    } catch (e) { /* la fenêtre ne se laisse pas écrire : on télécharge */ }
   }
-  const frame = document.createElement("iframe");
-  frame.style.position = "fixed";
-  frame.style.right = "0";
-  frame.style.bottom = "0";
-  frame.style.width = "0";
-  frame.style.height = "0";
-  frame.style.border = "0";
-  document.body.appendChild(frame);
-  const d = frame.contentDocument;
-  d.open();
-  d.write(html);
-  d.close();
-  const go = () => { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) {} setTimeout(() => frame.remove(), 1500); };
-  if (d.readyState === "complete") setTimeout(go, 300); else frame.onload = () => setTimeout(go, 300);
-  return "iframe";
+  try {
+    download(nomPageImprimable(titre), page, "text/html");
+    return "telechargement";
+  } catch (e) {
+    return "echec";
+  }
 }
+
+// La page emporte son propre geste d'impression : c'est ELLE qui ouvre la boîte
+// d'impression, une fois ses styles posés — jamais l'onglet de l'application.
+function avecImpressionAuto(html) {
+  const script = "<script>window.addEventListener(\"load\",function(){setTimeout(function(){try{window.print();}catch(e){}},250);});</" + "script>";
+  const t = String(html || "");
+  return /<\/body>/i.test(t) ? t.replace(/<\/body>/i, script + "</body>") : t + script;
+}
+
+const nomPageImprimable = (nom) => {
+  const n = String(nom || "").trim().replace(/[^\w.-]+/g, "_");
+  if (/\.html?$/i.test(n)) return n;
+  return (n || "acte") + ".html";
+};
 
 // Le document compilé, prêt à imprimer (ou à enregistrer en PDF).
 export function printDocument(doc, config, trame) {
-  return printHtml(exportStandaloneHtml(doc, config, trame));
+  const base = String(doc?.meta?.numero || doc?.meta?.designation || "acte").replace(/[^\w-]+/g, "_");
+  return printHtml(exportStandaloneHtml(doc, config, trame), { titre: base + ".html" });
 }

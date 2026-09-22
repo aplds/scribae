@@ -53,9 +53,14 @@ et l'édition web de l'application.
      plus avancée qui écrase le dépôt fait perdre du travail.
 4. **Chaque livraison laisse une trace** : incrémenter `APP_VERSION` (`src/lib/version.js`),
    ouvrir une entrée datée dans **`src/CHANGELOG.md`** (rubriques `Ajouté` / `Modifié` /
-   `Corrigé` / `Retiré`), et vérifier que la première entrée datée correspond bien à
-   `APP_VERSION`. Le changelog est lisible dans l'application — **Documentation technique ›
-   Journal des versions** — et dans le dépôt.
+   `Corrigé` / `Retiré`), et vérifier que la première entrée datée **sans lettre** correspond
+   bien à `APP_VERSION`. Le changelog est lisible dans l'application — **Documentation
+   technique › Journal des versions** — et dans le dépôt.
+   **Entre deux livraisons**, le travail achevé ne reste pas sans trace : chaque correction
+   reçoit une **note de version intermédiaire** dans le changelog — un numéro de correctif
+   suivi d'une lettre (`1.3.1a`, `1.3.1b`…), datée. Ces notes ne touchent **pas**
+   `APP_VERSION` (réservé aux livraisons GitHub) et sont reprises, sans les lettres, sous
+   l'entrée de la livraison suivante.
 5. **Ne jamais livrer deux fois le même numéro.** Si le dépôt a déjà le numéro d'ici, c'est
    qu'une livraison a eu lieu : incrémenter avant de figer, jamais réutiliser.
 
@@ -85,6 +90,27 @@ dates fixes pour un export reproductible), en excluant `node_modules`, `scratch/
 les fichiers système ; ajouter les trois fichiers ci-dessus. Le nom du fichier porte la
 version courante — `scribae-v<APP_VERSION>-github.zip` — et l'archive se décompresse **à la
 racine** du dépôt.
+
+Le zip porte en outre **`package.json`** (recopie de `src/package.json`) et
+**`.github/workflows/ci.yml`** (recopie de `src/github/ci.yml`) : la racine est lue par
+l'intégrateur et par la forge, `src/` par le navigateur. Les commandes du `package.json` recopié
+désignent l'outillage **là où il vit dans `src/`** (`src/scripts/…`, `src/tests/`,
+`src/server/mysql/`) : rien n'est dupliqué, et `npm run verifier` fonctionne **depuis la racine**
+du dépôt. `src/scripts/verifier-syntaxe.mjs` et `src/scripts/verifier-style.mjs` retrouvent leur
+arborescence tout seuls, qu'ils soient lancés depuis `src/` (copie de travail) ou depuis la racine
+(dépôt livré).
+
+Le `.gitignore` ajouté à la racine vaut ceci. Le `.env` n'est **jamais** commité : il porte les
+secrets de déploiement (voir `docs/VARIABLES.md`, qui ne montre aucune valeur).
+
+```gitignore
+node_modules/
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*~
+```
 
 Le dépôt porte aussi des fichiers que l'export **ne contient pas** : `LICENSE` (GPL-3.0), le
 dossier `.git/`, et d'éventuels fichiers tiers. On décompresse donc l'archive **par-dessus un
@@ -137,27 +163,59 @@ nom — voir plus bas).
 > couleurs. `Scribae` est le **logiciel**. Dans l'en-tête, la gauche est le logiciel
 > et la pastille de droite rappelle la structure.
 
-## Bandeau de démonstration
+## Démonstration, ou référentiel vierge
 
-Un **bandeau orange** (« Démonstration » + une phrase, et un lien *Réglage* pour les
-administrateurs) est affiché **en tête de l'application** — sur l'écran de connexion comme
-dans l'en-tête — tant que le référentiel ne dit pas le contraire : `brand.demo !== false`.
-C'est un choix délibéré : une installation neuve, un référentiel importé ou des données
-effacées réaffichent le bandeau, donc on ne peut pas se retrouver à produire des actes
-« pour de vrai » dans une démonstration par simple oubli.
+La démonstration est décidée par le **DÉPLOIEMENT** : un seul commutateur, **`DEMO`** dans le
+`.env` du service (voir `src/server/env.example`). La question se tranche à **un seul endroit**,
+`demoActif()` (`src/lib/demo.js`) ; `config.brand.demo` n'en est qu'un **miroir** — il voyage avec
+les données exportées et importées, et fait foi quand aucun déploiement ne parle (aperçu en ligne,
+page statique).
 
-- **Élément** : `src/ui/notice.js` (`demoNotice()`, `isDemo()`, `DEMO_TEXT`), posé par
-  `app.js` (coquille) et par `views/connexion.js` ; styles `.app-demo` dans `app.css`.
-- **Réglage** : `Administration › Identité › Mention de démonstration` — *Afficher / Masquer*
-  plus un **texte libre** (`brand.demoText`, vide = phrase d'origine). Le basculement
-  rafraîchit toute l'application ; la saisie du texte met le bandeau à jour en direct.
+- **Allumée** (le défaut de l'aperçu en ligne ; `DEMO=true`, ou `AUTH_MODE=demo`, ou
+  `DEMO_ACCOUNTS=true`) : l'application sème le **jeu fictif livré** — identité, entités,
+  assemblées, services, personnes, rôles, références, familles, trames, actes et comptes — et
+  affiche le **bandeau orange** « Démonstration ».
+- **Éteinte** (`DEMO=false`) : l'application part d'un **référentiel VIERGE**
+  (`seedConfigVierge()`, `src/lib/seed.js`) — identité neutre (« Mon établissement », aucun
+  blason), vocabulaire, numérotation, délais et mentions du recueil génériques — et **aucune
+  donnée de fiction** : les collections restent vides, `bootstrap()` ne sème ni trame, ni acte,
+  ni personne, ni compte. Le premier écran invite à construire le référentiel.
+
+Le bandeau :
+
+- **Élément** : `src/ui/notice.js` (`demoNotice()`, `viergeNotice()`, `isDemo()`, `DEMO_TEXT`),
+  posé par `app.js` (coquille) et par `views/connexion.js` ; styles `.app-demo` et `.app-vierge`
+  dans `app.css`. Le bandeau de démonstration l'emporte : les deux ne s'affichent jamais ensemble.
+- **Réglage du texte** : `Administration › Identité › Mention de démonstration` — un **texte
+  libre** (`brand.demoText`, vide = phrase d'origine) ; le choix *Afficher / Masquer* ne subsiste,
+  comme réglage du référentiel, que quand **aucun déploiement** ne parle (aperçu, page statique).
 - **Portée** : le bandeau marque l'**application** — l'écran de connexion, l'en-tête de
   l'atelier **et le recueil public** — mais **pas les documents produits** (un acte exporté ou
-  publié ne porte pas la mention). Si une installation veut marquer aussi ses sorties, c'est un
-  autre réglage à ajouter (sortie HTML/Akoma Ntoso).
+  publié ne porte pas la mention).
 - Les captures du guide ont été prises **avant** l'introduction du bandeau, volontairement :
   elles montrent l'application en service (bandeau coupé), pas la démonstration. Les repères
   restent valides tels quels.
+
+**Sortir de la démonstration.** `Administration › Données › « Repartir d'un référentiel
+vierge »` efface le référentiel, les trames, les actes et les comptes du poste, **et** — sur le
+service partagé — les actes déposés, les circuits de signature et les publications (route
+`POST /v1/admin/purge`, réservée à l'administration) : sans cela, basculer `DEMO=false`
+laisserait les données fictives en place, et les publications au recueil public.
+
+## Réglages déclaratifs (`.env`)
+
+Le déploiement peut **poser** des réglages de référentiel qui, sinon, se saisissent dans
+l'interface : identité, vocabulaire des actes, numérotation, délais, recueil public, fonctions.
+Une seule déclaration les décrit — le registre **`src/server/mysql/variables.mjs`**, qui porte
+leur portée, leur type, leurs bornes et leur rôle. Il en découle la validation (au démarrage
+du service), le transport au navigateur (`GET /v1/config`) et le wiki des variables
+(`src/docs/VARIABLES.md`, engendré par `node src/scripts/generer-variables.mjs`).
+
+Côté client, `src/lib/deploiement-config.js` reçoit ces réglages et `bootstrap()`
+(`src/lib/store.js`) les applique **par-dessus le référentiel** — en mémoire seulement : le
+`.env` l'emporte, mais le référentiel enregistré reste celui de l'administrateur ; une variable
+retirée n'est plus imposée au lancement suivant, et l'interface reprend la main. C'est le même
+principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 
 ## État actuel (v1 fonctionnelle)
 
@@ -201,7 +259,7 @@ effacées réaffichent le bandeau, donc on ne peut pas se retrouver à produire 
 | **Base de données** (pilotes local / service partagé / **serveur MySQL-MariaDB** externe, synchronisation par enregistrement, conflits, file hors ligne) | ✅ |
 | **Auto-hébergement** (pile Docker nginx + service Node + MySQL/MariaDB, édition web de l'application, transport HTTP) | ✅ |
 | **Bibliothèque de trames partagée / multi-poste** | ✅ (mode partagé ; export/import JSON toujours disponible) |
-| **Guide** (wiki intégré : 24 chapitres, glossaire, dépannage, fiche mémo, impression) | ✅ |
+| **Guide** (wiki intégré : 25 chapitres, glossaire, dépannage, fiche mémo, impression) | ✅ |
 | PDF/A certifié, bordereau SEDA | ⏳ |
 
 ### Comptes et rôles
@@ -1577,7 +1635,10 @@ Base de données). Seules les ressources PUBLIQUES se lisent sans clé : le recu
 (`/v1/publications`, `/v1/eli/…`), la santé du service et l'OpenAPI. Les actes déposés, les
 circuits de signature, les comptes et le journal exigent une clé, et `/v1/db/collections/users`
 ou `config` en écriture exigent le rôle **administrateur** — c'est ce qui ferme l'élévation de
-privilèges qui consistait à réécrire la collection des comptes.
+privilèges qui consistait à réécrire la collection des comptes. `POST /v1/admin/purge` (rôle
+administrateur, corps `{ confirmation: "repurge" }`) **remet le service à zéro** : c'est le
+pendant, côté service, du bouton « Repartir d'un référentiel vierge » — le recueil public lisant
+le service, vider le seul navigateur laisserait les publications de démonstration en ligne.
 
 Deux détails de fonctionnement : les **certificats sont créés par titulaire** (`certificate()`
 les indexe par sujet : deux signataires ont deux certificats, comme sur deux postes de
@@ -2242,7 +2303,9 @@ src/lib/
   schema.js               types de nœuds/champs/règles + fabriques (dont `newTrame`, `publishable`, le nœud `division` et l'échelle des divisions `NIVEAUX_DEFAUT` / `ladderOf` / `numeroNiveau`, la nature de document `natureDe`, la disponibilité d'une trame `trameDisponible`)
   trame-format.js         format de fichier des trames : exemple documenté + lecture/normalisation à l'import
   doc-import.js           IMPORTER UN DOCUMENT COMME TRAME : lecture d'un .docx / .odt sans dépendance (archive ZIP + XML), blocs bruts, reconnaissance de la structure d'un acte (autorité, intitulé tokenisé, visas, considérants, formule d'édiction, articles, divisions, listes, tableaux, mention de recours, signature) et points à vérifier (module pur, sans DOM hors DOMParser)
-  seed.js                 JEU DE DONNÉES INITIAL (remplaçable — aucune logique métier)
+  seed.js                 JEU DE DONNÉES INITIAL (remplaçable — aucune logique métier), et `seedConfigVierge()` : le référentiel NEUTRE d'une installation hors démonstration
+  demo.js                 LE COMMUTATEUR DE DÉMONSTRATION : `demoActif()` (source unique de vérité, alimentée par le déploiement), `demoRegleParLeDeploiement()`, `referentielVierge()` et `registreVierge()`
+  deploiement-config.js   RÉGLAGES DÉCLARATIFS DU .env : `setDeploiementConfig()` (ce que rend `GET /v1/config`), `appliquerOptions()` (les pose dans le référentiel au démarrage), `poseParLeDeploiement()` — le registre des variables vit côté service (`server/mysql/variables.mjs`)
   demo-actes.js           ACTES DE DÉMONSTRATION (rédigés et signés au premier démarrage)
   demo-publications.js    AMORÇAGE DU RECUEIL (démonstration) : publie les actes que la fiction déclare publiés, et porte au service la mise à la une des actes épinglés
   compile.js              contexte, interpolation {{…}}, règles, article par article, divisions (numérotation par échelon), écarts, ordre du document et renumérotation, visas et annexes (pour une annexe : ni autorité ni mention de publication au recueil, visas conservés)
@@ -2323,7 +2386,7 @@ src/ui/
   assistant.js            LES DEUX PASTILLES D'ASSISTANCE (Plume dans l'atelier, Publia sur le recueil) : personnage, bulle d'invitation, panneau de conversation, réponse en flux, liens des réponses suivis dans l'application, questions de l'acte consulté, et le bloc « Assistants » du menu du compte (masquer pour soi)
   dnd.js                  GLISSER-DÉPOSER : primitives partagées sur les POINTER EVENTS (glissable, deposable, conversion d'un point de dépôt en position de curseur) — souris, doigt et stylet d'un seul chemin
   brand.js                nom et marque du logiciel (SVG en ligne, currentColor)
-  notice.js               bandeau « Démonstration » (affiché tant que brand.demo !== false, dans l'atelier comme sur le recueil public)
+  notice.js               bandeaux de tête : « Démonstration » (si le déploiement l'allume) et « Référentiel vierge » (démonstration éteinte et référentiel vide), dans l'atelier comme sur le recueil public
   state.js                état global, routeur (sans toucher au hash), persistance différée, corbeille et mise à disposition d'une trame (gestes journalisés)
   markdown.js             rendu markdown → DOM (documentation technique)
   import-trame.js         OUVRIR LA TRAME PROPOSÉE PAR UN IMPORT DE DOCUMENT : l'adresse réservée `trame/__import__`, la lecture du fichier, la fenêtre des points à vérifier, et l'enregistrement ou l'abandon (rien n'est écrit avant)
@@ -2334,6 +2397,7 @@ src/ui/
   global-search.js        RECHERCHE GLOBALE (Ctrl+K ou « / ») : superposition, index, navigation clavier
   collab.js               TÉMOINS DE COLLABORATION dans l'en-tête : présence, cloche de notifications, panneaux
   theme.js                sélecteur d'apparence de la coquille (bouton d'en-tête + menu du compte)
+  zoom.js                 ZOOM ET DÉPLACEMENT d'un contenu : l'organigramme, la feuille de la trame et le document en rédaction se traitent comme un canvas — molette ou boutons pour le cran, « Ajuster », déplacement au curseur (voir « Le canvas »)
   oidc.js                 annuaire : panneau de connexion, retour du fournisseur, fenêtre d'essai, onglet de l'Administration
   mot-de-passe.js         COMPTES LOCAUX (écrans) : formulaire de connexion (identifiant, mot de passe, œil), fenêtre « changer mon mot de passe », fenêtre d'administration d'un mot de passe (poser, engendrer un provisoire, retirer) et l'état des mots de passe pour la table des comptes
   comptes-liste.js        LA LISTE DES COMPTES telle qu'elle se présente à la connexion (groupes par profil, ligne de compte) — partagée par l'écran de connexion et le raccourci de démonstration
@@ -2464,6 +2528,45 @@ Les onglets de l'inspecteur s'appellent **« Ce bloc », « Commentaires », « 
 nomme de la même façon** (`src/wiki.js`, chapitre *Préparer et faire évoluer une trame*) :
 renommer un onglet oblige à corriger le guide dans le même mouvement, sinon l'aide désigne un
 onglet qui n'existe plus.
+
+### Le canvas : zoomer et déplacer ce qui ne tient pas
+
+Trois écrans montrent un contenu plus large que leur colonne — l'**organigramme des
+délégations** (un arbre large), la **feuille de la trame** et le **document en cours de
+rédaction** (une page A4). Plutôt que d'imposer un défilement horizontal, ils sont traités comme
+un **canvas** : une barre flottante (`.zoom__bar`) règle le cran — `−`, pourcentage, `+`,
+« Ajuster » — et le fond se saisit au curseur pour se déplacer.
+
+Tout est dans **`src/ui/zoom.js`** (`cadreZoom`), et repose sur une idée simple : le contenu est
+posé dans un **plateau** dont la taille en pixels vaut `taille naturelle × cran`, le contenu
+lui-même étant **hors flux** et réduit par `transform: scale()`. C'est ce plateau qui RÉSERVE la
+place du contenu réduit : les barres de défilement et le défilement tactile du navigateur restent
+donc normaux, et rien n'est jamais rogné. Poser le `transform` sur un élément en flux n'aurait
+réservé aucune place — un grand vide, ou un débordement sans barre de défilement.
+
+Deux modes, pour deux gestes :
+
+- **`canvas`** (l'organigramme) : la molette règle le cran, on saisit l'arbre n'importe où pour le
+  déplacer (un appui sans mouvement reste un clic : la fiche s'ouvre), et le cadre est une fenêtre
+  de hauteur bornée. L'arbre s'ouvre à **100 %** — le réduire pour le faire tenir entier rendrait
+  ses noms illisibles —, et « Ajuster » en donne la vue d'ensemble ;
+- **`feuille`** (le document, la trame) : seul **Ctrl + molette** zoome (la molette nue continue de
+  faire défiler la page, comme partout ; le pincement d'un pavé tactile arrive sous cette même
+  forme), et la feuille s'ajuste d'elle-même à la largeur disponible au premier affichage. On ne
+  saisit que le fond ou la marge : le texte reste sélectionnable et un bouton reste un bouton.
+
+Deux pièges sont traités dans le module, et méritent d'y rester : la largeur naturelle est
+**mesurée** en effaçant le temps de la mesure la taille du plateau ET la largeur du contenu (sans
+quoi une feuille **fluide** — `width: 100%`, le cas des écrans étroits — se mesurerait d'après le
+plateau, qui se règle lui-même d'après la mesure, et fondrait à chaque dessin) ; puis cette largeur
+est **figée en pixels** sur le contenu, que `ResizeObserver` surveille pour que le plateau suive un
+document qui grandit (un article ajouté, une division ouverte). Le cran et le défilement sont rangés
+dans `state.ui.zooms[cle]` : un écran se redessine souvent, et le cran choisi ne s'y perd pas.
+
+L'éditeur de trame occupe par ailleurs **toute la fenêtre** (`.app--plein`, posé sur la coquille
+quand la route est `trame`) : ses volets défilent sur place au lieu d'allonger la page — c'est aussi
+ce qui donne au canvas de la feuille une vraie fenêtre à déplacer. Sans cette borne, la coquille
+(`min-height: 100vh`) s'allongeait avec le contenu.
 
 ### Les commentaires : commenter ce qu'on voit, et ne pas pouvoir les manquer
 

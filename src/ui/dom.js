@@ -129,10 +129,23 @@ export function alert(kind, title, content, opts = {}) {
     opts.actions || null);
 }
 
+// Deux fenêtres peuvent être ouvertes l'une par-dessus l'autre (la fiche d'une
+// délégation, puis celle de sa sous-délégation) : chacune s'inscrit dans cette
+// pile à l'ouverture, et seule celle du DESSUS répond à « Échap » — sans quoi
+// appuyer une fois sur Échap refermerait aussi la fiche qu'on lisait.
+const pileModales = [];
+
 export function modal({ title, body, actions, wide = false, onClose }) {
   const overlay = h("div", { class: "fr-modal-overlay", on: { click: (e) => { if (e.target === overlay) close(); } } });
-  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); onClose?.(); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const close = () => {
+    const i = pileModales.indexOf(close);
+    if (i >= 0) pileModales.splice(i, 1);
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+    onClose?.();
+  };
+  const onKey = (e) => { if (e.key === "Escape" && pileModales[pileModales.length - 1] === close) close(); };
+  pileModales.push(close);
   document.addEventListener("keydown", onKey);
   const box = h("div", { class: "fr-modal" + (wide ? " fr-modal--wide" : ""), role: "dialog", "aria-modal": "true" },
     h("div", { class: "fr-modal__header" },

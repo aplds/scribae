@@ -24,7 +24,7 @@ import { renderMarkdown } from "./markdown.js";
 import { state, onChange, emit, navigate } from "./state.js";
 import { ASSISTANTS, ASSISTANT_IDS, assistantSettings, assistantIdentite, assistantActif, assistantVisible, assistantPref, reglerPrefAssistant, moteurDe, repondre } from "../lib/assistant.js";
 import { estVisiteur } from "../lib/users.js";
-import { get } from "../lib/remote.js";
+import { get, bodyOf } from "../lib/remote.js";
 
 // L'état de chaque conversation vit ici, hors du DOM : il survit donc aux
 // redessins de l'application (navigation, journal, changement de référentiel),
@@ -370,7 +370,7 @@ async function publicationsPubliques() {
       let liste = Array.isArray(state.recueil?.liste) ? state.recueil.liste : null;
       if (!liste) {
         const r = await get("/v1/publications", { label: "Assistant du recueil", source: "lecture" }).catch(() => null);
-        liste = r && r.ok ? (r.body.publications || []) : [];
+        liste = r && r.ok ? (bodyOf(r).publications || []) : [];
       }
       const recents = liste.filter((p) => p && p.latest !== false).slice(0, ACTES_DETAILLES);
       await Promise.all(recents.map(async (p) => {

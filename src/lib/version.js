@@ -15,17 +15,20 @@
 //   • une version n'existe qu'une fois FIGÉE — c'est-à-dire déposée sur GitHub.
 //     On incrémente `APP_VERSION` et on date l'entrée du changelog à ce
 //     moment-là, jamais avant ;
-//   • tant qu'une évolution n'est pas livrée, elle n'a pas de numéro : elle se
-//     décrit sous « Non publié » dans le changelog ;
-//   • la version courante doit correspondre à la première entrée datée du
-//     changelog. Si les deux divergent, c'est le changelog qui dit la vérité,
-//     et il faut corriger `APP_VERSION`.
+//   • entre deux livraisons GitHub, le travail achevé reçoit une NOTE
+//     INTERMÉDIAIRE dans le changelog (`1.3.1a`, `1.3.1b`…) : un numéro de
+//     correctif suivi d'une lettre, daté. Ces notes ne sont pas des
+//     publications : elles ne touchent PAS `APP_VERSION`, et la livraison
+//     suivante les reprend sous sa propre entrée, sans les lettres ;
+//   • la version courante doit correspondre à la première entrée datée SANS
+//     lettre du changelog. Si les deux divergent, c'est le changelog qui dit la
+//     vérité, et il faut corriger `APP_VERSION`.
 // ============================================================================
 
-export const APP_VERSION = "1.3.0";
+export const APP_VERSION = "1.3.1";
 
 // Date de la version courante (ISO, AAAA-MM-JJ).
-export const APP_RELEASED = "2026-09-21";
+export const APP_RELEASED = "2026-09-22";
 
 // Le changelog est un fichier du dépôt, pas une donnée recopiée dans le code :
 // l'écran « Documentation technique » le lit tel quel (comme README/SPEC/TODO).

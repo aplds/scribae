@@ -67,6 +67,13 @@ async function appel(method, chemin, corps) {
 // en conclut que le mode est celui du référentiel.
 export const modeService = () => appel("GET", "/v1/auth/config");
 
+// Les réglages de RÉFÉRENTIEL posés par le `.env` du déploiement (identité,
+// vocabulaire, numérotation, délais, recueil, fonctions) : `{ variables, erreurs }`.
+// L'application les applique par-dessus le référentiel (voir
+// src/lib/deploiement-config.js). Route publique ; un service injoignable
+// (édition en ligne, page statique) rend `{ ok: false }`.
+export const configService = () => appel("GET", "/v1/config");
+
 // ------------------------------------------------------------------ connexion
 export const connexion = (login, motDePasse) => appel("POST", "/v1/auth/connexion", { login, motDePasse });
 export const connexionDemo = (userId) => appel("POST", "/v1/auth/demo", { userId });

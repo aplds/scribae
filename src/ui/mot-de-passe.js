@@ -29,6 +29,30 @@ const minimum = () => {
   return (d && Number(d.motDePasseMin)) || 12;
 };
 
+// L'état du DÉPLOIEMENT, dit À L'ÉCRAN plutôt que dans les seuls journaux du
+// service (voir `GET /v1/auth/config`). Deux cas empêchent toute connexion, et
+// l'agent doit pouvoir les distinguer d'un simple refus d'identifiants :
+//   • la base est injoignable — l'écran serait vide sans ce mot ;
+//   • aucun compte d'administration n'a pu être installé (ADMIN_PASSWORD refusé
+//     par la politique, compte sans mot de passe…), et le motif est donné.
+// Rend une liste de nœuds à poser en tête de l'écran de connexion.
+export function bandeauEtatService() {
+  const d = deploiementAuth();
+  if (!d) return [];
+  const out = [];
+  if (d.baseDisponible === false) {
+    out.push(alert("error", "Base de données indisponible",
+      `${d.baseMessage || "Le service de la collectivité ne joint pas sa base de données."}${d.baseRemede ? " " + d.baseRemede : ""}`));
+  } else if (d.adminAmorce === false) {
+    out.push(alert("warning", "Aucun compte d'administration installé",
+      `${d.adminMotif || "L'installation n'a pas encore de compte d'administration."} Sans lui, aucune connexion n'est possible.`));
+  }
+  if (d.adminAvertissement) {
+    out.push(alert("info", "Compte d'administration", d.adminAvertissement));
+  }
+  return out;
+}
+
 // Un champ de mot de passe, avec l'œil qui montre la saisie : une faute de
 // frappe invisible est la première cause de « connexion refusée ».
 function champMotDePasse(label, { help, autocomplete = "current-password", required = true } = {}) {

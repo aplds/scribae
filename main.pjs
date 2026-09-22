@@ -17,7 +17,7 @@
 
 $meta
   title = Scribae — trames, rédaction et publication des actes administratifs
-  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. La page d'accueil est le recueil public des actes publiés — consultable par tous, sans compte, avec leur identifiant ELI et leur texte ; l'atelier s'ouvre par « Se connecter ». Démonstrateur configuré pour une collectivité fictive (mairie de Valmont-sur-Loire).
+  description = Scribae est un éditeur de trames d'actes administratifs : les administrateurs préparent les modèles (structure, champs, règles, commentaires), les services les remplissent, le système compile et exporte en Akoma Ntoso, Schematron, JSON-LD/ELI et HTML imprimable. Un guide d'utilisation intégré accompagne les rédacteurs pas à pas. La page d'accueil est le recueil public des actes publiés — consultable par tous, sans compte, avec leur identifiant ELI et leur texte ; l'atelier s'ouvre par « Se connecter ». L'application peut être déployée en auto-hébergement sur la base de la collectivité (le jeu de démonstration, entièrement fictif, s'active alors par le réglage DEMO) ; à défaut, cet aperçu présente la démonstration.
   image = https://user.uploads.dev/file/06d748c1bac8b420d52e7572cc6d66f0.jpg
   tags = actes administratifs, akoma ntoso, legalxml, trames, eli, open data, guide
 

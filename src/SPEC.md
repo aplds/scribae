@@ -891,6 +891,8 @@ elle-même. Le service expose :
 | `POST` | `/v1/publications/{cle}/retrait` | retirer un acte du recueil (motif technique exigé, administrateur seul) |
 | `POST` | `/v1/publications/{cle}/epingle` | épingler un acte à la « une » du recueil public (corps `{ epingle, auteur }`) |
 | `GET` | `/v1/publications`, `/v1/publications/{cle}`, `/v1/eli/{...}` | registre public et résolution ELI |
+| `POST` | `/v1/admin/purge` | **remettre le service à zéro** (actes déposés, circuits, publications ; corps `{ confirmation: "repurge" }`, administrateur seul) — le pendant, côté service, de « Repartir d'un référentiel vierge » |
+| `GET` | `/v1/config` | **réglages de référentiel posés par le `.env`** (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés, avec les valeurs refusées ; public, sans secret (§ 2.7 bis.3) |
 
 Les lectures sont publiques ; les écritures exigent `Authorization: Bearer <jeton>`
 (`401` sans jeton, `403` si le jeton est invalide, `429` au-delà de 90 écritures par
@@ -1945,11 +1947,14 @@ que le référentiel, et `authConfig()` (`src/lib/auth.js`) applique son mode **
 service, `amorcerAdmin()` (`src/server/mysql/server.mjs`) le **crée** s'il n'existe pas — rôle
 `administrateur`, mot de passe haché —, ou lui **repose** son mot de passe s'il existe déjà. Un
 `ADMIN_PASSWORD` trop faible (moins de `MDP_MIN_LONGUEUR`, ou égal à l'identifiant) est **refusé**
-avec son motif. C'est ensuite ce compte qui, depuis **Comptes et rôles**, crée les autres — et
+avec son motif — et l'écran de connexion **l'annonce** (`adminAmorce`, `adminMotif`, portés par
+`GET /v1/auth/config`), au lieu de laisser croire à de mauvais identifiants. C'est ensuite ce
+compte qui, depuis **Comptes et rôles**, crée les autres — et
 qui peut changer son mot de passe pour ne plus dépendre du `.env` (recommandé : `ADMIN_PASSWORD`
-se retire alors du fichier). Le mode démonstration se commande de la même façon : `DEMO_ACCOUNTS`
-(défaut **`false`** en mode mot de passe) laisse ou non le raccourci « choisir un compte » de
-l'écran de connexion — réglage du déploiement, jamais du référentiel.
+se retire alors du fichier). Deux réglages voisins, à ne pas confondre : `DEMO_ACCOUNTS` (défaut
+**`false`** en mode mot de passe) laisse ou non le raccourci « choisir un compte » de l'écran de
+connexion ; **`DEMO`** commande, lui, tout le **jeu fictif** (voir § 2.7 bis.2) — les deux viennent du
+déploiement, jamais du référentiel.
 
 **Ce qui protège vraiment.** Le mot de passe est vérifié par le **service** : jamais le
 navigateur ne détient de secret, et le référentiel ne conserve **pas** le mot de passe mais son
@@ -1968,22 +1973,64 @@ client l'appelle par `src/lib/motdepasse.js`.
 
 
 
-Une installation de démonstration doit **se voir** : un bandeau orange « Démonstration »
-(avec une phrase d'explication) est affiché **en tête de l'application**, au-dessus de
-l'en-tête, sur l'écran de connexion, une fois connecté, **et sur le recueil public**.
+### 2.7 bis.2 La démonstration est un commutateur unique
 
-Le réglage vit dans le référentiel, sous `brand.demo` (booléen) et `brand.demoText` (texte
-libre, facultatif) :
+Deux notions cohabitaient, et ne se recouvraient pas : le **déploiement** décidait de la
+**connexion** (`AUTH_MODE`, `DEMO_ACCOUNTS`), et le **référentiel** (`brand.demo`) du **bandeau**.
+Résultat : même en service réel, l'application semait et affichait une collectivité fictive.
 
-- affiché tant que `brand.demo !== false` — **l'absence du réglage vaut « démonstration »** :
-  une installation neuve, un référentiel importé ou des données effacées réaffichent le
-  bandeau. On ne peut donc pas produire des actes réels dans une démonstration par simple
-  oubli ;
-- coupé par l'**administrateur** (`Administration › Identité › Mention de démonstration`) au
-  moment où l'installation est **adaptée en production** ; le réglage suit le référentiel
-  exporté/importé ;
-- il marque **l'application, pas les documents** : un acte exporté, publié ou imprimé ne
-  porte pas la mention.
+Il n'y a plus qu'une source de vérité, `DEMO` (`.env` du service — voir `src/server/env.example`),
+lue par `demoActif()` (`src/lib/demo.js`) ; `config.brand.demo` survit comme **miroir** (il voyage
+avec les données exportées/importées et fait foi quand aucun déploiement ne parle : aperçu en
+ligne, page statique). Valeur par défaut : `AUTH_MODE=demo` ou `DEMO_ACCOUNTS=true` **allument** la
+démonstration ; `DEMO=false` l'**éteint**.
+
+**Allumée**, l'application sème le **jeu fictif livré** (identité, entités, assemblées, services,
+personnes, rôles, références, familles, trames, actes, comptes) et affiche le **bandeau orange**
+« Démonstration » — en tête de l'application, sur l'écran de connexion, **et sur le recueil
+public**. Il marque **l'application, pas les documents** : un acte exporté, publié ou imprimé ne
+porte pas la mention. Le **texte** du bandeau reste réglable (`brand.demoText`).
+
+**Éteinte**, l'application part d'un **référentiel VIERGE** (`seedConfigVierge()`,
+`src/lib/seed.js`) : identité neutre, aucun blason, vocabulaire, numérotation, délais et mentions
+du recueil génériques, collections vides, **et aucune mention de la collectivité fictive** nulle
+part — ni à l'écran, ni dans le DOM, ni dans les données servies par l'API, ni dans le guide, ni
+dans les métadonnées publiées. Le premier écran affiche une invitation (« Référentiel vierge »,
+`viergeNotice()`, `src/ui/notice.js`) qui mène à Administration › Identité.
+
+**Sortir de la démonstration.** `Administration › Données › « Repartir d'un référentiel vierge »`
+efface le référentiel, les trames, les actes et les comptes du poste, **et** — sur le service
+partagé — les actes déposés, les circuits de signature et les publications (`POST /v1/admin/purge`,
+réservé à l'administration) : le recueil public lit le service, donc vider le seul navigateur
+laisserait la fiction en ligne.
+
+### 2.7 bis.3 Les réglages déclaratifs du référentiel
+
+Le `.env` du déploiement peut **poser** des réglages qui, sinon, se saisissent dans
+l'interface : identité de la collectivité (nom, sigle, adresse de base, couleur, emblème,
+polices, service de contact), vocabulaire des actes, numérotation, délais et formalités
+d'exécution, recueil public (titre, publication automatique, opposabilité), circuit de
+signature, et fonctions (parapheur, contrôle de légalité, assistants). Ces variables —
+préfixe `SCRIBA_` pour le référentiel — sont **déclaratives**.
+
+Une seule déclaration les décrit : le registre **`src/server/mysql/variables.mjs`**, qui porte,
+pour chaque variable, sa portée (*service* ou *référentiel*), son type, ses bornes, son rôle et
+sa valeur d'exemple. Il en découle :
+
+- la **validation** au démarrage du service : une valeur refusée (type, choix ou borne) n'est
+  jamais appliquée, et son motif est journalisé — jamais de repli silencieux ;
+- le **transport au navigateur** par `GET /v1/config` (route publique, sans secret), que
+  l'application applique **par-dessus le référentiel** à chaque démarrage
+  (`src/lib/deploiement-config.js`) ; le `.env` l'emporte donc sur l'interface, sans modifier
+  le référentiel enregistré : une variable retirée n'est plus imposée au lancement suivant, et
+  l'interface reprend la main ;
+- le **wiki** `src/docs/VARIABLES.md`, engendré par `node src/scripts/generer-variables.mjs` et
+  rendu dans *Documentation technique › Variables de déploiement*.
+
+Une variable vide ou absente ne change rien. Les variables de **service** (base, comptes,
+jetons, courriel, limites) sont validées par la même fonction et documentées par le même wiki,
+mais ne sont jamais transmises au navigateur ; leurs secrets ne sont jamais rendus par
+`lireVariables`, ni recopiés dans une erreur.
 
 ## 2.8 Parapheur, exécution et registre
 
@@ -2180,7 +2227,7 @@ n'existe pas.
 ```js
 CONTROLE_LEGALITE = { id:"controle-legalite", service:"Télétransmission au contrôle de légalité",
                       destinataire:"Préfecture — contrôle de légalité", mode:"ctes",
-                      apiUrl:"https://api.ctes.valmont-sur-loire.fr/v1/transmissions" }
+                      apiUrl:"https://api.ctes.exemple.fr/v1/transmissions" }   // adresse d'EXEMPLE (transmission simulée)
 certificat = { nature, emisPar, emisLe, destinataire, reference, algorithme:"SHA-256",
                empreinte,   // SHA-256 du document transmis
                sceau,       // SHA-256 de reference|recuLe|destinataire|empreinte

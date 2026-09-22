@@ -822,6 +822,28 @@ const visaSelf = (refKind, when = "") => ({ id: "it-" + Math.random().toString(3
 // fixé par la trame, les décisions viennent du référentiel.
 const visaChaine = () => ({ id: "it-" + Math.random().toString(36).slice(2, 7), refId: "", text: "", when: "", chaine: true });
 
+// Le référentiel d'une installation HORS démonstration : une page vierge.
+//
+// Ce n'est pas « le jeu livré, vidé » : c'est le squelette que l'application
+// sait faire fonctionner (vocabulaire, numérotation, délais, mentions du recueil
+// génériques…), avec une IDENTITÉ NEUTRE — ni nom de collectivité, ni blason —
+// et aucune donnée de fiction : ni entités, ni assemblées, ni services, ni
+// personnes, ni rôles, ni références, ni familles, ni trames, ni actes.
+// L'emblème neutre est celui de l'application (aucun `logoUrl`), et le premier
+// écran invite à construire le référentiel (voir src/ui/notice.js).
+//
+// Voir src/lib/demo.js : c'est `demoActif()` qui décide lequel des deux
+// référentiels `bootstrap()` installe.
+export function seedConfigVierge() {
+  const c = emptyConfig();
+  c.brand = {
+    ...c.brand,
+    demo: false,
+    demoText: "",
+  };
+  return c;
+}
+
 export function seedTrames() {
   return [
     nominationTrame(), delegationTrame(), permisTrame(), marcheTrame(), regieTrame(), subventionTrame(), revalorisationTrame(),

@@ -13,7 +13,7 @@ import { authConfig, isTestProvider, isPassword } from "../lib/auth.js";
 import { themeButton, themeChooser } from "./theme.js";
 import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
-import { demoNotice } from "./notice.js";
+import { demoNotice, viergeNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
 import { ouvrirChangementMotDePasse } from "./mot-de-passe.js";
 import { renderSansAcces } from "./views/sans-acces.js";
@@ -141,6 +141,10 @@ function renderConsultationRoute(root, params) {
 }
 
 let mainEl = null;
+// La coquille entière : elle porte l'état « plein écran » de l'éditeur de trame
+// (`app--plein`), qui borne la hauteur pour que les volets défilent sur place —
+// et pour que le canvas de la feuille ait une vraie fenêtre à déplacer.
+let appEl = null;
 
 // Pastille d'état de la persistance : discrète en mode local (c'est le mode par
 // défaut), explicite dès que les données sont partagées.
@@ -235,11 +239,16 @@ function shell() {
   const initials = (brand.shortName || brand.name || "?")
     .split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 
-  // Bandeau de démonstration : en tête, au-dessus de l'en-tête. Il disparaît
-  // quand l'administrateur l'a coupé (Administration › Identité).
+  // Bandeau de démonstration : en tête, au-dessus de l'en-tête. Il n'apparaît
+  // que si le DÉPLOIEMENT a allumé la démonstration (voir src/lib/demo.js).
   const notice = demoNotice(can("referentiel.gerer")
     ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
     : null);
+
+  // Invitation du premier pas : démonstration éteinte et référentiel vierge.
+  // Elle occupe la place du bandeau de démonstration — jamais les deux à la fois.
+  // Le raccourci n'est proposé qu'à qui peut tenir le référentiel.
+  const vierge = notice ? null : viergeNotice(can("referentiel.gerer") ? undefined : null);
 
   // Témoins de collaboration (postes connectés, notifications) : montés dans
   // l'en-tête, mais mis à jour d'eux-mêmes — un redessin à chaque battement de
@@ -296,7 +305,8 @@ function shell() {
 
   mainEl = h("main", { class: "app-main" });
   const body = h("div", { class: "app-body" }, nav, mainEl);
-  const app = h("div", { class: "app" }, notice, header, body);
+  const app = h("div", { class: "app" }, notice, vierge, header, body);
+  appEl = app;
   return app;
 }
 
@@ -315,6 +325,10 @@ function drawView() {
   const params = state.route.params || {};
   poserTitreEcran();
   mainEl.className = "app-main" + (state.route.view === "trame" ? " app-main--flush" : "");
+  // L'éditeur de trame est un écran « plein » : sa hauteur doit être bornée à la
+  // fenêtre, sinon il s'allonge avec son contenu et les volets (plan, inspecteur,
+  // feuille) ne défilent plus sur place — voir `.app--plein`.
+  if (appEl) appEl.classList.toggle("app--plein", state.route.view === "trame");
   // La présence annonce l'écran courant : les autres postes voient qui travaille
   // où. Le libellé de l'acte, lui, est posé par l'éditeur de rédaction.
   // Quitter la rédaction relâche le verrou souple de l'acte.

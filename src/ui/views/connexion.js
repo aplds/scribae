@@ -24,7 +24,7 @@ import { demoNotice } from "../notice.js";
 import { isOidc, isPassword, demoAccountsDisabled } from "../../lib/auth.js";
 import { loginPanel } from "../oidc.js";
 import { comptesGroupes } from "../comptes-liste.js";
-import { panneauMotDePasse } from "../mot-de-passe.js";
+import { panneauMotDePasse, bandeauEtatService } from "../mot-de-passe.js";
 
 export function renderConnexion(root) {
   const oidc = isOidc(state.config);
@@ -38,6 +38,11 @@ export function renderConnexion(root) {
 
   const box = h("div", { class: "connexion" },
     demoNotice(),
+    // L'état du déploiement (base joignable ? compte d'administration amorcé ?)
+    // est dit ICI, avant le formulaire : « Identifiant ou mot de passe
+    // incorrect » ne doit pas être la seule explication d'un service qui n'a
+    // jamais pu installer son administrateur.
+    ...bandeauEtatService(),
     // L'apparence (clair / sombre) se règle aussi avant de se connecter : c'est
     // un réglage du poste de travail, indépendant du compte.
     h("div", { class: "connexion__theme" }, themeButton()),

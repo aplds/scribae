@@ -1,0 +1,21 @@
+# ============================================================================
+# Ce qui n'entre PAS dans le contexte de construction de l'image autonome
+# (src/server/Dockerfile). Docker lit ce fichier quand on construit avec
+#   docker build -f src/server/Dockerfile .
+# (convention `<Dockerfile>.dockerignore`). Il borne le contexte et allège
+# l'image : n'y entrent que le code de l'application et le service.
+#
+# S'il n'est pas pris en compte par votre version de Docker, l'effet est
+# seulement un contexte plus gros : la construction reste correcte, car le
+# Dockerfile ne copie que `src/`.
+# ============================================================================
+.git
+.github
+.gitignore
+node_modules
+**/node_modules
+scratch
+imports
+**/*.test.mjs
+**/*.md.bak
+*.log

@@ -36,18 +36,40 @@ import { readFileSync } from "node:fs";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
-import { createActesApi } from "./actes.mjs";
+import { createActesApi, emptyState } from "./actes.mjs";
 import * as courriel from "./courriel.mjs";
 import { loadState, saveState } from "./state.mjs";
-import { createComptes, createStoreMysql, normaliserLogin, motDePasseFaible } from "./comptes.mjs";
+import { SERVICE_ID, entetesSurs, ecrireEntetes } from "./entetes.mjs";
+import { amorcerAdministrateur } from "./amorcage.mjs";
+import { createComptes, createStoreMysql, normaliserLogin } from "./comptes.mjs";
+import { lireVariables } from "./variables.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVICE = "Scribae — service de la collectivité";
 const SERVICE_VERSION = "1.0.0";
+// `SERVICE` (tiret cadratin, accents) sert aux journaux et aux corps JSON ;
+// `SERVICE_ID` (« scribae », ASCII) est le seul employé en en-tête HTTP. La
+// distinction vit dans entetes.mjs, avec les protections qui empêchent un
+// en-tête refusé d'abattre le processus.
 
 // ------------------------------------------------------------------ réglages
 const env = (k, d = "") => (process.env[k] === undefined ? d : String(process.env[k]));
 const num = (k, d) => (process.env[k] === undefined ? d : Number(process.env[k]) || d);
+
+// --- Réglages déclaratifs du `.env` -----------------------------------------
+// Le registre (variables.mjs) est la source de vérité des variables : il dit
+// leur portée, leur type, leurs bornes et leur rôle. On lit et on VALIDE les
+// deux portées ici, AVANT de s'en servir :
+//   • OPTIONS — les réglages de RÉFÉRENTIEL, transmis au navigateur par
+//     `GET /v1/config`, qui les applique par-dessus le référentiel ;
+//   • OPTIONS_SERVICE — les réglages du SERVICE. Les constantes ci-dessous les
+//     lisent par `opt()`, pour qu'il n'existe qu'UNE interprétation de chaque
+//     variable (types, bornes, choix) au lieu d'un lecteur par réglage.
+// Une valeur refusée n'est jamais appliquée : elle est signalée dans les
+// journaux et dans `GET /v1/config`, jamais remplacée en silence.
+const OPTIONS = lireVariables(process.env, "referentiel");
+const OPTIONS_SERVICE = lireVariables(process.env, "service");
+const opt = (k) => OPTIONS_SERVICE.valeurs[k];
 
 const PORT = num("PORT", 8080);
 const HOST = env("HOST", "0.0.0.0");
@@ -88,13 +110,26 @@ const MDP_MIN = num("MDP_MIN_LONGUEUR", 12);
 const SCRYPT_N = num("SCRYPT_N", 65536);
 // `Secure` sur les cookies : à laisser à true en production (HTTPS). Sur un
 // essai en clair (http://serveur:8080), le navigateur refuserait le cookie.
-const COOKIE_SECURE = env("COOKIE_SECURE", "true").trim() !== "false";
+// Lu par le registre (`OPTIONS_SERVICE`) : « false » (ou « 0 », « non »…) éteint
+// le drapeau ; toute autre valeur posée le laisse allumé. Vide = allumé.
+const COOKIE_SECURE = opt("COOKIE_SECURE") !== false;
 // Les comptes de démonstration (choisis dans une liste, sans mot de passe).
 // Par défaut : autorisés en mode « demo », éteints en mode « password ».
-const DEMO_ACCOUNTS = env("DEMO_ACCOUNTS", MOT_DE_PASSE ? "false" : "true").trim() === "true";
+const DEMO_ACCOUNTS = opt("DEMO_ACCOUNTS") === undefined ? !MOT_DE_PASSE : opt("DEMO_ACCOUNTS");
 // En mode « demo », DEMO_ACCOUNTS=false n'aurait aucun sens (plus personne ne
 // pourrait entrer) : le jeu de démonstration reste autorisé, et on le dit.
 const DEMO_EFFECTIF = MOT_DE_PASSE ? DEMO_ACCOUNTS : true;
+// LE COMMUTATEUR DE DÉMONSTRATION (`DEMO`). Un seul réglage commande tout le jeu
+// fictif : identité, entités, services, personnes, rôles, trames, actes, comptes
+// et publications de démonstration. Éteint, l'outil est une page vierge — aucune
+// donnée fictive, aucune mention de collectivité fictive (voir src/lib/demo.js,
+// qui est le seul endroit où la question se tranche côté navigateur).
+// À défaut de réglage explicite, le mode « demo » l'allume, et `DEMO_ACCOUNTS=true`
+// aussi : c'est le sens historique de ces deux réglages, et rien ne doit changer
+// pour une installation de démonstration existante. Le registre lit `DEMO`
+// (« true »/« 1 »/« oui » l'allument, « false »/« 0 »/« non » l'éteignent).
+const DEMO_BRUT = env("DEMO", "").trim();
+const DEMO_JEU = opt("DEMO") === undefined ? (AUTH_MODE === "demo" || DEMO_ACCOUNTS) : opt("DEMO");
 // Les collections qui portent l'IDENTITÉ et les RÉGLAGES ne sont écrites que par
 // un administrateur : sinon un compte ordinaire pourrait se donner des droits.
 const COLLECTIONS_ADMIN = new Set(["users", "config"]);
@@ -202,6 +237,54 @@ async function sessionHTTP(req) {
 const refusSession = () => ({ status: 401, headers: {}, body: err("session_absente", "Connexion requise : ouvrez une session (identifiant et mot de passe).") });
 const refusCsrf = () => ({ status: 403, headers: {}, body: err("csrf_invalide", "Jeton anti-CSRF absent ou incorrect : rechargez la page, puis réessayez.") });
 
+// -------------------------------------------------- état de santé du service
+// Ce que l'écran de connexion doit pouvoir montrer AVANT toute session, plutôt
+// que de laisser l'agent devant « Identifiant ou mot de passe incorrect » (le
+// cas d'un ADMIN_PASSWORD refusé) ou devant un écran vide (base injoignable).
+// `GET /v1/auth/config` le transporte ; c'est le seul endroit qui expose l'état
+// du DÉPLOIEMENT (et non celui du référentiel).
+const etatService = {
+  //   true  un compte d'administration peut ouvrir une session : il existe et
+  //         porte un mot de passe ;
+  //   false l'amorçage a été refusé (ADMIN_PASSWORD non conforme, absent,
+  //         ADMIN_LOGIN vide…) : le motif accompagne.
+  adminAmorce: null,     // null = pas encore tenté (ou mode « demo » : sans objet)
+  adminMotif: "",
+  adminAvertissement: "",
+  // La base répond-elle ? Tant qu'on ne l'a pas éprouvée, on se tait.
+  baseDisponible: null,  // null = inconnu ; true/false ensuite
+  baseMessage: "",
+};
+
+// Enregistre la disponibilité de la base, avec le remède adapté à l'erreur
+// (identifiants refusés, base absent, schéma non migré…). Le client s'en sert
+// pour afficher un bandeau au lieu d'écrans vides.
+function noterBase(disponible, message = "", e = null) {
+  etatService.baseDisponible = !!disponible;
+  etatService.baseMessage = disponible ? "" : String(message || (e && e.message) || "");
+  if (!disponible) {
+    const code = e && e.code;
+    const remede = code === "ER_ACCESS_DENIED_ERROR" || code === "ER_ACCESS_DENIED_NO_PASSWORD_ERROR"
+      ? "La base refuse les identifiants du service : vérifiez DB_USER / DB_PASSWORD (et MARIADB_* du compose s'il crée le dossier de données pour la première fois)."
+      : "Vérifiez la configuration DB_* / MARIADB_* du .env, puis « node server.mjs --migrate » (ou « docker compose down -v && docker compose up -d --build » pour rejouer schéma et amorçage sur un dossier de données vierge).";
+    etatService.baseRemede = remede;
+  } else {
+    etatService.baseRemede = "";
+  }
+}
+
+// Les erreurs qui disent « la base n'est pas là » (et non « cette requête a
+// échoué »). Elles font basculer l'état du service, pour que l'écran le montre,
+// au lieu de laisser un écran vide ou un message de repli trompeur.
+const CODES_BASE_INDISPONIBLE = new Set([
+  "ECONNREFUSED", "PROTOCOL_CONNECTION_LOST", "ETIMEDOUT", "ENOTFOUND", "EHOSTUNREACH",
+  "ER_ACCESS_DENIED_ERROR", "ER_ACCESS_DENIED_NO_PASSWORD_ERROR", "ER_BAD_DB_ERROR",
+  "ER_NO_SUCH_TABLE", "ER_NO_DB_ERROR",
+]);
+function noterBaseSelonErreur(e) {
+  if (e && e.code && CODES_BASE_INDISPONIBLE.has(e.code)) noterBase(false, e.message, e);
+}
+
 
 // ------------------------------------------------------------------- réponses
 function corsHeaders(req) {
@@ -223,16 +306,19 @@ function send(req, res, status, body, extra = {}) {
   // Le corps peut être une chaîne : certaines routes publiques servent du texte
   // (robots.txt, llms.txt), du XML ou du HTML, pas du JSON.
   const payload = body === null || body === undefined ? "" : (typeof body === "string" ? body : JSON.stringify(body));
-  res.writeHead(status, {
+  const entetes = entetesSurs({
     "content-type": "application/json; charset=utf-8",
-    "x-service": SERVICE,
+    "x-service": SERVICE_ID,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     ...corsHeaders(req),
     ...extra,
   });
-  res.end(payload);
+  // Un en-tête refusé ne doit JAMAIS abattre le service : `ecrireEntetes` se
+  // rabat sur un jeu minimal (voir entetes.mjs, et sa mise en cause en tête).
+  ecrireEntetes(res, status, entetes);
+  if (!res.writableEnded) res.end(payload);
 }
 
 const err = (message, extra) => ({ erreur: message, ...(extra || {}) });
@@ -442,7 +528,7 @@ function dbPaths() {
 function authPaths() {
   const gardeSession = { 401: { description: "Session absente ou expirée" } };
   return {
-    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application.", tags: ["Comptes"], responses: { 200: { description: "Mode du service" } } } },
+    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, demoJeu: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application. `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le jeu fictif est installé ; éteint, l'outil est une page vierge (voir src/lib/demo.js). Il porte en outre l'état du déploiement, pour que l'écran de connexion montre un motif au lieu d'« Identifiant ou mot de passe incorrect » : `adminAmorce` (un compte d'administration peut-il se connecter ?), `adminMotif`, `adminAvertissement`, `baseDisponible`, `baseMessage` et `baseRemede`.", tags: ["Comptes"], responses: { 200: { description: "Mode du service et état du déploiement" } } } },
     "/v1/auth/connexion": { post: { operationId: "connexion", summary: "Ouvrir une session", description: "Vérifie l'identifiant et le mot de passe, puis pose deux cookies : la session (`HttpOnly`) et le jeton anti-CSRF. Message identique pour un identifiant inconnu et un mot de passe faux ; le compte se bloque progressivement après plusieurs échecs (429).", tags: ["Comptes"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["login", "motDePasse"], properties: { login: { type: "string" }, motDePasse: { type: "string", format: "password" } } } } } }, responses: { 200: { description: "Session ouverte" }, 401: { description: "Identifiants invalides" }, 429: { description: "Compte bloqué quelques instants" } } } },
     "/v1/auth/session": { get: { operationId: "sessionCourante", summary: "Session courante", description: "Rend le compte de la session ouverte, ou 401.", tags: ["Comptes"], responses: { 200: { description: "Compte de la session" }, ...gardeSession } } },
     "/v1/auth/deconnexion": { post: { operationId: "deconnexion", summary: "Fermer la session", description: "Efface la session en base et les cookies.", tags: ["Comptes"], responses: { 200: { description: "Session fermée" }, ...gardeSession } } },
@@ -452,6 +538,13 @@ function authPaths() {
       post: { operationId: "definirMotDePasse", summary: "Définir ou remettre un mot de passe", description: "Définit le mot de passe d'un compte, ou le REMET. Sans `motDePasse` dans le corps, le service en ENGENDRE un (16 caractères, à changer à la première connexion) et ne le rend qu'ici, une seule fois — c'est la remise d'un accès à un agent. Réservé au rôle administrateur.", tags: ["Comptes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { motDePasse: { type: "string", format: "password" }, mustChange: { type: "boolean", description: "Exiger un changement à la première connexion (vrai par défaut pour un mot de passe choisi à la main)." } } } } } }, responses: { 200: { description: "Mot de passe défini (le mot de passe provisoire figure dans la réponse s'il a été engendré)" }, 404: { description: "Compte inconnu" }, 422: { description: "Mot de passe trop faible" }, 403: { description: "Rôle administrateur requis" }, ...gardeSession } },
       delete: { operationId: "retirerMotDePasse", summary: "Retirer le mot de passe d'un compte", description: "Le compte cesse de pouvoir ouvrir de session, et ses sessions ouvertes sont fermées. Le compte lui-même reste au référentiel. Réservé au rôle administrateur.", tags: ["Comptes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Mot de passe retiré" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Compte inconnu" }, ...gardeSession } },
     },
+  };
+}
+
+// Le contrat des réglages déclaratifs, tel qu'il apparaît dans la description.
+function deploiementPaths() {
+  return {
+    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif). Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés et valeurs refusées" } } } },
   };
 }
 
@@ -517,9 +610,25 @@ async function handle(req, res) {
 
   if (pathname === "/" || pathname === "/v1" || pathname === "/v1/") {
     const doc = api.openapi();
-    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...courrielPaths() };
+    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...deploiementPaths(), ...courrielPaths() };
     doc.paths = Object.fromEntries(Object.entries(doc.paths).sort((a, b) => a[0].localeCompare(b[0])));
     send(req, res, 200, doc);
+    return;
+  }
+
+  // --- réglages déclaratifs du déploiement : /v1/config ----------------------
+  // Les variables de RÉFÉRENTIEL posées dans le `.env` (voir variables.mjs),
+  // validées au démarrage. L'application les applique par-dessus le référentiel.
+  // Route PUBLIQUE et sans secret : ce sont les informations que le recueil
+  // public affiche déjà, et l'écran de connexion en a besoin avant toute
+  // session. Une valeur refusée n'est pas appliquée : elle est rendue ici, et
+  // l'exploitant la lit aussi dans les journaux du service.
+  if (pathname === "/v1/config" && req.method === "GET") {
+    send(req, res, 200, {
+      service: SERVICE_ID,
+      variables: OPTIONS.valeurs,
+      erreurs: OPTIONS.erreurs,
+    });
     return;
   }
 
@@ -530,9 +639,37 @@ async function handle(req, res) {
   // elle-même (`/v1/auth/session`, comptes, changement de mot de passe).
   if (pathname === "/v1/auth" || pathname.startsWith("/v1/auth/")) {
     if (pathname === "/v1/auth/config" && req.method === "GET") {
-      send(req, res, 200, MOT_DE_PASSE
-        ? await comptes.config()
-        : { auth: "demo", demo: true, message: "Le service est en mode « comptes de l'application » (AUTH_MODE=demo)." });
+      // L'écran de connexion lit TOUT ici : le mode du service, les règles du
+      // mot de passe, les comptes de démonstration éventuels, ET l'état du
+      // déploiement — un compte d'administration a-t-il pu être amorcé ? la base
+      // répond-elle ? Sans cela, un ADMIN_PASSWORD refusé restait invisible (on
+      // n'affichait qu'« Identifiant ou mot de passe incorrect ») et une base
+      // injoignable donnait un écran vide.
+      let base;
+      try {
+        base = MOT_DE_PASSE
+          ? await comptes.config()
+          : { auth: "demo", demo: true, message: "Le service est en mode « comptes de l'application » (AUTH_MODE=demo)." };
+      } catch (e) {
+        console.error("[auth:config]", e);
+        noterBase(false, "La configuration des comptes n'a pas pu être lue : " + e.message, e);
+        base = { auth: MOT_DE_PASSE ? "password" : "demo", demo: !MOT_DE_PASSE };
+      }
+      send(req, res, 200, {
+        ...base,
+        // LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : le jeu fictif est-il
+        // installé, ou l'outil est-il une page vierge ? Le navigateur en a besoin
+        // AVANT toute session (il décide de semer ou non le référentiel), donc il
+        // voyage ici, avec le mode. Voir src/lib/demo.js.
+        demoJeu: DEMO_JEU,
+        // Sans objet en mode « demo » (les comptes viennent de la liste).
+        adminAmorce: MOT_DE_PASSE ? etatService.adminAmorce : null,
+        adminMotif: MOT_DE_PASSE ? etatService.adminMotif : "",
+        adminAvertissement: MOT_DE_PASSE ? etatService.adminAvertissement : "",
+        baseDisponible: etatService.baseDisponible,
+        baseMessage: etatService.baseMessage,
+        baseRemede: etatService.baseRemede || "",
+      });
       return;
     }
     if (!MOT_DE_PASSE) {
@@ -561,10 +698,12 @@ async function handle(req, res) {
 
   if (pathname === "/v1/db/health" && req.method === "GET") {
     try {
+      noterBase(true);
       send(req, res, 200, await health());
     } catch (e) {
       // Le cas le plus fréquent d'une première installation : la base répond
       // mais le schéma n'existe pas encore.
+      noterBaseSelonErreur(e);
       send(req, res, 503, err("La base de données n'est pas prête : " + e.message, {
         code: "base_indisponible",
         remede: "Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate » pour créer les tables.",
@@ -587,8 +726,9 @@ async function handle(req, res) {
     try {
       const records = await listCollection(pool, name);
       const revision = await collectionRevision(pool, name);
+      noterBase(true);
       send(req, res, 200, { collection: name, revision, records });
-    } catch (e) { send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" })); }
+    } catch (e) { noterBaseSelonErreur(e); send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" })); }
     return;
   }
 
@@ -800,68 +940,27 @@ async function migrate() {
 }
 
 // ------------------------------------------------------- comptes : amorçage
-// L'administrateur du service est déclaré dans `.env`. Au PREMIER démarrage, il
-// est créé au référentiel avec son mot de passe. Ensuite, `.env` ne le touche
-// plus : changer le mot de passe se fait dans l'application (ou par la commande
-// `--mot-de-passe`), et rien ne l'écrase au redémarrage.
-const slug = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-function nomDe(complet) {
-  const mots = String(complet || "").trim().split(/\s+/).filter(Boolean);
-  if (!mots.length) return { firstName: "", lastName: "" };
-  if (mots.length === 1) return { firstName: mots[0], lastName: "" };
-  return { firstName: mots[0], lastName: mots.slice(1).join(" ") };
-}
-
+// L'amorçage DIT toujours ce qu'il a fait : le verdict est porté jusqu'à l'écran
+// de connexion par `etatService` (voir plus haut). Le VERDICT lui-même est
+// calculé par amorcage.mjs, qui est pur et donc éprouvable sans base.
 async function amorcerAdmin() {
-  const login = normaliserLogin(ADMIN_LOGIN);
-  if (!login) {
-    console.error("ADMIN_LOGIN est vide : aucun compte d'administration n'a été installé. Renseignez-le dans .env.");
-    return null;
-  }
-  let compte = await comptes.lireCompteParLogin(login);
-  if (!compte) {
-    if (!ADMIN_PASSWORD) {
-      console.error(`Aucun compte « ${login} » au référentiel, et ADMIN_PASSWORD n'est pas renseigné : rien n'a été créé.`);
-      console.error(`Renseignez ADMIN_PASSWORD dans .env (au moins ${MDP_MIN} caractères), ou créez le compte depuis l'application.`);
-      return null;
-    }
-    const faible = motDePasseFaible(login, ADMIN_PASSWORD, MDP_MIN);
-    if (faible) { console.error("ADMIN_PASSWORD refusé : " + faible); return null; }
-    const nom = nomDe(ADMIN_NOM);
-    compte = {
-      id: "u-" + (slug(login) || "admin"),
-      civility: "", firstName: nom.firstName, lastName: nom.lastName,
-      login, email: ADMIN_EMAIL, role: "administrateur", roles: ["administrateur"],
-      entityId: ADMIN_ENTITY, service: "", personId: "", memberships: [],
-      active: true, source: "local",
-      createdAt: new Date().toISOString(), lastLogin: "",
-    };
-    // Le compte lui-même est écrit au référentiel (collection `users`), comme
-    // s'il avait été créé depuis l'écran « Comptes et rôles ».
-    await comptes.ecrireCompte(compte);
-    const pose = await comptes.definirMotDePasse(compte.id, ADMIN_PASSWORD, { mustChange: false });
-    if (!pose.ok) { console.error("Mot de passe du compte administrateur non posé : " + pose.message); return compte; }
-    console.log(`Compte administrateur « ${login} » créé depuis .env (rôle administrateur, mot de passe d'ADMIN_PASSWORD).`);
-    console.log("Changez ce mot de passe depuis l'application (menu du compte → mot de passe), puis retirez ADMIN_PASSWORD de .env.");
-    return compte;
-  }
-
-  const etats = await comptes.etatComptes();
-  const aMotDePasse = etats.some((c) => c.userId === compte.id);
-  if (!aMotDePasse) {
-    if (ADMIN_PASSWORD) {
-      const pose = await comptes.definirMotDePasse(compte.id, ADMIN_PASSWORD, { mustChange: false });
-      if (pose.ok) console.log(`Mot de passe d'ADMIN_PASSWORD posé sur le compte « ${login} ».`);
-      else console.error("Mot de passe non posé : " + pose.message);
-    } else {
-      console.warn(`Le compte « ${login} » n'a pas de mot de passe et ADMIN_PASSWORD n'est pas renseigné : il ne peut pas se connecter.`);
-      console.warn(`Posez-en un avec : printf '%s' "$MDP" | node server.mjs --mot-de-passe ${login}`);
-    }
-  }
-  if (!comptes.estAdmin(compte)) {
-    console.warn(`Le compte « ${login} » n'a plus le rôle administrateur (modifié depuis l'application) : .env n'y change rien.`);
-  }
-  return compte;
+  const r = await amorcerAdministrateur({
+    adminLogin: ADMIN_LOGIN,
+    adminPassword: ADMIN_PASSWORD,
+    adminNom: ADMIN_NOM,
+    adminEmail: ADMIN_EMAIL,
+    adminEntity: ADMIN_ENTITY,
+    mdpMin: MDP_MIN,
+    comptes,
+  });
+  if (r.panne) noterBaseSelonErreur(r.panne);
+  etatService.adminAmorce = r.ok;
+  etatService.adminMotif = r.motif || "";
+  etatService.adminAvertissement = r.avertissement || "";
+  if (r.message) console.log(r.message);
+  if (r.avertissement) console.warn("[amorcage] " + r.avertissement);
+  if (!r.ok) console.error("[amorcage] " + (r.motif || "l'amorçage n'a pas abouti"));
+  return r.compte;
 }
 
 // Réinitialisation par la ligne de commande : le mot de passe est lu sur
@@ -902,17 +1001,42 @@ async function main() {
     await pool.end();
     return;
   }
-  if (env("AUTO_MIGRATE", "false") === "true") {
+  if (opt("AUTO_MIGRATE") === true) {
     try { await migrate(); } catch (e) { console.error("Migration automatique impossible :", e.message); }
   }
   try {
     const h = await health();
+    noterBase(true);
     console.log(`Base « ${h.base.schema} » joignable (${h.base.moteur}).`);
   } catch (e) {
+    noterBaseSelonErreur(e);
+    // Une erreur qui n'est pas une panne de liaison (schéma vide, par exemple)
+    // laisse `baseDisponible` à null : on ne dit pas « base injoignable » à tort.
+    if (etatService.baseDisponible === null) noterBase(false, e.message, e);
     console.error("La base ne répond pas encore :", e.message);
     console.error("Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate ».");
   }
-  const state = await loadState(pool);
+  // Démarrage DÉGRADÉ, explicite : si l'état de signature/publication est
+  // illisible, on ne sort PAS en `process.exit(1)` (le conteneur redémarrerait
+  // en boucle, nginx servirait des 502) et on ne bascule pas en silence sur un
+  // état vide — on démarre, on le journalise, et le client l'apprend par
+  // `/v1/auth/config` (bandeau « base de données indisponible »).
+  let state;
+  try {
+    state = await loadState(pool, {
+      onDegrade: (e) => {
+        noterBase(false, "L'état du service est illisible : " + e.message, e);
+        console.error("Démarrage DÉGRADÉ : l'état du service n'a pas pu être chargé. Le registre paraîtra vide tant que la base ne sera pas rétablie.");
+        if (etatService.baseRemede) console.error(etatService.baseRemede);
+      },
+    });
+  } catch (e) {
+    // `loadState` ne devrait pas lever (il retombe sur un état vide), mais un
+    // démarrage ne doit jamais dépendre de cette promesse.
+    noterBase(false, "L'état du service est illisible : " + e.message, e);
+    console.error("Démarrage DÉGRADÉ :", e.message);
+    state = emptyState();
+  }
   api = createActesApi({
     state,
     sha256,
@@ -935,6 +1059,17 @@ async function main() {
     if (!TOKENS.length) console.warn("ATTENTION : aucun jeton dans API_TOKENS — toutes les écritures seront refusées (503).");
     if (!DEMO_ACCOUNTS) console.warn("AUTH_MODE=demo avec DEMO_ACCOUNTS=false : personne ne pourrait se connecter ; le jeu de démonstration reste autorisé (DEMO_ACCOUNTS n'a de sens qu'avec AUTH_MODE=password).");
   }
+  // LE COMMUTATEUR DE DÉMONSTRATION : on dit à l'exploitant ce que les postes
+  // recevront, puisqu'il n'est plus réglable depuis l'application.
+  console.log(DEMO_JEU
+    ? `Démonstration : ALLUMÉE — le jeu fictif est installé par les postes (DEMO=${DEMO_BRUT || "déduit du mode"}). À éteindre (DEMO=false) pour une installation réelle.`
+    : "Démonstration : éteinte — les postes partent d'un référentiel vierge, sans donnée fictive.");
+  // Les réglages déclaratifs : ce que le `.env` impose au référentiel, et ce qui
+  // a été REFUSÉ. Une valeur refusée n'est jamais appliquée en silence — elle le
+  // sera aussi dans `GET /v1/config`, pour l'administrateur.
+  console.log(`Réglages déclaratifs du référentiel : ${Object.keys(OPTIONS.valeurs).length} variable(s) posée(s).`);
+  for (const e of OPTIONS.erreurs) console.error(`  REFUSÉE : ${e.variable}=${e.valeur} — ${e.motif}`);
+  for (const e of OPTIONS_SERVICE.erreurs) console.error(`  RÉGLAGE DE SERVICE REFUSÉ : ${e.variable} — ${e.motif}`);
   server.listen(PORT, HOST, () => {
     console.log(`${SERVICE} à l'écoute sur http://${HOST}:${PORT}`);
     console.log(`Collections : ${COLLECTIONS.join(", ")}`);

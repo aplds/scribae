@@ -130,6 +130,12 @@ export function setDeploiementAuth(source) {
   deploiement = {
     mode: String(source.mode),
     demo: source.demo !== false,
+    // Le COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : le jeu fictif est-il
+    // installé, et l'outil est-il une page vierge plutôt ? Il vient du
+    // déploiement, comme le mode. `null` = le déploiement n'en parle pas : on
+    // retombe alors sur le mode (« demo » implique le jeu de démonstration).
+    // Voir src/lib/demo.js, qui est le seul endroit où la question se tranche.
+    demoJeu: source.demoJeu === undefined || source.demoJeu === null ? null : !!source.demoJeu,
     motDePasseMin: Number(source.motDePasseMin) || 12,
     marque: source.marque || null,
     // Les comptes de démonstration annoncés par le service (vide en
@@ -137,6 +143,24 @@ export function setDeploiementAuth(source) {
     // d'avoir une session, et c'est donc le service qui les lui donne.
     comptes: Array.isArray(source.comptes) ? source.comptes : [],
     serveur: source.serveur !== false,
+    // ÉTAT DU DÉPLOIEMENT, pour l'écran de connexion (voir mot-de-passe.js) :
+    //   baseDisponible  la base répond-elle ? (`null` = pas encore éprouvée)
+    //   baseMessage/baseRemede  le motif, et le remède à afficher ;
+    //   adminAmorce     un compte d'administration peut-il se connecter ?
+    //                   (`null` en mode « demo » : sans objet)
+    //   adminMotif      pourquoi l'amorçage a échoué, le cas échéant ;
+    //   adminAvertissement  l'amorçage a réussi, mais avec une réserve.
+    // Sans ces champs, un ADMIN_PASSWORD refusé ne se voyait QUE dans les
+    // journaux du service — l'agent, lui, ne lisait qu'« Identifiant ou mot de
+    // passe incorrect ».
+    baseDisponible: source.baseDisponible === undefined || source.baseDisponible === null
+      ? null : !!source.baseDisponible,
+    baseMessage: String(source.baseMessage || ""),
+    baseRemede: String(source.baseRemede || ""),
+    adminAmorce: source.adminAmorce === undefined || source.adminAmorce === null
+      ? null : !!source.adminAmorce,
+    adminMotif: String(source.adminMotif || ""),
+    adminAvertissement: String(source.adminAvertissement || ""),
   };
   return deploiement;
 }

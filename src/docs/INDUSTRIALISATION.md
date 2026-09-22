@@ -16,7 +16,9 @@ ligne) — voir aussi `src/server/README.md` pour l'exploitation.
 > | `src/github/ci.yml` | `.github/workflows/ci.yml` |
 >
 > Cette copie n'est qu'une convention de rangement : le dépôt reste du HTML et du
-> JavaScript servis en l'état, et **rien n'est compilé**.
+> JavaScript servis en l'état, et **rien n'est compilé**. Le `package.json` recopié
+> désigne l'outillage **là où il vit** (`src/scripts/…`, `src/tests/`, `src/server/mysql/`) :
+> rien n'est dupliqué, et `npm run verifier` s'exécute **depuis la racine** du dépôt.
 
 ---
 

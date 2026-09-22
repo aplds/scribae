@@ -295,10 +295,49 @@ cp env.example .env
 #   ADMIN_LOGIN=admin
 #   ADMIN_PASSWORD=<long, unique — la clé de l'installation>
 #   DEMO_ACCOUNTS=false
+#   DEMO=false                  # aucune donnée fictive : l'outil part d'un référentiel vierge
 #   COOKIE_SECURE=true          # false seulement pour un essai en clair (http://…)
 docker compose up -d --build
 docker compose logs -f api      # « Compte administrateur créé depuis .env »
 ```
+
+> **Le dossier de données ne s'initialise qu'une fois.** Les variables `MARIADB_*` de
+> `docker-compose.yml` ne créent la base, l'utilisateur et le schéma que lorsque le **volume est
+> vide** — au tout premier démarrage. Ensuite, modifier `DB_*` ou `MARIADB_*` ne change **ni** le
+> schéma **ni** le compte d'administration déjà créés. Pour rejouer schéma **et** amorçage sur un
+> dossier vierge :
+>
+> ```bash
+> docker compose down -v && docker compose up -d --build
+> ```
+>
+> `-v` supprime le volume : **toutes les données sont perdues**. À réserver à une installation
+> neuve, ou après une sauvegarde.
+
+**Si l'écran de connexion refuse, sachez distinguer les causes.** Le service **n'installe pas** de
+compte d'administration quand `ADMIN_PASSWORD` ne respecte pas la politique : au moins
+`MDP_MIN_LONGUEUR` caractères (`12` par défaut), au moins **trois** sortes de caractères
+(minuscules, majuscules, chiffres, symboles), ni l'identifiant du compte, ni un mot de passe
+courant. Sans ce compte, **aucune session** ne peut s'ouvrir. Ce n'est donc pas « un mot de passe
+mal saisi » : l'écran de connexion l'annonce désormais en clair, parce qu'il lit
+`GET /v1/auth/config`, qui porte :
+
+| Champ | Sens |
+| --- | --- |
+| `adminAmorce` | `true` un compte d'administration peut se connecter ; `false` l'amorçage a échoué ; `null` sans objet (mode démo) |
+| `adminMotif` | pourquoi l'amorçage a échoué (mot de passe refusé, `ADMIN_LOGIN` vide, compte sans mot de passe…) |
+| `adminAvertissement` | l'amorçage a réussi, mais avec une réserve (compte sans le rôle administrateur) |
+| `baseDisponible` | `true`/`false` la base répond ; `null` pas encore éprouvée |
+| `baseMessage` / `baseRemede` | le motif de l'indisponibilité, et le remède à appliquer |
+
+Le journal du service (`docker compose logs api`) redit le même motif. Un **démarrage dégradé** —
+base injoignable, schéma non migré — est également journalisé et signalé à l'écran : le service ne
+sort plus en boucle de redémarrage, et il ne se contente plus d'un « registre vide » silencieux.
+
+> **`COOKIE_SECURE` (défaut `true`) interdit la session en `http://`.** Le navigateur refuse de
+> renvoyer un cookie `Secure` sur une liaison en clair : aucune session ne s'ouvre. Pour un essai en
+> clair (`http://serveur:8080`), mettez `COOKIE_SECURE=false` **le temps de l'essai**, puis remettez
+> `true` — en production, TLS est de toute façon obligatoire (§ 6.2).
 
 Le compte d'administration est créé **au premier démarrage** : le service l'inscrit au référentiel
 et lui pose le mot de passe de `ADMIN_PASSWORD`. Ensuite ce mot de passe **n'est plus relu** — le
@@ -322,11 +361,23 @@ ses actes).
 les rôles et les périmètres) reste dans l'application ; **seuls les mots de passe** vivent dans les
 tables `sb_motdepasse` et `sb_session`, à côté.
 
-**Le mode démonstration** se ferme par `DEMO_ACCOUNTS=false` (le défaut en mode mot de passe). À
-`true`, l'écran de connexion garde le raccourci « choisir un compte » (la liste vient du service,
-et ces comptes entrent sans mot de passe) : pratique pour une recette, **à ne pas laisser en
-service**. Le bandeau « Démonstration » de l'application se coupe, lui, dans *Administration ›
-Identité*.
+**Le mode démonstration est un SEUL commutateur**, `DEMO` (voir `src/server/env.example`). Il
+commande **tout le jeu fictif** : identité, entités, services, personnes, rôles, références,
+trames, actes et comptes de démonstration.
+
+- `DEMO=false` : l'application part d'un **référentiel vierge** — aucune donnée fictive, aucune
+  mention de collectivité fictive nulle part. C'est le réglage d'une installation réelle.
+- `DEMO=true` (ou `AUTH_MODE=demo`, ou `DEMO_ACCOUNTS=true`) : le jeu fictif est installé, et le
+  bandeau « Démonstration » s'affiche dans l'application et sur le recueil public.
+
+`DEMO_ACCOUNTS` ne règle plus que le **raccourci de connexion** : à `true`, l'écran de connexion
+garde « choisir un compte » (pratique pour une recette, **à ne pas laisser en service**) ; à
+`false` (le défaut en mode mot de passe), il faut un identifiant et un mot de passe.
+
+**Une installation déjà peuplée par la démonstration** ne se nettoie pas en changeant `DEMO` : les
+données fictives resteraient en place, et les publications au recueil public. Le geste est
+*Administration › Données › « Repartir d'un référentiel vierge »* : il vide le poste **et** le
+service (actes déposés, circuits de signature, publications).
 
 **Ce qu'il faut savoir avant de s'engager :**
 
@@ -471,6 +522,7 @@ Les plus importantes :
 | `AUTO_MIGRATE` | `false` | appliquer `schema.sql` au démarrage |
 | `AUTH_MODE` | `demo` | `demo` (comptes de l'application + jetons) ou `password` (comptes locaux : mot de passe + session) — § 4.3 bis |
 | `DEMO_ACCOUNTS` | `false` en mode password | laisse le raccourci « choisir un compte » ouvert (recette) |
+| `DEMO` | selon le mode | **commutateur de démonstration** : `true` installe le jeu fictif complet, `false` fait partir l'outil d'un **référentiel vierge**. Vide = `AUTH_MODE=demo` ou `DEMO_ACCOUNTS=true` l'allument, `password` l'éteint |
 | `ADMIN_LOGIN` / `ADMIN_PASSWORD` | `admin` / — | compte d'administration créé au **premier** démarrage |
 | `ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY` | — | son nom, son adresse, son entité de rattachement |
 | `SESSION_DAYS` | `12` | durée d'une session |
@@ -490,9 +542,9 @@ Les plus importantes :
 | `SMTP_HELO_NAME` / `SMTP_TIMEOUT_MS` | — / `15000` | nom annoncé en EHLO, délai d'un dialogue SMTP |
 
 Variables du conteneur `web` : `HTTP_PORT`, `APP_DIR`, `API_BASE`, `API_TOKEN`,
-`CORS_ORIGINS` — plus `AUTH_MODE` et `DEMO_ACCOUNTS`, qui servent seulement à annoncer le mode au
-navigateur avant le premier appel (`web/config.js.template`) : le mode du **service** reste
-autoritaire.
+`CORS_ORIGINS` — plus `AUTH_MODE`, `DEMO_ACCOUNTS` et `DEMO`, qui servent seulement à annoncer le
+mode au navigateur avant le premier appel (`web/config.js.template`) : le mode et le commutateur du
+**service** restent autoritaires (`GET /v1/auth/config`).
 
 ### 5.3 Apparence : clair ou sombre (par poste)
 

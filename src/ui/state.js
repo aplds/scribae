@@ -1,7 +1,9 @@
 import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, initStorage } from "../lib/store.js";
-import { seedConfig } from "../lib/seed.js";
+import { seedConfigVierge } from "../lib/seed.js";
 import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
 import { demoAccountsDisabled, isOidc, isPassword, authConfig, setDeploiementAuth, deploiementAuth } from "../lib/auth.js";
+import { demoActif } from "../lib/demo.js";
+import { setDeploiementConfig, appliquerOptions } from "../lib/deploiement-config.js";
 import * as motdepasse from "../lib/motdepasse.js";
 import { applyOidcUser } from "../lib/oidc.js";
 import { inScope } from "../lib/scope.js";
@@ -93,11 +95,28 @@ export async function chargerModeDeploiement() {
   const dep = setDeploiementAuth({
     mode: r.body.auth,
     demo: r.body.demo,
+    // Le commutateur de démonstration, tel que le service le dit (`DEMO` du
+    // .env, voir src/lib/demo.js). Absent d'un service antérieur : `demoDeploiement`
+    // retombe alors sur le mode.
+    demoJeu: r.body.demoJeu,
     motDePasseMin: r.body.motDePasseMin,
     marque: r.body.marque || null,
     comptes: r.body.demoComptes || [],
     serveur: true,
+    baseDisponible: r.body.baseDisponible,
+    baseMessage: r.body.baseMessage,
+    baseRemede: r.body.baseRemede,
+    adminAmorce: r.body.adminAmorce,
+    adminMotif: r.body.adminMotif,
+    adminAvertissement: r.body.adminAvertissement,
   });
+  // Les réglages de RÉFÉRENTIEL posés par le `.env` (identité, vocabulaire,
+  // numérotation, délais, recueil, fonctions) : le service les rend à part,
+  // déjà validés. Ils s'appliquent par-dessus le référentiel au démarrage (voir
+  // `bootstrap`, src/lib/store.js). Un service antérieur ne connaît pas la
+  // route : `setDeploiementConfig(null)` n'applique alors rien.
+  const rc = await motdepasse.configService();
+  setDeploiementConfig(rc.ok ? rc.body : null);
   state.deploiement = dep;
   return dep;
 }
@@ -109,7 +128,7 @@ export async function chargerModeDeploiement() {
 // collectivité au lieu de celles de la démonstration.
 function appliquerMarqueDeploiement(config) {
   const m = state.deploiement && state.deploiement.marque;
-  if (!m || !config || !config.brand) return config;
+  if (!m || !config || !config.brand) return appliquerOptions(config);
   config.brand = {
     ...config.brand,
     ...(m.name ? { name: m.name } : {}),
@@ -117,7 +136,7 @@ function appliquerMarqueDeploiement(config) {
     ...(m.logoUrl ? { logoUrl: m.logoUrl } : {}),
     demo: false,
   };
-  return config;
+  return appliquerOptions(config);
 }
 
 // Charge les données du registre et rouvre la session enregistrée sur ce poste.
@@ -155,9 +174,12 @@ export async function init() {
   // et l'application ne doit donc rien demander avant de s'être identifiée.
   const dep = await chargerModeDeploiement();
   if (dep && dep.mode === "password") {
-    // On se donne la marque par défaut (le vrai référentiel est protégé) : c'est
+    // On se donne une identité NEUTRE (le vrai référentiel est protégé) : c'est
     // assez pour dessiner l'écran de connexion, et le service en fournit le nom.
-    state.config = appliquerMarqueDeploiement(seedConfig());
+    // Surtout PAS le jeu de démonstration : hors démonstration, l'écran de
+    // connexion ne doit laisser filtrer aucune identité fictive (voir
+    // src/lib/demo.js).
+    state.config = appliquerMarqueDeploiement(seedConfigVierge());
     const s = await motdepasse.sessionCourante();
     if (s.ok && s.body && s.body.utilisateur) {
       await chargeDonnees();
@@ -517,7 +539,7 @@ export const transmissionDe = (acte) => acte?.execution?.transmission || null;
 // parapheur sans exemple : on les régénère donc. Réservé au jeu de
 // démonstration — un registre réel, ou repris à la main, n'est jamais touché.
 export async function regenerateDemoActes() {
-  if (state.config?.brand?.demo === false) return false;
+  if (!demoActif(state.config)) return false;
   const demoOnly = state.actes.length && state.actes.every((a) => String(a.id).startsWith("acte-demo-"))
     && state.trames.length && state.trames.every((t) => String(t.id).startsWith("tpl-"));
   if (!demoOnly) return false;

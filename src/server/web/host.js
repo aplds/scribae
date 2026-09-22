@@ -39,11 +39,16 @@
   // du SERVICE (GET /v1/auth/config) reste autoritaire : celui-ci n'est qu'un
   // présage, posé avant le premier appel réseau.
   if (config.authMode) {
+    // `DEMO` : LE COMMUTATEUR DE DÉMONSTRATION. Vide = le déploiement n'en parle
+    // pas : le navigateur retombe alors sur le mode (« demo » implique le jeu).
+    // Voir src/lib/demo.js, seul endroit où la question se tranche.
+    var demoJeuBrut = String(config.demoJeu == null ? "" : config.demoJeu).trim().toLowerCase();
     window.__SCRIBA_AUTH__ = {
       mode: String(config.authMode),
       // `DEMO_ACCOUNTS` n'a de sens qu'en mode mot de passe : ailleurs, les
       // comptes de démonstration suivent le référentiel (src/lib/auth.js).
       demo: !(String(config.demoAccounts).toLowerCase() === "false"),
+      demoJeu: demoJeuBrut === "true" ? true : (demoJeuBrut === "false" ? false : null),
     };
   }
 

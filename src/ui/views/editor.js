@@ -1,5 +1,6 @@
 import { state, touch, navigate, redrawView, parapheurActif, can } from "../state.js";
-import { h, clear, button, icon, toast, modal, badge, textInput, fitPaper } from "../dom.js";
+import { h, clear, button, icon, toast, modal, badge, textInput } from "../dom.js";
+import { cadreZoom } from "../zoom.js";
 import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { compile, buildContext, interpolate, nextNumero } from "../../lib/compile.js";
 import { renderDocument, applyPaper, MARQUE_STYLE } from "../../lib/render.js";
@@ -480,7 +481,7 @@ export function renderEditor(root, params) {
         class: "editor__counts" + (nbNotes ? " is-on" : ""), type: "button",
         title: nbNotes ? "Voir tous les commentaires de la trame" : "Aucun commentaire pour l'instant — sélectionnez un passage dans la page, ou ouvrez l'onglet « Commentaires ».",
         onClick: () => { ed.tab = "commentaires"; redraw(); },
-      }, `${(trame.fields || []).length} champs · ${(trame.rules || []).length} règles · ${nbNotes} commentaire${nbNotes > 1 ? "s" : ""}`),
+      }, `${(trame.fields || []).length} champ${(trame.fields || []).length > 1 ? "s" : ""} · ${(trame.rules || []).length} règle${(trame.rules || []).length > 1 ? "s" : ""} · ${nbNotes} commentaire${nbNotes > 1 ? "s" : ""}`),
     ),
     h("div", { class: "fr-row" },
       h("div", { class: "fr-choices" },
@@ -584,11 +585,12 @@ export function renderEditor(root, params) {
       h("span", { class: "fr-spacer" }),
       button("Annuler", { variant: "tertiary", size: "sm", onClick: () => { ed.armed = null; redraw(); } })));
   }
-  const canvas = h("div", { class: "canvas" });
-  center.appendChild(canvas);
   const paper = h("div", { class: "paper" });
   paper.style.fontFamily = state.config.brand.documentFont || "";
-  canvas.appendChild(paper);
+  // La feuille est un CANVAS : la molette (Ctrl) ou la barre règle le cran, et
+  // le fond se déplace au curseur — voir src/ui/zoom.js.
+  const canvas = cadreZoom(paper, { mode: "feuille", plein: true, cle: "trame", classe: "canvas" });
+  center.appendChild(canvas);
 
   if (ed.mode === "preview") {
     const values = sampleValues(trame);
@@ -615,7 +617,6 @@ export function renderEditor(root, params) {
       },
     });
   }
-  requestAnimationFrame(() => fitPaper(canvas, paper));
 
   // ---- volet droit : inspecteur
   right.appendChild(h("div", { class: "editor__colhead" }, icon("gear", 14), "Inspecteur"));

@@ -47,6 +47,7 @@ if (!document.documentElement.lang) document.documentElement.lang = "fr";
 //   /v1/actes/{id}/publication  publication au recueil + attribution de l'ELI
 //   /v1/publications          registre public des publications
 //   /v1/eli/{...}             résolution d'un identifiant ELI
+//   /v1/admin/purge           remise à zéro du service (actes, circuits, publications)
 //
 // Persistance : l'unique mémoire durable est `state` (Uint8Array), où l'on
 // range un document JSON en unités UTF-16 (voir loadDb/saveDb). Son en-tête
@@ -513,6 +514,7 @@ function openapi() {
         responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, acte déclaré non publiable, ou acte non transmis au contrôle de légalité" }, 422: { description: "Version en ligne manquante" } },
       },
     },
+    "/v1/admin/purge": { post: { operationId: "purgerService", summary: "Remettre le service à zéro", description: "Vide les actes déposés, les circuits de signature et les publications — le pendant, côté service, du bouton « Repartir d'un référentiel vierge ». Le recueil public lit le service : vider le seul navigateur laisserait les publications de démonstration en ligne. Exige `{ \"confirmation\": \"repurge\" }` : un appel accidentel ne doit pas l'emporter. Réservé à l'administration.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["confirmation"], properties: { confirmation: { type: "string", description: "Le mot « repurge »" } } } } } }, tags: ["Service"], responses: { 200: { description: "Service purgé" }, 400: { description: "Confirmation absente (code `confirmation_absente`)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide ou rôle insuffisant" } } } },
     "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
     "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
     "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
@@ -556,6 +558,28 @@ function hSante() {
     // voir venir (voir `saveDb`, et MAX_CHARS).
     utilise: (U16[0] === STATE_VERSION ? longueur() : 0) + HEADER,
   });
+}
+
+// Remise à zéro du SERVICE de démonstration : vide les actes déposés, les
+// circuits de signature et les publications. C'est le pendant, côté plateforme,
+// du bouton « Repartir d'un référentiel vierge » (voir src/ui/views/referentiel.js) :
+// le recueil public lit le service, donc vider le seul navigateur laisserait la
+// fiction en ligne. Exige un mot de confirmation — un appel accidentel ne doit
+// pas l'emporter — et le rôle administrateur (voir la table des routes).
+function hPurger(ctx) {
+  const corps = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+  if (String(corps.confirmation || "") !== "repurge") {
+    return err(400, "Confirmation absente : envoyer {\"confirmation\": \"repurge\"}.", { code: "confirmation_absente" });
+  }
+  const avant = { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publies: Object.keys(db.publies).length };
+  db.actes = {};
+  db.signatures = {};
+  db.publies = {};
+  db.idem = {};
+  db.seq = 0;
+  journaliser("purge", "service remis à zéro (" + avant.actes + " acte(s), " + avant.publies + " publication(s))");
+  saveDb(db);
+  return ok(200, { purge: true, avant });
 }
 
 // ------------------------------------------------------------------ clés d'API
@@ -1390,6 +1414,7 @@ const ROUTES = [
   { m: "POST", p: /^\/v1\/auth\/cles$/, auth: "administrateur", ecrit: true, f: hCreerCle },
   { m: "POST", p: /^\/v1\/auth\/cles\/([^/]+)\/revoquer$/, auth: "administrateur", ecrit: true, f: (ctx) => hRevoquerCle(ctx.params.id) },
   { m: "GET", p: /^\/v1\/journal$/, auth: "administrateur", f: hJournal },
+  { m: "POST", p: /^\/v1\/admin\/purge$/, auth: "administrateur", ecrit: true, f: hPurger },
   { m: "GET", p: /^\/v1\/db\/health$/, f: hDbHealth },
   { m: "GET", p: /^\/v1\/db\/collections\/([a-z]+)$/, f: (ctx) => hDbCollection(ctx.params.id, ctx.headers) },
   { m: "POST", p: /^\/v1\/db\/collections\/([a-z]+)\/sync$/, ecrit: true, f: (ctx) => hDbSync(ctx.params.id, ctx.body || {}, ctx.headers) },

@@ -289,10 +289,12 @@ async function delivrerPiece(a, opts, kind) {
   const qui = nomUtilisateur(state.user);
   const args = { acte: a, doc, config, opts, qui };
   const html = kind === "etat" ? etatFormalitesHtml(args) : attestationNonRecoursHtml(args);
-  const ouvert = printHtml(html) === "onglet";
-  toast(ouvert
-    ? "Pièce ouverte dans un nouvel onglet : imprimez-la ou enregistrez-la en PDF."
-    : "Si aucune fenêtre ne s'ouvre, autorisez les fenêtres surgissantes pour ce site.", ouvert ? "success" : "warning");
+  const mode = printHtml(html, { titre: `${kind === "etat" ? "etat-des-formalites" : "attestation-de-non-recours"}-${a.numero || a.id}.html` });
+  if (mode !== "onglet") {
+    toast(mode === "telechargement"
+      ? "Le navigateur n'a pas ouvert d'onglet : la pièce a été téléchargée — ouvrez-la et imprimez-la (Ctrl+P)."
+      : "L'impression n'a pas pu être lancée : autorisez les fenêtres surgissantes pour ce site.", "warning");
+  }
   await journaliser({
     action: kind === "etat" ? "document.etat_formalites" : "document.attestation_non_recours",
     cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,

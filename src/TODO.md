@@ -190,6 +190,22 @@ Reste à faire, par ordre d'importance :
       par courriel — le service de courriel est désormais là, § « La signature simple et le
       courriel »), second facteur (TOTP), journal des connexions, et purges planifiées de
       `sb_session`.
+- [x] **Le commutateur de démonstration (livré).** `DEMO` (`.env`) commande **tout** le jeu fictif :
+      allumé, l'installation est une démonstration (bandeau, jeu complet) ; éteint, elle part d'un
+      **référentiel vierge** — aucune donnée fictive, aucune mention de la collectivité fictive. Une
+      installation déjà peuplée se nettoie par *Administration › Données › « Repartir d'un référentiel
+      vierge »* (poste **et** service : `POST /v1/admin/purge`). Reste possible : l'adresse @ctes de
+      `CONTROLE_LEGALITE.apiUrl` est une adresse d'**exemple** (la transmission est simulée) — à rendre
+      réglable dans le référentiel le jour où une vraie télétransmission sera branchée.
+- [x] **Les réglages déclaratifs et l'image autonome (livrés).** Le `.env` peut **poser** les
+      réglages de référentiel (identité, vocabulaire, numérotation, délais, recueil, fonctions,
+      variables `SCRIBA_*`) : un registre unique (`src/server/mysql/variables.mjs`) les déclare, le
+      service les valide et les sert par `GET /v1/config`, l'application les applique par-dessus le
+      référentiel, et un wiki engendré (`src/docs/VARIABLES.md`) les documente. `src/server/Dockerfile`
+      bâtit par ailleurs une **image autonome** (service + façade + application), décrite dans
+      `src/docs/DOCKER.md`. Reste possible : une tâche d'intégration continue qui construit et publie
+      l'image (`buildx`, multi-architecture) à chaque version figée, et un `schema.sql` versionné
+      pour l'image (aujourd'hui, l'exploitant lance `--migrate` ou pose `AUTO_MIGRATE=true`).
 - [ ] **Éprouver la suite de tests Node depuis un vrai Node.** `comptes.test.mjs` a été vérifié
       ici avec un substitut de `node:crypto` (le domaine, lui, est éprouvé), mais
       `npm test` dans `src/server/mysql` n'a pas pu être lancé dans l'atelier : à faire au premier
@@ -286,6 +302,29 @@ onglets renommés. Restent ouverts :
       une ligne, une colonne) dans l'éditeur (`views/editor.js`, `tableGridEditor`) ; une liste
       gagne ou perd ses éléments d'un clic. Côté rédaction, ces réglages se posent par bloc
       (« Mise en forme », `views/rediger.js`) et s'écartent du modèle comme les autres valeurs.
+
+## Zoom et déplacement du contenu : le canvas (livré — suite possible)
+
+Livré : `src/ui/zoom.js` (`cadreZoom`) traite l'organigramme des délégations, la feuille de la
+trame et le document en rédaction comme un **canvas** — molette ou boutons pour le cran,
+« Ajuster », déplacement au curseur. L'éditeur de trame occupe en outre toute la fenêtre
+(`.app--plein`), si bien que ses volets défilent sur place. Voir `README.md` § « Le canvas ».
+
+Restent ouverts :
+
+- [ ] **Le pincement sur écran tactile.** Aujourd'hui le doigt **fait défiler** le canvas (le
+      défilement natif, rendu possible par la taille du plateau) et la barre règle le cran ; le
+      pincement à deux doigts n'est pas repris. Le capter demanderait de poser `touch-action` et
+      d'écrire le geste — au prix du défilement natif, que l'on ne veut pas perdre.
+- [ ] **Le cran ne survit pas au rechargement.** Il vit dans `state.ui.zooms` (mémoire de la
+      session), comme l'état des écrans. Le mémoriser par poste — comme l'apparence claire/sombre
+      (`src/lib/theme.js`) — serait cohérent.
+- [ ] **Étendre le canvas aux autres aperçus A4.** « Modifier un acte », l'aperçu des feuilles de
+      style et l'écran de signature réduisent encore la feuille par l'ancien ajustement à la
+      largeur (`fitPaper`, `src/ui/dom.js`), qui ne sait que **réduire** : on ne peut pas y zoomer.
+- [ ] **Réajuster quand l'utilisateur a choisi son cran.** Un cadre réglé à la main (`auto` faux)
+      ne se recadre plus quand la largeur change : la feuille reste à sa largeur figée jusqu'à
+      « Ajuster ». À raffiner si cela se remarque à l'usage.
 
 ## Documents longs, annexes et réorganisation (chantier livré — suite possible)
 
@@ -627,6 +666,11 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       rattrape l'appel perdu quand la page était occupée — l'attente de vingt secondes de
       `ready()` (src/lib/remote.js) expire alors que le canal s'ouvre normalement, et la reprise
       suivante aboutit.
+      La **condition de déclenchement** de l'amorçage a en outre été resserrée (`1.3.1c`) : il ne
+      s'exécute plus seulement si *tous* les actes sont ceux de la fiction — un acte écrit à la
+      main laissait le recueil vide pour toute la session —, mais publie CHAQUE acte `acte-demo-…`.
+      Reste vrai : une mémoire durable vidée (1011) oblige à **reprovisionner** le service avant
+      que le moindre dépôt n'aboutisse.
       Piste pour le premier : écrire l'état en **double tampon** (deux copies dans `state`, un
       index actif dans l'en-tête) — un instantané pris au milieu ne trouverait alors que la
       copie précédente, complète. À faire dans `index.html` **et** `src/pages/host.js`
@@ -655,3 +699,62 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
 - [ ] **Réinitialiser le jeu de démonstration** depuis le référentiel (bouton « Réinstaller le
       jeu de démonstration »), plutôt que de dépendre d'un changement de `SEED_VERSION` ou de
       `clearAll()`.
+
+
+## Constats d'un essai de bout en bout (22/09/2026)
+
+Essai mené **par l'interface seule** (clics et frappes réelles, en changeant de compte),
+sur toute l'application : rédaction, révision, signature, publication, exécution,
+délégations, comptes, référentiel, feuilles de style, recherche, assistants, recueil public.
+
+**Les dix constats ci-dessous sont levés** — voir `CHANGELOG.md`, notes intermédiaires
+`1.3.1a` à `1.3.1k` :
+
+- [x] **Service non provisionné = tous les circuits bloqués, avec un message opaque.**
+      Un service neuf n'a aucune clé d'écriture : dépôt, signature, publication échouent en
+      403. Le geste existe (Administration › Base de données, mode « Service de démonstration
+      — partagé », bouton « Provisionner le service »), mais `remote.js` ne lisait pas
+      `body.erreur` et n'affichait donc que « Erreur 403 ». **Livré (`1.3.1a`)** : le motif du
+      service s'affiche tel quel. **Livré aussi (`1.3.1b`)** : le provisionnement rejoue la
+      MÊME clé, reconnaît un service « déjà provisionné » quand c'est la sienne, le dit en
+      français quand il échoue, et le service se RECONNECTE de lui-même après une fermeture
+      1011.
+- [x] **Aucun moyen, dans l'interface, de résoudre « le signataire n'a pas de compte ».**
+      Un acte dont le signataire désigné est la Maire ne peut être signé par personne tant
+      qu'aucun COMPTE n'est rattaché à cette personne : l'écran le dit (« Signataire sans
+      adresse… Renseignez son adresse au référentiel »), mais **le référentiel des personnes
+      n'a pas de champ courriel** — l'adresse vit sur le compte (Comptes et rôles). **Livré
+      (`1.3.1g`)** : le message dit ce qui manque au juste (le compte, son courriel, ou le
+      rapprochement) et ouvre « Comptes et rôles ».
+- [x] **Le recueil public se vide quand un acte non-démonstration entre au registre.**
+      L'amorçage (`src/ui/demo-publications.js`) ne publie les actes de la fiction que si
+      TOUS les actes sont `acte-demo-*` : un seul acte écrit à la main (même un brouillon
+      d'essai) laisse le recueil public sans rien, alors que l'écran « Publications (ELI) »
+      en liste neuf. **Livré (`1.3.1c`)** : le critère porte sur la provenance de CHAQUE acte
+      (seuls les `acte-demo-…` sont publiés par l'amorçage).
+- [x] **Délégation suspendue : l'aperçu dit « Aucune décision renseignée »** alors que les
+      deux décisions sont bel et bien saisies sur la fiche — c'est la suspension qui les
+      neutralise. **Livré (`1.3.1d`)** : la fiche dit que la délégation est hors d'effet,
+      pourquoi, et comment la rétablir.
+- [x] **« Ajouter une sous-délégation » referme la fiche du parent** : on perd la chaîne
+      qu'on était en train de lire pour ouvrir un formulaire neuf. **Livré (`1.3.1e`)** : la
+      nouvelle fiche s'ouvre par-dessus, la première se redessine à la fermeture, et « Échap »
+      ne ferme que la fenêtre du dessus.
+- [x] **Épinglage sans état visible** : le bouton d'un acte déjà à la une garde le libellé
+      « Épingler à la une du recueil public ». **Livré (`1.3.1f`)** : l'état se lit sur l'acte
+      OU sur sa publication, et le libellé, la punaise allumée et la pastille suivent.
+- [x] **Petites grammaires d'écran** : « 1 règles » (compteur), « Il manque ici décision de
+      nomination (…) ». **Livré (`1.3.1h`)** : les compteurs s'accordent, et la phrase porte
+      son article (« la décision de nomination (intitulé et lien) et la décision de délégation
+      (lien) »).
+- [x] **Assistant Plume : trou de documentation.** « Comment créer une délégation de
+      signature ? » répond « je ne sais pas » alors que le guide consacre cinq chapitres au
+      sujet ; « Comment exporter un acte en PDF ? » est, lui, parfaitement servi. **Livré
+      (`1.3.1k`)** : un chapitre « Les délégations de signature » existe pour lui-même et
+      l'écran Délégations le désigne à l'assistant.
+- [x] **« Imprimer / PDF »** ouvre un onglet puis lance l'impression (comportement voulu),
+      mais fige l'aperçu de l'éditeur pendant que la boîte d'impression est ouverte. **Livré
+      (`1.3.1i`)** : plus jamais de `window.print()` dans la page de l'application — onglet
+      dédié (qui imprime lui-même) ou téléchargement.
+- [x] **JSON-LD ELI : `eli:type_document` vide** (la nature de l'acte n'y est pas reportée).
+      **Livré (`1.3.1j`)** : le type d'acte et l'entité voyagent avec la publication.

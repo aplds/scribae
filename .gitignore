@@ -1,11 +1,11 @@
 # Dépendances
 node_modules/
 
-# Système / éditeur
+# Secrets de déploiement — jamais commités (voir src/server/env.example)
+.env
+.env.local
+
+# Fichiers système
 .DS_Store
 Thumbs.db
-*.swp
-
-# Divers
-scratch/
-*.log
+*~

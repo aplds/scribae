@@ -325,7 +325,7 @@ const CHAPITRES_ECRAN = {
   actes: ["retrouver", "export"],
   acte: ["retrouver", "signature", "execution", "annexes"],
   modifier: ["modifier", "annexes"],
-  delegations: ["ouvrir", "administrateurs", "signature"],
+  delegations: ["delegations", "ouvrir", "signature"],
   signature: ["signature", "signature-externe", "parapheur"],
   publications: ["publication"],
   publication: ["publication"],

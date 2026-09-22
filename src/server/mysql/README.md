@@ -9,8 +9,9 @@ Il expose **deux familles de ressources** :
 | Famille | Ressources | Persistance |
 |---|---|---|
 | **Données** | `GET /v1/db/health`, `GET /v1/db/collections/{collection}`, `POST /v1/db/collections/{collection}/sync` | `sb_record`, `sb_collection`, `sb_journal` |
-| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/actes/{id}/dossier-signature`, `/v1/publications…`, `/v1/eli/…`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
+| **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/actes/{id}/dossier-signature`, `/v1/publications…`, `/v1/eli/…`, `POST /v1/admin/purge`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
 | **Courriel** | `GET /v1/courriel`, `POST /v1/courriel/envoi`, `POST /v1/courriel/test` | `sb_courriel` (+ `SMTP_*` du `.env`) |
+| **Réglages** | `GET /v1/config` (réglages de référentiel posés par le `.env`, voir § 9) | — |
 
 Le contrat de la famille « données » est **le même** que celui du service de
 démonstration : l'application ne voit aucune différence et
@@ -126,6 +127,10 @@ vise la même base. La **session** de connexion, elle, reste locale.
 - **Mode d'authentification** : `AUTH_MODE=demo` (démonstration, jetons d'API) ou
   `AUTH_MODE=password` (comptes locaux). En mode `demo`, **ne pas exposer** l'installation :
   placer l'application derrière un VPN ou un portail, car le jeton d'écriture est public.
+- **Commutateur de démonstration** : `DEMO=false` pour une installation réelle — l'outil part
+  d'un **référentiel vierge**, sans aucune donnée fictive. À `true` (ou vide en mode `demo`), le
+  jeu fictif livré est installé et le bandeau « Démonstration » s'affiche. Une installation déjà
+  peuplée se nettoie par *Administration › Données › « Repartir d'un référentiel vierge »*.
 - **TLS obligatoire** : placez le service derrière un reverse-proxy HTTPS (nginx, Caddy,
   Traefik). Le jeton circule en clair dans l'en-tête sinon — et, en mode `password`, le mot de
   passe de l'agent aussi.
@@ -211,3 +216,33 @@ L'application — qui n'a **jamais** accès au mot de passe SMTP — demande l'e
 est journalisé dans `sb_courriel`, et l'écran « Administration › Courriel » en montre les
 derniers. Le message d'essai (`POST /v1/courriel/test`) ne suit pas la politique de
 notification de l'application : c'est un essai de la chaîne.
+
+## 9. Les réglages déclaratifs (`GET /v1/config`)
+
+Le `.env` ne règle pas que le service : il peut aussi **poser des réglages de référentiel**
+— identité de la collectivité, vocabulaire des actes, numérotation, délais, recueil public,
+fonctions expérimentales — qui se font d'ordinaire dans l'interface. Le registre
+[variables.mjs](variables.mjs) en est la **source de vérité** : chaque variable y est
+déclarée avec sa portée, son type, ses bornes et son rôle.
+
+- au **démarrage**, le service lit et VALIDE ces variables ; une valeur refusée (type, choix
+  ou borne) n'est **jamais** appliquée, et son motif est journalisé ;
+- `GET /v1/config` rend `{ variables, erreurs }` : les réglages posés (chemins pointés, ex.
+  `{ "brand.name": "Ville d'Exemple", "numbering.pad": 3 }`) et les valeurs refusées ;
+- l'application les applique **par-dessus le référentiel** à chaque démarrage
+  (voir `../lib/deploiement-config.js`) : le `.env` l'emporte, et le référentiel enregistré
+  reste celui de l'administrateur ;
+- la route est **publique** et ne porte **aucun secret** : ce sont les informations que le
+  recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session.
+
+La référence complète des variables — les deux portées, avec rôle, type, bornes et exemple —
+est engendrée depuis ce registre dans **`../../docs/VARIABLES.md`** :
+
+```bash
+node scripts/generer-variables.mjs     # depuis la racine du dépôt (src/)
+```
+
+Pour **ajouter** une variable : un descripteur dans `variables.mjs`, une ligne dans
+`env.example`, puis régénérer le wiki. Rien d'autre — la validation, le transport au
+navigateur et la documentation en découlent.
+

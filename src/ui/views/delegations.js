@@ -32,6 +32,7 @@ import {
   sourceDeDecision, intituleDecision, lienDecision, lienDeReference, decisionRenseignee, decisionsManquantes,
 } from "../../lib/delegations.js";
 import { personName, personSignatureName } from "../../lib/render.js";
+import { cadreZoom } from "../zoom.js";
 import { initialsOf, fullName, hasRole } from "../../lib/users.js";
 import {
   ROLE_SIGNATAIRE, assurerRoleSignataire, etatRapprochement, rapprocher, deRapprocher,
@@ -91,6 +92,17 @@ const refsDecision = (c) => (c.refs || [])
   .filter((r) => r.active !== false && !["code", "reglement", "instruction"].includes(r.kind))
   .map((r) => ({ value: r.id, label: (r.label || r.id).slice(0, 110) }));
 
+// D'où vient une décision, dans l'ordre où cela se lit. « Non renseignée » n'est
+// pas un cul-de-sac : l'intitulé ET l'adresse s'y saisissent à la main (voir
+// `champAdresseDeDecision`), et `sourceDeDecision` (lib/delegations.js) reconnaît
+// le lien externe à la seule présence d'une adresse.
+const SOURCES_DECISION = [
+  { value: "", label: "Non renseignée" },
+  { value: "publication", label: "Acte publié au recueil" },
+  { value: "lien", label: "Lien externe" },
+  { value: "ref", label: "Référence" },
+];
+
 // ------------------------------------------- les décisions publiées au recueil
 // Une décision peut être un acte PUBLIÉ par cette installation : le lien du visa
 // est alors l'adresse du recueil en ligne. La liste vient du REGISTRE PUBLIC —
@@ -139,10 +151,12 @@ const intituleDePublication = (c, p) => {
 const libellePublication = (p) => [p.numero ? "n° " + p.numero : "", p.objet || "", p.dateDocument ? formatDate(p.dateDocument) : ""].filter(Boolean).join(" — ");
 
 // Ce qui manque, dit en français : « la décision de nomination (intitulé et
-// lien), la décision de délégation (lien) ».
+// lien) et la décision de délégation (lien) ». L'article défini est porté ici
+// parce que toutes les phrases qui appellent ce résumé sont construites autour
+// de lui (« Il manque ici… », « Décisions à renseigner : … »).
 const resumeManque = (manque) => manque
-  .map((x) => x.libelle + " (" + x.manque.join(" et ") + ")")
-  .join(", ");
+  .map((x) => "la " + x.libelle + " (" + x.manque.join(" et ") + ")")
+  .join(manque.length > 1 ? " et " : ", ");
 
 // Une ligne « étiquette / valeur », pour la lecture seule.
 function ligneInfo(label, valeur) {
@@ -164,7 +178,10 @@ export function renderDelegations(root) {
 
   const commun = { peutGerer, save, paint };
   const ouvrir = (noeud) => ouvrirFiche(c, { ...commun, noeud, ouvrir, creer });
-  const creer = (fromId = "") => ouvrirFiche(c, { ...commun, noeud: null, nouvelle: true, fromId, ouvrir, creer });
+  // `onFermer` : ce que la fiche appelante doit refaire quand cette fenêtre se
+  // referme. « Ajouter une sous-délégation » s'en sert pour rester ouverte
+  // derrière et se redessiner (voir `ouvrirFiche`).
+  const creer = (fromId = "", onFermer = null) => ouvrirFiche(c, { ...commun, noeud: null, nouvelle: true, fromId, ouvrir, creer, onFermer });
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
@@ -237,10 +254,12 @@ function idsDansArbre(arbre) {
 }
 
 // ------------------------------------------------------------- l'organigramme
+// L'arbre est un CANVAS : on le saisit au curseur pour le déplacer, la molette
+// règle le cran, la barre flottante le fait aussi (voir src/ui/zoom.js).
 function vueOrganigramme(c, arbre, ouvrir) {
   const org = h("div", { class: "org" });
   for (const racine of arbre) org.appendChild(branche(c, racine, ouvrir, true));
-  return h("div", { class: "org-scroll" }, org);
+  return cadreZoom(org, { mode: "canvas", cle: "delegations", classe: "org-scroll" });
 }
 
 function branche(c, noeud, ouvrir, racine = false) {
@@ -340,12 +359,27 @@ function ouvrirFiche(c, opts) {
   const autorite = !nouvelle && !d;
   const niveau = nouvelle ? 1 : (opts.noeud?.niveau || 1);
   const personne = autorite ? (opts.noeud?.person || null) : personById(d?.toId);
-  const enfants = opts.noeud?.enfants || [];
+  // Les sous-délégations (ou, pour une autorité de tête, les délégations
+  // qu'elle a données), RELUES à chaque dessin : en ajouter une depuis cette
+  // fiche ne doit pas obliger à la refermer pour la voir apparaître.
+  const enfants = () => {
+    const id = autorite ? personne?.id : d?.toId;
+    if (!id) return [];
+    return (c.delegations || [])
+      .filter((x) => x.fromId === id && x.toId !== id)
+      .map((x) => ({ delegation: x, person: personById(x.toId), niveau: 1, enfants: [] }));
+  };
+
+  // La personne de la fiche, relue à chaque dessin : le délégataire se choisit
+  // ICI, et la tête comme le bloc « compte et signature électronique » doivent
+  // suivre ce choix sans qu'on ait à rouvrir la fiche.
+  const personneCourante = () => (autorite ? (opts.noeud?.person || null) : personById(d?.toId));
 
   const body = h("div", { class: "org-fiche" });
   let apercu = null;
   let majBanniere = null;       // l'avis « décisions renseignées / à compléter »
   const etats = [];             // les états des deux décisions, rafraîchis à la frappe
+  const choixSource = [];       // les pastilles « D'où vient la décision », relues à la frappe
 
   const titre = autorite
     ? "Fiche — " + (personName(personne) || "autorité de tête")
@@ -353,9 +387,15 @@ function ouvrirFiche(c, opts) {
 
   const m = modal({
     title: titre, body, wide: true,
+    // La fiche n'est pas la seule fenêtre ouverte : « Ajouter une sous-délégation »
+    // en ouvre une seconde PAR-DESSUS, sans refermer celle-ci (voir `ouvrirFiche`
+    // et `onFermer`). Quand la fenêtre fille se referme — la sous-délégation
+    // créée, ou l'abandon —, la fiche reprend la main et se redessine pour
+    // montrer la chaîne à jour.
+    onClose: () => opts.onFermer && opts.onFermer(),
     actions: (close) => {
       const out = [];
-      if (peutGerer && autorite) out.push(button("Nouvelle délégation de cette autorité", { variant: "secondary", icon: "plus", onClick: () => { close(); creer(personne?.id || ""); } }));
+      if (peutGerer && autorite) out.push(button("Nouvelle délégation de cette autorité", { variant: "secondary", icon: "plus", onClick: () => { creer(personne?.id || "", () => peindre()); } }));
       if (peutGerer && nouvelle) out.push(button("Créer la délégation", { variant: "primary", icon: "plus", onClick: () => {
         if (!d.fromId) { toast("Choisissez d'abord le délégant.", "warning"); return; }
         if (!d.toId) { toast("Choisissez ensuite le délégataire.", "warning"); return; }
@@ -402,6 +442,7 @@ function ouvrirFiche(c, opts) {
   // dates : ce sont les seules parties qu'un simple changement de valeur
   // oblige à redessiner sans reconstruire toute la fiche.
   function teteFiche() {
+    const personne = personneCourante();
     const genre = genreDe(personne);
     const rang = autorite ? rangDe({ delegation: null }) : rangDe({ delegation: d, niveau });
     const etat = autorite ? null : etatDe(d);
@@ -432,6 +473,17 @@ function ouvrirFiche(c, opts) {
     const p = personById(d.toId);
     if (!p) {
       apercu.appendChild(h("p", { class: "fr-small fr-muted", text: "Choisissez le délégataire : la signature qu'il produira s'affichera ici." }));
+      return;
+    }
+    // Une délégation HORS D'EFFET — suspendue, échue, ou pas encore commencée —
+    // ne produit ni ligne de signature ni décision visée : le dire ici, plutôt
+    // que d'afficher « Aucune décision renseignée », qui laisserait croire que
+    // rien n'a été saisi alors que les deux décisions sont bel et bien là.
+    const etat = etatDe(d);
+    if (etat) {
+      apercu.appendChild(h("div", { class: "fr-alert fr-alert--info" },
+        h("p", { class: "fr-alert__title", text: "Délégation hors d'effet — " + etat.label.toLowerCase() }),
+        h("p", { class: "fr-small", text: "Ses deux décisions sont bien renseignées : hors d'effet, elle ne produit ni ligne de signature ni décision visée, et les actes repartent de l'autorité de tête. " + (d.active === false ? "Remettez-la « En vigueur » dans « La durée et l'état » pour la rétablir." : "Corrigez ses dates dans « La durée et l'état » pour la rétablir.") })));
       return;
     }
     const portee = { familyId: d.familyId || "", actTypeId: d.actTypeId || "", entityId: entiteDeDelegation(configLecture(), d) };
@@ -487,6 +539,7 @@ function ouvrirFiche(c, opts) {
   function peindre() {
     clear(body);
     etats.length = 0;
+    choixSource.length = 0;
     majBanniere = null;
     body.appendChild(teteFiche());
     apercu = h("div", { class: "fr-stack" });
@@ -518,12 +571,13 @@ function ouvrirFiche(c, opts) {
       body.appendChild(blocSig);
     }
 
-    if (enfants.length) {
+    const listeEnfants = enfants();
+    if (listeEnfants.length) {
       const libelle = autorite ? "Délégataires" : "Sous-délégations";
       body.appendChild(h("hr", { class: "fr-sep" }));
       body.appendChild(sectionHeader(libelle));
       const liste = h("div", { class: "org-orph" });
-      for (const e of enfants) {
+      for (const e of listeEnfants) {
         const p = e.person;
         liste.appendChild(h("button", { class: "org-orph__item", type: "button", onClick: () => { m.close(); ouvrir(e); } },
           h("span", { class: "org-orph__nom", text: p ? personName(p) : "Délégataire à choisir" }),
@@ -534,7 +588,13 @@ function ouvrirFiche(c, opts) {
 
     if (peutGerer && !autorite && !nouvelle) {
       body.appendChild(h("p", { class: "fr-small" },
-        button("Ajouter une sous-délégation", { variant: "tertiary", size: "sm", icon: "plus", onClick: () => { m.close(); creer(d.toId || ""); } })));
+        button("Ajouter une sous-délégation", {
+          variant: "tertiary", size: "sm", icon: "plus",
+          // La fiche de la sous-délégation s'ouvre PAR-DESSUS celle-ci : la
+          // chaîne qu'on était en train de lire ne disparaît pas, et se
+          // redessine quand la nouvelle fiche se referme.
+          onClick: () => creer(d.toId || "", () => peindre()),
+        })));
     }
 
     majApercu();
@@ -658,6 +718,38 @@ function ouvrirFiche(c, opts) {
     clear(corps);
     const controle = controleurDeDecision(base, ch, source);
     if (controle) corps.appendChild(controle);
+    // L'adresse, quand la source choisie n'en donne pas encore : décision sans
+    // source, ou référence du référentiel qui ne porte pas la sienne. Sans ce
+    // champ, l'intitulé se remplissait sans qu'aucune adresse ne pût être
+    // saisie : la décision restait incomplète et la délégation impossible à
+    // créer, sans que rien ne dise où l'adresse attendue s'écrivait.
+    const adresse = champAdresseDeDecision(base, ch, source);
+    if (adresse) corps.appendChild(adresse);
+
+    const choix = choiceField({
+      label: "D'où vient la décision",
+      value: source,
+      options: SOURCES_DECISION,
+      onChange: (v) => {
+        // Une seule source à la fois : les autres champs sont effacés, sans
+        // quoi l'intitulé et le lien pourraient venir de deux endroits. Le
+        // choix lui-même est rangé (`…Source`) — un choix d'« acte publié »
+        // encore vide doit se distinguer de « non renseignée ».
+        if (v === sourceDeDecision(d, base)) return;   // re-clic : rien à effacer
+        d[ch.cle] = ""; d[ch.url] = ""; d[ch.refId] = "";
+        d[base + "Source"] = v;
+        if (v === "publication" && !PUBLIEES) chargerPubliees(() => peindre());
+        save(); paint(); peindre();
+      },
+    });
+    // La pastille suit la frappe : saisir une adresse ci-dessous fait de la
+    // décision un lien externe, et le choix doit le dire — sans reconstruire la
+    // fiche, qui réécrirait le champ sous les doigts de celui qui le remplit.
+    const relireChoix = () => {
+      const v = sourceDeDecision(d, base);
+      [...choix.querySelectorAll(".fr-choice")].forEach((b, i) => b.classList.toggle("is-on", SOURCES_DECISION[i].value === v));
+    };
+    choixSource.push(relireChoix);
 
     return h("div", { class: "deleg-decision" },
       h("div", { class: "deleg-decision__tete" },
@@ -665,26 +757,7 @@ function ouvrirFiche(c, opts) {
         h("span", { class: "deleg-decision__aide", text: base === "nomination"
           ? "L'acte qui a nommé le délégataire à sa fonction (arrêté de nomination, délibération d'élection…)."
           : "L'acte par lequel la délégation de signature lui a été donnée." })),
-      choiceField({
-        label: "D'où vient la décision",
-        value: source,
-        options: [
-          { value: "", label: "Non renseignée" },
-          { value: "publication", label: "Acte publié au recueil" },
-          { value: "lien", label: "Lien externe" },
-          { value: "ref", label: "Référence" },
-        ],
-        onChange: (v) => {
-          // Une seule source à la fois : les autres champs sont effacés, sans
-          // quoi l'intitulé et le lien pourraient venir de deux endroits. Le
-          // choix lui-même est rangé (`…Source`) — un choix d'« acte publié »
-          // encore vide doit se distinguer de « non renseignée ».
-          d[ch.cle] = ""; d[ch.url] = ""; d[ch.refId] = "";
-          d[base + "Source"] = v;
-          if (v === "publication" && !PUBLIEES) chargerPubliees(() => peindre());
-          save(); paint(); peindre();
-        },
-      }),
+      choix,
       corps,
       // L'intitulé qui sera visé. Quand la décision est une RÉFÉRENCE du
       // référentiel, c'est son libellé qui s'imprime : on le montre, sans le
@@ -708,10 +781,10 @@ function ouvrirFiche(c, opts) {
     if (source === "publication") {
       if (!PUBLIEES) {
         if (!publieesEnCours) chargerPubliees(() => peindre());
-        return h("p", { class: "fr-small fr-muted", text: publieesEnCours ? "Chargement des actes publiés au recueil…" : "Le registre des publications est indisponible : désignez la décision par une référence ou par une adresse." });
+        return h("p", { class: "fr-small fr-muted", text: publieesEnCours ? "Chargement des actes publiés au recueil…" : "Le registre des publications est indisponible : désignez la décision par une référence du référentiel ou par un lien externe." });
       }
       if (!PUBLIEES.length) {
-        return h("p", { class: "fr-small fr-muted", text: "Aucun acte n'est publié au recueil pour l'instant : publiez-le d'abord (écran Signature & publication), ou désignez la décision par une référence ou par une adresse." });
+        return h("p", { class: "fr-small fr-muted", text: "Aucun acte n'est publié au recueil pour l'instant : publiez-le d'abord (écran Signature & publication), ou désignez la décision par une référence du référentiel ou par un lien externe." });
       }
       return selectField({
         label: "Acte publié au recueil",
@@ -735,7 +808,7 @@ function ouvrirFiche(c, opts) {
         placeholder: "— Choisir une référence —",
         options: refsDecision(c),
         help: sansLien
-          ? "Cette référence ne porte pas d'adresse : renseignez son « URL de la source » (Administration › Références), ou choisissez plutôt « Lien externe »."
+          ? "Cette référence ne porte pas d'adresse : saisissez-la ci-dessous, ou renseignez son « URL de la source » (Administration › Références)."
           : "Le lien du visa sera l'« URL de la source » de la référence (Administration › Références).",
         onChange: (v) => {
           d[ch.refId] = v;
@@ -756,6 +829,31 @@ function ouvrirFiche(c, opts) {
       });
     }
     return null;
+  }
+
+  // L'adresse saisie à la main, pour les sources qui n'en donnent pas encore :
+  // une décision sans source (dont l'intitulé se saisit, et dont l'adresse doit
+  // pouvoir se saisir aussi), ou une référence du référentiel qui ne porte pas la
+  // sienne. La source n'est pas rangée pour autant : `sourceDeDecision` déduit
+  // « lien externe » de la seule présence d'une adresse, et la pastille du choix
+  // se relit à la frappe (voir `choixSource`). Sans ce champ, la décision restait
+  // INCOMPLÉTABLE : l'écran refusait de créer la délégation faute de lien.
+  function champAdresseDeDecision(base, ch, source) {
+    // L'« acte publié » a son propre contrôle — le menu des actes — et le
+    // « lien externe » EST ce champ : rien à ajouter dans ces deux cas.
+    if (source === "lien" || source === "publication") return null;
+    // La source en donne déjà une (référence qui porte son adresse) : inutile.
+    if (lienDecision(configLecture(), d, base)) return null;
+    return textField({
+      label: "Adresse de la décision",
+      type: "url",
+      value: d[ch.url] || "",
+      placeholder: "https://…",
+      help: source === "ref"
+        ? "L'adresse à porter au visa. Elle peut aussi s'inscrire une fois pour toutes sur la référence (Administration › Références)."
+        : "L'adresse où la décision se lit : site de la collectivité, Légifrance, intranet… Elle est posée sur le visa de l'acte, et s'ouvre d'un clic. Saisir une adresse fait de la décision un lien externe ; pour un acte publié au recueil ou une référence du référentiel, choisissez d'abord cette source ci-dessus.",
+      onChange: (v) => { d[ch.url] = v; save(); majLeger(); },
+    });
   }
 
   function blocDecisionsLecture() {
@@ -809,6 +907,7 @@ function ouvrirFiche(c, opts) {
   // deux se fait ici — c'est le pendant de la désignation, qui, elle, donne la
   // qualité de signataire au compte (voir src/lib/signataires.js).
   function blocSignature() {
+    const personne = personneCourante();
     if (!personne) return null;
     const etat = etatRapprochement(c, state.users, personne.id);
     const estSignataire = etat.compte ? hasRole(etat.compte, ROLE_SIGNATAIRE) : false;
@@ -858,5 +957,6 @@ function ouvrirFiche(c, opts) {
     // dit, sans quitter la fiche, si la délégation est complète.
     majBanniere?.();
     for (const f of etats) f();
+    for (const f of choixSource) f();
   }
 }

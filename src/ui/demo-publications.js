@@ -20,7 +20,8 @@
 // avant de laisser le recueil tel quel.
 // ============================================================================
 import { state, touch, actePubliable } from "./state.js";
-import { get, post, beginFlow } from "../lib/remote.js";
+import { demoActif } from "../lib/demo.js";
+import { get, post, beginFlow, bodyOf } from "../lib/remote.js";
 import { publicationSettings } from "../lib/eli.js";
 import { docOfActe } from "./views/modifier.js";
 import { publierActeDuSeed } from "./views/signature.js";
@@ -73,7 +74,7 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
   // public se contrediraient. Le service reste la source : ce qu'il détient n'est
   // ni redéposé ni republié.
   const aPublier = state.actes.filter((a) =>
-    !a.deletedAt && (a.statut === "signee" || a.statut === "publie") && a.original && a.execution?.publication && actePubliable(a));
+    estDemonstration(a) && !a.deletedAt && (a.statut === "signee" || a.statut === "publie") && a.original && a.execution?.publication && actePubliable(a));
   if (!aPublier.length) return 0;
 
   enCours = true;
@@ -83,7 +84,7 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
     // Le service est la source : ce qu'il détient déjà n'est ni redéposé ni
     // republié, il est seulement repris au registre local.
     const res = await get("/v1/publications", { label: "Amorçage du recueil", source: "lecture" });
-    const auService = new Map(((res.ok && res.body.publications) || []).map((p) => [String(p.numero || ""), p]));
+    const auService = new Map((bodyOf(res).publications || []).map((p) => [String(p.numero || ""), p]));
     const settings = publicationSettings(state.config);
     const flow = beginFlow("Amorçage du recueil (démonstration)");
 
@@ -162,6 +163,10 @@ async function reprendre(acte, resume) {
   if (!one.ok) return;
   const p = one.body;
   acte.publication = { ...p, html: p.formats?.html || "", akn: p.formats?.akn || "", jsonld: p.formats?.jsonld || "" };
+  // La mise à la une vit sur la PUBLICATION chez le service : on la reprend
+  // aussi sur l'acte, pour que le bouton de la liste dise son état (voir
+  // `libelleEpinglage`, src/ui/views/actes.js).
+  acte.epingle = p.epingle === true;
   acte.statut = "publie";
   acte.eli = p.eliUri;
   acte.datePublication = p.datePublication;
@@ -196,9 +201,16 @@ async function epinglerAuService(acte, { token, flow }) {
 
 // L'amorçage ne touche QUE le jeu de démonstration : un référentiel repris à la
 // main, ou une installation réelle, n'est jamais concerné.
-function jeuDeDemonstration() {
-  if (state.config?.brand?.demo === false) return false;
+//
+// Le critère porte sur la PROVENANCE de chaque acte, non sur la composition du
+// registre entier : exiger que TOUS les actes soient `acte-demo-*` faisait
+// disparaître le recueil public dès qu'un seul acte écrit à la main entrait au
+// registre (une rédaction d'essai, un brouillon) — alors que la démonstration,
+// elle, n'avait pas changé. Un acte de la fiction est reconnu à son
+// identifiant (`acte-demo-…`) ; c'est lui, et lui seul, que l'amorçage publie.
+const estDemonstration = (a) => String(a?.id || "").startsWith("acte-demo-");
+const jeuDeDemonstration = () => {
+  if (!demoActif(state.config)) return false;
   if (!state.actes.length || !state.trames.length) return false;
-  return state.actes.every((a) => String(a.id).startsWith("acte-demo-"))
-    && state.trames.every((t) => String(t.id).startsWith("tpl-"));
-}
+  return state.actes.some(estDemonstration) && state.trames.some((t) => String(t.id).startsWith("tpl-"));
+};

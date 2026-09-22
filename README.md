@@ -16,6 +16,11 @@ A4), Word, Markdown.
 > juridiques, numérotation, recueil). Rien de réel. La signature électronique est **réellement
 > vérifiable** (ECDSA P-256 / SHA-256), mais son certificat est un certificat de démonstration, non
 > qualifié au sens du règlement eIDAS, et le prestataire de signature est **simulé**.
+>
+> Ce jeu fictif est un **commutateur** : le déploiement l'allume (`DEMO=true`, ou le mode « demo »)
+> et l'éteint (`DEMO=false`). Éteint, l'outil part d'un **référentiel VIERGE** — aucune donnée
+> fictive, aucune mention de la collectivité de démonstration nulle part. La page de démonstration
+> publiée ci-dessous, elle, reste **en démonstration**.
 
 ## Essayer, sans rien installer
 
@@ -89,7 +94,7 @@ les collectivités, une variante **inspirée de cette charte sans ses éléments
 | **Administration** | tout ce qui est configurable : identité, entités, services et bureaux, personnes (accord en genre de la qualité, décision fondant le pouvoir de signer), rôles, références, numérotation (**séquence interne, ou numéro attribué par un service externe**), circuits (**trois circuits de signature**), **courriel** (six notifications activables, expéditeur, adresse de réponse, copie systématique, état du **serveur SMTP** du déploiement et message d'essai), **publication** (titre du recueil, publication automatique, opposabilité), **fonctions expérimentales** (le parapheur), annuaire (OIDC), base de données |
 | **Feuilles de style** | charte graphique des actes : marges, **police** (liste de polices proposées), en-tête, pied, filets, **intitulés encadrés** (côtés au choix), **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; édition directe |
 | **Comptes et rôles** | cinq rôles — dont le **Réviseur** et le **Signataire**, qualités **cumulables** — plus le visiteur, sans accès ; **dix-sept permissions** ; périmètre par service et par bureau ; **personne du référentiel**, rapprochement du compte de l'outil de signature. Retirer un acte du recueil (dépublier) est réservé à l'administrateur, avec un avertissement en grand et un motif technique exigé ; **épingler** un acte (le mettre à la « une » du recueil public) est ouvert à l'administrateur et à l'éditeur |
-| **Guide** | wiki intégré (24 chapitres, glossaire, dépannage) + documentation technique lue depuis les fichiers du dépôt |
+| **Guide** | wiki intégré (25 chapitres, glossaire, dépannage) + documentation technique lue depuis les fichiers du dépôt |
 
 Formats d'export : **Akoma Ntoso 3.0**, **Schematron**, **JSON-LD / ELI**, **HTML** autonome,
 **Word** (`.doc`), **Markdown**, JSON — tous au **format A4** pour l'impression et le PDF.

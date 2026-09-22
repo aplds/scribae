@@ -1,0 +1,61 @@
+# ============================================================================
+# Scribae — intégration continue (GitHub Actions).
+#
+# OÙ VIT CE FICHIER. Le dépôt est servi tel quel (GitHub Pages) : les fichiers
+# du logiciel sont à la racine, avec `main.pjs`, `index.html` et `src/`. Le
+# présent fichier appartient donc à `<racine>/.github/workflows/ci.yml` : à la
+# mise en place du dépôt, copiez-le à cet emplacement (comme `src/docs/GITHUB.md`
+# qui devient `README.md` à la racine). Voir `src/docs/INDUSTRIALISATION.md`.
+#
+# CE QU'IL FAIT. Rien à installer pour le premier travail : la vérification de
+# syntaxe et les tests des modules purs n'utilisent que Node.
+#
+#   vérifier   la syntaxe de tout le JavaScript du dépôt, puis les tests purs
+#              (src/tests/) et ceux du domaine du service (src/server/mysql/) ;
+#   service    l'installation des dépendances du service auto-hébergé et ses
+#              tests (aucune base requise).
+#
+# Le second travail installe `mysql2`. Faute de `package-lock.json` versionné,
+# il utilise `npm install` ; passez à `npm ci` dès que le verrou est commité
+# (voir l'audit, NC-I-002).
+# ============================================================================
+name: Intégration continue
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    name: Syntaxe et tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Vérifier la syntaxe de tout le JavaScript
+        run: npm run lint
+      - name: Tests (modules purs et domaine du service)
+        run: npm test
+
+  service:
+    name: Service auto-hébergé
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: src/server/mysql
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Installer les dépendances du service
+        run: npm install --no-audit --no-fund
+      - name: Tests du domaine des comptes et de la signature
+        run: npm test

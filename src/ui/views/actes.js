@@ -103,7 +103,7 @@ export function renderActes(root) {
         // Le repère n'est posé qu'une fois l'acte PUBLIÉ : épingler un acte encore
         // en circuit prépare la une, il ne la tient pas — le bouton, lui, reste
         // allumé, et son infobulle dit ce qui va se passer.
-        a.epingle && a.publication ? h("span", { class: "fr-badge fr-badge--info", style: { marginLeft: "6px" }, title: "Mis en avant dans la bande « À la une » du recueil public.", text: "à la une" }) : null,
+        acteEpingle(a) && a.publication ? h("span", { class: "fr-badge fr-badge--info", style: { marginLeft: "6px" }, title: "Mis en avant dans la bande « À la une » du recueil public.", text: "à la une" }) : null,
       ]),
       h("td", {}, h("div", { class: "fr-row" },
         editable ? button("Reprendre", { variant: "secondary", size: "sm", icon: "note", title: "Rouvrir le document pour le modifier", onClick: () => openActe(a) }) : null,
@@ -182,11 +182,19 @@ function canEdit(a) {
 // donc pas de bouton. C'est `actePubliable` qui le dit.
 const peutEpingler = (a) => can("publications.epingler") && actePubliable(a);
 
+// L'acte est-il à la une ? Le drapeau vit sur l'ACTE — c'est lui qui prépare la
+// une d'un acte encore en circuit — et, pour un acte publié, sur la PUBLICATION
+// que détient le service : c'est elle que lit le visiteur. Les deux peuvent
+// diverger — une publication déposée ou épinglée par un autre poste, ou reprise
+// du service sans que l'acte local l'ait suivi — et le bouton doit dire l'état
+// RÉEL de la une, non celui du seul registre local.
+export const acteEpingle = (a) => !!a && (a.epingle === true || a.publication?.epingle === true);
+
 // Le libellé du geste d'épinglage : UN SEUL, qui dit l'ÉTAT de l'acte. Épinglé,
 // il propose de retirer ; à épingler, il distingue l'acte déjà publié (l'effet
 // est immédiat) de l'acte encore en circuit (« dès sa publication »). Voir
 // NC-III-006 et P-28.
-export const libelleEpinglage = (a) => a.epingle
+export const libelleEpinglage = (a) => acteEpingle(a)
   ? "Retirer de la une du recueil public"
   : (a.publication?.cle
     ? "Épingler à la une du recueil public"
@@ -199,15 +207,22 @@ function boutonEpinglage(a) {
     onClick: () => basculerEpinglage(a),
     });
   // Épinglé, le bouton le dit : la punaise reste allumée (voir `.is-on`).
-  if (a.epingle) b.classList.add("is-on");
+  if (acteEpingle(a)) b.classList.add("is-on");
   return b;
 }
 
 export async function basculerEpinglage(a) {
-  const epingle = !a.epingle;
-  const avant = !!a.epingle;
+  const epingle = !acteEpingle(a);
+  const avant = acteEpingle(a);
   const cle = a.publication?.cle;
   a.epingle = epingle;
+  if (a.publication) a.publication = { ...a.publication, epingle };
+  // Le service a refusé, ou l'appel n'est pas passé : on remet l'acte ET sa
+  // publication dans l'état d'avant (le drapeau est lu sur les deux).
+  const restaurer = (v) => {
+    a.epingle = v;
+    if (a.publication) a.publication = { ...a.publication, epingle: v };
+  };
   if (cle) {
     const u = currentUser();
     const auteur = [u?.firstName, u?.lastName].filter(Boolean).join(" ") || u?.login || "";
@@ -219,7 +234,7 @@ export async function basculerEpinglage(a) {
         flow, label: epingle ? "Mise à la une du recueil" : "Retrait de la une du recueil",
       });
     } catch (e) {
-      a.epingle = avant;
+      restaurer(avant);
       toast(String((e && e.message) || e), "error");
       redrawView();
       return;
@@ -227,7 +242,7 @@ export async function basculerEpinglage(a) {
     if (!res.ok) {
       // Le service fait foi : si l'épinglage n'a pas été accepté, l'acte ne se
       // dit pas épinglé.
-      a.epingle = avant;
+      restaurer(avant);
       toast("Le recueil n'a pas été modifié : " + errorMessage(res), "error");
       redrawView();
       return;

@@ -11,7 +11,7 @@
 // fichiers `.js` sont donc lus dans la syntaxe des modules, comme le fait le
 // navigateur pour le `<script type="module">` de l'application.
 //
-//   node scripts/verifier-syntaxe.mjs
+//   npm run syntaxe   (soit : node src/scripts/verifier-syntaxe.mjs)
 //
 // Sortie : une ligne par fichier fautif, et un code de sortie 1 s'il y en a.
 // ============================================================================

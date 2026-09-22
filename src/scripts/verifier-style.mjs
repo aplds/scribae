@@ -15,17 +15,24 @@
 //     pour l'exploitant, le second est un amorçage ES5 volontaire.
 //
 // USAGE
-//   node scripts/verifier-style.mjs            avertissements tolérés (CI douce)
-//   node scripts/verifier-style.mjs --strict   les avertissements font échouer
+//   npm run lint                               avertissements tolérés (CI douce)
+//   npm run style                              les avertissements font échouer
 //
 // Voir docs/INDUSTRIALISATION.md et l'audit (proposition P-30).
 // ============================================================================
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const racine = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const strict = process.argv.includes("--strict");
+
+// Où vit le code à analyser. L'outillage est rangé sous `src/` dans la copie de
+// travail (Perchance) et recopié à la RACINE du dépôt (`scripts/…`) à la
+// livraison : dans le premier cas le code est le dossier de l'outillage
+// lui-même, dans le second c'est `src/`. Les deux marchent, sans réglage.
+const dossierCode = existsSync(join(racine, "src")) ? "src" : ".";
 
 // Les fichiers volontairement exemptés, et pourquoi.
 const EXEMPTIONS = [
@@ -50,9 +57,10 @@ async function fichiers(dir, out = []) {
 const erreurs = [];
 const avertissements = [];
 
-const liste = await fichiers("src");
+const liste = await fichiers(dossierCode);
 for (const rel of liste) {
-  const chemin = rel.split(sep).slice(1).join(sep); // relatif à src/
+  // Chemin du fichier relativement au code (c'est ce que lisent les exemptions).
+  const chemin = dossierCode === "." ? rel : rel.split(sep).slice(1).join(sep);
   const ex = exempt(chemin);
   const lignes = (await readFile(join(racine, rel), "utf8")).split("\n");
   lignes.forEach((ligne, i) => {

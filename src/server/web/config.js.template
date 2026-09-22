@@ -1,5 +1,5 @@
 // Produit au démarrage du conteneur (voir web/entrypoint.sh) à partir des
-// variables d'environnement API_BASE, API_TOKEN, AUTH_MODE et DEMO_ACCOUNTS.
+// variables d'environnement API_BASE, API_TOKEN, AUTH_MODE, DEMO_ACCOUNTS et DEMO.
 // Ce fichier n'est jamais versionné : le jeton ne doit pas entrer dans le dépôt.
 //
 // `authMode` / `demoAccounts` disent au navigateur sous quel régime le service
@@ -8,9 +8,15 @@
 // lire), et c'est le service qui vérifie le mot de passe. Le mode annoncé ici
 // est un simple présage : `GET /v1/auth/config`, lui, fait autorité (voir
 // src/lib/auth.js, `setDeploiementAuth`).
+//
+// `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le
+// jeu fictif est installé ; éteint, l'outil est une page vierge. Vide = le
+// déploiement n'en parle pas, et le navigateur retombe sur le mode (voir
+// src/lib/demo.js).
 window.__SCRIBA_CONFIG__ = {
   apiBase: "${API_BASE}",
   apiToken: "${API_TOKEN}",
   authMode: "${AUTH_MODE}",
   demoAccounts: "${DEMO_ACCOUNTS}",
+  demoJeu: "${DEMO}",
 };

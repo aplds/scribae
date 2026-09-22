@@ -17,7 +17,12 @@ import { emptyState } from "./actes.mjs";
 
 const NAME = "service";
 
-export async function loadState(pool) {
+// `onDegrade` est appelé quand on retombe sur un état vide PARCE QUE l'état
+// réel était illisible (table absente — schéma non migré —, base injoignable,
+// document corrompu). Sans ce signal, un démarrage dégradé se confondrait avec
+// un registre légitimement vide : l'appelant (server.mjs) s'en sert pour le
+// journaliser ET le montrer au client.
+export async function loadState(pool, { onDegrade } = {}) {
   try {
     const [rows] = await pool.query("SELECT payload FROM sb_etat WHERE name = ?", [NAME]);
     if (!rows.length) return emptyState();
@@ -25,8 +30,9 @@ export async function loadState(pool) {
     return { ...emptyState(), ...parsed };
   } catch (e) {
     // Table absente (schéma non migré) ou document illisible : on démarre sur un
-    // état vide plutôt que de refuser de servir.
+    // état vide plutôt que de refuser de servir — mais on le DIT.
     console.error("État du service indisponible, démarrage à vide :", e.message);
+    if (typeof onDegrade === "function") onDegrade(e);
     return emptyState();
   }
 }

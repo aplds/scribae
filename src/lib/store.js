@@ -10,13 +10,15 @@
 // additives du jeu de données, et les accesseurs utilisés par l'interface.
 // ============================================================================
 
-import { seedConfig, seedTrames } from "./seed.js";
+import { seedConfig, seedConfigVierge, seedTrames } from "./seed.js";
 import { emptyConfig } from "./schema.js";
 import { mentionsParDefaut } from "./recueil.js";
 import { seedActes } from "./demo-actes.js";
 import { seedUsers, isDemoUsers, isDemoUser, hasRole, rolesOf, setRoles, syncDemoAccounts, DEMO_USER_IDS } from "./users.js";
 import { ROLE_SIGNATAIRE, situationDeSignature } from "./signataires.js";
 import { emptyAuth, demoAccountsDisabled } from "./auth.js";
+import { demoActif, demoDeploiement } from "./demo.js";
+import { appliquerOptions } from "./deploiement-config.js";
 import * as db from "./db/index.js";
 
 // La mise en page A4 des documents (`src/lib/paper.js`), l'export Word, et
@@ -147,7 +149,13 @@ import * as db from "./db/index.js";
 // public de l'habitat, et la trame « Délibération du conseil d'administration ».
 // Les délibérations émanent désormais de l'assemblée — ligne d'autorité « Le
 // conseil municipal de … » — et sont signées par le président de celle-ci.
-export const SEED_VERSION = 49;
+// La 50 ne change PAS le jeu livré (les données de la fiction sont identiques) :
+// elle change la façon dont il est semé. La démonstration devient un commutateur
+// unique du déploiement (src/lib/demo.js) et `bootstrap()` n'installe plus rien
+// quand elle est éteinte ; une installation de démonstration doit donc repasser
+// par l'amorçage pour recevoir le MIROIR `brand.demo` et laisser le reste à
+// l'identique — d'où l'incrément.
+export const SEED_VERSION = 50;
 
 // Migration du vocabulaire de modification. Les gabarits par défaut d'origine
 // accordaient mal le nom de l'acte (« la présente arrêté », « confiée à le
@@ -188,7 +196,7 @@ function migrateAmendmentVocab(config) {
 // réservé à un référentiel de démonstration : un référentiel réel n'est pas
 // touché.
 function migrateDemoNonPublishable(config) {
-  if (!config || config.brand?.demo === false) return false;
+  if (!config || !demoActif(config)) return false;
   const fresh = seedConfig();
   let changed = false;
   config.families = config.families || [];
@@ -229,7 +237,7 @@ function migrateFamilyDescriptions(config) {
 // reçoit ; un référentiel réel — ou vidé volontairement — n'est pas touché et
 // reste sur la feuille implicite dérivée de la marque (voir src/lib/styles.js).
 function migrateDemoStyles(config) {
-  if (!config || config.brand?.demo === false) return false;
+  if (!config || !demoActif(config)) return false;
   if (Array.isArray(config.styles) && config.styles.length) return false;
   config.styles = seedConfig().styles;
   return true;
@@ -266,7 +274,7 @@ function migrateCircuits(config) {
     changed = true;
   }
   if (!Array.isArray(config.circuits)) {
-    config.circuits = config.brand?.demo === false ? [] : seedConfig().circuits;
+    config.circuits = demoActif(config) ? seedConfig().circuits : [];
     changed = true;
   }
   return changed;
@@ -320,7 +328,7 @@ function migrateRecueilsExternes(config) {
   if (!config) return false;
   const p = (config.publication = config.publication || {});
   if (Array.isArray(p.recueilsExternes)) return false;
-  p.recueilsExternes = config.brand?.demo === false ? [] : seedConfig().publication.recueilsExternes.map((r) => ({ ...r }));
+  p.recueilsExternes = demoActif(config) ? seedConfig().publication.recueilsExternes.map((r) => ({ ...r })) : [];
   return true;
 }
 
@@ -336,12 +344,12 @@ function migrateMentionsPubliques(config) {
   if (!config) return false;
   const p = (config.publication = config.publication || {});
   if (p.mentions && typeof p.mentions === "object") return false;
-  p.mentions = config.brand?.demo === false ? mentionsParDefaut() : seedConfig().publication.mentions;
+  p.mentions = demoActif(config) ? seedConfig().publication.mentions : mentionsParDefaut();
   return true;
 }
 
 function migrateDemoStyleOptions(config) {
-  if (!config || config.brand?.demo === false) return false;
+  if (!config || !demoActif(config)) return false;
   if (!Array.isArray(config.styles)) return false;
   let changed = false;
   for (const s of config.styles) {
@@ -361,7 +369,7 @@ function migrateDemoStyleOptions(config) {
 // n'a AUCUN réglage de révision reçoit celui de la démonstration ; s'il en a un —
 // même éteint par l'administrateur — il n'est pas touché.
 function migrateDemoServiceRevision(config) {
-  if (!config || config.brand?.demo === false) return false;
+  if (!config || !demoActif(config)) return false;
   const fresh = seedConfig();
   let changed = false;
   for (const s of config.services || []) {
@@ -488,22 +496,26 @@ export async function bootstrap() {
   const session = await loadSession();
   const meta = (await db.read("meta")) || {};
   const firstRun = !config && !trames;
+  // LE COMMUTATEUR DE DÉMONSTRATION (voir src/lib/demo.js) : allumé, on sème le
+  // jeu fictif livré ; éteint, on n'installe RIEN — un référentiel neuf reste
+  // vierge, sans identité de fiction, et c'est à l'administrateur de le bâtir.
+  const demo = demoActif(config);
   // Le registre ne contient que des actes de démonstration (ou rien) : une mise
   // à niveau du jeu de démonstration peut alors remplacer trames et actes sans
   // risquer d'écraser un travail réel.
   const demoActes = (actes || []).every((a) => String(a.id).startsWith("acte-demo-"));
-  if (!config) { config = seedConfig(); await saveConfig(config); }
-  if (!trames) { trames = seedTrames(); await saveTrames(trames); }
-  else if (meta.seedVersion !== SEED_VERSION && demoActes && trames.every((t) => String(t.id).startsWith("tpl-"))) {
+  if (!config) { config = demo ? seedConfig() : seedConfigVierge(); await saveConfig(config); }
+  if (!trames) { trames = demo ? seedTrames() : []; await saveTrames(trames); }
+  else if (demo && meta.seedVersion !== SEED_VERSION && demoActes && trames.every((t) => String(t.id).startsWith("tpl-"))) {
     // jeu de démonstration obsolète et aucune donnée utilisateur : on remet à niveau
     trames = seedTrames();
     await saveTrames(trames);
     // Le référentiel de démonstration est remis à niveau lui aussi : c'est déjà
     // acquis que le registre ne contient que des actes de démonstration, et l'on
-    // vérifie que la marque est bien celle de la démonstration (`brand.demo`) —
-    // un référentiel réel, ou repris à la main, n'est jamais touché. Seuls
-    // l'identité, le vocabulaire et la numérotation de l'utilisateur survivent.
-    if (config.brand?.demo !== false) {
+    // vérifie que la démonstration est bien allumée — un référentiel réel, ou
+    // repris à la main, n'est jamais touché. Seuls l'identité, le vocabulaire et
+    // la numérotation de l'utilisateur survivent.
+    if (demo) {
       const keep = { brand: config.brand, vocab: config.vocab, numbering: config.numbering, experimental: config.experimental, assistant: config.assistant };
       const fresh = seedConfig();
       config = { ...fresh, brand: { ...fresh.brand, ...keep.brand }, vocab: { ...fresh.vocab, ...keep.vocab }, numbering: { ...fresh.numbering, ...keep.numbering }, experimental: { ...fresh.experimental, ...(keep.experimental || {}) }, assistant: { atelier: { ...(keep.assistant?.atelier || {}) }, public: { ...(keep.assistant?.public || {}) } } };
@@ -511,6 +523,15 @@ export async function bootstrap() {
     }
   }
   if (!actes) { actes = []; await saveActes(actes); }
+
+  // MIROIR du commutateur : `brand.demo` recopie ce que dit le déploiement, pour
+  // que le réglage voyage avec les données exportées et importées. Il ne décide
+  // plus rien — toutes les décisions passent par `demoActif()` (src/lib/demo.js).
+  const reglageDeploiement = demoDeploiement();
+  if (reglageDeploiement !== null && config.brand?.demo !== reglageDeploiement) {
+    config.brand = { ...(config.brand || {}), demo: reglageDeploiement };
+    await saveConfig(config);
+  }
 
   // Le choix du signataire par la fonction : conversion des trames antérieures
   // (champ « signataire » de type `person` → type `signataire`). Indépendante du
@@ -561,14 +582,14 @@ export async function bootstrap() {
   // courante, et uniquement si les trames sont celles de la démonstration et que
   // le registre ne contient que des actes de démonstration. Un registre réel —
   // ou enrichi à la main — n'est jamais touché.
-  const demoRegistry = (trames || []).length && trames.every((t) => String(t.id).startsWith("tpl-"));
-  if (meta.seedVersion !== SEED_VERSION && demoRegistry && demoActes && config.brand?.demo !== false) {
+  const demoRegistry = demo && (trames || []).length && trames.every((t) => String(t.id).startsWith("tpl-"));
+  if (meta.seedVersion !== SEED_VERSION && demoRegistry && demoActes) {
     try {
       // L'emblème de la commune fait partie du jeu de démonstration : la version
       // 47 l'a redessiné. Sur une installation de démonstration, l'identité suit
       // donc le jeu livré — de la même façon que les trames et les actes qu'on
-      // régénère ici (la mention de démonstration, elle, est déjà un réglage du
-      // référentiel : `brand.demo`).
+      // régénère ici (le commutateur de démonstration, lui, est celui du
+      // déploiement : voir src/lib/demo.js).
       const embleme = seedConfig().brand.logoUrl;
       if (config.brand?.logoUrl !== embleme) {
         config.brand = { ...(config.brand || {}), logoUrl: embleme };
@@ -597,7 +618,9 @@ export async function bootstrap() {
     // comptes fictifs incapables de se connecter. Sur une installation réelle,
     // le référentiel n'est d'ailleurs pas vide : le service y a créé le compte
     // d'administration du `.env` (voir src/server/mysql/server.mjs).
-    users = demoAccountsDisabled(config) ? [] : seedUsers(config);
+    // Les comptes fictifs font partie du jeu de démonstration : démonstration
+    // éteinte, ou raccourci fermé par le déploiement, on n'en sème aucun.
+    users = (demo && !demoAccountsDisabled(config)) ? seedUsers(config) : [];
     await saveUsers(users);
   }
   // Comptes de démonstration créés avant les services : on leur redonne le
@@ -625,6 +648,13 @@ export async function bootstrap() {
   const sig = migrateDemoSignataires(config, users);
   if (sig.changed) { users = sig.users; await saveUsers(users); }
   if (meta.seedVersion !== SEED_VERSION) await db.write("meta", { ...meta, seedVersion: SEED_VERSION });
+  // LES RÉGLAGES DU DÉPLOIEMENT (identité, vocabulaire, numérotation, délais,
+  // recueil, fonctions) s'appliquent EN DERNIER, et seulement EN MÉMOIRE : le
+  // `.env` du service l'emporte sur le référentiel (voir src/lib/deploiement-config.js),
+  // mais le référentiel enregistré reste celui de l'administrateur. Rien n'est
+  // donc persisté ici : retirer une variable du `.env` la fait disparaître au
+  // démarrage suivant.
+  appliquerOptions(config);
   return { config, trames, actes, users, session, firstRun };
 }
 

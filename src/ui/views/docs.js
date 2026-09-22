@@ -43,6 +43,16 @@ const DOCUMENTS = [
     desc: "Le schéma de la base, les routes du service, l'édition du conteneur.",
   },
   {
+    id: "variables", group: "Exploitation",
+    path: "src/docs/VARIABLES.md", title: "Variables de déploiement",
+    desc: "Toutes les variables du fichier .env — service et référentiel —, leur rôle, leur type et leurs bornes. Document engendré.",
+  },
+  {
+    id: "docker", group: "Exploitation",
+    path: "src/docs/DOCKER.md", title: "Construire une image Docker autonome",
+    desc: "Bâtir une image unique (service + façade + application), la publier sur un registre, et la lancer.",
+  },
+  {
     id: "industrialisation", group: "Exploitation",
     path: "src/docs/INDUSTRIALISATION.md", title: "Vérifier, tester, livrer",
     desc: "Les commandes de vérification, ce qui est testé sans navigateur, la CI, et ce qui reste à mettre en place.",

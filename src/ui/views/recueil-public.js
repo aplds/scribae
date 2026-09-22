@@ -16,7 +16,7 @@ import { state, can, navigate, majUrlRecherche } from "../state.js";
 import { h, clear, button, icon } from "../dom.js";
 import { estVisiteur } from "../../lib/users.js";
 import { demoNotice } from "../notice.js";
-import { get } from "../../lib/remote.js";
+import { get, bodyOf } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { formatDate } from "../../lib/util.js";
 import { filtrerPublications, facettes, parAnnee, parTheme, dernieresPublications, publicationsEnVigueur, publicationsEpinglees,
@@ -63,8 +63,8 @@ function charger(st) {
   st.chargement = true;
   get("/v1/publications", { label: "Recueil public", source: "lecture" })
     .then((r) => {
-      st.liste = r.ok ? (r.body.publications || []) : [];
-      st.erreur = r.ok ? null : (r.body && r.body.erreur) || `Registre indisponible (${r.status}).`;
+      st.liste = r.ok ? (bodyOf(r).publications || []) : [];
+      st.erreur = r.ok ? null : bodyOf(r).erreur || `Registre indisponible (${r.status}).`;
     })
     .catch((e) => { st.erreur = String((e && e.message) || e); st.liste = []; })
     .finally(() => { st.chargement = false; rafraichir(); });

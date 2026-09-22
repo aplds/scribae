@@ -158,9 +158,9 @@ function trameCard(t, redraw) {
       !tramePublishable(t)
         ? h("span", { class: "fr-badge fr-badge--warning", title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels).", text: "Non publiable" })
         : null,
-      h("span", { class: "fr-badge", text: `${(t.fields || []).length} champs` }),
-      h("span", { class: "fr-badge", text: `${(t.rules || []).length} règles` }),
-      noteCount ? h("span", { class: "fr-badge fr-badge--info", text: `${noteCount} commentaires` }) : null,
+      h("span", { class: "fr-badge", text: `${(t.fields || []).length} champ${(t.fields || []).length > 1 ? "s" : ""}` }),
+      h("span", { class: "fr-badge", text: `${(t.rules || []).length} règle${(t.rules || []).length > 1 ? "s" : ""}` }),
+      noteCount ? h("span", { class: "fr-badge fr-badge--info", text: `${noteCount} commentaire${noteCount > 1 ? "s" : ""}` }) : null,
     ),
     // Un brouillon ne sort pas de l'atelier : on le dit là où on le voit, plutôt
     // que de laisser croire qu'un service peut déjà s'en servir.

@@ -1055,9 +1055,23 @@ function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, bloc
   actions.appendChild(h("p", { class: "fr-small", text: "Signature électronique simple : l'acte est signé DANS l'application, par le signataire désigné, avec son compte. La signature est horodatée et vérifiable par empreinte. Les mentions nominatives (adresse électronique, compte, moyen d'authentification) restent dans l'ORIGINAL INTERNE : le recueil public ne montre que le nom, la fonction et la date." }));
 
   if (!auteur.courriel) {
+    // L'adresse ne vit PAS sur la personne du référentiel (elle n'y a pas de
+    // champ) : elle vit sur le COMPTE du signataire (Comptes et rôles), ou vient
+    // de l'annuaire. Le message dit donc où aller — et ce qui manque au juste :
+    // le compte, son courriel, ou le rapprochement.
+    const etat = auteur.personId ? etatRapprochement(state.config, state.users, auteur.personId) : null;
+    const compte = etat?.compte || null;
+    const qui = auteur.nom || "ce signataire";
+    const texte = !compte
+      ? `Aucun compte de l'application n'est rattaché à ${qui} : un signataire signe avec son compte. Dans « Comptes et rôles », ouvrez son compte (ou créez-le), rattachez-le à sa personne du référentiel, puis renseignez son courriel — c'est cette adresse qui identifie le signataire.`
+      : `Le compte de ${qui} (${compte.login || compte.id}) n'a pas de courriel : sa trace nominative serait incomplète. Renseignez-le dans « Comptes et rôles », puis rapprochez le compte depuis « Ma signature ».`;
     actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
       h("p", { class: "fr-alert__title", text: "Signataire sans adresse" }),
-      h("p", { class: "fr-small", text: "Le compte de ce signataire n'a pas d'adresse électronique exploitable : sa trace nominative serait incomplète. Renseignez son adresse au référentiel (ou laissez l'annuaire la fournir), puis rapprochez son compte depuis « Ma signature »." })));
+      h("p", { class: "fr-small", text: texte }),
+      h("div", { class: "fr-row", style: { marginTop: "6px" } },
+        can("comptes.gerer")
+          ? button("Ouvrir « Comptes et rôles »", { variant: "secondary", size: "sm", icon: "lock", onClick: () => navigate("comptes") })
+          : h("p", { class: "fr-small fr-muted", text: "Demandez à un administrateur de renseigner ce courriel (Administration › Comptes et rôles)." }))));
   }
   if (auteur.nom) {
     actions.appendChild(h("div", { class: "sig-cert" },
@@ -2606,6 +2620,11 @@ async function publier(acte, doc, form, paint) {
   const originalInterne = !externe && originalBrut ? originalInterneDe(acte) : null;
   const record = {
     eliUri: eliU, url, numero: acte.numero || doc.meta?.numero || "", nature: doc.meta?.actTypeId || "Décision",
+    // Le type d'acte et l'entité voyagent AVEC la publication : c'est ce que le
+    // JSON-LD publie (`eli:type_document`, `eli:passed_by`), et ce que la notice
+    // du recueil relit. Sans eux le type restait vide, et l'autorité anonyme.
+    actTypeId: doc.meta?.actTypeId || "",
+    entityId: doc.meta?.entity?.id || "",
     ...theme,
     title: (doc.nodes.find((n) => n.type === "title")?.text) || acte.objet || "",
     objet: acte.objet || doc.meta?.objet || "", entityName: doc.meta?.entity?.name || "",

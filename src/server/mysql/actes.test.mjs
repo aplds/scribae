@@ -77,10 +77,15 @@ test("le webhook n'accepte pas un document différent de celui déposé", () => 
   const a = call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON }).body;
   const s = call("POST", `/v1/actes/${a.id}/signature`, {}, { authorization: JETON }).body;
 
+  // La notification du prestataire n'est pas publique : sans clé, elle est
+  // refusée (voir src/CHANGELOG.md, « Le webhook du prestataire de signature
+  // est authentifié »).
+  assert.equal(call("POST", "/v1/webhooks/signature", { signatureId: s.signatureId }).status, 401);
+
   const faux = call("POST", "/v1/webhooks/signature", {
     signatureId: s.signatureId,
     documentSigne: { document: { akn: AKN + "FALSIFIÉ" }, signatures: [{ signeLe: "2026-03-10T12:10:00.000Z" }] },
-  });
+  }, { authorization: JETON });
   assert.equal(faux.status, 409);
   assert.equal(faux.body.code, "empreinte_divergente");
   assert.equal(state.signatures[s.signatureId].statut, "rejetee");
@@ -88,7 +93,7 @@ test("le webhook n'accepte pas un document différent de celui déposé", () => 
   const vrai = call("POST", "/v1/webhooks/signature", {
     signatureId: s.signatureId,
     documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z", algorithme: "ECDSA P-256 / SHA-256", signataire: { nom: "Yann Dubois", fonction: "Maire" } }] },
-  });
+  }, { authorization: JETON });
   assert.equal(vrai.status, 200);
   assert.equal(vrai.body.statut, "signee");
   assert.equal(state.actes[a.id].statut, "signee");
@@ -101,7 +106,7 @@ test("publication : ELI, registre, idempotence et date d'opposabilité", () => {
   call("POST", "/v1/webhooks/signature", {
     signatureId: s.signatureId,
     documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
-  });
+  }, { authorization: JETON });
 
   const corps = { html: "<html>x</html>", akn: AKN, eliUri: "eli:/fr/arr/2026/0401/iam", datePublication: "2026-03-11", original: { document: { sha256: sha256(AKN) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] } };
   const publie = call("POST", `/v1/actes/${a.id}/publication`, corps, { authorization: JETON, "idempotency-key": "idem-1" });
@@ -121,13 +126,15 @@ test("publication : ELI, registre, idempotence et date d'opposabilité", () => {
   assert.ok(Array.isArray(call("GET", `/v1/publications/${encodeURIComponent(cle)}`).body.versions));
   assert.equal(call("GET", "/v1/eli/arr/2026/0401/iam").status, 200);
   assert.equal(call("GET", "/v1/eli/arr/2026/9999/zzz").status, 404);
-  assert.equal(call("GET", "/v1/actes").body.actes.length, 1);
+  assert.equal(call("GET", "/v1/actes", null, { authorization: JETON }).body.actes.length, 1);
 });
 
 test("contrôle de légalité : transmettre avant de publier, et le certificat est conservé", () => {
   const { call } = banc();
   const a = call("POST", "/v1/actes", { akn: AKN, numero: "2026-402", dateSignature: "2026-03-10", controleLegalite: true }, { authorization: JETON }).body;
-  assert.equal(a.controleLegalite, true, "le dépôt retient l'exigence de transmission");
+  // Le dépôt RETIENT l'exigence : sa réponse est brève (identifiant, empreinte),
+  // c'est la fiche de l'acte déposé qui la rend.
+  assert.equal(call("GET", `/v1/actes/${a.id}`, null, { authorization: JETON }).body.controleLegalite, true, "le dépôt retient l'exigence de transmission");
 
   // Avant la signature, il n'y a rien à transmettre.
   const tropTot = call("POST", `/v1/actes/${a.id}/transmission`, {}, { authorization: JETON });
@@ -138,7 +145,7 @@ test("contrôle de légalité : transmettre avant de publier, et le certificat e
   call("POST", "/v1/webhooks/signature", {
     signatureId: s.signatureId,
     documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
-  });
+  }, { authorization: JETON });
 
   // Signé mais non transmis : la publication est refusée par le service.
   const corps = { html: "<html>x</html>", akn: AKN, eliUri: "eli:/fr/arr/2026/0402/iam", datePublication: "2026-03-11", original: { document: { sha256: sha256(AKN) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] } };
@@ -152,7 +159,7 @@ test("contrôle de légalité : transmettre avant de publier, et le certificat e
   assert.ok(t.body.certificat.mention.startsWith("Transmis au contrôle de légalité le "), t.body.certificat.mention);
   assert.equal(t.body.certificat.empreinte, sha256(AKN));
   assert.equal(call("POST", `/v1/actes/${a.id}/transmission`, {}, { authorization: JETON }).body.idempotent, true);
-  const lu = call("GET", `/v1/actes/${a.id}/transmission`);
+  const lu = call("GET", `/v1/actes/${a.id}/transmission`, null, { authorization: JETON });
   assert.equal(lu.status, 200);
   assert.equal(lu.body.reference, t.body.reference);
 
@@ -190,7 +197,7 @@ function publier(call, { numero, eliUri, dateDocument, datePublication, html = "
   call("POST", "/v1/webhooks/signature", {
     signatureId: s.signatureId,
     documentSigne: { document: { akn }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
-  });
+  }, { authorization: JETON });
   return call("POST", `/v1/actes/${a.id}/publication`, {
     html, akn, eliUri, datePublication,
     original: { document: { sha256: sha256(akn) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },

@@ -22,14 +22,16 @@
 import { sha256Hex } from "./signature.js";
 
 // Le service de contrôle de légalité, décrit comme un service distant — il a
-// son adresse, son vocabulaire, ses références d'accusé de réception.
+// son adresse, son vocabulaire, ses références d'accusé de réception. L'adresse
+// est un EXEMPLE : la transmission est simulée (voir `controleLegaliteActif`),
+// et un déploiement réel pointe vers son propre point de terminaison @ctes.
 export const CONTROLE_LEGALITE = {
   id: "controle-legalite",
   nom: "Contrôle de légalité (@ctes)",
   service: "Télétransmission au contrôle de légalité",
   destinataire: "Préfecture — contrôle de légalité",
   mode: "ctes",
-  apiUrl: "https://api.ctes.valmont-sur-loire.fr/v1/transmissions",
+  apiUrl: "https://api.ctes.exemple.fr/v1/transmissions",
 };
 
 // La transmission automatique est une fonction expérimentale : éteinte par

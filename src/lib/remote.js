@@ -104,10 +104,14 @@ function ensureSocket() {
     if (s !== socket) return;
     socket = null;
     if (ev.code === 4403) setStatus("blocked", "Le service refuse les pages servies depuis une autre adresse.");
-    else if (ev.code === 1011) setStatus("error", "Le service distant a échoué à son démarrage.");
+    else if (ev.code === 1011) setStatus("error", "Le service distant se reconstruit (code 1011). Reconnexion en cours…");
     else if (ev.code === 4429) setStatus("error", "Le service est temporairement suspendu (trop de requêtes). Réessayez dans quelques minutes.");
     else setStatus("offline", `Connexion au service perdue (${ev.code}). Reconnexion en cours…`);
-    if (ev.code !== 4403 && ev.code !== 1011 && ev.code !== 4429) scheduleRetry();
+    // Un service qui se RECONSTRUIT (1011) revient de lui-même : on retente, au
+    // lieu de laisser croire à une panne et d'attendre que l'agent reclique. Le
+    // refus d'origine (4403) est définitif, et la suspension (4429) demande
+    // d'attendre : ces deux-là ne se retentent pas.
+    if (ev.code !== 4403 && ev.code !== 4429) scheduleRetry();
   });
   return s;
 }
@@ -224,9 +228,19 @@ export async function call(method, path, opts = {}) {
 export const get = (path, opts) => call("GET", path, opts);
 export const post = (path, body, opts) => call("POST", path, { ...opts, body });
 
-// Extrait un message d'erreur lisible d'une réponse non-2xx.
+// Le corps d'une réponse, TOUJOURS exploitable. `r.ok` ne dit rien de la forme
+// du corps : `httpRequest` pose `body = null` quand la réponse n'est pas du JSON
+// (une page 502 de nginx, un service qui redémarre…). Lire `r.body.publications`
+// levait alors « Cannot read properties of null (reading 'publications') » au
+// lieu d'un message propre. `bodyOf` rend `{}` dans ce cas : les écrans
+// retombent sur leur état vide habituel, et l'erreur reste visible via `r.status`.
+export const bodyOf = (r) => (r && r.body && typeof r.body === "object" ? r.body : {});
+
+// Extrait un message d'erreur lisible d'une réponse non-2xx. Le service répond
+// `{ erreur }` (voir les réponses de index.html) : sans cette clé, l'appelant
+// n'affichait qu'un « Erreur 403 » muet au lieu du motif envoyé par le service.
 export function errorMessage(res) {
   const b = res && res.body;
   if (!b) return `Erreur ${res && res.status}`;
-  return b.message || (b.error && b.error.message) || `Erreur ${res.status}`;
+  return b.erreur || b.message || (b.error && b.error.message) || `Erreur ${res.status}`;
 }

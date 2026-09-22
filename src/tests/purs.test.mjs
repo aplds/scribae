@@ -144,9 +144,11 @@ test("conseils : l'assemblée d'une entité, et la qualité qui signe", async (t
 });
 
 test("compile : un acte d'assemblée porte la formule du conseil", async (t) => {
-  const { compile } = await charger("../lib/compile.js");
-  const { newTrame, newNode } = await charger("../lib/schema.js");
-  if (!compile || !newTrame) return t.skip("module indisponible hors navigateur");
+  const compileMod = await charger("../lib/compile.js");
+  const schemaMod = await charger("../lib/schema.js");
+  if (!compileMod || !schemaMod || !schemaMod.newTrame) return t.skip("module indisponible hors navigateur");
+  const { compile } = compileMod;
+  const { newTrame, newNode } = schemaMod;
   const config = {
     brand: { baseUri: "https://exemple.fr" },
     roles: [{ id: "maire", m: "maire", f: "maire", label: "Maire" }],

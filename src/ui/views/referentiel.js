@@ -21,6 +21,11 @@ import { signatureSettings, SIGNATURE_MODES, MODES_TRAME, trameModeLabel, circui
 import { EVENEMENTS, courrielSettings, etatService as etatCourriel, envoyerTest, evenementDe } from "../../lib/courriel.js";
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
+import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
+import { optionsDeployees } from "../../lib/deploiement-config.js";
+import { post, errorMessage } from "../../lib/remote.js";
+import { modeDeploiement } from "../../lib/auth.js";
+import { cleService } from "../../lib/cle-service.js";
 import { annuairePanel } from "../oidc.js";
 import {
   numberingSettings, demanderNumero, relaisDisponible,
@@ -132,14 +137,18 @@ export function renderReferentiel(root) {
       textField({ label: "Adresse électronique", value: c.brand.supportEmail || "", onChange: (v) => { c.brand.supportEmail = v; save(); } }),
     ));
     body.appendChild(card("Mention de démonstration",
-      "Tant qu'elle est affichée, un bandeau en tête de l'application — et sur le recueil public — rappelle que cette installation n'est pas en production : données fictives, signature électronique simulée. Coupez-la au moment de la mise en service réelle : le bandeau disparaît immédiatement, partout.",
-      choiceField({
-        label: "Afficher le bandeau « Démonstration »",
-        value: c.brand.demo !== false,
-        options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
-        help: "Le réglage est conservé dans le référentiel : il suit les données exportées et importées.",
-        onChange: (v) => { c.brand.demo = v; touch("config"); },
-      }),
+      "Le mode de démonstration — « cette installation montre un jeu fictif » — est décidé par le DÉPLOIEMENT (`DEMO` dans le `.env` du service ; voir src/lib/demo.js). Éteint, l'outil est une page vierge : aucune donnée fictive, aucune mention de collectivité fictive, nulle part. Tant qu'il est allumé, un bandeau en tête de l'application — et sur le recueil public — rappelle que l'installation n'est pas en production : données fictives, signature électronique simulée.",
+      demoRegleParLeDeploiement()
+        ? h("p", { class: "fr-small fr-muted", text: demoActif(c)
+            ? "Démonstration ACTIVE sur cette installation (réglage du déploiement) : le jeu fictif et les comptes de démonstration sont installés."
+            : "Démonstration DÉSACTIVÉE sur cette installation (réglage du déploiement) : l'outil part d'une page vierge. Pour revenir en arrière, changez DEMO dans le .env du service." })
+        : choiceField({
+            label: "Afficher le bandeau « Démonstration »",
+            value: c.brand.demo !== false,
+            options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
+            help: "Réglage du référentiel (il suit les données exportées et importées) : il ne s'applique que quand le déploiement ne dit rien — aperçu en ligne, page statique. Il ne décide pas du jeu fictif, qui vient du déploiement (`DEMO`).",
+            onChange: (v) => { c.brand.demo = v; touch("config"); },
+          }),
       textField({
         label: "Texte du bandeau", value: c.brand.demoText || "", rows: 2,
         placeholder: DEMO_TEXT,
@@ -240,8 +249,8 @@ export function renderReferentiel(root) {
         { key: "code", label: "Code", type: "text" },
         { key: "kind", label: "Nature", type: "select", options: ["commune", "etablissement-public", "etablissement", "association", "service"] },
         { key: "name", label: "Nom", type: "text" },
-        { key: "nameWithArt", label: "Nom avec article (dans une phrase)", type: "text", help: "Ex. « la commune de Valmont-sur-Loire »" },
-        { key: "authorityFormula", label: "Formule d'autorité", type: "text", help: "Ligne d'en-tête de l'acte, ex. « Le maire de Valmont-sur-Loire »" },
+        { key: "nameWithArt", label: "Nom avec article (dans une phrase)", type: "text", help: "Ex. « la commune de … », avec l'article qui convient." },
+        { key: "authorityFormula", label: "Formule d'autorité", type: "text", help: "Ligne d'en-tête de l'acte, ex. « Le maire de … »." },
         { key: "legalName", label: "Dénomination juridique", type: "text" },
         { key: "seatCity", label: "Ville du siège", type: "text" },
         { key: "tribunal", label: "Tribunal administratif compétent", type: "text" },
@@ -262,8 +271,8 @@ export function renderReferentiel(root) {
       fields: () => [
         { key: "code", label: "Code", type: "text", help: "Repère court (CM, CA…)." },
         { key: "entityId", label: "Entité de rattachement", type: "select", options: c.entities.map((e) => ({ value: e.id, label: e.name })), help: "C'est l'entité de l'acte qui détermine l'assemblée retenue par défaut." },
-        { key: "name", label: "Nom de l'assemblée", type: "text", help: "Ex. « Conseil municipal de Valmont-sur-Loire »." },
-        { key: "authorityFormula", label: "Formule d'autorité (ligne d'en-tête de l'acte)", type: "text", help: "Ex. « Le conseil municipal de Valmont-sur-Loire ». C'est ce que rend le jeton {{autorite}}." },
+        { key: "name", label: "Nom de l'assemblée", type: "text", help: "Ex. « Conseil municipal de … »." },
+        { key: "authorityFormula", label: "Formule d'autorité (ligne d'en-tête de l'acte)", type: "text", help: "Ex. « Le conseil municipal de … ». C'est ce que rend le jeton {{autorite}}." },
         { key: "signerRoleId", label: "Qualité qui signe", type: "select", options: c.roles.map((r) => ({ value: r.id, label: r.label })), placeholder: "—", help: "Le rôle sous lequel l'acte est signé : le maire pour un conseil municipal, le président du conseil d'administration pour un établissement public. Le nom du signataire vient, lui, du champ « Signataire » de la trame." },
         { key: "actif", label: "En activité", type: "boolean" },
       ],
@@ -418,7 +427,12 @@ export function renderReferentiel(root) {
       h("div", { class: "fr-row" },
         button("Vider le référentiel", { variant: "secondary", danger: true, onClick: resetConfig }),
         button("Réinstaller le jeu de démonstration", { variant: "tertiary", onClick: resetAll }),
+        button("Repartir d'un référentiel vierge", { variant: "tertiary", danger: true, onClick: resetVierge }),
       ),
+      h("p", { class: "fr-small fr-muted", text: "« Repartir d'un référentiel vierge » efface tout — référentiel, trames, actes, comptes — et, sur le service partagé, actes déposés, circuits et publications ; l'application redémarre ensuite sur un référentiel neuf. C'est la sortie de démonstration : si la démonstration est allumée par le déploiement (`DEMO` dans le .env du service), le jeu fictif sera réinstallé au démarrage suivant — éteignez d'abord ce réglage." }),
+      optionsDeployees() && Object.keys(optionsDeployees().variables).length
+        ? h("p", { class: "fr-small", text: `Réglages posés par le déploiement (fichier .env) : ${Object.keys(optionsDeployees().variables).length}. Ils s'appliquent par-dessus le référentiel à chaque démarrage — une valeur saisie ici ne les remplace pas ; une variable retirée du .env n'est plus imposée au lancement suivant. La liste est dans « Documentation technique › Variables de déploiement ».` })
+        : null,
       h("hr", { class: "fr-sep" }),
       h("p", { class: "fr-small fr-muted", text: "Les comptes et leurs rôles se gèrent dans « Comptes et rôles »." }),
       h("p", { class: "fr-small fr-muted", text: "Le mode de connexion — comptes de l'application, ou annuaire de la collectivité (OIDC) — se règle dans l'onglet « Annuaire (OIDC) ». Brancher l'annuaire désactive automatiquement les comptes de démonstration. Le mode « comptes locaux » (identifiant et mot de passe) est, lui, un réglage du déploiement (`AUTH_MODE=password` dans le `.env` du service), et prime sur le référentiel." }),
@@ -938,6 +952,69 @@ async function resetAll() {
   toast("Jeu de démonstration réinstallé", "success");
 }
 
+// Repartir d'un référentiel VIERGE : la SORTIE de démonstration. Ce bouton ne
+// remet pas le jeu fictif — il l'efface, partout. Le recueil public lit le
+// SERVICE : vider le seul navigateur laisserait les publications de
+// démonstration en ligne, donc on purge d'abord le service, puis le stockage
+// local, et l'application redémarre : `bootstrap()` sème alors un référentiel
+// vierge — ou le jeu de démonstration, si le déploiement l'allume encore (voir
+// src/lib/demo.js).
+async function resetVierge() {
+  const ok = await confirmDialog(
+    "Repartir d'un référentiel vierge",
+    "Tout est effacé : référentiel, trames, actes, comptes, et — sur le service partagé — actes déposés, circuits de signature et publications. L'installation repart d'une page blanche, à construire. Action irréversible.",
+    { confirmLabel: "Repartir à zéro", danger: true },
+  );
+  if (!ok) return;
+  const purge = await purgerService();
+  if (!purge.ok) {
+    // Le service a REFUSÉ (ou la purge a échoué) : sans cela, on laisserait la
+    // fiction en ligne. On s'arrête et on le dit, plutôt que de faire semblant.
+    toast("Le service n'a pas pu être purgé : " + purge.detail, "error");
+    return;
+  }
+  if (purge.avertissement) {
+    // Le poste va être vidé, mais le service ne connaît pas la purge (service
+    // plus ancien que l'application, le plus souvent) : ses publications
+    // resteront en ligne. On le dit AVANT d'effacer, et l'agent décide.
+    const continuer = await confirmDialog(
+      "Le service n'a pas de purge",
+      purge.avertissement + " Le référentiel de ce poste peut malgré tout être vidé : l'application rechargera un référentiel vierge.",
+      { confirmLabel: "Vider quand même", danger: true },
+    );
+    if (!continuer) return;
+  }
+  await clearAll();
+  location.reload();
+}
+
+// La purge du service (actes déposés, circuits, publications). Il faut la clé
+// d'écriture — remise au poste par le déploiement, sinon celle du jeu de
+// démonstration du référentiel — sauf en mode « mot de passe », où c'est la
+// session de l'agent qui ouvre le droit (voir src/lib/remote.js).
+async function purgerService() {
+  const token = modeDeploiement() === "password"
+    ? null
+    : (cleService() || publicationSettings(state.config).jetonDemonstration || null);
+  try {
+    const r = await post("/v1/admin/purge", { confirmation: "repurge" }, { token, label: "Remise à zéro du service" });
+    if (r.ok) return { ok: true };
+    // Aucun service joignable (aperçu hors ligne, transport en échec) : il n'y a
+    // rien à purger de ce côté.
+    if (r.status === 0) return { ok: true, absent: true };
+    // Un service qui ne connaît pas la route (version antérieure à celle de
+    // l'application) : on continue, mais on le DIT — ses publications, elles,
+    // subsistent.
+    if (r.status === 404 || r.status === 405) {
+      return { ok: true, avertissement: "Le service n'a pas la route de purge (POST /v1/admin/purge) — il est antérieur à cette version de l'application, ou il l'a refusée : les actes déposés et les publications déjà en ligne ne seront pas effacés." };
+    }
+    return { ok: false, detail: errorMessage(r) };
+  } catch (e) {
+    // Transport injoignable : le service est absent, pas en faute.
+    return { ok: true, absent: true, detail: (e && e.message) || String(e) };
+  }
+}
+
 // ------------------------------------------------- circuits de validation
 // Un circuit est une DONNÉE du référentiel, pas une règle codée : c'est ici
 // qu'on décide du chemin que suit un acte avant la signature, et de qui le
@@ -1380,7 +1457,7 @@ function courrielPanel(save, redraw) {
   }));
   carte.appendChild(textField({
     label: "Nom affiché de l'expéditeur", value: reglages.expediteurNom ?? d.expediteurNom,
-    help: "Le nom qui apparaît chez le destinataire, devant l'adresse d'expédition du déploiement (SMTP_FROM). Ex. « Recueil des actes — Mairie de Valmont-sur-Loire ».",
+    help: "Le nom qui apparaît chez le destinataire, devant l'adresse d'expédition du déploiement (SMTP_FROM). Ex. « Recueil des actes — Mairie ».",
     onChange: (v) => { reglages.expediteurNom = v; save(); },
   }));
   carte.appendChild(textField({
