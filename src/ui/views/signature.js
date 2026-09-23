@@ -22,6 +22,7 @@ import { annexesJointes } from "../../lib/annexe-docs.js";
 import { exportAkn, printHtml, documentCss, exportMarkdown, exportStandaloneHtml } from "../../lib/export.js";
 import { renderDocument, applyPaper, documentToText } from "../../lib/render.js";
 import { styleForDoc } from "../../lib/styles.js";
+import { boutonPdfA } from "../pdfa.js";
 import { formatDate, download, todayIso } from "../../lib/util.js";
 import {
   publicationSettings, eliUri as eliUriOf, opposability, opposabilityRule,
@@ -69,6 +70,14 @@ const publicationAttendue = (acte) => acte.publication || { juridique: natureJur
 const lignesAttentePublication = (p) => (pubNonJuridique(p)
   ? ["En attente de publication au recueil", "Document non opposable"]
   : ["En attente de publication"]);
+
+// La DIFFUSION d'un acte : réservée aux agents quand sa trame le déclare
+// (Administration › Trames, « Réserver la diffusion aux agents connectés »). La
+// publication automatique (après signature) reprend ce réglage de la trame ; la
+// publication manuelle le propose dans sa carte, et le laisse modifiable acte
+// par acte. Voir src/server/mysql/actes.mjs (le drapeau `reserve`).
+const reserveDe = (acte) => trameById(acte && acte.trameId)?.reserve === true;
+const mentionReserve = "Publication réservée aux agents connectés : le recueil public ne la montre qu'aux porteurs d'une session.";
 
 const STATUTS = {
   brouillon: ["Brouillon", "warning"],
@@ -1920,7 +1929,7 @@ async function publierApresVerification(acte, paint) {
   const settings = publicationSettings(state.config);
   await publier(acte, doc, {
     datePublication: todayIso(), mode: settings.opposabilite.mode, jours: settings.opposabilite.jours,
-    recueil: settings.recueil, publishConsolide: true,
+    recueil: settings.recueil, publishConsolide: true, reserve: reserveDe(acte),
   }, paint);
 }
 
@@ -2362,7 +2371,7 @@ async function publierApresSignature(acte, paint) {
   toast("Acte signé — publication automatique au recueil…", "info");
   await publier(acte, doc, {
     datePublication, mode: settings.opposabilite.mode, jours: settings.opposabilite.jours,
-    recueil: settings.recueil, publishConsolide: true,
+    recueil: settings.recueil, publishConsolide: true, reserve: reserveDe(acte),
   }, paint);
 }
 
@@ -2496,6 +2505,24 @@ function renderPublication(root, ctx) {
       h("p", { class: "fr-small", style: { margin: "0 0 6px" } },
         h("strong", { text: "Nature publiée : " }),
         kindLabel(a) + (a.kind === "modificatif" ? " — l'acte modificatif est publié sous son propre identifiant ELI." : ".")),
+      // La DIFFUSION : par défaut, ce que dit la trame ; modifiable pour cet
+      // acte, car une même trame peut servir un acte public et une circulaire
+      // interne. Le choix est propre à l'ACTE (le formulaire est partagé par
+      // toutes les cartes).
+      (() => {
+        const coche = (form.reserve && Object.prototype.hasOwnProperty.call(form.reserve, a.id))
+          ? form.reserve[a.id]
+          : reserveDe(a);
+        const cb = h("input", { type: "checkbox", checked: coche });
+        cb.addEventListener("change", () => {
+          form.reserve = form.reserve || {};
+          form.reserve[a.id] = cb.checked;
+          paint();
+        });
+        return h("div", {},
+          h("label", { class: "fr-check" }, cb, "Réserver la diffusion aux agents connectés"),
+          cb.checked ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 6px" }, text: mentionReserve }) : null);
+      })(),
       consolidationNotice(a, form, paint),
       h("div", { class: "oppo-preview" },
         h("strong", { text: nonJuridique ? "Portée" : "Opposabilité" }),
@@ -2509,7 +2536,7 @@ function renderPublication(root, ctx) {
         button("Publier et attribuer l'ELI", {
           variant: "primary", icon: "upload",
           disabled: apiStatus().status !== "online" || dateIncoherente(a, doc, form),
-          onClick: () => publier(a, doc, { ...form }, paint),
+          onClick: () => publier(a, doc, { ...form, reserve: (form.reserve && Object.prototype.hasOwnProperty.call(form.reserve, a.id)) ? form.reserve[a.id] : reserveDe(a) }, paint),
         }),
         button("Voir l'acte", { variant: "tertiary", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
       ),
@@ -2689,6 +2716,10 @@ async function publier(acte, doc, form, paint) {
   // ligne et le JSON-LD s'y conforment (voir src/lib/eli.js).
   const juridique = !trame || natureJuridiqueDe(trame);
   const natureDoc = trame ? natureDe(trame) : "acte";
+  // La DIFFUSION : réservée aux agents quand le formulaire le demande (case de
+  // la carte de publication, pré-remplie par la trame). Elle voyage avec la
+  // publication ; le service s'en sert pour écarter l'acte du recueil anonyme.
+  const reserve = form.reserve === true;
   const dateOpposabilite = juridique ? opposability(form.datePublication, { opposabilite: { mode: form.mode, jours: form.jours } }) : "";
   const rule = juridique ? opposabilityRule({ opposabilite: { mode: form.mode, jours: form.jours } }) : "";
   const theme = themeDe(acte, doc);
@@ -2720,6 +2751,8 @@ async function publier(acte, doc, form, paint) {
     // Le document FAIT-IL DROIT ? `false` pour un verbatim, une déclaration, un
     // vœu : le recueil les présente comme des documents, sans opposabilité.
     juridique, natureDoc,
+    // La DIFFUSION restreinte : l'acte est publié, mais réservé aux agents.
+    reserve: reserve || undefined,
     auteur: auteurDe(acte, doc).nom, originalSha256: (original && original.document && original.document.sha256) || "",
     originalExterne,
     // Le certificat de transmission au contrôle de légalité, s'il y en a un :
@@ -2751,6 +2784,9 @@ async function publier(acte, doc, form, paint) {
     // quelle, et le recueil s'en sert pour ne pas présenter un verbatim ou un
     // vœu comme un acte opposable (voir src/server/mysql/actes.mjs).
     juridique, natureDoc,
+    // La DIFFUSION restreinte : l'acte est publié, mais le recueil public ne le
+    // sert qu'aux personnes connectées (voir src/server/mysql/actes.mjs).
+    reserve: reserve || undefined,
     html, akn, jsonld, md, texte, original, transmission: record.transmission,
     // Un acte ÉPINGLÉ (mis en avant depuis l'onglet « Actes ») dépose son
     // drapeau avec sa version en ligne : le recueil public le présentera dans sa
@@ -2792,11 +2828,16 @@ async function publier(acte, doc, form, paint) {
     acte.updatedAt = new Date().toISOString();
     // Le registre public a changé : on invalide son cache pour qu'il se recharge.
     state.pubRegistre = { chargement: false };
+    // Le recueil public aussi : il avait lu sa liste, et l'acte qu'on vient de
+    // publier doit s'y trouver — sans quoi il faudrait recharger la page pour le
+    // voir apparaître au public (le recueil relit ses listes quand elles sont
+    // invalidées, voir src/ui/views/recueil-public.js).
+    if (state.recueil) { state.recueil.liste = null; state.recueil.actes = {}; }
     touch("actes", { rerender: false });
     dire(`Acte publié — ELI ${eliU}`, "success");
     await journaliser({
       action: "publication.publie", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
-      detail: juridique ? `publié sous l'ELI ${eliU}, opposable le ${dateOpposabilite}` : `publié au recueil sous l'ELI ${eliU} (document non opposable)`,
+      detail: (juridique ? `publié sous l'ELI ${eliU}, opposable le ${dateOpposabilite}` : `publié au recueil sous l'ELI ${eliU} (document non opposable)`) + (reserve ? " — diffusion réservée aux agents connectés" : ""),
       to: [acte.createdBy, "role:editeur"],
     });
     // La notification de publication : par courriel quand le service de courriel
@@ -2816,7 +2857,7 @@ async function publier(acte, doc, form, paint) {
     // Les RÈGLEMENTS annexés à l'acte : leur texte en vigueur part au recueil
     // dans la foulée, à titre informatif (voir `publierReglements`). Un acte qui
     // n'adopte qu'un tableau (une grille tarifaire) n'en déclenche aucun.
-    await publierReglements(acte, doc, { token, flow, datePublication: form.datePublication, recueil: form.recueil });
+    await publierReglements(acte, doc, { token, flow, datePublication: form.datePublication, recueil: form.recueil, reserve });
 
     // Une modification n'est complète que lorsque le texte consolidé est publié :
     // c'est lui qui devient la version en vigueur de l'acte d'origine.
@@ -2877,7 +2918,7 @@ function consolidationNotice(acte, form, paint) {
 //
 // Elle se déclenche à la publication de l'acte qui adopte le règlement — donc
 // aussi à l'amorçage de démonstration, qui passe par `publier`.
-async function publierReglements(acte, doc, { token, flow, datePublication, recueil }) {
+async function publierReglements(acte, doc, { token, flow, datePublication, recueil, reserve }) {
   const config = state.config;
   const joints = annexesJointes(doc?.meta?.annexes, { actes: state.actes, trames: state.trames, config, acteId: acte.id });
   const reglements = joints.filter((j) => estReglement(j.trame) && j.doc);
@@ -2930,6 +2971,9 @@ async function publierReglements(acte, doc, { token, flow, datePublication, recu
       // Le service n'attend ni signature ni original : cette publication est le
       // texte du règlement, à titre informatif — pas un acte opposable.
       informative: true, adoption,
+      // La diffusion du règlement suit celle de l'acte qui l'adopte : un
+      // règlement annexé à un acte réservé aux agents l'est aussi.
+      reserve: reserve === true || undefined,
       ...themeDe(a, reg),
     };
     try {
@@ -3029,6 +3073,8 @@ async function publierConsolide(cons, form, { token, flow }) {
       dateDocument: record.dateDocument, datePublication: form.datePublication, dateExpression,
       dateOpposabilite, opposabiliteRule: rule, recueil: form.recueil, auteur: record.auteur,
       kind: "consolidee", html, akn, jsonld, md, texte, original: pack,
+      // Une version consolidée d'un acte à diffusion restreinte reste réservée.
+      reserve: form.reserve === true || undefined,
       ...themeDe(cons, doc),
     };
     const res = await post(`/v1/actes/${dep.body.id}/publication`, payload, {
@@ -3163,7 +3209,9 @@ export async function publierActeDuSeed(acte, doc, form) {
     // pas faire passer un échec pour un succès).
     const avantPublication = acte.publication || null;
     acte.publication = null;
-    await publier(acte, doc, form, () => {});
+    // La DIFFUSION suit la trame de l'acte (Administration › Trames) : un acte
+    // de démonstration issu d'une trame réservée l'est aussi.
+    await publier(acte, doc, { reserve: reserveDe(acte), ...form }, () => {});
     if (!acte.publication) { acte.publication = avantPublication; return false; }
     return true;
   } finally { silencieux = avant; }
@@ -3219,6 +3267,9 @@ export function voirOriginal(acte) {
     h("div", { class: "fr-row" },
       button("Ouvrir la page de l'original", { variant: "secondary", icon: "eye", onClick: () => ouvrirPage(pack.pageHtml, "Original signé") }),
       button("Imprimer / PDF", { variant: "secondary", icon: "download", onClick: () => printHtml(pack.pageHtml) }),
+      // Le PDF/A de l'original signé : le même document, dans la forme
+      // normalisée pour la conservation (voir ui/pdfa.js).
+      boutonPdfA(docOfActe(acte), state.config, { base: pack.reference || acte.numero || acte.id }),
       // L'export porte la part PUBLIQUE de l'original : le dossier interne
       // (adresse, compte, authentification) n'a pas à sortir du registre par un
       // fichier téléchargé — il se consulte par « Dossier de signature (interne) ».

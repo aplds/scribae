@@ -168,8 +168,23 @@ export const PERMS = [
   // L'organigramme des délégations est LISIBLE par tous les comptes (voir
   // src/ui/app.js, VIEW_PERMS) ; cette permission ne garde que sa modification.
   { key: "delegations.gerer", label: "Gérer l'organigramme des délégations de signature (qui peut signer à la place de qui)", roles: ["administrateur", "editeur"] },
+  // La STRUCTURE (les services, leurs bureaux et leurs rattachements) se dessine
+  // aussi par un ÉDITEUR : c'est lui qui connaît les services, et le rattachement
+  // d'un service élargit le périmètre de ceux qui sont au-dessus de lui. Les
+  // ENTITÉS, elles — la personne morale —, restent à l'administrateur.
+  { key: "organigramme.gerer", label: "Gérer la structure : services, bureaux et leurs rattachements (organigramme)", roles: ["administrateur", "editeur"] },
   { key: "publications.depublier", label: "Retirer une publication du recueil (dépublier)", roles: ["administrateur"] },
   { key: "publications.epingler", label: "Mettre un acte en avant sur le recueil public (épingler, « À la une »)", roles: ["administrateur", "editeur"] },
+  // Les INFORMATIONS publiées au recueil (les billets de la rubrique
+  // « Informations ») : un geste de communication, distinct de la publication
+  // d'un acte — on y écrit, on publie, on épingle, et rien n'y est signé ni
+  // numéroté. Voir src/lib/informations.js et src/ui/views/informations.js.
+  { key: "informations.gerer", label: "Écrire et publier les informations du recueil public (billets, actualités)", roles: ["administrateur", "editeur"] },
+  // Le BULLETIN (ou Journal) des actes : sa cadence, ses numéros, ses abonnés,
+  // son flux. C'est un geste de PUBLICATION — le recueil rassemblé par période —
+  // et il demande les mêmes rôles que la publication d'un acte. Voir
+  // src/lib/bulletins.js et src/ui/views/bulletin.js.
+  { key: "bulletin.gerer", label: "Régler et diffuser le bulletin des actes (cadence, numéros, abonnés, flux)", roles: ["administrateur", "editeur"] },
   { key: "referentiel.gerer", label: "Gérer le référentiel (identité, entités, personnes, rôles, références…)", roles: ["administrateur"] },
   { key: "comptes.gerer", label: "Créer des comptes, changer les rôles, désactiver, supprimer", roles: ["administrateur"] },
   { key: "api.gerer", label: "Connecter des API et consulter le journal des échanges", roles: ["administrateur"] },

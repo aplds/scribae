@@ -47,6 +47,44 @@ export const STEP_ROLES = [
   { id: "signataire", label: "Signataire (celui qui signe l'acte)" },
 ];
 
+// À QUI l'étape est confiée. Trois cibles, du plus large au plus précis :
+//
+//   • un RÔLE — le cas ordinaire : « le réviseur », « un éditeur »… C'est le
+//     rôle du COMPTE qui compte, et tout compte qui le porte peut franchir
+//     l'étape (sous réserve du service de l'acte, si l'étape est liée au
+//     service).
+//   • une PERSONNE nommée du référentiel — l'étape n'attend qu'elle (le compte
+//     rattaché à cette personne, `user.personId`). C'est le cas d'un visa
+//     nominatif, qui ne relève pas d'un rôle : un chef de projet, un référent.
+//   • un SERVICE — l'étape est confiée à un service, et tout agent qui en relève
+//     (ou qui relève d'un service au-dessus, par le rattachement) peut la
+//     franchir. Utile pour les circuits qui ne passent pas par la chaîne de
+//     décision : « la direction des finances », « les affaires juridiques ».
+//
+// L'administrateur, lui, peut toujours franchir n'importe quelle étape : il est
+// le recours quand le titulaire est absent, comme avant.
+export const STEP_TARGETS = [
+  { id: "role", label: "Un rôle" },
+  { id: "personne", label: "Une personne nommée" },
+  { id: "service", label: "Un service" },
+];
+
+// À qui l'étape est confiée, en clair (l'écran des circuits, le parapheur et la
+// fiche de l'acte s'en servent). `config` fournit les personnes et les services.
+export function etapeCible(step, config) {
+  const s = step || {};
+  if ((s.targetType || "role") === "personne") {
+    const p = (config?.people || []).find((x) => x.id === s.personId);
+    return p ? "Personne — " + [p.firstName, p.lastName].filter(Boolean).join(" ") : "Personne à désigner";
+  }
+  if (s.targetType === "service") {
+    const svc = (config?.services || []).find((x) => x.id === s.serviceId);
+    return svc ? "Service — " + svc.name : "Service à désigner";
+  }
+  const r = STEP_ROLES.find((x) => x.id === s.role);
+  return r ? r.label : (s.role || "Rôle à désigner");
+}
+
 // LES TROIS NATURES D'UNE ÉTAPE. Un parapheur de papier passe par trois
 // gestes, et dans cet ordre : on VÉRIFIE que le dossier est complet et l'acte
 // conforme, on donne son VISA (on engage son accord), et l'on SIGNE. Chaque
@@ -137,6 +175,10 @@ export function newStep(patch = {}) {
     id: uid("etp"),
     kind: nature,
     ...DEFAUTS_NATURE[nature],
+    // À qui l'étape est confiée : un rôle (défaut), une personne, un service.
+    targetType: "role",
+    personId: "",
+    serviceId: "",
     optional: false,
     help: "",
     ...patch,
@@ -242,7 +284,7 @@ export function validationPourSignature(acte) {
 }
 
 // ------------------------------------------------------------- déroulement
-export function demarrerValidation(acte, circuit, user) {
+export function demarrerValidation(acte, circuit, user, config) {
   if (!circuit || !(circuit.steps || []).length) { delete acte.validation; return null; }
   const at = new Date().toISOString();
   acte.validation = {
@@ -258,6 +300,13 @@ export function demarrerValidation(acte, circuit, user) {
       label: s.label || "Étape",
       role: s.role || "editeur",
       kind: natureEtape(s.kind).id,
+      // À qui l'étape est confiée : un rôle, une personne nommée ou un service.
+      // Le libellé est FIGÉ au démarrage du circuit : si la personne ou le
+      // service changeait de nom ensuite, l'étape garderait ce qu'elle disait.
+      targetType: s.targetType || "role",
+      personId: s.personId || "",
+      serviceId: s.serviceId || "",
+      cibleLabel: etapeCible(s, config),
       serviceScoped: !!s.serviceScoped,
       optional: !!s.optional,
       statut: "en_attente",
@@ -292,15 +341,28 @@ export function peutValider(user) {
   return STEP_ROLES.some((r) => hasRole(user, r.id));
 }
 
+// Le compte peut-il franchir CETTE étape ? Trois cibles possibles (voir
+// STEP_TARGETS) : un rôle (tout compte qui le porte), une personne nommée du
+// référentiel (le compte qui lui est rattaché), ou un service (tout agent qui en
+// relève — par la chaîne de rattachement comprise). L'administrateur peut
+// toujours : il est le recours.
+export function aDroitSurEtape(step, user, config) {
+  if (!user || user.active === false) return false;
+  if (hasRole(user, "administrateur")) return true;
+  const type = step?.targetType || "role";
+  if (type === "personne") return !!step.personId && user.personId === step.personId;
+  if (type === "service") return !!step.serviceId && inScope(config, user, { serviceId: step.serviceId });
+  if (!peutValider(user)) return false;
+  return hasRole(user, step.role);
+}
+
 export function etapePour(acte, user, config) {
   const v = acte?.validation;
-  if (!v || v.statut !== "en_cours" || !peutValider(user)) return null;
+  if (!v || v.statut !== "en_cours") return null;
   if (!validationAJour(acte)) return null;
   const step = etapeActive(v);
   if (!step) return null;
-  // Un administrateur peut tenir n'importe quelle étape (il est le recours
-  // quand le titulaire est absent) ; les autres doivent porter le rôle demandé.
-  if (!hasRole(user, "administrateur") && !hasRole(user, step.role)) return null;
+  if (!aDroitSurEtape(step, user, config)) return null;
   if (step.serviceScoped && acte.serviceId && !inScope(config, user, acte)) return null;
   return step;
 }
@@ -335,10 +397,10 @@ function recalculer(v) {
 // Remet le circuit à zéro (après une réécriture de l'acte, ou une reprise
 // volontaire). Les décisions précédentes restent lisibles dans l'historique du
 // journal, mais le circuit repart de sa première étape.
-export function redemarrerValidation(acte, circuit, user) {
+export function redemarrerValidation(acte, circuit, user, config) {
   if (!acte?.validation) return null;
   const ancien = { statut: acte.validation.statut, closLe: acte.validation.closLe };
-  const v = demarrerValidation(acte, circuit, user);
+  const v = demarrerValidation(acte, circuit, user, config);
   if (v) v.repriseDe = ancien;
   return v;
 }

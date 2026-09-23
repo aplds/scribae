@@ -79,6 +79,24 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SCRIBA_RECUEIL_OPPOSABILITE` | référentiel | **Entrée en vigueur** — « lendemain » : opposable le lendemain de la publication. « jours » : après le nombre de jours réglé. | choix : lendemain ou jours |  | lendemain |
 | `SCRIBA_RECUEIL_OPPOSABILITE_JOURS` | référentiel | **Entrée en vigueur (jours)** — Nombre de jours quand l'entrée en vigueur est réglée « jours ». | entier (min 0, max 60) |  | 1 |
 
+## Bulletin des actes
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_BULLETIN_ACTIF` | référentiel | **Bulletin allumé** — Allumé, le recueil publie un numéro à chaque clôture de période et ouvre l'abonnement par courriel. Éteint, les adresses du bulletin n'existent pas. | booleen |  | true |
+| `SCRIBA_BULLETIN_TITRE` | référentiel | **Titre du bulletin** — Titre porté par le bulletin : en-tête des pages, objet des courriels, titre du flux. | texte |  | Bulletin officiel des actes |
+| `SCRIBA_BULLETIN_TITRE_BULLETIN` | référentiel | **Titre de chaque numéro** — Titre de chaque numéro, précédant le rang et la période (« … n° 12 — septembre 2026 »). Vide : le titre du bulletin sert. | texte |  | Bulletin des actes |
+| `SCRIBA_BULLETIN_SOUS_TITRE` | référentiel | **Sous-titre** — Phrase d'introduction du bulletin : sous les pages, en tête du courriel, dans la description du flux. | texte |  | Les actes administratifs de la collectivité, rassemblés par période. |
+| `SCRIBA_BULLETIN_CADENCE` | référentiel | **Cadence de parution** — La périodicité du bulletin. « bimensuelle » paraît deux fois par mois (1er–15, puis 16–fin). « personnalisee » (toutes les N unités) se règle dans l'interface. | choix : quotidienne ou hebdomadaire ou bimensuelle ou mensuelle ou bimestrielle ou trimestrielle ou semestrielle ou annuelle ou personnalisee |  | mensuelle |
+| `SCRIBA_BULLETIN_PARUTION_JOURS` | référentiel | **Jour de parution** — Jour du mois où paraît le bulletin, une fois sa période close (0 : dès le premier jour permis). | entier (min 0, max 31) |  | 1 |
+
+## Accès à l'atelier
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_ATELIER_IPS` | référentiel | **Adresses autorisées à entrer dans l'atelier** — Liste blanche d'adresses ou de champs d'adresses, séparés par des virgules : adresse (« 192.168.1.24 »), préfixe CIDR (« 10.0.0.0/8 », « 2001:db8::/32 »), champ (« 10.0.0.0-10.0.0.255 ») ou plage abrégée (« 10.0.0.* »). Vide : l'atelier est ouvert à toutes les adresses. Renseignée, l'atelier n'est accessible que depuis ces adresses — et les actes réservés aux agents ne sont montrés qu'à elles. | liste |  | 10.0.0.0/8, 192.168.1.0/24 |
+| `SCRIBA_ATELIER_MESSAGE` | référentiel | **Message affiché hors du réseau autorisé** — La phrase expliquée à qui tente d'entrer depuis une adresse non autorisée. Vide : le message livré avec l'application sert. | texte |  | L'atelier est ouvert depuis le réseau de la collectivité. Depuis l'extérieur, consultez le recueil public. |
+
 ## Signature
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
@@ -116,11 +134,11 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `DB_HOST` | service | **Hôte de la base** — Nom d'hôte du serveur MariaDB / MySQL (celui du service `db` en Compose : `db`). | texte | 127.0.0.1 | db |
 | `DB_PORT` | service | **Port de la base** — Port d'écoute de MariaDB / MySQL. | entier (min 1, max 65535) | 3306 | 3306 |
 | `DB_USER` | service | **Compte applicatif** — Compte avec lequel l'application se connecte à la base. | texte | scriba | scriba |
-| `DB_PASSWORD` | service | **Mot de passe de la base** — Mot de passe du compte applicatif. SECRET : ne jamais le versionner. | texte |  | (secret) |
+| `DB_PASSWORD` | service | **Mot de passe de la base** — Mot de passe du compte applicatif. La pile REMET le compte de la base à cette valeur à chaque démarrage (service `db-init`, qui a besoin de DB_ROOT_PASSWORD) et lui applique ensuite le schéma (`schema.sql`) : c'est ici, et nulle part ailleurs, qu'il se change. SECRET : ne jamais le versionner. | texte |  | (secret) |
 | `DB_NAME` | service | **Nom de la base** — Base qui contient les tables du service. | texte | scriba | scriba |
 | `DB_POOL` | service | **Taille du pool** — Nombre de connexions simultanées à la base. | entier (min 1, max 128) | 8 | 8 |
 | `DB_SOCKET` | service | **Socket Unix** — Chemin d'une socket Unix, au lieu de DB_HOST/DB_PORT. | texte |  | /run/mysqld/mysqld.sock |
-| `DB_ROOT_PASSWORD` | service | **Mot de passe root MariaDB** — Employé par le conteneur `db` à la CRÉATION du dossier de données. SECRET. | texte |  | (secret) |
+| `DB_ROOT_PASSWORD` | service | **Mot de passe root MariaDB** — Employé par le conteneur `db` à la CRÉATION du dossier de données, et, à chaque démarrage, par l'ALIGNEMENT du compte applicatif sur DB_PASSWORD puis l'application du schéma (`docker compose run --rm db-init`, ou `node server.mjs --reconcilier`). SECRET. | texte |  | (secret) |
 
 ## Authentification
 
@@ -148,8 +166,8 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
 |---|---|---|---|---|---|
-| `API_TOKENS` | service | **Jetons acceptés en écriture** — « libellé\|rôle:empreinte_sha256 », séparés par des virgules. Obligatoire en mode demo ; sans objet en mode password. SECRET. | texte |  | (secret) |
-| `API_TOKEN` | service | **Jeton remis à l'application** — Le même jeton, en clair, remis au conteneur web. Doit correspondre à une empreinte de API_TOKENS. SECRET. | texte |  | (secret) |
+| `API_TOKENS` | service | **Jetons acceptés en écriture** — « libellé\|rôle:empreinte_sha256 », séparés par des virgules. Les jetons de DÉPLOIEMENT du service : utiles en mode demo (où aucune session n'existe) ; facultatifs en mode password, où les clés d'API créées dans l'application les remplacent. SECRET. | texte |  | (secret) |
+| `API_TOKEN` | service | **Jeton remis à l'application** — Le même jeton, en clair, remis au conteneur web. Doit correspondre à une empreinte de API_TOKENS (facultatif : laissez vide si les clés d'API de l'application suffisent). SECRET. | texte |  | (secret) |
 
 ## Façade HTTP
 
@@ -158,7 +176,7 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `CORS_ORIGINS` | service | **Origines autorisées (CORS)** — Origines de navigateur autorisées à appeler l'API, séparées par des virgules. Vide = aucune (l'application est servie par la même origine). | liste |  | https://actes.exemple.fr |
 | `API_BASE` | service | **Adresse de l'API vue du navigateur** — Renseignée si l'API est sur une autre origine que l'application. Vide = même origine. | texte |  | https://actes.exemple.fr |
 | `HTTP_PORT` | service | **Port publié sur l'hôte** — Port publié par le conteneur web (à placer derrière un reverse-proxy TLS). | entier (min 1, max 65535) | 8080 | 8080 |
-| `APP_DIR` | service | **Dossier de l'application** — Dossier qui contient « src/ » et index.html. Sans objet pour l'image autonome, qui les embarque. | texte | ../../ |  |
+| `APP_DIR` | service | **Dossier de l'application** — Dossier qui contient « src/ » et index.html. Sans objet par défaut : la pile Compose et l'image autonome EMBARQUENT le code (le monter sert à travailler sur le code sans reconstruire, voir src/server/README.md § 9 bis). | texte | ../../ |  |
 
 ## Service
 
@@ -166,7 +184,7 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 |---|---|---|---|---|---|
 | `PORT` | service | **Port d'écoute du service** — Port sur lequel le service Node écoute (interne). | entier (min 1, max 65535) | 8080 | 8080 |
 | `HOST` | service | **Interface d'écoute** — Interface réseau du service Node. | texte | 0.0.0.0 | 0.0.0.0 |
-| `AUTO_MIGRATE` | service | **Migration au démarrage** — Applique le schéma au démarrage. À réserver aux installations maîtrisées : la migration se lance normalement à la main. | booleen | false | false |
+| `AUTO_MIGRATE` | service | **Migration au démarrage** — Applique le schéma au démarrage, et à chaque fois que le service se rétablit après une panne de base (il la rééprouve de lui-même). À réserver aux installations maîtrisées : la migration se lance normalement à la main. | booleen | false | false |
 
 ## Limites et débit
 
@@ -199,6 +217,16 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SMTP_TLS_INSECURE` | service | **Accepter un certificat non vérifiable** — ESSAI seulement : accepte un certificat SMTP non vérifiable. | booleen | false | false |
 | `SMTP_HELO_NAME` | service | **Nom annoncé en EHLO** — Nom annoncé au serveur SMTP. Défaut : SMTP_HOST. | texte |  |  |
 | `SMTP_TIMEOUT_MS` | service | **Délai d'attente SMTP (ms)** — Délai d'attente maximal d'une conversation SMTP. | entier (min 1000) | 20000 | 20000 |
+
+## Bulletin des actes (service)
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_PUBLIQUE_URL` | service | **Adresse publique du recueil** — Adresse publique du recueil (par exemple « https://actes.exemple.fr »). C'est elle qui donne leurs liens aux bulletins adressés par courriel et au flux, puisque le service, quand il compose seul, ne voit pas l'adresse du lecteur. Sans elle, l'abonnement par courriel n'est pas ouvert. | url |  | https://actes.exemple.fr |
+| `SCRIBA_BULLETIN_MAX` | service | **Bulletins conservés** — Nombre de bulletins conservés dans l'état du service : les plus anciens sont élagués au-delà. Il borne aussi la remontée initiale, pour qu'un recueil de dix ans ne fasse pas paraître cent numéros d'un coup. | entier (min 1, max 600) | 60 | 60 |
+| `SCRIBA_BULLETIN_MAX_ABONNES` | service | **Abonnés au bulletin** — Nombre maximal d'abonnés au bulletin sur ce service. Au-delà, une nouvelle demande est refusée — sans dire qui est déjà inscrit. | entier (min 1, max 200000) | 2000 | 2000 |
+| `SCRIBA_BULLETIN_ENVOIS_PASSE` | service | **Livraisons par passe** — Nombre de courriels de bulletin expédiés à chaque passe : borne le temps passé en envoi d'un seul coup. Une livraison refusée est réessayée à la passe suivante, trois fois au total. | entier (min 1, max 2000) | 40 | 40 |
+| `SCRIBA_BULLETIN_INTERVALLE_MIN` | service | **Intervalle des passes (minutes)** — Fréquence de la passe qui clôt les périodes échues, compose les numéros et vide la file d'envoi. Une passe a lieu aussi à chaque démarrage du service, qui rattrape ainsi son retard seul. | entier (min 1, max 1440) | 10 | 10 |
 
 ## Écrire une valeur
 

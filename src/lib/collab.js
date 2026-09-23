@@ -99,6 +99,9 @@ export function notifiePour(entry, user) {
   if (rolesOf(user).some((r) => to.includes("role:" + r))) return true;
   const services = (user.memberships || []).map((m) => m.serviceId).filter(Boolean);
   if (services.some((s) => to.includes("service:" + s))) return true;
+  // Une étape confiée à une PERSONNE nommée du référentiel : c'est le compte
+  // rattaché à cette personne qui est prévenu (`user.personId`).
+  if (user.personId && to.includes("personne:" + user.personId)) return true;
   return false;
 }
 

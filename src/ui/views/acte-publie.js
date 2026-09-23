@@ -20,7 +20,7 @@ import { printHtml } from "../../lib/export.js";
 import { assainirHtml } from "../../lib/sanitize.js";
 import { verifySignedPackage } from "../../lib/signature.js";
 import { extraireVersion, CSS_DOCUMENT_WEB, lienRecueil, mentionDeTransmission,
-  adresseActe, adresseFichier, urlFormat, hrefActe, hrefFormat, autoHeberge,
+  adresseActe, adresseFichier, urlFormat, hrefActe, hrefFormat, hrefFichier, autoHeberge,
   adresseEli, hrefEli, estEliUri, resoudreLiensEli,
   themeLabel,
   FORMATS_OUVERTS, FICHIERS_OUVERTS, texteDePublication, markdownDePublication } from "../../lib/recueil.js";
@@ -186,10 +186,12 @@ export function notice(rec, v) {
 // ------------------------------------------------------------------ le texte
 
 // Le texte publié, posé DANS la page. Sa charte n'est PAS appliquée : la
-// version en ligne suit l'apparence du recueil, et `CSS_DOCUMENT_WEB` donne au
-// document les styles de lecture du web.
+// version en ligne suit la feuille de style WEB du recueil (`CSS_DOCUMENT_WEB`,
+// marquée par `doc-web`) — deux entités aux chartes différentes présentent donc
+// leurs actes à l'identique ici. L'en-tête, le logo et le pied de la charte ont
+// été écartés à l'extraction (voir `extraireVersion`, lib/recueil.js).
 export function lecture(rec, v) {
-  const box = h("div", { class: "recueil-acte" });
+  const box = h("div", { class: "recueil-acte doc-web" });
   box.appendChild(h("style", { text: CSS_DOCUMENT_WEB }));
   const doc = h("div", { class: "recueil-doc" });
   // Le texte publié vient du recueil, donc d'une donnée que cette page n'a pas

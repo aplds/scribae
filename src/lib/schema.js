@@ -440,6 +440,14 @@ export function newTrame(patch = {}) {
     // modifiable sans toucher au code, et vaut par défaut (toute trame « normale »
     // est publiable).
     publishable: true,
+    // `reserve: true` restreint la DIFFUSION des actes de cette trame : ils sont
+    // bien publiés au recueil (identifiant ELI, original, versions), mais le
+    // recueil public ne les sert qu'aux personnes CONNECTÉES — une circulaire
+    // interne, une consigne aux agents, un acte à diffusion restreinte. Le
+    // réglage est propre à la trame, donc modifiable sans toucher au code ; la
+    // case du formulaire de publication le reprend, et peut le modifier acte par
+    // acte. Voir src/server/mysql/actes.mjs et src/lib/eli.js.
+    reserve: false,
     // Feuille de style explicite (facultatif). Vide, l'acte reçoit la feuille
     // de son entité, sinon celle de sa famille, sinon la feuille générale —
     // voir src/lib/styles.js. Le réglage est propre à la trame, donc modifiable
@@ -523,6 +531,12 @@ export const emptyConfig = () => ({
     supportName: "",
     supportPhone: "",
     supportEmail: "",
+    // La mention de l'éditeur du logiciel : « Propulsé par Scribae — GPLv3 »,
+    // portée par les pieds de page (recueil public, atelier, écran de
+    // connexion). Elle est AFFICHÉE tant qu'elle n'a pas été éteinte — une
+    // installation qui n'y touche jamais la porte donc. Voir src/ui/mention.js
+    // et Administration › Identité.
+    mentionScribae: true,
   },
   vocab: {
     enact: "DÉCIDE",
@@ -627,7 +641,52 @@ export const emptyConfig = () => ({
     // les **mentions d'accessibilité**. Chacune s'affiche comme un texte, se
     // remplace par un simple lien (les mentions du site principal de la
     // collectivité, par exemple), ou se désactive : l'administration en décide.
+    // Depuis 1.5.3, chacune a aussi sa SOUS-PAGE (`?page=mentions-legales`,
+    // `?page=accessibilite`) : un long texte ne se cherche pas dans un pied de
+    // page replié.
     mentions: mentionsParDefaut(),
+    // Le CSS propre à la collectivité (1.5.3). Il est ajouté APRÈS la feuille du
+    // recueil, et ne s'applique qu'à l'ESPACE PUBLIC : l'atelier garde son
+    // apparence. Vide, le recueil suit sa feuille livrée. Voir
+    // `cssPersonnalisee` (src/lib/recueil.js) et Administration › Publication.
+    css: "",
+    // Les informations publiées au recueil — les billets de l'administration
+    // (actualités, avis, communications). Ils vivent dans leur propre collection
+    // (`informations`) ; ce bloc ne règle que la façon dont le recueil les
+    // présente. Voir src/lib/informations.js.
+    informations: {
+      actif: true,
+      titre: "Informations",
+      intro: "Les actualités et communications de la collectivité.",
+    },
+    // L'accès à l'atelier (1.5.3) : la liste blanche d'adresses, et le message
+    // montré à qui vient d'ailleurs. Le DÉPLOIEMENT peut poser la liste
+    // (`SCRIBA_ATELIER_IPS`), et elle l'emporte alors sur ce réglage. La
+    // restriction est appliquée par le SERVICE, jamais par le navigateur : voir
+    // src/server/mysql/atelier.mjs.
+    atelier: { ips: "", message: "" },
+    // LE BULLETIN (ou Journal) des actes (1.6.0). Le recueil publie ses actes au
+    // fil de l'eau ; le bulletin les RASSEMBLE par PÉRIODE et les diffuse — une
+    // sous-page du recueil par numéro, un flux RSS/Atom, un courriel aux
+    // abonnés. `cadence` découpe le temps : les cadences nommées
+    // (« mensuelle »…) et la cadence « personnalisee » (toutes les N unités,
+    // avec `unite` et `pas`). Une période sans publication ne donne AUCUN
+    // numéro. Voir src/lib/bulletins.js, src/server/mysql/bulletins.mjs, et
+    // Administration › Bulletin.
+    bulletin: {
+      actif: false,
+      titre: "Bulletin des actes administratifs",
+      titreBulletin: "",
+      sousTitre: "Les actes administratifs publiés, rassemblés par période.",
+      cadence: { id: "mensuelle", unite: "", pas: 0, ancre: "" },
+      // Le jour du mois où le bulletin paraît, une fois sa période close
+      // (0 : dès le premier jour permis).
+      parutionJours: 1,
+      entete: "",
+      pied: "",
+      expediteurNom: "",
+      repondreA: "",
+    },
   },
   // Circuit de signature de la collectivité. `mode` : « electronique » (défaut —
   // le prestataire, par API), ou « externe » (le document est téléchargé, signé

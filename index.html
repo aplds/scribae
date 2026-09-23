@@ -46,6 +46,8 @@ if (!document.documentElement.lang) document.documentElement.lang = "fr";
 //   /v1/actes/{id}/transmission  télétransmission au contrôle de légalité
 //   /v1/actes/{id}/publication  publication au recueil + attribution de l'ELI
 //   /v1/publications          registre public des publications
+//   /v1/informations          informations (billets) publiées au recueil
+//   /v1/atelier/acces         état de la restriction d'accès à l'atelier
 //   /v1/eli/{...}             résolution d'un identifiant ELI
 //   /v1/admin/purge           remise à zéro du service (actes, circuits, publications)
 //
@@ -377,7 +379,276 @@ function allowWrite(conn, limit = 90) {
   return e.n <= limit;
 }
 
-// ---------------------------------------------------------------- projections
+// ------------------------------------------------- adresses IP et accès à l'atelier
+// Même règle que le service auto-hébergé (src/server/mysql/ips.mjs et
+// atelier.mjs) : la liste blanche dit qui entre. Le SERVICE de démonstration de
+// la plateforme, lui, ne voit PAS l'adresse de l'appelant — aucun proxy ne la
+// lui transmet —, et il ne peut donc pas refuser l'entrée : il dit l'état du
+// réglage, il SIMULE l'adresse qu'on lui demande d'éprouver (le simulateur de
+// l'écran d'administration), et il n'applique la restriction que si une adresse
+// lui parvient réellement (en-tête X-Forwarded-For). Sur une installation
+// auto-hébergée, c'est le service qui décide, et il répond 403.
+//
+// La liste accepte : une adresse, un préfixe CIDR, un champ « a-b », une plage
+// abrégée « 10.0.0.* », et « # » ouvre un commentaire. Une entrée incomprise est
+// rapportée, jamais ignorée en silence.
+const IP_V4_MAX = (1n << 32n) - 1n;
+
+function ipV4(txt) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(txt);
+  if (!m) return null;
+  let v = 0n;
+  for (let i = 1; i <= 4; i += 1) {
+    const o = Number(m[i]);
+    if (o > 255) return null;
+    v = (v << 8n) | BigInt(o);
+  }
+  return v;
+}
+
+function ipV6Groupes(partie) {
+  const bouts = String(partie).split(":").filter((x) => x !== "");
+  const g = [];
+  for (let i = 0; i < bouts.length; i += 1) {
+    const b = bouts[i];
+    if (i === bouts.length - 1 && b.includes(".")) {
+      const v4 = ipV4(b);
+      if (v4 === null) return null;
+      g.push(Number((v4 >> 16n) & 65535n), Number(v4 & 65535n));
+    } else {
+      if (!/^[0-9a-f]{1,4}$/i.test(b)) return null;
+      g.push(parseInt(b, 16));
+    }
+  }
+  return g;
+}
+
+function ipV6(txt) {
+  if (!txt.includes(":")) return null;
+  const d = txt.split("::");
+  if (d.length > 2) return null;
+  let groupes;
+  if (d.length === 2) {
+    const tete = ipV6Groupes(d[0]);
+    const queue = ipV6Groupes(d[1]);
+    if (tete === null || queue === null) return null;
+    const manquants = 8 - (tete.length + queue.length);
+    if (manquants < 1) return null;
+    groupes = tete.concat(Array(manquants).fill(0), queue);
+  } else {
+    groupes = ipV6Groupes(txt);
+    if (groupes === null || groupes.length !== 8) return null;
+  }
+  return groupes.reduce((a, g) => (a << 16n) | BigInt(g), 0n);
+}
+
+// Une écriture mixte (« ::ffff:192.168.1.1 ») désigne l'IPv4 qu'elle porte : une
+// liste écrite en IPv4 doit la reconnaître.
+function ipLire(txt) {
+  const t = String(txt == null ? "" : txt).trim();
+  if (!t) return null;
+  const v4 = ipV4(t);
+  if (v4 !== null) return { valeur: v4, bits: 32 };
+  const v6 = ipV6(t);
+  if (v6 === null) return null;
+  if ((v6 >> 32n) === 65535n) return { valeur: v6 & IP_V4_MAX, bits: 32 };
+  return { valeur: v6, bits: 128 };
+}
+
+function ipEcrire(v, bits) {
+  if (bits === 32) return [24n, 16n, 8n, 0n].map((d) => Number((v >> d) & 255n)).join(".");
+  const g = [];
+  for (let i = 7; i >= 0; i -= 1) g.push(Number((v >> BigInt(16 * i)) & 65535n).toString(16));
+  let debut = -1;
+  let meilleurD = -1;
+  let meilleurL = 0;
+  for (let i = 0; i <= 8; i += 1) {
+    if (i < 8 && g[i] === "0") { if (debut < 0) debut = i; }
+    else if (debut >= 0) {
+      if (i - debut > meilleurL) { meilleurL = i - debut; meilleurD = debut; }
+      debut = -1;
+    }
+  }
+  if (meilleurL < 2) return g.join(":");
+  return g.slice(0, meilleurD).join(":") + "::" + g.slice(meilleurD + meilleurL).join(":");
+}
+
+// Une entrée de liste → son champ d'adresses, ou la faute qui l'empêche.
+function ipEntree(brut) {
+  const t = String(brut == null ? "" : brut).split("#")[0].trim();
+  if (!t) return null;
+  const faute = (motif) => ({ entree: t, erreur: motif });
+  if (t.includes("-")) {
+    const [g, d] = t.split("-");
+    const debut = ipLire(g);
+    const fin = ipLire(d);
+    if (!debut || !fin) return faute("champ d'adresses : les deux bornes doivent être des adresses");
+    if (debut.bits !== fin.bits) return faute("champ d'adresses : bornes de familles différentes");
+    if (debut.valeur > fin.valeur) return faute("champ d'adresses : la borne basse dépasse la borne haute");
+    return { debut: debut.valeur, fin: fin.valeur, bits: debut.bits, libelle: ipEcrire(debut.valeur, debut.bits) + "-" + ipEcrire(fin.valeur, fin.bits) };
+  }
+  if (t.includes("*")) {
+    const m = /^(\d{1,3}(?:\.\d{1,3})*)(?:\.\*)+$/.exec(t);
+    if (!m) return faute("plage abrégée : syntaxe attendue « 10.0.0.* »");
+    const fixes = m[1].split(".");
+    const reste = 4 - fixes.length;
+    if (!reste) return faute("plage abrégée : la dernière étoile doit couvrir au moins un octet");
+    const debut = ipV4(fixes.concat(Array(reste).fill("0")).join("."));
+    const fin = ipV4(fixes.concat(Array(reste).fill("255")).join("."));
+    if (debut === null || fin === null) return faute("plage abrégée : adresse IPv4 attendue");
+    return { debut, fin, bits: 32, libelle: ipEcrire(debut, 32) + "-" + ipEcrire(fin, 32) };
+  }
+  if (t.includes("/")) {
+    const i = t.lastIndexOf("/");
+    const adresse = ipLire(t.slice(0, i));
+    const taille = String(t.slice(i + 1)).trim();
+    if (!adresse) return faute("préfixe : l'adresse qui précède « / » est illisible");
+    if (!/^\d{1,3}$/.test(taille)) return faute("préfixe : la longueur après « / » doit être un nombre");
+    const n = Number(taille);
+    if (n > adresse.bits) return faute("préfixe : la longueur doit être comprise entre 0 et " + adresse.bits);
+    const haut = adresse.bits === 32 ? IP_V4_MAX : (1n << 128n) - 1n;
+    const masque = n === 0 ? 0n : (haut << BigInt(adresse.bits - n)) & haut;
+    const debut = adresse.valeur & masque;
+    const fin = debut | (haut & ~masque);
+    return { debut, fin, bits: adresse.bits, libelle: ipEcrire(debut, adresse.bits) + "/" + n };
+  }
+  const a = ipLire(t);
+  if (!a) return faute("adresse illisible (IPv4 ou IPv6 attendue)");
+  return { debut: a.valeur, fin: a.valeur, bits: a.bits, libelle: ipEcrire(a.valeur, a.bits) };
+}
+
+function ipListe(brut) {
+  const parts = Array.isArray(brut) ? brut : String(brut == null ? "" : brut).split(/[,\n;]/);
+  const entrees = [];
+  const erreurs = [];
+  for (const item of parts) {
+    const r = ipEntree(item);
+    if (!r) continue;
+    if (r.erreur) erreurs.push({ entree: r.entree, motif: r.erreur });
+    else entrees.push(r);
+  }
+  return { entrees, erreurs };
+}
+
+// Une liste est-elle DEMANDÉE ? Le texte porte-t-il autre chose qu'un vide ou un
+// commentaire ? La question se pose séparément des entrées LUES, parce qu'une
+// liste peut n'en produire aucune : écrite de travers, elle doit fermer l'atelier
+// et le dire (`erreurs`), jamais l'ouvrir en silence.
+function ipListeDemandee(brut) {
+  const parts = Array.isArray(brut) ? brut : String(brut == null ? "" : brut).split(/[,\n;]/);
+  return parts.some((x) => String(x == null ? "" : x).split("#")[0].trim() !== "");
+}
+
+function ipEntreeQui(ip, entrees) {
+  const a = ipLire(ip);
+  if (!a) return null;
+  for (const e of entrees) {
+    if (e.bits !== a.bits) continue;
+    if (a.valeur >= e.debut && a.valeur <= e.fin) return e;
+  }
+  return null;
+}
+
+// Les espaces réseau réservés : ils servent au MESSAGE montré à l'agent
+// (« vous passez bien par un réseau interne »), jamais à décider.
+function ipInterne(ip) {
+  const a = ipLire(ip);
+  if (!a) return false;
+  if (a.bits === 32) {
+    const dans = (base, taille) => {
+      const b = ipV4(base);
+      const haut = (IP_V4_MAX << BigInt(32 - taille)) & IP_V4_MAX;
+      return (a.valeur & haut) === (b & haut);
+    };
+    return dans("10.0.0.0", 8) || dans("172.16.0.0", 12) || dans("192.168.0.0", 16)
+      || dans("127.0.0.0", 8) || dans("169.254.0.0", 16) || dans("100.64.0.0", 10);
+  }
+  const fc = ipV6("fc00::");
+  const fe = ipV6("fe80::");
+  return (a.valeur >> 121n) === (fc >> 121n) || (a.valeur >> 118n) === (fe >> 118n);
+}
+
+const MESSAGE_ATELIER =
+  "L'atelier des actes est réservé au réseau de la collectivité. Depuis une autre adresse, "
+  + "l'espace public du recueil reste consultable.";
+
+// Le réglage, tel qu'il vit dans le référentiel
+// (`config.publication.atelier`, Administration › Accès à l'atelier).
+function reglageAtelier() {
+  const rec = db.collections && db.collections.config && db.collections.config.records
+    && db.collections.config.records.self;
+  const doc = rec && rec.payload;
+  const a = doc && doc.publication && doc.publication.atelier;
+  return a && typeof a === "object" ? a : {};
+}
+
+// L'adresse de l'appelant, si elle parvient au service. Sur la plateforme, elle
+// n'arrive pas : le service ne peut donc pas restreindre l'entrée — il le DIT
+// (`restriction_appliquee: false`).
+function ipDeLEntete(headers) {
+  const xff = String((headers && (headers["x-forwarded-for"] || headers["X-Forwarded-For"])) || "").split(",")[0].trim();
+  if (!xff) return "";
+  const a = ipLire(xff);
+  return a ? ipEcrire(a.valeur, a.bits) : xff;
+}
+
+function etatAtelier(ip) {
+  const a = reglageAtelier();
+  const liste = ipListe(a.ips || "");
+  // La restriction est ACTIVE dès qu'une liste a été DEMANDÉE, même si aucune de
+  // ses entrées n'est lisible : une liste écrite de travers doit FERMER l'atelier,
+  // jamais l'ouvrir en croyant l'avoir fermé (voir src/server/mysql/atelier.mjs,
+  // `etat`). « Aucune liste » reste le seul cas qui ouvre.
+  const actif = ipListeDemandee(a.ips);
+  const adresse = String(ip || "").trim();
+  const regle = actif ? ipEntreeQui(adresse, liste.entrees) : null;
+  const connue = !!ipLire(adresse);
+  return {
+    ip: adresse,
+    actif,
+    // Une adresse inconnue n'est pas refusée : le service de démonstration ne
+    // peut pas la juger, et refuser fermerait l'atelier à tout le monde.
+    autorise: actif && connue ? !!regle : true,
+    connue,
+    interne: ipInterne(adresse),
+    source: actif ? "referentiel" : "",
+    regle: regle ? regle.libelle : "",
+    liste: liste.entrees.map((e) => e.libelle),
+    erreurs: liste.erreurs,
+    message: String(a.message || "").trim() || MESSAGE_ATELIER,
+    restriction_appliquee: false,
+    note: "Service de démonstration : il ne voit pas l'adresse de l'appelant, et n'applique donc pas la restriction — il la dit, et la simule sur « ?ip= ». Si ce panneau reste « ouvert » après l'écriture d'une liste, c'est que le référentiel de l'aperçu n'est pas transmis au service de démonstration (l'application travaille alors sur son stockage local). L'installation auto-hébergée, elle, décide : 403 « atelier_hors_reseau » (voir src/server/mysql/atelier.mjs).",
+  };
+}
+
+// L'atelier est-il ouvert à cet appelant ? Vrai tant qu'aucune adresse ne
+// permet de trancher — voir `etatAtelier`.
+function atelierPermet(headers) {
+  const ip = ipDeLEntete(headers);
+  if (!ip) return true;
+  const e = etatAtelier(ip);
+  return !e.actif || e.autorise;
+}
+
+// ------------------------------------------------------- les informations publiées
+// Les billets du recueil public (voir src/lib/informations.js). La route ne rend
+// que les billets PUBLIÉS ; un brouillon ne sort que vers une clé de service.
+const resumeInformation = (i) => ({
+  id: i.id, titre: i.titre, slug: i.slug, resume: i.resume, corps: i.corps,
+  date: i.date, auteur: i.auteur, publie: i.publie === true, epingle: i.epingle === true,
+  creeLe: i.creeLe, modifieLe: i.modifieLe || "",
+});
+
+function hInformations(headers) {
+  const c = collection("informations");
+  const estEditeur = !authFail(headers, { min: "editeur" });
+  const tous = Object.keys(c.records).map((k) => c.records[k].payload).filter((i) => i && typeof i === "object");
+  const liste = tous.filter((i) => i.publie === true || estEditeur);
+  liste.sort((a, b) => String(b.date || b.creeLe || "").localeCompare(String(a.date || a.creeLe || "")));
+  return ok(200, { informations: liste.map(resumeInformation) });
+}
+
+// -------------------------------------------------- projections
 // Les listes ne renvoient jamais les documents : seulement les métadonnées.
 function resumeActe(a) {
   return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null, revision: a.revision || null, signatureMode: a.signatureMode || "electronique", certificationRequise: a.certificationRequise === true, originalExterne: resumeOriginalExterne(a) || null, certification: a.certification || null };
@@ -393,7 +664,17 @@ function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+}
+
+// Les publications RÉSERVÉES AUX AGENTS : publiées (ELI, original, versions),
+// mais servies qu'aux requêtes qui portent une clé de service — la même règle
+// que le service auto-hébergé (src/server/mysql/actes.mjs, `visiblePour`).
+const reservee = (p) => !!p && p.reserve === true;
+const visiblePour = (p, agent) => !!p && (agent || !reservee(p));
+function dernierVisible(eliUri, agent) {
+  const v = versionsOf(eliUri).filter((p) => visiblePour(p, agent));
+  return v.length ? v[v.length - 1] : null;
 }
 
 // La part PUBLIQUE d'un original signé : sans son dossier interne (adresse du
@@ -443,7 +724,7 @@ function openapi() {
     "/v1/auth/cles/{id}/revoquer": { post: { operationId: "revoquerCle", summary: "Révoquer une clé d'API", description: "Retire une clé. Le service refuse de révoquer la DERNIÈRE clé d'administration (409 `derniere_cle_admin`) : il ne peut pas se retrouver sans moyen d'être administré.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Clé révoquée" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Clé inconnue (code `cle_inconnue`)" }, 409: { description: "Dernière clé d'administration (code `derniere_cle_admin`)" } } } },
     "/v1/journal": { get: { operationId: "lireJournal", summary: "Lire le journal d'audit du service", description: "Journal APPEND-ONLY tenu par le service (et non par le poste client) : chaque geste sensible — dépôt, ouverture de signature, notification, transmission, publication, retrait, épinglage, provisionnement et gestion des clés — y laisse une ligne. Chaque ligne scelle la précédente par son empreinte SHA-256 : modifier une ligne rompt la chaîne, ce que le champ `scelle` révèle. Route d'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les dernières entrées, et l'état du scellement" }, 403: { description: "Rôle administrateur requis" } } } },
     "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
-    "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "users", "meta", "journal", "presence"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
+    "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "users", "meta", "journal", "presence", "informations"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
     "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: "Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé.", security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, ord: { type: "integer" }, rev: { type: "integer", nullable: true }, payload: {} } } }, deletes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, rev: { type: "integer", nullable: true } } } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données). Réservé au rôle `administrateur` : toute autre clé reçoit 403 `force_reserve_admin`. Chaque appel est journalisé." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide, ou `force` demandé sans le rôle administrateur (code `force_reserve_admin`)" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
     "/v1/actes": {
       get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
@@ -515,8 +796,10 @@ function openapi() {
       },
     },
     "/v1/admin/purge": { post: { operationId: "purgerService", summary: "Remettre le service à zéro", description: "Vide les actes déposés, les circuits de signature et les publications — le pendant, côté service, du bouton « Repartir d'un référentiel vierge ». Le recueil public lit le service : vider le seul navigateur laisserait les publications de démonstration en ligne. Exige `{ \"confirmation\": \"repurge\" }` : un appel accidentel ne doit pas l'emporter. Réservé à l'administration.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["confirmation"], properties: { confirmation: { type: "string", description: "Le mot « repurge »" } } } } } }, tags: ["Service"], responses: { 200: { description: "Service purgé" }, 400: { description: "Confirmation absente (code `confirmation_absente`)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide ou rôle insuffisant" } } } },
-    "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
-    "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
+    "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", description: "Les publications, de la plus récente à la plus ancienne. Les publications marquées `reserve` (circulaires internes) ne sont rendues qu'à l'appelant qui porte une clé de service ; elles sont invisibles aux visiteurs anonymes.", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
+    "/v1/informations": { get: { operationId: "listerInformations", summary: "Informations publiées au recueil", description: "Les billets publiés par la collectivité (actualités, avis, communications), du plus récent au plus ancien. Route PUBLIQUE : seuls les billets publiés sont rendus ; un brouillon ne sort que vers une clé de service de rôle `editeur` au moins.", tags: ["Publication"], responses: { 200: { description: "Les informations publiées" } } } },
+    "/v1/atelier/acces": { get: { operationId: "accesAtelier", summary: "L'accès à l'atelier depuis cette adresse", description: "Route PUBLIQUE. Dit si l'accès à l'atelier est restreint à certains réseaux (`actif`), quelle liste s'applique (`liste`) et le message à montrer en cas de refus. Le paramètre `ip` permet de DEMANDER « et si j'arrivais de là ? » — c'est le simulateur de l'écran d'administration. Sur le service auto-hébergé, la restriction est appliquée à toutes les routes de l'atelier, qui répondent alors 403 `atelier_hors_reseau` ; le service de démonstration de la plateforme, lui, ne voit pas l'adresse de l'appelant et ne peut donc pas restreindre l'entrée (`restriction_appliquee: false`).", tags: ["Service"], parameters: [{ name: "ip", in: "query", required: false, schema: { type: "string" }, description: "Adresse à éprouver (simulation)" }], responses: { 200: { description: "État de l'accès depuis cette adresse" } } } },
+    "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", description: "Renvoie 404 pour une publication réservée quand l'appelant est anonyme.", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
     "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
     "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" }, 401: { description: "Jeton absent" } } } },
     "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
@@ -577,6 +860,9 @@ function hPurger(ctx) {
   db.publies = {};
   db.idem = {};
   db.seq = 0;
+  // Les bulletins aussi : ils sont faits des publications qu'on vient de
+  // retirer, et un numéro qui survivrait à ses actes serait un document faux.
+  db.bulletins = bEtatVide();
   journaliser("purge", "service remis à zéro (" + avant.actes + " acte(s), " + avant.publies + " publication(s))");
   saveDb(db);
   return ok(200, { purge: true, avant });
@@ -1122,6 +1408,9 @@ function hPublier(ctx) {
     // une version publiée plus tard hérite donc du drapeau déjà posé — un
     // règlement intérieur qu'on modifie reste « à la une ». Voir hEpinglerPublication.
     epingle: b.epingle === true || versionsOf(eliUri).some((v) => v.epingle === true),
+    // La publication peut être RÉSERVÉE AUX AGENTS (circulaire interne) : le
+    // recueil public ne la sert alors qu'aux porteurs d'une clé de service.
+    reserve: b.reserve === true || undefined,
     sha256: sha256Hex(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
     // La part PUBLIQUE de l'original : `sansInterne` la débarrasse du dossier
     // interne, même si un client le lui avait laissé dans le paquet. Une
@@ -1185,6 +1474,7 @@ function hPublier(ctx) {
     opposabilite: rec.opposabiliteRule,
     recueil: rec.recueil,
     epingle: rec.epingle === true,
+    reserve: rec.reserve === true,
     informative: rec.informative === true,
     juridique: rec.juridique === false ? false : undefined,
     natureDoc: rec.natureDoc || undefined,
@@ -1279,7 +1569,7 @@ function hEpinglerPublication(ctx) {
 
 function hResoudreEli(ctx) {
   const eliUri = eliKey(ctx.params);
-  const versions = versionsOf(eliUri);
+  const versions = versionsOf(eliUri).filter((p) => visiblePour(p, ctx.agent));
   if (!versions.length) return err(404, "Aucune publication ne porte l'identifiant " + eliUri + ".", { code: "eli_inconnu" });
   const enVigueur = versions[versions.length - 1];
   return ok(200, {
@@ -1304,7 +1594,7 @@ function hResoudreEli(ctx) {
 // écriture porte la révision que le client connaissait ; si le serveur en a une
 // autre, il refuse et renvoie sa version (conflit), que le client affiche au
 // lieu de l'écraser silencieusement.
-const DBC = { config: 1, trames: 1, actes: 1, users: 1, meta: 1, journal: 1, presence: 1 };
+const DBC = { config: 1, trames: 1, actes: 1, users: 1, meta: 1, journal: 1, presence: 1, informations: 1 };
 const MAX_SYNC_RECORDS = 4000;
 
 // Sensibilité des collections. `null` = lecture PUBLIQUE (documents de travail
@@ -1321,6 +1611,10 @@ const DBC_LECTURE = {
   meta: null,
   journal: { min: "lecteur" },
   presence: { min: "lecteur" },
+  // Les billets du recueil public se lisent par leur propre route (`/v1/informations`,
+  // qui ne rend que les billets publiés) ; la lecture directe de la collection
+  // donne aussi les brouillons, et demande donc une clé.
+  informations: { min: "lecteur" },
 };
 // Ce que chaque écriture exige. Les comptes et la configuration ne se
 // réécrivent que par un administrateur : un jeton de rédaction ne peut donc pas
@@ -1333,6 +1627,7 @@ const DBC_ECRITURE = {
   meta: { min: "editeur" },
   journal: { min: "redacteur" },
   presence: { min: "redacteur" },
+  informations: { min: "editeur" },
 };
 
 function collection(name) {
@@ -1432,6 +1727,830 @@ function hDbSync(name, b, headers) {
   return ok(200, { collection: name, revision: c.rev || 0, applied, conflicts });
 }
 
+// ============================================================================
+// LE BULLETIN DES ACTES (1.6.0) — le miroir de démonstration
+//
+// Le vrai moteur vit dans `src/server/mysql/bulletins.mjs` : c'est lui qui fait
+// foi, et c'est lui qui tourne sur l'installation auto-hébergée. Ici, on en
+// reproduit le COMPORTEMENT et les RÉPONSES, pour que l'écran « Bulletin », les
+// sous-pages publiques et le flux aient quelque chose de vrai à montrer dans
+// l'aperçu de la plateforme — qui, elle, n'a pas de serveur.
+//
+// Ce miroir est RÉDUIT, et chaque réduction a une raison :
+//   • SYNCHRONE. Le service de démonstration répond par `self.rpc.api` en une
+//     seule fois : pas de promesses, pas d'attente. Le moteur, lui, est
+//     asynchrone (il lit un état, envoie des courriels).
+//   • SANS COURRIEL. La plateforme n'a pas de serveur SMTP (voir `/v1/courriel`) :
+//     `bEnvoyerCourriel` constate l'échec au lieu de l'ignorer, exactement comme
+//     le moteur quand aucun port de courriel ne lui est branché. L'abonnement
+//     par courriel est donc FERMÉ ici, et le tableau de bord le dit.
+//   • SANS ADRESSE PUBLIQUE. Le service ne connaît pas l'adresse de la page
+//     (`SCRIBA_PUBLIQUE_URL` est vide) : les liens de confirmation et de
+//     désabonnement restent des chemins, comme sur un service auto-hébergé qui
+//     n'aurait pas renseigné cette variable.
+//   • SANS MISE EN PAGE. Le texte, le Markdown, le flux et les pages du recueil
+//     ne sont PAS produits ici : c'est la page qui les compose, faute de serveur
+//     pour les servir (voir src/lib/bulletins-formats.js). Le service rend les
+//     DONNÉES — c'est son rôle sur tous les déploiements.
+//
+// Les fonctions de date et de cadence sont recopiées du moteur (même découpe,
+// mêmes libellés, même arithmétique UTC) : c'est le seul moyen d'obtenir des
+// périodes identiques sans pouvoir importer son paquet.
+// ============================================================================
+const B_MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const B_CADENCES = [
+  { id: "quotidienne", label: "Quotidienne", unite: "jour", pas: 1, resume: "un bulletin par jour" },
+  { id: "hebdomadaire", label: "Hebdomadaire", unite: "semaine", pas: 1, resume: "un bulletin par semaine (du lundi au dimanche)" },
+  { id: "bimensuelle", label: "Bimensuelle (deux par mois)", unite: "demi-mois", pas: 1, resume: "deux bulletins par mois (du 1er au 15, puis du 16 au dernier jour)" },
+  { id: "mensuelle", label: "Mensuelle", unite: "mois", pas: 1, resume: "un bulletin par mois" },
+  { id: "bimestrielle", label: "Bimestrielle (tous les deux mois)", unite: "mois", pas: 2, resume: "un bulletin tous les deux mois" },
+  { id: "trimestrielle", label: "Trimestrielle", unite: "trimestre", pas: 1, resume: "un bulletin par trimestre" },
+  { id: "semestrielle", label: "Semestrielle", unite: "mois", pas: 6, resume: "un bulletin tous les six mois" },
+  { id: "annuelle", label: "Annuelle", unite: "an", pas: 1, resume: "un bulletin par an" },
+  { id: "personnalisee", label: "Personnalisée", unite: "", pas: 0, resume: "toutes les N unités (jours, semaines, demi-mois, mois, trimestres, années)" },
+];
+const B_UNITES = [
+  { id: "jour", label: "jours", singulier: "jour" },
+  { id: "semaine", label: "semaines", singulier: "semaine" },
+  { id: "demi-mois", label: "demi-mois", singulier: "demi-mois" },
+  { id: "mois", label: "mois", singulier: "mois" },
+  { id: "trimestre", label: "trimestres", singulier: "trimestre" },
+  { id: "an", label: "années", singulier: "année" },
+];
+const B_MOTIF_SMTP = "Ce service de démonstration n'a pas accès à un serveur SMTP : l'envoi par courriel n'est actif qu'avec le service auto-hébergé (voir src/server/mysql/env.example, SMTP_HOST).";
+
+const bCadenceParId = (id) => B_CADENCES.find((c) => c.id === String(id || "").trim().toLowerCase()) || null;
+
+function bPasAccepte(unite, pas) {
+  if (!B_UNITES.some((u) => u.id === unite)) return 0;
+  const n = Number(pas);
+  if (unite === "demi-mois") return n === 1 ? 1 : 0;
+  return Number.isInteger(n) && n >= 1 && n <= 60 ? n : 0;
+}
+
+// La cadence NORMALISÉE : celle que le moteur emploie, et que le client reçoit.
+// Une cadence illisible rend `null` — le service retombe alors sur « mensuelle ».
+function bNormaliserCadence(v) {
+  if (!v) return null;
+  const brut = typeof v === "string" ? { id: v } : v;
+  const nommee = bCadenceParId(brut.id || brut.cadence || brut.mode);
+  const personnalisee = !nommee || nommee.id === "personnalisee";
+  const unite = personnalisee ? String(brut.unite || "").trim().toLowerCase() : nommee.unite;
+  const pas = bPasAccepte(unite, personnalisee ? (brut.pas === undefined || brut.pas === "" ? 1 : brut.pas) : nommee.pas);
+  if (!pas) return null;
+  const id = nommee ? nommee.id : "personnalisee";
+  const ancre = /^\d{4}-\d{2}-\d{2}$/.test(String(brut.ancre || "")) ? String(brut.ancre) : "";
+  const c = { id, unite, pas, ancre };
+  return { ...c, label: (nommee || {}).label || "Personnalisée", resume: bLibelleCadence(c) };
+}
+
+function bLibelleCadence(c) {
+  if (!c) return "";
+  const nommee = bCadenceParId(c.id);
+  if (nommee && nommee.id !== "personnalisee") return nommee.resume;
+  const u = B_UNITES.find((x) => x.id === c.unite) || { label: c.unite, singulier: c.unite };
+  return c.pas === 1 ? "un bulletin par " + u.singulier : "un bulletin tous les " + c.pas + " " + u.label;
+}
+
+// ------------------------------------------------------------------ les dates
+// Tout est calculé sur des dates ISO et en UTC : un bulletin ne doit pas changer
+// de période selon le fuseau du poste qui le compose.
+const bD = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  return m ? { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) } : null;
+};
+const bPad = (n) => String(n).padStart(2, "0");
+const bEnIso = (x) => x.y + "-" + bPad(x.m) + "-" + bPad(x.d);
+const bJourDe = (iso) => { const x = bD(iso); return x ? bEnIso(x) : ""; };
+const bJoursDansMois = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+const bMsJour = 86400000;
+const bMs = (iso) => { const x = bD(iso); return Date.UTC(x.y, x.m - 1, x.d); };
+const bComparer = (a, b) => (String(a || "") < String(b || "") ? -1 : String(a || "") > String(b || "") ? 1 : 0);
+
+function bAjouterJours(iso, n) {
+  const x = bD(iso);
+  if (!x) return "";
+  const t = new Date(bMs(bEnIso(x)) + n * bMsJour);
+  return bEnIso({ y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() });
+}
+
+function bAjouterMois(iso, n) {
+  const x = bD(iso);
+  if (!x) return "";
+  const total = x.y * 12 + (x.m - 1) + n;
+  const y = Math.floor(total / 12);
+  const m = (total % 12) + 1;
+  return bEnIso({ y, m, d: Math.min(x.d, bJoursDansMois(y, m)) });
+}
+
+const bPremierDuMois = (iso) => { const x = bD(iso); return bEnIso({ y: x.y, m: x.m, d: 1 }); };
+
+// Le premier jour de l'UNITÉ qui contient la date.
+function bDebutUnite(iso, unite) {
+  const x = bD(iso);
+  if (!x) return "";
+  if (unite === "jour") return bEnIso(x);
+  if (unite === "semaine") {
+    const t = new Date(bMs(bEnIso(x)));
+    return bAjouterJours(bEnIso(x), -((t.getUTCDay() + 6) % 7));
+  }
+  if (unite === "demi-mois") return bEnIso({ y: x.y, m: x.m, d: x.d <= 15 ? 1 : 16 });
+  if (unite === "mois") return bEnIso({ y: x.y, m: x.m, d: 1 });
+  if (unite === "trimestre") return bEnIso({ y: x.y, m: 3 * Math.floor((x.m - 1) / 3) + 1, d: 1 });
+  if (unite === "an") return bEnIso({ y: x.y, m: 1, d: 1 });
+  return "";
+}
+
+const bMoitie = (iso) => (bD(iso).d <= 15 ? 0 : 1);
+
+// La distance, en unités, entre deux DÉBUTS d'unité (le second moins le premier).
+function bDistanceUnites(unite, a, b) {
+  const x = bD(a), y = bD(b);
+  if (!x || !y) return 0;
+  const mois = (y.y - x.y) * 12 + (y.m - x.m);
+  if (unite === "jour") return Math.round((bMs(bEnIso(y)) - bMs(bEnIso(x))) / bMsJour);
+  if (unite === "semaine") return Math.round((bMs(bEnIso(y)) - bMs(bEnIso(x))) / (7 * bMsJour));
+  if (unite === "demi-mois") return mois * 2 + (bMoitie(bEnIso(y)) - bMoitie(bEnIso(x)));
+  if (unite === "mois") return mois;
+  if (unite === "trimestre") return Math.round(mois / 3);
+  if (unite === "an") return y.y - x.y;
+  return 0;
+}
+
+function bDemiMoisVoisin(debut, sens) {
+  const x = bD(debut);
+  if (sens > 0) return x.d <= 15 ? bEnIso({ y: x.y, m: x.m, d: 16 }) : bPremierDuMois(bAjouterMois(debut, 1));
+  return x.d > 15 ? bEnIso({ y: x.y, m: x.m, d: 1 }) : bEnIso({ ...bD(bAjouterMois(debut, -1)), d: 16 });
+}
+
+function bDecaler(debut, unite, n) {
+  if (!n) return debut;
+  if (unite === "jour") return bAjouterJours(debut, n);
+  if (unite === "semaine") return bAjouterJours(debut, 7 * n);
+  if (unite === "mois") return bAjouterMois(debut, n);
+  if (unite === "trimestre") return bAjouterMois(debut, 3 * n);
+  if (unite === "an") return bAjouterMois(debut, 12 * n);
+  if (unite === "demi-mois") {
+    let courant = debut;
+    for (let i = 0; i < Math.abs(n); i++) courant = bDemiMoisVoisin(courant, n > 0 ? 1 : -1);
+    return courant;
+  }
+  return debut;
+}
+
+// LA PÉRIODE qui contient une date, ancrée sur `ancre` (sans elle, « tous les
+// deux mois » commencerait au mois du jour où l'on regarde). Bornes INCLUSES.
+function bPeriodeDe(iso, cadence) {
+  const c = bNormaliserCadence(cadence);
+  const jour = bJourDe(iso);
+  if (!c || !jour) return null;
+  const ancre = bDebutUnite(c.ancre || jour, c.unite);
+  const debut = bDebutUnite(jour, c.unite);
+  const n = bDistanceUnites(c.unite, ancre, debut);
+  const reste = ((n % c.pas) + c.pas) % c.pas;
+  const d = reste ? bDecaler(debut, c.unite, -reste) : debut;
+  return { debut: d, fin: bAjouterJours(bDecaler(d, c.unite, c.pas), -1) };
+}
+
+function bPeriodeSuivante(periode, cadence) {
+  const c = bNormaliserCadence(cadence);
+  const debut = bDecaler(periode.debut, c.unite, c.pas);
+  return { debut, fin: bAjouterJours(bDecaler(debut, c.unite, c.pas), -1) };
+}
+
+const bDateLongue = (iso) => { const x = bD(iso); return x ? x.d + " " + B_MOIS_FR[x.m - 1] + " " + x.y : ""; };
+
+function bDateCourte(iso, annee) {
+  const x = bD(iso);
+  if (!x) return "";
+  return (x.d === 1 ? "1er" : String(x.d)) + " " + B_MOIS_FR[x.m - 1] + (annee === false ? "" : " " + x.y);
+}
+
+function bIntervalleTexte(debut, fin) {
+  const a = bD(debut), b = bD(fin);
+  if (!a || !b) return "";
+  if (debut === fin) return "du " + bDateCourte(debut);
+  const memeMois = a.y === b.y && a.m === b.m;
+  const premier = memeMois ? (a.d === 1 ? "1er" : String(a.d)) : bDateCourte(debut, a.y === b.y);
+  return "du " + premier + " au " + bDateCourte(fin);
+}
+
+// Le libellé COURT d'une période — celui qui tient dans un titre de bulletin.
+function bLibellePeriode(periode, cadence) {
+  const c = bNormaliserCadence(cadence);
+  const a = bD(periode.debut), b = bD(periode.fin);
+  if (!c || !a || !b) return bIntervalleTexte(periode.debut, periode.fin);
+  if (c.unite === "an") return periode.debut.slice(0, 4);
+  if (c.unite === "mois") {
+    if (c.pas === 1) return B_MOIS_FR[a.m - 1] + " " + a.y;
+    if (a.y === b.y) return B_MOIS_FR[a.m - 1] + "–" + B_MOIS_FR[b.m - 1] + " " + a.y;
+    return B_MOIS_FR[a.m - 1] + " " + a.y + " – " + B_MOIS_FR[b.m - 1] + " " + b.y;
+  }
+  if (c.unite === "trimestre") {
+    if (c.pas === 1) {
+      const q = Math.floor((a.m - 1) / 3) + 1;
+      return (q === 1 ? "1er" : q + "e") + " trimestre " + a.y;
+    }
+    if (a.y === b.y) return B_MOIS_FR[a.m - 1] + "–" + B_MOIS_FR[b.m - 1] + " " + a.y;
+    return B_MOIS_FR[a.m - 1] + " " + a.y + " – " + B_MOIS_FR[b.m - 1] + " " + b.y;
+  }
+  if (c.unite === "demi-mois") return (a.d > 15 ? "16–" + b.d : "1er–" + b.d) + " " + B_MOIS_FR[a.m - 1] + " " + a.y;
+  if (c.unite === "semaine") return "semaine " + bIntervalleTexte(periode.debut, periode.fin);
+  return bIntervalleTexte(periode.debut, periode.fin);
+}
+
+const bDateParution = (periode, r) => bAjouterJours(periode.fin, Math.max(0, Number(r.parutionJours) || 0) + 1);
+
+const bCourielValide = (v) => {
+  const s = String(v || "").trim();
+  return s.length >= 6 && s.length <= 190 && /^[^\s@,;<>\"]+@[^\s@,;<>\"]+\.[^\s@,;<>\"]{2,}$/.test(s) ? s : "";
+};
+
+// --------------------------------------------------------------- l'état
+function bEtatVide() {
+  return { v: 1, secret: "", depuis: "", cadence: "", periodes: {}, abonnes: {}, file: [], envois: [] };
+}
+
+function bEtat() {
+  if (!db.bulletins || typeof db.bulletins !== "object") db.bulletins = bEtatVide();
+  const b = db.bulletins;
+  if (!b.periodes) b.periodes = {};
+  if (!b.abonnes) b.abonnes = {};
+  if (!b.file) b.file = [];
+  if (!b.envois) b.envois = [];
+  return b;
+}
+
+// Le secret des jetons : tiré UNE FOIS puis conservé, sinon les liens de
+// confirmation déjà partis ne vaudraient plus rien.
+function bSecret() {
+  const b = bEtat();
+  if (!b.secret) { b.secret = sha256Hex("scribae|abonnement|" + String(Math.random()).slice(2) + "|" + nowIso()); journaliser("bulletin", "secret d'abonnement créé"); }
+  return b.secret;
+}
+
+const bJeton = (genre, abonne) => sha256Hex("scribae|" + genre + "|" + bSecret() + "|" + abonne).slice(0, 40);
+const bLienConfirmation = (a, r) => ((r && r.base) || "") + "/recueil/bulletins/confirmation?jeton=" + encodeURIComponent(bJeton("conf", a.id));
+const bLienDesabonnement = (a, r) => ((r && r.base) || "") + "/recueil/bulletins/desabonnement?jeton=" + encodeURIComponent(bJeton("desabo", a.id));
+
+// --------------------------------------------------------------- réglages
+// Les réglages EFFECTIFS, lus là où l'administration les a écrits
+// (`config.publication.bulletin`, Administration › Publication).
+function bReglages() {
+  const rec = db.collections && db.collections.config && db.collections.config.records
+    && db.collections.config.records.self;
+  const doc = rec && rec.payload;
+  const b = (doc && doc.publication && doc.publication.bulletin) || {};
+  const jours = Number(b.parutionJours);
+  return {
+    actif: b.actif === true,
+    titre: String(b.titre || "").trim() || "Bulletin des actes administratifs",
+    titreBulletin: String(b.titreBulletin || "").trim(),
+    sousTitre: String(b.sousTitre || "").trim(),
+    cadence: bNormaliserCadence(b.cadence) || bNormaliserCadence("mensuelle"),
+    parutionJours: Number.isInteger(jours) ? Math.max(0, Math.min(31, jours)) : 1,
+    entete: String(b.entete || "").trim(),
+    pied: String(b.pied || "").trim(),
+    expediteurNom: String(b.expediteurNom || "").trim(),
+    repondreA: String(b.repondreA || "").trim(),
+    // Pas d'adresse publique : le service de démonstration ne connaît pas
+    // l'adresse de la page (voir SCRIBA_PUBLIQUE_URL sur l'installation).
+    base: "",
+  };
+}
+
+// ------------------------------------------------- les publications à rassembler
+// La dernière version de chaque identifiant ELI, JAMAIS les publications
+// réservées aux agents : un bulletin se lit en clair sur le recueil.
+function bPublications() {
+  const vue = [];
+  for (const p of Object.keys(db.publies).map((k) => db.publies[k])) {
+    if (!p || p.reserve === true) continue;
+    if (dernierVisible(p.eliUri, false) !== p) continue;
+    vue.push({
+      cle: p.cle, eliUri: p.eliUri || "", numero: p.numero || "", objet: p.objet || "",
+      nature: p.nature || "", themeId: p.themeId || "", themeLabel: p.themeLabel || "",
+      entityName: p.entityName || "", dateDocument: p.dateDocument || "",
+      datePublication: p.datePublication || "", dateOpposabilite: p.dateOpposabilite || "",
+      kind: p.kind || "originale", juridique: p.juridique === false ? false : undefined,
+      natureDoc: p.natureDoc || "", recueil: p.recueil || "",
+    });
+  }
+  return vue;
+}
+
+// ------------------------------------------------------------ composition
+function bComposer(periode, cadence, r, liste, annee, rang, provisoire) {
+  const entites = new Map();
+  let total = 0;
+  for (const p of liste) {
+    const nom = String(p.entityName || "").trim() || "(sans entité)";
+    const theme = String(p.themeLabel || "").trim() || "Autres actes";
+    if (!entites.has(nom)) entites.set(nom, new Map());
+    const themes = entites.get(nom);
+    if (!themes.has(theme)) themes.set(theme, []);
+    themes.get(theme).push({
+      cle: p.cle, eliUri: p.eliUri || "", numero: p.numero || "", objet: p.objet || "",
+      nature: p.nature || "", themeId: p.themeId || "", themeLabel: p.themeLabel || "",
+      entityName: nom, dateDocument: p.dateDocument || "", datePublication: p.datePublication || "",
+      dateOpposabilite: p.dateOpposabilite || "", kind: p.kind || "originale",
+      juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined,
+      remplacee: (p.remplacee || 0) > 0, recueil: p.recueil || "",
+    });
+    total += 1;
+  }
+  const ordreTexte = (a, b) => String(a).localeCompare(String(b), "fr", { sensitivity: "base" });
+  const listeEntites = [...entites.entries()]
+    .filter(([, themes]) => themes.size)
+    .map(([nom, themes]) => ({
+      nom,
+      nombre: [...themes.values()].reduce((n, l) => n + l.length, 0),
+      themes: [...themes.entries()]
+        .map(([label, actes]) => ({
+          id: actes[0].themeId || "",
+          label,
+          nombre: actes.length,
+          actes: actes.sort((a, b) => bComparer(a.datePublication, b.datePublication) || ordreTexte(a.numero, b.numero) || ordreTexte(a.objet, b.objet)),
+        }))
+        .sort((a, b) => ordreTexte(a.label, b.label)),
+    }))
+    // Les actes sans entité ferment la marche : ce n'est pas une rubrique.
+    .sort((a, b) => (a.nom === "(sans entité)" ? 1 : b.nom === "(sans entité)" ? -1 : ordreTexte(a.nom, b.nom)));
+
+  const libelle = bLibellePeriode(periode, cadence);
+  const bulletin = {
+    id: periode.debut, debut: periode.debut, fin: periode.fin, annee, rang,
+    cadence: cadence.id,
+    titre: (r.titreBulletin || r.titre) + " n° " + rang + " — " + libelle,
+    libelle, sousTitre: r.sousTitre, entete: r.entete, pied: r.pied,
+    nombre: total, entites: listeEntites, provisoire: !!provisoire,
+    composeLe: nowIso(), empreinte: "",
+  };
+  bulletin.empreinte = sha256Hex(JSON.stringify([bulletin.id, bulletin.titre, bulletin.nombre, bulletin.entites]));
+  return bulletin;
+}
+
+// Les publications d'une période : la dernière version de chaque ELI.
+function bPublicationsDe(periode, liste) {
+  const dedans = (liste || []).filter((p) => {
+    const d = String(p.datePublication || "").slice(0, 10);
+    return d >= periode.debut && d <= periode.fin;
+  });
+  const dernieres = new Map();
+  for (const p of dedans) {
+    const k = String(p.eliUri || p.cle);
+    const deja = dernieres.get(k);
+    if (!deja) { dernieres.set(k, { ...p, remplacee: 0 }); continue; }
+    if (bComparer(String(p.datePublication || ""), String(deja.datePublication || "")) >= 0) {
+      dernieres.set(k, { ...p, remplacee: (deja.remplacee || 0) + 1 });
+    } else {
+      deja.remplacee += 1;
+    }
+  }
+  return [...dernieres.values()];
+}
+
+// Le rang d'un numéro : continu dans l'année, comme un journal officiel.
+function bRangPour(annee, debut) {
+  let rang = 0;
+  for (const k of Object.keys(bEtat().periodes)) {
+    const x = bEtat().periodes[k];
+    if (x && x.bulletin && x.bulletin.annee === annee && bComparer(x.bulletin.debut, debut) < 0) rang += 1;
+  }
+  return rang + 1;
+}
+
+// Compose (ou recompose) une période. Ne touche pas aux envois.
+function bComposerPeriode(periode, r, options) {
+  const b = bEtat();
+  const provisoire = !!(options && options.provisoire);
+  const liste = (options && options.publications) || [];
+  const annee = Number(periode.fin.slice(0, 4));
+  const existante = b.periodes[periode.debut];
+  const rang = (existante && existante.bulletin && existante.bulletin.rang) || bRangPour(annee, periode.debut);
+  const dedans = bPublicationsDe(periode, liste);
+  if (!dedans.length) {
+    // RÈGLE : pas de publication, pas de bulletin. La période est marquée, pour
+    // ne pas être réexaminée à chaque passe.
+    if (provisoire && existante && existante.bulletin) { delete b.periodes[periode.debut]; return null; }
+    b.periodes[periode.debut] = { etat: "vide", examineLe: nowIso() };
+    return null;
+  }
+  const bulletin = bComposer(periode, r.cadence, r, dedans, annee, rang, provisoire);
+  b.periodes[periode.debut] = {
+    etat: provisoire ? "provisoire" : "publie",
+    composeLe: (existante && existante.bulletin && existante.bulletin.composeLe) || bulletin.composeLe,
+    majLe: nowIso(),
+    publieLe: provisoire ? null : ((existante && existante.publieLe) || nowIso()),
+    envoi: (existante && existante.envoi) || null,
+    bulletin,
+  };
+  return bulletin;
+}
+
+// La mémoire du service ne grandit pas sans fin.
+function bElaguer() {
+  const b = bEtat();
+  let retires = 0;
+  const avecBulletin = Object.keys(b.periodes).filter((k) => b.periodes[k] && b.periodes[k].bulletin);
+  if (avecBulletin.length > 60) {
+    for (const k of avecBulletin.sort((x, y) => bComparer(y, x)).slice(60)) { delete b.periodes[k]; retires += 1; }
+  }
+  const vides = Object.keys(b.periodes).filter((k) => b.periodes[k] && !b.periodes[k].bulletin);
+  if (vides.length > 240) {
+    for (const k of vides.sort((x, y) => bComparer(y, x)).slice(240)) { delete b.periodes[k]; retires += 1; }
+  }
+  return retires;
+}
+
+// ------------------------------------------------------------ les envois
+// Le port du courriel : il CONSTATE l'absence de serveur, il ne l'ignore pas.
+// Chaque tentative est tracée dans le journal du service, comme sur le vrai
+// service (qui, lui, écrit dans `sb_courriel`).
+function bEnvoyerCourriel(o) {
+  journaliser("bulletin_courriel", (o.evenement || "courriel") + " → " + (o.destinataires || []).map((d) => d.courriel).join(", ") + " : non envoyé (" + o.sujet + ")");
+  return { envoye: false, motif: B_MOTIF_SMTP };
+}
+
+function bProgrammerInterne(bulletin) {
+  const b = bEtat();
+  const fiches = Object.keys(b.abonnes).map((k) => b.abonnes[k]).filter((a) => a && a.etat === "confirme");
+  const deja = new Set(b.file.map((x) => x.abonne + "|" + x.bulletin));
+  for (const a of fiches) if (!deja.has(a.id + "|" + bulletin.id)) b.file.push({ bulletin: bulletin.id, abonne: a.id, essais: 0, dernier: "", motif: "" });
+  const p = b.periodes[bulletin.id];
+  if (p) p.envoi = { total: fiches.length, fait: 0, echecs: 0, depuis: nowIso(), termineLe: fiches.length ? null : nowIso() };
+  return fiches.length;
+}
+
+function bViderFile() {
+  const b = bEtat();
+  const passe = { total: 0, ok: 0, echecs: 0 };
+  if (!b.file.length) return passe;
+  let restants = b.file.length;
+  while (restants > 0 && passe.total < 40 && b.file.length) {
+    const item = b.file.shift();
+    restants -= 1;
+    const periode = b.periodes[item.bulletin];
+    const bulletin = periode && periode.bulletin;
+    const abonne = b.abonnes[item.abonne];
+    if (!bulletin || !abonne || abonne.etat !== "confirme") continue;
+    const envoi = bEnvoyerCourriel({ destinataires: [{ courriel: abonne.courriel, nom: abonne.nom }], sujet: bulletin.titre, evenement: "bulletin", cible: bulletin.id });
+    passe.total += 1;
+    if (envoi.envoye) {
+      passe.ok += 1;
+      if (periode.envoi) periode.envoi.fait = (periode.envoi.fait || 0) + 1;
+    } else {
+      item.essais = (item.essais || 0) + 1;
+      item.dernier = nowIso();
+      item.motif = String(envoi.motif || "").slice(0, 200);
+      // Trois tentatives, puis la livraison est ABANDONNÉE avec son motif.
+      if (item.essais >= 3) {
+        passe.echecs += 1;
+        if (periode.envoi) periode.envoi.echecs = (periode.envoi.echecs || 0) + 1;
+      } else {
+        b.file.push(item);
+      }
+    }
+    if (periode && periode.envoi) periode.envoi.termineLe = b.file.some((x) => x.bulletin === bulletin.id) ? null : nowIso();
+  }
+  if (passe.total) {
+    b.envois.push({ le: nowIso(), total: passe.total, ok: passe.ok, echecs: passe.echecs });
+    if (b.envois.length > 40) b.envois.splice(0, b.envois.length - 40);
+  }
+  return passe;
+}
+
+// ----------------------------------------------- la passe automatique
+// Elle clôt les périodes ÉCHUES, compose celles qui ne sont plus vides, puis
+// vide la file d'envoi. C'est le seul endroit qui écrit et qui envoie.
+function bAssurer() {
+  const r = bReglages();
+  const b = bEtat();
+  const passe = { actif: r.actif, composees: [], publies: [], vides: [], envois: { total: 0, ok: 0, echecs: 0 }, motif: "" };
+  if (!r.actif) { passe.motif = "Le bulletin est éteint."; return passe; }
+  if (b.cadence !== r.cadence.id) b.cadence = r.cadence.id;
+  const liste = bPublications();
+  const auj = today();
+  // LA MISE EN SERVICE : à la première passe, on remonte à la plus ancienne
+  // publication détenue — mais pas au-delà de 60 périodes, pour qu'un recueil de
+  // dix ans ne fasse pas paraître cent bulletins d'un coup.
+  if (!b.depuis) {
+    const enCours = bPeriodeDe(auj, r.cadence);
+    const plusAncienne = liste.map((p) => String(p.datePublication || "").slice(0, 10)).filter(Boolean).sort()[0] || "";
+    if (plusAncienne && enCours) {
+      const debutPublication = (bPeriodeDe(plusAncienne, r.cadence) || {}).debut || "";
+      const borne = bDecaler(enCours.debut, r.cadence.unite, -60 * r.cadence.pas);
+      b.depuis = debutPublication && bComparer(debutPublication, borne) > 0 ? debutPublication : borne;
+    } else {
+      b.depuis = enCours ? enCours.debut : auj;
+    }
+    journaliser("bulletin", "mise en service du bulletin à la période du " + b.depuis);
+  }
+  let periode = bPeriodeDe(b.depuis, r.cadence);
+  let parcourues = 0;
+  while (periode && periode.fin < auj && parcourues < 60) {
+    parcourues += 1;
+    const connue = b.periodes[periode.debut];
+    if (!connue || connue.etat === "provisoire") {
+      const bulletin = bComposerPeriode(periode, r, { publications: liste, provisoire: false });
+      if (bulletin) {
+        passe.composees.push(bulletin.id);
+        passe.publies.push(bulletin.id);
+        bProgrammerInterne(bulletin);
+      } else if (!connue) {
+        passe.vides.push(periode.debut);
+      }
+    }
+    const suivante = bPeriodeSuivante(periode, r.cadence);
+    if (!suivante || bComparer(suivante.debut, periode.debut) <= 0) break;
+    periode = suivante;
+  }
+  passe.envois = bViderFile();
+  const elagues = bElaguer();
+  if (passe.composees.length || passe.vides.length || passe.envois.total || elagues) saveDb(db);
+  if (passe.composees.length) journaliser("bulletin", "bulletins composés : " + passe.composees.join(", "));
+  return passe;
+}
+
+// ------------------------------------------------------------ les abonnés
+function bResumeAbonne(a) {
+  return {
+    id: a.id, courriel: a.courriel, nom: a.nom || "", etat: a.etat,
+    creeLe: a.creeLe || "", confirmeLe: a.confirmeLe || "", desaboLe: a.desaboLe || "", source: a.source || "",
+  };
+}
+
+// L'INSCRIPTION ne dit JAMAIS si l'adresse était déjà là : la réponse est la
+// même dans les deux cas, sinon elle servirait à savoir qui est abonné.
+function bAbonner(o) {
+  const r = bReglages();
+  const courriel = bCourielValide(o && o.courriel);
+  if (!courriel) return { ok: false, status: 422, motif: "Cette adresse électronique n'est pas valide." };
+  if (!r.actif) return { ok: false, status: 409, motif: "Le bulletin n'est pas ouvert sur ce recueil." };
+  const b = bEtat();
+  const id = "ab-" + sha256Hex(courriel.toLowerCase()).slice(0, 16);
+  const existante = b.abonnes[id];
+  const actifs = Object.keys(b.abonnes).filter((k) => b.abonnes[k].etat !== "retire").length;
+  if (!existante && actifs >= 2000) return { ok: false, status: 507, motif: "Le nombre maximal d'abonnés est atteint sur ce service." };
+  const fiche = existante || { id, courriel, nom: String((o && o.nom) || "").slice(0, 120), etat: "attente", creeLe: nowIso(), source: "recueil" };
+  if (o && o.nom) fiche.nom = String(o.nom).slice(0, 120);
+  if (fiche.etat !== "confirme") fiche.etat = "attente";
+  b.abonnes[id] = fiche;
+  const envoi = bEnvoyerCourriel({
+    destinataires: [{ courriel: fiche.courriel, nom: fiche.nom }],
+    sujet: "Confirmez votre abonnement — " + r.titre,
+    evenement: "bulletin_abonnement", cible: fiche.id,
+  });
+  saveDb(db);
+  return {
+    ok: true, status: 202, abonne: bResumeAbonne(fiche), envoye: !!envoi.envoye, motif: envoi.envoye ? "" : (envoi.motif || ""),
+    message: envoi.envoye
+      ? "Un courriel de confirmation vient d'être envoyé à " + fiche.courriel + ". L'abonnement prend effet dès que le lien qu'il contient est ouvert."
+      : "Votre demande est enregistrée, mais le courriel de confirmation n'a pas pu être envoyé (" + envoi.motif + ") : l'abonnement n'est pas encore actif.",
+  };
+}
+
+// La confirmation (le lien du courriel). Un jeton inconnu ne dit rien de plus
+// qu'« invalide » : il ne révèle pas l'existence d'une fiche.
+function bConfirmer(jetonRecu) {
+  const b = bEtat();
+  const j = String(jetonRecu || "").trim();
+  if (!j) return { ok: false, status: 400, motif: "Jeton de confirmation absent." };
+  const r = bReglages();
+  for (const id of Object.keys(b.abonnes)) {
+    const a = b.abonnes[id];
+    if (!a || bJeton("conf", id) !== j) continue;
+    if (a.etat !== "confirme") { a.etat = "confirme"; a.confirmeLe = nowIso(); saveDb(db); }
+    return { ok: true, status: 200, abonne: bResumeAbonne(a), desabonnement: r.base ? bLienDesabonnement(a, r) : "" };
+  }
+  return { ok: false, status: 404, motif: "Ce lien de confirmation n'est plus valable." };
+}
+
+function bDesabonner(jetonRecu) {
+  const b = bEtat();
+  const j = String(jetonRecu || "").trim();
+  if (!j) return { ok: false, status: 400, motif: "Jeton de désabonnement absent." };
+  for (const id of Object.keys(b.abonnes)) {
+    const a = b.abonnes[id];
+    if (!a || bJeton("desabo", id) !== j) continue;
+    a.etat = "retire";
+    a.desaboLe = nowIso();
+    // Un désabonnement qui laisserait un courriel en file serait un mensonge.
+    b.file = b.file.filter((x) => x.abonne !== id);
+    saveDb(db);
+    return { ok: true, status: 200, abonne: bResumeAbonne(a) };
+  }
+  return { ok: false, status: 404, motif: "Ce lien de désabonnement n'est plus valable." };
+}
+
+function bRetirerAbonne(id) {
+  const b = bEtat();
+  const fiche = b.abonnes[id];
+  if (!fiche) return { ok: false, status: 404, motif: "Abonné inconnu : " + id };
+  fiche.etat = "retire";
+  fiche.desaboLe = nowIso();
+  b.file = b.file.filter((x) => x.abonne !== fiche.id);
+  saveDb(db);
+  return { ok: true, status: 200, abonne: bResumeAbonne(fiche) };
+}
+
+// ------------------------------------------------------------- les lectures
+function bListe() {
+  return Object.keys(bEtat().periodes)
+    .map((k) => bEtat().periodes[k])
+    .filter((p) => p && p.bulletin)
+    .map((p) => p.bulletin)
+    .sort((a, c) => bComparer(c.debut, a.debut));
+}
+
+const bLire = (id) => {
+  const p = bEtat().periodes[String(id || "")];
+  return p && p.bulletin ? p.bulletin : null;
+};
+
+function bResume(bulletin) {
+  const p = bEtat().periodes[bulletin.id] || {};
+  return {
+    id: bulletin.id, titre: bulletin.titre, libelle: bulletin.libelle,
+    debut: bulletin.debut, fin: bulletin.fin, annee: bulletin.annee, rang: bulletin.rang,
+    nombre: bulletin.nombre, provisoire: bulletin.provisoire === true,
+    composeLe: bulletin.composeLe, publieLe: p.publieLe || null,
+    empreinte: bulletin.empreinte, envoi: p.envoi || null,
+    entites: (bulletin.entites || []).map((e) => ({ nom: e.nom, nombre: e.nombre })),
+  };
+}
+
+// Ce que le recueil public affiche. `actif: false` dit au client de n'en rien
+// montrer. C'est la réponse de `publicEtat()` du moteur, à une réserve près :
+// l'abonnement est FERMÉ, faute de serveur de courriel (voir l'en-tête).
+function bPublicEtat() {
+  const r = bReglages();
+  if (!r.actif) return { actif: false };
+  const b = bEtat();
+  const auj = today();
+  const enCours = bPeriodeDe(auj, r.cadence);
+  const suivante = enCours && enCours.fin >= auj ? enCours : (enCours ? bPeriodeSuivante(enCours, r.cadence) : null);
+  return {
+    actif: true, titre: r.titre, sousTitre: r.sousTitre,
+    cadence: { id: r.cadence.id, label: r.cadence.label, resume: r.cadence.resume },
+    abonnement: false,
+    motifAbonnement: "Ce service de démonstration n'a pas accès à un serveur SMTP, et son adresse publique n'est pas réglée : l'abonnement par courriel n'est ouvert qu'avec le service auto-hébergé (voir src/server/mysql/env.example, SMTP_HOST et SCRIBA_PUBLIQUE_URL).",
+    prochaine: suivante ? { debut: suivante.debut, fin: suivante.fin, libelle: bLibellePeriode(suivante, r.cadence), parution: bDateParution(suivante, r) } : null,
+    bulletins: bListe().map(bResume),
+    depuis: b.depuis || "",
+  };
+}
+
+// L'état vu par l'administration : les réglages effectifs, ce qui reste à
+// envoyer, les abonnés, les dernières passes. La période EN COURS y est rendue
+// en ENTIER quand elle a été composée à titre provisoire.
+function bTableauDeBord() {
+  const r = bReglages();
+  const b = bEtat();
+  const auj = today();
+  const enCours = bPeriodeDe(auj, r.cadence);
+  const suivante = enCours && enCours.fin >= auj ? enCours : (enCours ? bPeriodeSuivante(enCours, r.cadence) : null);
+  return {
+    actif: r.actif, titre: r.titre, titreBulletin: r.titreBulletin, sousTitre: r.sousTitre,
+    cadence: { id: r.cadence.id, label: r.cadence.label, unite: r.cadence.unite, pas: r.cadence.pas, ancre: r.cadence.ancre, resume: r.cadence.resume },
+    cadences: B_CADENCES.map((c) => ({ id: c.id, label: c.label, resume: c.resume })),
+    unites: B_UNITES,
+    parutionJours: r.parutionJours, base: r.base, depuis: b.depuis || "", cadenceAppliquee: b.cadence || "",
+    prochaine: suivante ? { debut: suivante.debut, fin: suivante.fin, libelle: bLibellePeriode(suivante, r.cadence), parution: bDateParution(suivante, r) } : null,
+    periodesExaminees: Object.keys(b.periodes).length,
+    bulletins: bListe().length,
+    bulletinsListe: bListe().map(bResume),
+    apercu: bListe().find((x) => x.provisoire) || null,
+    enAttente: b.file.length,
+    abonnes: {
+      total: Object.keys(b.abonnes).filter((k) => b.abonnes[k].etat !== "retire").length,
+      confirmes: Object.keys(b.abonnes).filter((k) => b.abonnes[k].etat === "confirme").length,
+      attente: Object.keys(b.abonnes).filter((k) => b.abonnes[k].etat === "attente").length,
+      retires: Object.keys(b.abonnes).filter((k) => b.abonnes[k].etat === "retire").length,
+    },
+    abonnesListe: Object.keys(b.abonnes).map((k) => b.abonnes[k])
+      .sort((a, c) => bComparer(c.creeLe, a.creeLe))
+      .map((a) => ({ ...bResumeAbonne(a), lienDesabonnement: r.base ? bLienDesabonnement(a, r) : "" })),
+    file: b.file.slice(0, 50),
+    envois: b.envois.slice(-6).reverse(),
+    courriel: {
+      disponible: false, configure: false, actif: false, raison: B_MOTIF_SMTP,
+      hote: "", port: 0, securise: "", expediteur: "", expediteurNom: r.expediteurNom, repondreA: r.repondreA, authentifie: false, derniers: [],
+    },
+    flux: { rss: (r.base || "") + "/recueil/bulletins.rss", atom: (r.base || "") + "/recueil/bulletins.atom" },
+  };
+}
+
+// Le numéro en données : c'est ce que la page rend à « ?bulletin=<id> », et ce
+// que le service sert à ses propres adresses.
+function bJsonBulletin(b, base) {
+  return {
+    id: b.id, titre: b.titre, libelle: b.libelle, sousTitre: b.sousTitre || "",
+    entete: b.entete || "", pied: b.pied || "",
+    debut: b.debut, fin: b.fin, annee: b.annee, rang: b.rang, cadence: b.cadence,
+    nombre: b.nombre, provisoire: b.provisoire === true, composeLe: b.composeLe,
+    empreinte: b.empreinte,
+    url: (base || "") + "/recueil/bulletins/" + encodeURIComponent(b.id),
+    entites: (b.entites || []).map((e) => ({
+      nom: e.nom, nombre: e.nombre,
+      themes: e.themes.map((t) => ({
+        id: t.id, label: t.label, nombre: t.nombre,
+        actes: t.actes.map((a) => ({
+          cle: a.cle, eliUri: a.eliUri, numero: a.numero, objet: a.objet, nature: a.nature,
+          entityName: a.entityName, dateDocument: a.dateDocument, datePublication: a.datePublication,
+          dateOpposabilite: a.dateOpposabilite, kind: a.kind, juridique: a.juridique,
+          natureDoc: a.natureDoc, remplacee: !!a.remplacee,
+          url: (base || "") + "/recueil/" + encodeURIComponent(a.cle),
+        })),
+      })),
+    })),
+  };
+}
+
+// --------------------------------------------------------------- les routes
+function hBulletinsEtat() {
+  return ok(200, bPublicEtat());
+}
+
+function hBulletinLire(ctx) {
+  const b = bLire(ctx.params.id);
+  if (!b) return err(404, "Bulletin inconnu : " + ctx.params.id, { code: "bulletin_inconnu" });
+  return ok(200, bJsonBulletin(b, ""));
+}
+
+function hBulletinsTableau() {
+  return ok(200, bTableauDeBord());
+}
+
+// La génération à la demande : les périodes échues, ou la période EN COURS
+// (`enCours`) — le geste « paraître aujourd'hui », à titre provisoire.
+function hBulletinsGenerer(ctx) {
+  const corps = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+  const r = bReglages();
+  if (!r.actif) return err(409, "Le bulletin est éteint sur ce service : activez-le avant de générer.", { code: "bulletin_eteint" });
+  const b = bEtat();
+  if (corps.depuis && /^\d{4}-\d{2}-\d{2}$/.test(String(corps.depuis))) b.depuis = String(corps.depuis);
+  if (corps.enCours) {
+    const enCours = bPeriodeDe(today(), r.cadence);
+    const bulletin = bComposerPeriode(enCours, r, { publications: bPublications(), provisoire: true });
+    saveDb(db);
+    if (!bulletin) return ok(200, { compose: [], message: "Aucun acte n'a encore été publié sur la période en cours : il n'y a pas de bulletin à composer." });
+    return ok(201, { compose: [bulletin.id], bulletin: bResume(bulletin), message: "Le bulletin « " + bulletin.titre + " » est composé. Il deviendra définitif à la fin de la période, et sera alors adressé aux abonnés." });
+  }
+  const avant = new Set(Object.keys(b.periodes));
+  const passe = bAssurer();
+  const nouveaux = Object.keys(b.periodes).filter((k) => !avant.has(k) && b.periodes[k].bulletin);
+  return ok(200, {
+    compose: nouveaux, vides: passe.vides, publies: passe.publies, envois: passe.envois,
+    bulletins: passe.composees.length,
+    message: nouveaux.length
+      ? nouveaux.length + " bulletin(s) composé(s)."
+      : "Aucune période échue n'avait d'actes à rassembler : il n'y a rien de nouveau à composer.",
+  });
+}
+
+function hBulletinEnvoyer(ctx) {
+  const p = bEtat().periodes[ctx.params.id];
+  if (!p || !p.bulletin) return err(404, "Bulletin inconnu : " + ctx.params.id, { code: "bulletin_inconnu" });
+  if (p.bulletin.provisoire) return err(409, "Ce bulletin est provisoire : il ne s'envoie qu'une fois la période close.", { code: "bulletin_provisoire" });
+  const n = bProgrammerInterne(p.bulletin);
+  const envois = bViderFile();
+  saveDb(db);
+  return ok(200, {
+    bulletin: p.bulletin.id, programme: n, envois,
+    message: n
+      ? n + " abonné(s) confirmé(s) : le bulletin part par courriel."
+      : "Aucun abonné confirmé : le bulletin n'a personne à qui être adressé.",
+  });
+}
+
+function hBulletinsAbonner(ctx) {
+  const corps = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+  const r = bAbonner({ courriel: corps.courriel || corps.email, nom: corps.nom });
+  if (!r.ok) return err(r.status, r.motif, { code: "abonnement_refuse" });
+  return ok(r.status, { abonne: { courriel: r.abonne.courriel, etat: r.abonne.etat }, envoye: r.envoye, motif: r.motif, message: r.message });
+}
+
+const bJetonDeLaRequete = (ctx) => (ctx.body && (ctx.body.jeton || ctx.body.token)) || (ctx.query && ctx.query.get("jeton"));
+
+function hBulletinsConfirmer(ctx) {
+  const r = bConfirmer(bJetonDeLaRequete(ctx));
+  if (!r.ok) return err(r.status, r.motif, { code: "confirmation_invalide" });
+  return ok(200, { confirme: true, abonne: r.abonne, desabonnement: r.desabonnement, message: "Votre abonnement est confirmé : vous recevrez chaque bulletin par courriel." });
+}
+
+function hBulletinsDesabonner(ctx) {
+  const r = bDesabonner(bJetonDeLaRequete(ctx));
+  if (!r.ok) return err(r.status, r.motif, { code: "desabonnement_invalide" });
+  return ok(200, { desabonne: true, abonne: r.abonne, message: "Votre abonnement est résilié : aucun courriel ne vous sera plus adressé." });
+}
+
+function hBulletinsRetirerAbonne(ctx) {
+  const r = bRetirerAbonne(ctx.params.id);
+  if (!r.ok) return err(r.status, r.motif, { code: "abonne_inconnu" });
+  return ok(200, { retire: true, abonne: r.abonne });
+}
+
 // --------------------------------------------------------------- table routière
 const ROUTES = [
   { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
@@ -1443,6 +2562,30 @@ const ROUTES = [
   { m: "GET", p: /^\/v1\/journal$/, auth: "administrateur", f: hJournal },
   { m: "POST", p: /^\/v1\/admin\/purge$/, auth: "administrateur", ecrit: true, f: hPurger },
   { m: "GET", p: /^\/v1\/db\/health$/, f: hDbHealth },
+  // L'accès à l'atelier, tel que le service le voit (route PUBLIQUE : l'appelant
+  // doit pouvoir savoir s'il est dehors). « ?ip= » demande « et si j'arrivais de
+  // là ? » — c'est le simulateur de l'écran d'administration.
+  { m: "GET", p: /^\/v1\/atelier\/acces$/, f: (ctx) => {
+      const simulee = String(ctx.query.get("ip") || "").trim();
+      const e = etatAtelier(simulee || ipDeLEntete(ctx.headers));
+      return ok(200, simulee ? { ...e, appelant: ipDeLEntete(ctx.headers), simulation: true } : { ...e, appelant: ipDeLEntete(ctx.headers) });
+    } },
+  // Les informations publiées au recueil (route PUBLIQUE) : les billets publiés,
+  // du plus récent au plus ancien. Un brouillon ne sort que vers une clé.
+  { m: "GET", p: /^\/v1\/informations$/, f: (ctx) => hInformations(ctx.headers) },
+  // Le BULLETIN (1.6.0). Ses routes PUBLIQUES — l'état, un numéro, l'abonnement,
+  // la confirmation, le désabonnement — n'exigent aucune clé : c'est la page
+  // publique qui les appelle, et un lecteur qui s'abonne n'a pas de compte. Les
+  // gestes d'administration, eux, portent leur rôle.
+  { m: "GET", p: /^\/v1\/bulletins$/, f: hBulletinsEtat },
+  { m: "POST", p: /^\/v1\/bulletins\/abonnement$/, ecrit: true, f: hBulletinsAbonner },
+  { m: "POST", p: /^\/v1\/bulletins\/abonnement\/confirmation$/, ecrit: true, f: hBulletinsConfirmer },
+  { m: "POST", p: /^\/v1\/bulletins\/abonnement\/desabonnement$/, ecrit: true, f: hBulletinsDesabonner },
+  { m: "GET", p: /^\/v1\/bulletins\/administration\/tableau$/, auth: "editeur", f: hBulletinsTableau },
+  { m: "POST", p: /^\/v1\/bulletins\/administration\/generer$/, auth: "editeur", ecrit: true, f: hBulletinsGenerer },
+  { m: "POST", p: /^\/v1\/bulletins\/abonnes\/([^/]+)\/retirer$/, auth: "administrateur", ecrit: true, f: hBulletinsRetirerAbonne },
+  { m: "GET", p: /^\/v1\/bulletins\/([^/]+)$/, f: hBulletinLire },
+  { m: "POST", p: /^\/v1\/bulletins\/([^/]+)\/envoyer$/, auth: "editeur", ecrit: true, f: hBulletinEnvoyer },
   { m: "GET", p: /^\/v1\/db\/collections\/([a-z]+)$/, f: (ctx) => hDbCollection(ctx.params.id, ctx.headers) },
   { m: "POST", p: /^\/v1\/db\/collections\/([a-z]+)\/sync$/, ecrit: true, f: (ctx) => hDbSync(ctx.params.id, ctx.body || {}, ctx.headers) },
   { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
@@ -1471,9 +2614,9 @@ const ROUTES = [
     } },
   { m: "GET", p: /^\/v1\/signatures\/([^/]+)$/, auth: "lecteur", f: (ctx) => { const s = lireSignature(ctx.params.id); return s ? ok(200, resumeSignature(s)) : err(404, "Circuit de signature inconnu : " + ctx.params.id); } },
   { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
-  { m: "GET", p: /^\/v1\/publications$/, f: () => {
-      const all = Object.keys(db.publies).map((k) => db.publies[k]);
-      const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
+  { m: "GET", p: /^\/v1\/publications$/, f: (ctx) => {
+      const all = Object.keys(db.publies).map((k) => db.publies[k]).filter((p) => visiblePour(p, ctx.agent));
+      const latestKeys = new Set(all.map((p) => dernierVisible(p.eliUri, ctx.agent)).filter(Boolean).map((p) => p.cle));
       return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => cmp(b.publieeLe, a.publieeLe)) });
     } },
   { m: "POST", p: /^\/v1\/publications\/([^/]+)\/retrait$/, auth: "administrateur", ecrit: true, f: hRetirerPublication },
@@ -1481,15 +2624,17 @@ const ROUTES = [
   { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
       const cle = decodeURIComponent(ctx.params.cle);
       const p = lirePublication(cle);
-      if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
-      const versions = versionsOf(p.eliUri).map((x) => resumePublication(x, latestOf(x.eliUri) === x));
+      // Une publication réservée aux agents n'existe pas, pour un visiteur
+      // anonyme : même réponse qu'une clé inconnue.
+      if (!p || !visiblePour(p, ctx.agent)) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+      const versions = versionsOf(p.eliUri).filter((x) => visiblePour(x, ctx.agent)).map((x) => resumePublication(x, dernierVisible(x.eliUri, ctx.agent) === x));
       // Le dossier interne ne sort JAMAIS par cette route (lecture publique).
       const { originalInterne, ...pub } = p;
-      return ok(200, { ...pub, latest: latestOf(p.eliUri) === p, versions });
+      return ok(200, { ...pub, latest: dernierVisible(p.eliUri, ctx.agent) === p, versions });
     } },
   { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/original$/, f: (ctx) => {
       const eliUri = eliKey(ctx.params);
-      const p = latestOf(eliUri);
+      const p = dernierVisible(eliUri, ctx.agent);
       return p ? ok(200, { eli: eliUri, cle: p.cle, original: p.original, signature: p.signature }) : err(404, "ELI inconnu : " + eliUri);
     } },
   { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/, f: hResoudreEli },
@@ -1509,12 +2654,54 @@ const ROUTES = [
 
 const eliKey = (p) => "eli:/fr/" + [p.code, p.annee, p.numero, p.entite].filter(Boolean).join("/");
 
+// Les routes qui appartiennent à l'ATELIER : hors réseau autorisé, elles
+// s'arrêtent à la porte (voir `route`). Les routes PUBLIQUES — santé, recueil,
+// informations, état de l'accès — n'y passent jamais : un visiteur extérieur
+// doit pouvoir lire le recueil.
+const ATELIER_PUBLIC = new Set(["/v1/health", "/v1/", "/v1/atelier/acces", "/v1/informations"]);
+const estRouteAtelier = (pathname) => {
+  if (ATELIER_PUBLIC.has(pathname)) return false;
+  if (/^\/v1\/db(\/|$)/.test(pathname)) return true;
+  if (/^\/v1\/(journal|actes|signatures|auth|comptes|admin)(\/|$)/.test(pathname)) return true;
+  return false;
+};
+
+// Les paramètres de requête, lus sans `URLSearchParams` : le moteur de
+// démonstration (QuickJS) n'expose pas toujours les API du navigateur, et le
+// service doit se contenter de ce qui est universel.
+function parametresRequete(q) {
+  const m = new Map();
+  for (const part of String(q || "").split("&")) {
+    if (!part) continue;
+    const i = part.indexOf("=");
+    const cle = i < 0 ? part : part.slice(0, i);
+    const val = i < 0 ? "" : part.slice(i + 1);
+    let k = cle;
+    let v = val;
+    try { k = decodeURIComponent(cle); v = decodeURIComponent(val.replace(/\+/g, " ")); } catch (e) { /* valeur brute */ }
+    m.set(k, v);
+  }
+  return m;
+}
+
 function route(req, conn) {
   const method = String(req.method || "GET").toUpperCase();
   const path = String(req.path || "/");
   const q = path.indexOf("?");
   const clean = q >= 0 ? path.slice(0, q) : path;
+  const query = parametresRequete(q >= 0 ? path.slice(q + 1) : "");
   const headers = req.headers || {};
+
+  // La porte de l'ATELIER (1.5.3). Quand le service SAIT d'où vient l'appelant
+  // et que l'accès est restreint à d'autres réseaux, les routes de l'atelier
+  // s'arrêtent ici — un 403 explicite, jamais un 404 muet. Sur la plateforme,
+  // aucune adresse ne parvient au service : la porte reste ouverte, et c'est
+  // l'installation auto-hébergée qui décide (voir `atelierPermet`).
+  const ouvre = atelierPermet(headers);
+  if (!ouvre && estRouteAtelier(clean)) {
+    const e = etatAtelier(ipDeLEntete(headers));
+    return err(403, e.message, { code: "atelier_hors_reseau", ip: e.ip, interne: e.interne });
+  }
 
   let cheminTrouve = false;
   for (const r of ROUTES) {
@@ -1536,7 +2723,10 @@ function route(req, conn) {
     const params = { 0: m[0] };
     if (m[1] !== undefined) { params.id = m[1]; params.cle = m[1]; }
     if (m[2] !== undefined) { params.code = m[1]; params.annee = m[2]; params.numero = m[3]; params.entite = m[4]; }
-    return r.f({ params, body: req.body, headers, conn, path: clean });
+    // `agent` : la requête porte-t-elle une clé de service ? Les publications
+    // RÉSERVÉES AUX AGENTS (`reserve`) ne sont servies qu'à celles-là — et
+    // seulement depuis une adresse autorisée quand l'accès est restreint.
+    return r.f({ params, body: req.body, headers, conn, path: clean, query, agent: !!identiteDe(headers) && ouvre });
   }
   return cheminTrouve
     ? err(405, "Méthode " + method + " non autorisée sur " + clean, { code: "methode_non_autorisee" })

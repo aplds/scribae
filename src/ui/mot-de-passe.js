@@ -14,7 +14,7 @@
 // service (les requêtes). Ici : l'interface.
 // ============================================================================
 import { h, icon, button, modal, toast, alert, field as frField, clear } from "./dom.js";
-import { state, loginWithPassword, loginDemoService, changerMonMotDePasse } from "./state.js";
+import { state, loginWithPassword, loginDemoService, changerMonMotDePasse, chargerModeDeploiement, redrawView } from "./state.js";
 import { deploiementAuth } from "../lib/auth.js";
 import { copyText } from "../lib/util.js";
 import { fullName } from "../lib/users.js";
@@ -136,6 +136,21 @@ export function panneauMotDePasse({ demoUsers = [] } = {}) {
     // En cas de succès, l'application s'est déjà redessinée (la session est
     // ouverte) : les nœuds d'ici sont détachés, et il n'y a plus rien à remettre.
     if (r.ok) return;
+    // UN REFUS PEUT N'ÊTRE QU'UN ÉTAT DE DÉPLOIEMENT PÉRIMÉ. Le service rééprouve
+    // sa base à chaque `GET /v1/auth/config` (voir server.mjs, `reevaluerBase`) :
+    // quand l'écran annonçait une base indisponible, on redemande donc l'état avant
+    // de laisser l'agent sur un « connexion refusée » — le bandeau se corrige (ou
+    // le motif se précise) sans recharger la page.
+    const avant = deploiementAuth();
+    if (avant && (avant.baseDisponible === false || avant.adminPanne)) {
+      const apres = await chargerModeDeploiement();
+      if (apres && (apres.baseDisponible !== avant.baseDisponible
+        || apres.baseRemede !== avant.baseRemede
+        || apres.adminAmorce !== avant.adminAmorce)) {
+        redrawView();
+        return;
+      }
+    }
     enCours = false;
     enAttente(valider, false);
     mdp.input.value = "";

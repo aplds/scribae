@@ -376,7 +376,16 @@ export const LOGO_CCAS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0
   <path d="M22 24h20" stroke="#0f4d38" stroke-width="3" stroke-linecap="round"/>
 </svg>`;
 
-const dataUrl = (svg) => "data:image/svg+xml;base64," + btoa(svg.trim());
+// Un SVG embarqué, prêt à poser dans un `src`. `btoa` n'accepte que le Latin-1 :
+// il faut donc encoder les octets UTF-8 à la main, sinon un libellé accentué
+// (« Emblème », `d'action`) produit une suite que le navigateur refuse de
+// décoder — et l'image ne s'affiche pas.
+export function svgDataUrl(svg) {
+  const octets = new TextEncoder().encode(String(svg).trim());
+  let binaire = "";
+  for (const octet of octets) binaire += String.fromCharCode(octet);
+  return "data:image/svg+xml;base64," + btoa(binaire);
+}
 
 // Les feuilles livrées avec la démonstration. Elles montrent les trois niveaux :
 // une générale, une rattachée à une entité (le CCAS), une rattachée à une
@@ -410,7 +419,7 @@ export function seedStyles() {
       authorityItalic: true,
       visasLabelStyle: "bold",
       showHeader: true,
-      logoUrl: dataUrl(LOGO_CCAS_SVG),
+      logoUrl: svgDataUrl(LOGO_CCAS_SVG),
       logoHeight: "46",
       logoAlign: "left",
       headerText: "{{entity.name}} — recueil des actes administratifs",
@@ -631,7 +640,9 @@ export function applyPreset(style, presetId) {
 
 // Éclaircit une couleur (mélange vers le blanc) : sert aux fonds discrets
 // (bandeaux, encadrés, lignes alternées), sans dépendre de `color-mix`.
-function tint(hex, amount = 0.9) {
+// Exporté : l'export PDF/A (`src/lib/pdfa.js`) en dérive les mêmes fonds et
+// filets que le CSS, pour que le papier et l'écran restent d'accord.
+export function tint(hex, amount = 0.9) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
   if (!m) return "#f2f2f6";
   const n = parseInt(m[1], 16);

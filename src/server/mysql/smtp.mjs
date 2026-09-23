@@ -84,11 +84,17 @@ const listeAdresses = (liste) => (liste || []).map(adresse).filter(Boolean);
 // voyagent ensemble (multipart/alternative) : les clients qui n'affichent pas le
 // HTML lisent le texte, jamais un message vide.
 export function construireMessage({
-  de, a, cc, repondreA, sujet, texte = "", html = "", domain = "", date = new Date(),
+  de, a, cc, repondreA, sujet, texte = "", html = "", domain = "", date = new Date(), entetes: supplementaires = [],
 } = {}) {
   const expediteur = adresse(de);
   const destinataires = listeAdresses(a);
   const copies = listeAdresses(cc);
+  // Les en-têtes SUPPLÉMENTAIRES (voir `courriel.envoyer`) : ce sont ceux d'un
+  // envoi en nombre — `List-Unsubscribe`, `List-Id`, `Precedence`. Ils sont
+  // écrits par l'appelant, et jamais repris d'un contenu utilisateur.
+  const enPlus = (supplementaires || [])
+    .map((l) => String(l || "").replace(/[\r\n]+/g, " ").trim())
+    .filter((l) => l && /^[A-Za-z][A-Za-z0-9-]*:/.test(l));
   const entetes = [
     "Date: " + dateRfc(date),
     "From: " + (expediteur || "Scribae <scribae@" + (domain || "localhost") + ">"),
@@ -97,6 +103,7 @@ export function construireMessage({
     ...(repondreA ? ["Reply-To: " + adresse(repondreA)] : []),
     "Subject: " + encoderMot(sujet || ""),
     "Message-ID: " + messageId((de && de.courriel) || domain),
+    ...enPlus,
     "MIME-Version: 1.0",
     "Auto-Submitted: auto-generated",
   ];
@@ -249,7 +256,7 @@ export function clientSMTP(transport, {
     trace,
     capacites: () => cap,
 
-    async envoyer({ de, a, cc, repondreA, sujet, texte, html, domain }) {
+    async envoyer({ de, a, cc, repondreA, sujet, texte, html, domain, entetes }) {
       // 1. Salutation du serveur.
       await lire([220], "");
       // 2. EHLO.
@@ -292,7 +299,7 @@ export function clientSMTP(transport, {
       if (!destinataires.length) throw new ErreurSMTP(0, "aucun destinataire", "RCPT TO");
       for (const d of destinataires) await envoyer("RCPT TO:<" + d + ">", [250, 251]);
       await envoyer("DATA", [354]);
-      const message = construireMessage({ de, a, cc, repondreA, sujet, texte, html, domain: domain || expediteur.split("@")[1] || "" });
+      const message = construireMessage({ de, a, cc, repondreA, sujet, texte, html, domain: domain || expediteur.split("@")[1] || "", entetes });
       noter(">", "[message : " + String(sujet || "").length + " caractères d'objet, corps " + message.length + " octets]");
       await t.ecrire(doublerPoints(message) + CRLF + "." + CRLF);
       const fin = await lire([250], "fin du message");

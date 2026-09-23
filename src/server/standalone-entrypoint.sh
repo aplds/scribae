@@ -20,6 +20,9 @@ SERVICE_DIR="${SCRIBA_SERVICE_DIR:-/srv/service}"
 mkdir -p "$WWW"
 for f in index.html host.js favicon.svg; do
   cp "$TPL/$f" "$WWW/$f"
+  # Le processus de travail de nginx n'est pas root : la coquille doit rester
+  # lisible par tous, quel que soit le mode du modèle dans l'image.
+  chmod 644 "$WWW/$f" 2>/dev/null || true
 done
 
 # `config.js` : adresse et jeton de l'API, mode d'authentification et commutateur
@@ -32,6 +35,23 @@ export DEMO="${DEMO:-}"
 envsubst '${API_BASE} ${API_TOKEN} ${AUTH_MODE} ${DEMO_ACCOUNTS} ${DEMO}' \
   < "$TPL/config.js.template" > "$WWW/config.js"
 chmod 644 "$WWW/config.js" 2>/dev/null || true
+
+# --- le compte de la base, puis le schéma -------------------------------------
+# Même geste que le service `db-init` de la pile Compose, et pour la même raison :
+# MariaDB ne pose le mot de passe du compte applicatif qu'au PREMIER démarrage d'un
+# dossier de données vierge — un `DB_PASSWORD` modifié ensuite est refusé par la
+# base alors que l'environnement du conteneur est correct. Quand le mot de passe
+# root est fourni, le compte est donc remis au mot de passe du conteneur, PUIS le
+# schéma est appliqué avec ce compte (`schema.sql` est idempotent : il ne détruit
+# rien). Sans `DB_ROOT_PASSWORD`, on ne touche à rien : la base est administrée
+# ailleurs, et c'est `docker exec … --reconcilier` qui s'en charge à la main.
+# Le geste ne bloque jamais le démarrage : au pire, il le dit et le service prend
+# la suite en journalisant l'état réel de la base.
+if [ -n "${DB_ROOT_PASSWORD:-}" ]; then
+  echo "Scribae — Compte applicatif et schéma : alignement sur l'environnement (DB_ROOT_PASSWORD fourni)."
+  node "$SERVICE_DIR/server.mjs" --reconcilier \
+    || echo "Scribae — Alignement impossible : le service démarre quand même et dira l'état de la base."
+fi
 
 # --- les deux processus ------------------------------------------------------
 echo "Scribae — Image autonome : service Node + nginx (API ${API_BASE:-même origine}, mode ${AUTH_MODE:-référentiel})."

@@ -25,10 +25,15 @@
 // Le port `crypto` est volontairement étroit — ce que `server.mjs` remplit avec
 // `node:crypto`, et les tests avec une autre implémentation :
 //   randomBytes(n)               → Uint8Array de n octets aléatoires
-//   scrypt(mdp, sel, {N,r,p,keylen}) → Uint8Array dérivé
+//   scrypt(mdp, sel, {N,r,p,keylen}) → Uint8Array dérivé, ou PROMESSE de dérivé
 //   sha256(texte)                → empreinte hexadécimale
 //   b64(octets) / deb64(texte)   → base64 standard
 //   meme(a, b)                   → comparaison à TEMPS CONSTANT
+//
+// `scrypt` PEUT rendre une promesse, et c'est ce que fait le service : `await`
+// devant un dérivé synchrone ne coûte rien, un dérivé lent rend la main. Ce
+// module ne présume donc jamais de la façon dont le dérivé est calculé — il
+// l'attend. Voir le commentaire du port dans `server.mjs`.
 //
 // Les comptes eux-mêmes (nom, rôles, rattachement) restent dans le référentiel
 // de l'application — collection `users` — pour qu'un compte créé ici soit un
@@ -91,10 +96,14 @@ export function motDePasseFaible(login, motDePasse, min = MDP_MIN_LONGUEUR) {
 // Le dérivé conservé : `scrypt$N$r$p$sel$empreinte` (base64 standard). Le sel et
 // l'empreinte sont binaires ; les paramètres voyagent AVEC le dérivé, ce qui
 // permettra de durcir le coût plus tard sans invalider les comptes existants.
-export function scellerMotDePasse(crypto, motDePasse, params = SCRYPT_DEFAUT) {
+//
+// Asynchrone : le coût du dérivé ne doit pas arrêter le service (voir le port de
+// `server.mjs`). Le format du dérivé, lui, ne change pas — les comptes déjà
+// scellés restent lisibles.
+export async function scellerMotDePasse(crypto, motDePasse, params = SCRYPT_DEFAUT) {
   const { N, r, p } = params;
   const sel = crypto.randomBytes(16);
-  const cle = crypto.scrypt(String(motDePasse), sel, { N, r, p, keylen: 32 });
+  const cle = await crypto.scrypt(String(motDePasse), sel, { N, r, p, keylen: 32 });
   return ["scrypt", N, r, p, crypto.b64(sel), crypto.b64(cle)].join("$");
 }
 
@@ -111,11 +120,11 @@ export function lireScelle(crypto, scelle) {
 // Vérifie un mot de passe. `needsRehash` signale un dérivé scellé avec des
 // paramètres plus faibles que ceux du service : la connexion réussie est
 // l'occasion de le recalculer (voir `connexion`).
-export function verifierMotDePasse(crypto, motDePasse, scelle, params = SCRYPT_DEFAUT) {
+export async function verifierMotDePasse(crypto, motDePasse, scelle, params = SCRYPT_DEFAUT) {
   const lu = lireScelle(crypto, scelle);
   if (!lu) return { ok: false, needsRehash: false };
   let cle;
-  try { cle = crypto.scrypt(String(motDePasse), lu.sel, { N: lu.N, r: lu.r, p: lu.p, keylen: lu.cle.length }); }
+  try { cle = await crypto.scrypt(String(motDePasse), lu.sel, { N: lu.N, r: lu.r, p: lu.p, keylen: lu.cle.length }); }
   catch (e) { return { ok: false, needsRehash: false }; }
   const ok = crypto.meme(cle, lu.cle);
   const needsRehash = ok && (lu.N < params.N || lu.r < params.r || lu.p < params.p);
@@ -318,7 +327,15 @@ export function createComptes({
 } = {}) {
   // Un dérivé factice, de coût identique : vérifié quand l'identifiant est
   // inconnu, pour que la durée de la réponse ne dise pas si le compte existe.
-  const FACTICE = scellerMotDePasse(crypto, "scribe-aucun-compte-" + "x".repeat(24), scryptParams);
+  //
+  // ENGAGÉ dès la construction, et non calculé à la première demande : le dérivé
+  // se calcule pendant que le service s'installe (il ne bloque rien : le port de
+  // crypto est asynchrone), et une vérification à vide coûte alors EXACTEMENT ce
+  // que coûte la vérification d'un compte — sans quoi la toute première tentative
+  // sur un identifiant inconnu serait deux fois plus lente, et le temps de
+  // réponse trahirait ce que le message s'applique à taire.
+  const facticeEngage = scellerMotDePasse(crypto, "scribe-aucun-compte-" + "x".repeat(24), scryptParams)
+    .catch(() => scellerMotDePasse(crypto, "scribe-aucun-compte-" + "x".repeat(24), scryptParams));
   const jours = Math.min(Math.max(Number(sessionJours) || SESSION_JOURS_DEFAUT, 1), SESSION_JOURS_MAX);
   const ttlMs = jours * 24 * 3600 * 1000;
   const iso = (d) => (d instanceof Date ? d : new Date(d)).toISOString();
@@ -388,7 +405,7 @@ export function createComptes({
     if (!compte) return { ok: false, code: "compte_inconnu", message: "Ce compte n'existe pas au référentiel." };
     const faible = motDePasseFaible(compte.login || userId, motDePasse, mdpMin);
     if (faible) return { ok: false, code: "mot_de_passe_faible", message: faible };
-    await store.ecrireMdp(compte.id, { hash: scellerMotDePasse(crypto, motDePasse, scryptParams), mustChange });
+    await store.ecrireMdp(compte.id, { hash: await scellerMotDePasse(crypto, motDePasse, scryptParams), mustChange });
     return { ok: true, userId: compte.id };
   }
 
@@ -424,7 +441,10 @@ export function createComptes({
       return { ok: false, code: "trop_de_tentatives", message: "Trop de tentatives : ce compte est bloqué quelques instants.", retryAfterSec: reste };
     }
 
-    const verif = verifierMotDePasse(crypto, motDePasse, (mdp && mdp.hash) || FACTICE, scryptParams);
+    // Le dérivé de comparaison : celui du compte, ou le dérivé factice — engagé
+    // au démarrage du service.
+    const scelle = (mdp && mdp.hash) || (await facticeEngage);
+    const verif = await verifierMotDePasse(crypto, motDePasse, scelle, scryptParams);
     if (!compte || !verif.ok) {
       // L'échec est compté sur le compte, s'il existe : c'est lui que l'on
       // protège. Le message, lui, ne dit jamais si l'identifiant existe.
@@ -447,7 +467,7 @@ export function createComptes({
 
     await store.majEchecs(compte.id, { echecs: 0, bloqueJusqua: null });
     // Un dérivé scellé avec des paramètres plus faibles est recalculé au passage.
-    await store.ecrireMdp(compte.id, { hash: verif.needsRehash ? scellerMotDePasse(crypto, motDePasse, scryptParams) : mdp.hash, mustChange: !!mdp.must_change });
+    await store.ecrireMdp(compte.id, { hash: verif.needsRehash ? await scellerMotDePasse(crypto, motDePasse, scryptParams) : mdp.hash, mustChange: !!mdp.must_change });
     const { jeton, csrf: csrfNeuf } = await ouvrirSession(compte, { ip, userAgent });
     return { ok: true, jeton, csrf: csrfNeuf, utilisateur: compte, mustChange: !!mdp.must_change };
   }
@@ -470,12 +490,12 @@ export function createComptes({
     if (!compte) return { ok: false, code: "compte_inconnu", message: "Compte inconnu." };
     const mdp = await store.lireMdp(compte.id);
     if (!mdp) return { ok: false, code: "aucun_mot_de_passe", message: "Ce compte n'a pas encore de mot de passe." };
-    const verif = verifierMotDePasse(crypto, ancien, mdp.hash, scryptParams);
+    const verif = await verifierMotDePasse(crypto, ancien, mdp.hash, scryptParams);
     if (!verif.ok) return { ok: false, code: "ancien_mot_de_passe", message: "Le mot de passe actuel est incorrect." };
     const faible = motDePasseFaible(compte.login || compte.id, nouveau, mdpMin);
     if (faible) return { ok: false, code: "mot_de_passe_faible", message: faible };
     if (normaliserLogin(ancien) === normaliserLogin(nouveau)) return { ok: false, code: "mot_de_passe_identique", message: "Le nouveau mot de passe doit différer de l'ancien." };
-    await store.ecrireMdp(compte.id, { hash: scellerMotDePasse(crypto, nouveau, scryptParams), mustChange: false });
+    await store.ecrireMdp(compte.id, { hash: await scellerMotDePasse(crypto, nouveau, scryptParams), mustChange: false });
     return { ok: true };
   }
 

@@ -61,6 +61,24 @@ un état durable dans IndexedDB. Deux conséquences pour l'exploitant :
 - **tout fonctionne sans réseau**, y compris la signature (ECDSA par `crypto.subtle`, qui
   exige un contexte sécurisé : HTTPS).
 
+**Ce que la démonstration fait d'elle-même.** Un service neuf est en **lecture seule** tant
+qu'aucune clé n'y a été déposée, et une démonstration n'a pas d'administrateur pour le faire :
+au premier démarrage, elle **provisionne donc son propre service** — une clé d'administration
+tirée au hasard par le poste, rangée dans les réglages locaux du navigateur, dont seule
+l'empreinte vit au service — puis y **dépose ses actes publiés et ses informations**. C'est ce
+qui rend le recueil public vivant. Le geste ne concerne **jamais** une installation réelle : le
+commutateur de démonstration le commande, et, là où un déploiement parle (`.env`, `config.js`),
+c'est lui qui décide. Conséquence à connaître : dans une démonstration, la clé du service est
+**celle du navigateur**, pas la vôtre — pour administrer un vrai service, suivez le
+provisionnement normal (Administration › Base de données).
+
+**Le recueil public se rabat sur le registre du poste** quand le service ne rend rien
+(`src/lib/publications-locales.js`) : un service remis à zéro, un aperçu qui reconstruit son état
+ou une page hors ligne ne font pas disparaître du recueil des actes réellement publiés. Le
+service reste la source ; c'est le même enregistrement qui est relu. La règle de diffusion est
+appliquée à l'identique : un acte **réservé aux agents** n'apparaît qu'à un agent connecté venu
+d'un réseau autorisé (§ 6).
+
 ### Architecture de l'installation auto-hébergée
 
 ```
@@ -102,6 +120,7 @@ Un seul processus HTTP, deux familles de ressources :
 |---|---|---|
 | **Données** | `/v1/db/health`, `/v1/db/collections/{collection}`, `/v1/db/collections/{collection}/sync` | tables `sb_record` / `sb_collection` / `sb_journal` |
 | **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/publications…`, `/v1/eli/…`, `/v1/health`, `GET /v1/` (OpenAPI) | table `sb_etat` |
+| **Public** | `/v1/config`, `/v1/health`, `/v1/db/health`, `/v1/atelier/acces`, `/v1/informations` | ces routes sont servies **sans session** (hors de la porte de l'atelier) ; `/v1/informations` lit la collection `informations` dans `sb_record` |
 
 Il n'ouvre **aucune connexion sortante** : il ne parle qu'à la base.
 
@@ -128,9 +147,10 @@ ne sont jamais saisies à la main.
 
 ### 3.1 Collections et enregistrements
 
-L'application manipule huit **collections** : `config` (le référentiel, objet unique),
+L'application manipule neuf **collections** : `config` (le référentiel, objet unique),
 `meta` (singleton), `trames`, `actes`, `users`, `journal` (le journal d'audit de
 l'application), `presence` (la présence des postes) — listes d'objets identifiés par `id` —
+`informations` (les billets du recueil public : actualités, avis, communications, voir § 5.5)
 et `session` (**strictement locale**, jamais transmise). L'unité d'échange est
 l'**enregistrement** : un objet de liste, ou l'objet unique d'un singleton.
 
@@ -216,20 +236,28 @@ quitte par la même mise à disposition.
 | **Signataire** | **qualité cumulable** (elle ne remplace pas un profil) : la **qualité de signer**. Elle **découle d'une désignation** — dès qu'une personne est désignée dans l'organigramme des **Délégations** (comme délégant ou délégataire), le compte rattaché à cette personne la reçoit, même si la désignation est faite par un éditeur. Elle ouvre l'onglet **« Ma signature »** et restreint la vue de l'atelier au **champ de compétence** du signataire (les actes dont sa signature relève). Un signataire **signe avec son compte**, rapproché du compte que l'outil de signature lui connaît (voir § 4.5) |
 | **Visiteur** | aucun accès : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public** (le recueil). C'est l'état d'un compte authentifié dont aucun rôle d'application n'est reconnu (voir § 4.4) |
 
-Les dix-sept permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes.rediger`,
+Les dix-neuf permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes.rediger`,
 `actes.valider`, `actes.gerer`, `actes.tous`, `actes.reviser`, `actes.signer`, `signature.gerer`,
-`delegations.gerer`, `publications.depublier`, `publications.epingler`,
-`referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`) sont la **source unique** du
-contrôle d'accès et de la matrice affichée dans l'écran « Comptes et rôles ».
+`delegations.gerer`, `organigramme.gerer`, `publications.depublier`, `publications.epingler`,
+`informations.gerer`, `referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`) sont la
+**source unique** du contrôle d'accès et de la matrice affichée dans l'écran « Comptes et rôles ».
 
 **`actes.signer`** (signer un acte) et **`signature.gerer`** (conduire la publication — recueil,
 identifiant ELI, formalités, transmission) sont **deux permissions distinctes** : un signataire
 peut signer sans pouvoir publier.
 
+**`informations.gerer`** ouvre l'écran **Informations** — les billets du recueil public
+(actualités, avis, communications, § 5.5). Elle est portée par l'administrateur et l'éditeur ; les
+autres rôles ne voient pas l'entrée du menu, et le service ne leur sert pas les brouillons
+(`COLLECTIONS_EDITEUR`).
+
 À noter : **`delegations.gerer`** ne garde que la **modification** de l'organigramme des
 délégations : l'écran, lui, est visible par **tous les comptes** (voir § 5.5 quater), et un
 compte qui n'a pas la permission y lit exactement la même fiche, sans les champs de saisie.
-**`publications.depublier`** (retirer un acte du recueil) est réservée à
+**`organigramme.gerer`** (ajouter ou retirer des **services** et des **bureaux**, régler leurs
+rattachements) est portée par l'**administrateur** **et** par l'**éditeur** ; l'ajout ou la
+suppression d'une **entité** reste à l'administrateur, un éditeur n'en réglant que les relations
+descendantes. **`publications.depublier`** (retirer un acte du recueil) est réservée à
 l'**administrateur**, et c'est un geste **exceptionnel** — un acte administratif publié ne se
 retire pas ; seul un motif technique le justifie. Le service exige ce motif et le conserve sur
 l'acte.
@@ -241,6 +269,15 @@ acte portent un service (`serviceId`) et, au besoin, un bureau (`bureauId`) ; `n
 Un compte porte des rattachements (`memberships`) : un service avec tous ses bureaux, ou une
 liste de bureaux restreinte. Un compte rattaché à tous les services est **transverse**. Seul
 l'administrateur échappe au périmètre.
+
+**Un service peut dépendre d'un autre service, ou du bureau d'un autre service** (Administration ›
+Services, ou écran Organigramme). Le rattachement ne resserre pas l'accès : il l'**élargit** — un
+compte rattaché à un service de **tête de chaîne** voit les actes de **toute la chaîne en
+contrebas** (ce service et ses descendants). C'est ce qu'une direction attend : affectée à la
+direction générale, elle suit les actes de ses directions rattachées. Les services et les bureaux
+s'ajoutent, se retirent et se rattachent dès le rôle d'**éditeur** (permission `organigramme.gerer`,
+portée par l'administrateur et l'éditeur) ; l'ajout ou la suppression d'une **entité** reste à
+l'administrateur.
 
 ### 4.3 Authentification
 
@@ -298,6 +335,13 @@ jeton **anti-CSRF** dans un second cookie lisible, que la page renvoie en en-tê
 agir à la place de l'agent. La session expire au bout de `SESSION_DAYS` jours, et chaque connexion
 renouvelle son jeton.
 
+**Le dérivé ne bloque personne.** Le calcul du dérivé est **asynchrone** : il s'exécute sur le
+pool de fils du processus, et non sur le fil qui sert les requêtes. Sans cela, la seule
+vérification d'un mot de passe immobilisait le service entier — y compris les visiteurs du
+recueil public — pendant la durée du calcul (environ 130 ms à `SCRYPT_N=65536`). L'effet d'une
+affluence de connexions simultanées, et le réglage qui la borne (`UV_THREADPOOL_SIZE`), sont
+documentés et mesurés dans [`docs/PERFORMANCE.md`](PERFORMANCE.md).
+
 **Mise en service :**
 
 ```bash
@@ -313,11 +357,13 @@ docker compose up -d --build
 docker compose logs -f api      # « Compte administrateur créé depuis .env »
 ```
 
-> **Le dossier de données ne s'initialise qu'une fois.** Les variables `MARIADB_*` de
-> `docker-compose.yml` ne créent la base, l'utilisateur et le schéma que lorsque le **volume est
-> vide** — au tout premier démarrage. Ensuite, modifier `DB_*` ou `MARIADB_*` ne change **ni** le
-> schéma **ni** le compte d'administration déjà créés. Pour rejouer schéma **et** amorçage sur un
-> dossier vierge :
+> **Le dossier de données ne s'initialise qu'une fois.** Le volume neuf est ce qui fait créer la
+> base et les comptes au tout premier démarrage. Ensuite, modifier `DB_*` ne change **pas** le mot de
+> passe inscrit en base pour le compte applicatif — c'est pourquoi la pile repose ce mot de passe à
+> chaque démarrage (service **`db-init`**, avec `DB_ROOT_PASSWORD`), **puis applique le schéma avec ce
+> compte tout neuf** : les deux pannes vont de pair, et le service se rétablit ensuite de lui-même.
+> Ce qui reste figé, en revanche, c'est le mot de passe **root** : lui n'est posé qu'à la création.
+> Pour rejouer schéma **et** mots de passe du `.env` sur un dossier vierge :
 >
 > ```bash
 > docker compose down -v && docker compose up -d --build
@@ -565,7 +611,7 @@ Les plus importantes :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | écoute du service |
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SOCKET` | — | accès à la base |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SOCKET` | — | accès à la base. Le compte applicatif est **aligné sur `DB_PASSWORD`** à chaque démarrage par le service `db-init`, qui **applique ensuite le schéma** avec ce compte |
 | `DB_POOL` | `8` | connexions simultanées |
 | `API_TOKENS` | — | jetons d'écriture, en `libellé:empreinte_sha256` |
 | `CORS_ORIGINS` | *aucune* | origines autorisées à appeler l'API, séparées par des virgules. **Vide = aucune** (une API de service public n'a pas à être appelable en lecture de cookies depuis n'importe quel site). À renseigner seulement si l'application est servie par une **autre origine** que le service : `CORS_ORIGINS=https://actes.exemple.fr`. `*` reste possible, mais il ne transporte **aucune session** (la spécification interdit `access-control-allow-credentials` avec `*`) : il ne convient qu'à un accès sans cookie |
@@ -574,7 +620,7 @@ Les plus importantes :
 | `MAX_STATE_CHARS` | `8000000` | capacité de l'état signature/publication |
 | `MAX_DOC` | `400000` | taille d'un acte déposé |
 | `RATE_MAX_WRITES` / `RATE_WINDOW_MS` | `600` / `60000` | limitation de débit des écritures, par IP |
-| `AUTO_MIGRATE` | `false` | appliquer `schema.sql` au démarrage |
+| `AUTO_MIGRATE` | `false` (service) — `true` dans la pile Compose livrée | appliquer `schema.sql` au démarrage. Le fichier ne supprime rien (`CREATE TABLE IF NOT EXISTS` + vues) : c'est ce qui rend une installation neuve utilisable du premier coup, et la pile Compose s'en sert par défaut (aucun script n'est monté dans MariaDB). Depuis la **1.5.3d**, le service l'applique aussi **quand il se rétablit** après une panne de base : une réparation faite pendant qu'il tourne n'exige pas de le recréer |
 | `AUTH_MODE` | `demo` dans le service, `password` dans le `.env` livré et le compose | `demo` (comptes de l'application + jetons) ou `password` (comptes locaux : mot de passe + session) — § 4.3 bis. Le `.env` livré pose `password` : c'est le mode d'une installation réelle. Un conteneur lancé **hors** du compose (sans `.env`) retombe, lui, sur `demo` |
 | `DEMO_ACCOUNTS` | `false` en mode password | laisse le raccourci « choisir un compte » ouvert (recette) |
 | `DEMO` | selon le mode | **commutateur de démonstration** : `true` installe le jeu fictif complet, `false` fait partir l'outil d'un **référentiel vierge**. Vide = `AUTH_MODE=demo` ou `DEMO_ACCOUNTS=true` l'allument, `password` l'éteint |
@@ -615,15 +661,26 @@ posées par le déploiement) :
 | `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | `/documents/{document}` | relecture du statut |
 | `SCRIBA_SIGNATURE_API_CLE` | — | **SECRET.** La clé que le service présente au prestataire. Elle **ne quitte jamais le serveur** : ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel ou une sauvegarde de données |
 
+Deux autres réglages de **référentiel** concernent l'accès à l'atelier (§ 5.5). Comme les
+précédents, ils sont validés par le service, puis transmis au navigateur, et ils **l'emportent** sur
+la valeur réglée dans l'interface (l'écran d'administration les signale alors comme posés par le
+déploiement) :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SCRIBA_ATELIER_IPS` | — | **liste blanche** des adresses autorisées à ouvrir l'atelier : adresse (`192.168.1.24`), préfixe CIDR (`10.0.0.0/8`, `2001:db8::/32`), champ (`10.0.0.0-10.0.0.255`) ou plage abrégée (`10.0.0.*`), séparés par des virgules. **Vide : l'atelier est ouvert à toutes les adresses.** Renseignée, elle vaut aussi pour les **actes réservés aux agents**, qui ne sont alors montrés qu'à une personne connectée **et** venue d'une adresse autorisée |
+| `SCRIBA_ATELIER_MESSAGE` | — | le message expliqué à une adresse non autorisée. Vide : le message livré avec l'application |
+
 La clé et les points de terminaison dépendent du **produit** : commencez par `GET /v1/health` puis
 `GET /v1/config` (qui rend l'état du prestataire : actif ou non, son adresse, son niveau, et un
 booléen disant si la clé est là — **jamais la clé**), et éprouvez l'ouverture d'un circuit sur un
 acte d'essai avant de l'annoncer aux services.
 
-Variables du conteneur `web` : `HTTP_PORT`, `APP_DIR`, `API_BASE`, `API_TOKEN`,
+Variables du conteneur `web` : `HTTP_PORT`, `API_BASE`, `API_TOKEN`,
 `CORS_ORIGINS` — plus `AUTH_MODE`, `DEMO_ACCOUNTS` et `DEMO`, qui servent seulement à annoncer le
 mode au navigateur avant le premier appel (`web/config.js.template`) : le mode et le commutateur du
-**service** restent autoritaires (`GET /v1/auth/config`).
+**service** restent autoritaires (`GET /v1/auth/config`). `APP_DIR` n'est plus utile à la pile
+livrée : la façade est **construite** et embarque le code (voir `../server/README.md` § 9 bis).
 
 ### 5.3 Apparence : clair ou sombre (par poste)
 
@@ -658,7 +715,12 @@ Le circuit se compose de **trois natures d'étape**, choisies marche par marche 
 - la **Signature** — le signataire marque son accord, et le circuit s'achève.
 
 Chaque nature appelle un **rôle par défaut** (réviseur, éditeur, signataire), que l'administrateur
-peut changer, ainsi qu'un libellé et la restriction au service de l'acte. Un circuit ancien reste
+peut changer, ainsi qu'un libellé et la restriction au service de l'acte. Il choisit aussi **à qui
+l'étape est confiée** : un **rôle** (le défaut), une **personne nommée**, ou un **service** qui
+n'a pas à faire partie de la chaîne de décision — un avis ou une vérification demandés à un service
+tiers, par exemple. L'onglet **Circuits de validation** présente les circuits sous forme de
+**récapitulatif** et ouvre une **sous-vue par circuit** : ils ne s'empilent plus à la suite sur la
+même page. Un circuit ancien reste
 lu : une étape « bon pour accord » est tenue pour un visa, une étape « avis » pour une
 vérification. Le réglage `experimental.parapheur` n'est plus servi ; il reste lu (toujours vrai)
 pour ne pas casser un référentiel antérieur.
@@ -696,9 +758,12 @@ modifie pas le paquet signé, dont l'empreinte reste celle qui a été signée.
 **La page d'accueil de l'installation, c'est le recueil public.** Ouvrir l'adresse du logiciel
 — `https://actes.votre-collectivite.fr/`, sans ancre ni paramètre — mène au recueil des actes
 publiés, et non à l'atelier : c'est la page que le public peut lire, et celle que vous pouvez
-communiquer ou afficher. L'atelier s'ouvre par le bouton **Se connecter** de l'en-tête du recueil
-(ou par l'adresse suivie de `#/trames`). Un agent qui recharge la page en travaillant revient donc
-au recueil, et repart d'un clic : c'est le prix de l'accueil public.
+communiquer ou afficher. L'atelier a sa **propre adresse** — `/atelier` sur une installation
+auto-hébergée, `…/?atelier` en mode statique (GitHub Pages, démonstration) — et s'ouvre aussi par
+le bouton **Se connecter** de l'en-tête du recueil. Un agent qui recharge la page en travaillant
+revient donc au recueil, et repart d'un clic ; c'est le prix de l'accueil public. Cette adresse
+propre existe pour une seconde raison : c'est elle qu'une collectivité peut **restreindre à son
+réseau** (voir « Restreindre l'atelier à un réseau » plus bas).
 
 Les réglages de publication vivent dans **Administration › Publication** (ils suivent l'export du
 référentiel, comme le reste) :
@@ -736,14 +801,83 @@ référentiel, comme le reste) :
   **« Rétablir le texte livré »** ramène la mention livrée avec l'application — elle n'est donc jamais
   perdue. Comme les renvois, ces mentions ne sont pour l'instant portées que par la vue servie par
   l'application (voir `TODO.md`).
+- **Apparence du site public** — la **feuille de style de la collectivité**, écrite dans
+  l'administration et injectée dans le site public. Sa portée utile est le conteneur `.recueil` :
+  une poignée de variables (couleur d'accent, police, largeur du contenu — la table dépliable les
+  énumère) suffit à poser une charte, mais rien n'interdit de viser n'importe quel élément de la
+  page. Le CSS **ne s'applique qu'au site public** : l'atelier garde l'apparence du logiciel. Un
+  bouton « Exemple » remplit une charte de deux lignes, « Vider » l'efface. C'est du CSS écrit par
+  l'administration (jamais par un visiteur), donc sans exécution de code.
+- **Rubrique « Informations »** — la rubrique de **billets** du recueil public (voir plus bas) :
+  son **titre** (« Informations », « Actualités », « Communications »…), son **chapeau** et son
+  **interrupteur**. Éteinte, la rubrique disparaît du site public et de son pied de page ; les
+  billets, eux, restent dans l'atelier et se republient d'un clic.
+- **Accès à l'atelier** — la **liste d'adresses** autorisées à ouvrir l'atelier, et le message
+  montré à qui vient d'ailleurs (voir « Restreindre l'atelier à un réseau » ci-dessous).
 
-**Le recueil public** est le site sans compte que les administrés consultent : `…/?recueil=1` (un
-acte : `…/?acte=<clé>`). Il
+**Les informations du recueil public.** Une collectivité publie au recueil autre chose que des
+actes : des **actualités**, des **avis**, des **communications**, comme les billets d'un blog.
+Elles s'écrivent dans l'écran **Informations** de l'atelier (permission `informations.gerer`) — un
+billet porte un **titre**, un **résumé**, un **corps en Markdown**, une **date**, un **auteur**, et
+deux drapeaux (`publie`, `epingle`) ; il ne se **signe pas** et ne reçoit **aucun identifiant
+ELI**. Elles vivent dans la collection `informations` (comme les autres : dans `sb_record`) et
+sont servies par la route publique **`GET /v1/informations`**, qui ne rend que les billets
+`publie: true` — un brouillon ne sort que vers une identité de rôle `editeur` au moins (le service
+applique `COLLECTIONS_EDITEUR`). Au recueil public, les billets publiés figurent dans leur
+**rubrique** (une page à part, listée dans le pied de page) et, les plus récents, sur la **page
+d'accueil** ; chacun a son adresse (`…/?info=<clé>`, ou `/recueil/information/<clé>` selon le
+mode), **figée à la publication** — retoucher le titre d'un brouillon déplace son adresse, retoucher
+celui d'un billet publié ne la change plus. Aucune information ne rend un acte opposable : ce qui
+fait droit se publie comme **acte**, avec son numéro et son ELI.
+
+**Le recueil public** est le site sans compte que les administrés consultent, à la **racine** du
+site (un acte : `…/?acte=<clé>` ; une **sous-page** :
+`…/?page=legales|reutilisation|accessibilite|informations` ; un billet : `…/?info=<clé>`). Il
 lit le **service de publication** (jamais les données locales) et ne montre que les actes
 **réellement publiés**. Dans une administration qui a éteint la publication automatique, il reste
 donc vide tant qu'aucun acte n'a été publié à la main. Il n'expose rien d'autre que la structure
 (nom, logo, titre du recueil) et le texte publié de chaque acte, avec ses métadonnées ; l'adresse
 d'un acte (`…/?acte=<clé>`) se cite et se partage.
+
+**Réserver un acte aux agents.** Un acte peut être **réservé aux personnes connectées** — une
+circulaire interne, une consigne aux agents — par la case **« Réserver la diffusion aux agents
+connectés »** de l'onglet *Trame* de l'éditeur de trame (elle vaut pour tous les actes issus de
+cette trame), ou, **acte par acte**, au formulaire de publication. L'acte reste *publié* : il a son
+identifiant ELI, sa page et ses versions. Mais le recueil public ne le sert **qu'aux porteurs d'une
+session ou d'une clé de service** : un visiteur anonyme ne le trouve ni dans la liste, ni à son
+adresse, ni dans `/recueil.json`, `/llms.txt` ou `/sitemap.xml`. Le bloc **« Vous ne trouvez pas ce
+que vous cherchez ? »** du pied de page paraît désormais **en toutes circonstances** et le rappelle.
+En mode **démonstration** (où il n'y a pas de session), un visiteur anonyme ne voit donc pas les
+actes réservés : la fonction est pleinement active en mode `password` ou par annuaire. Et si
+l'atelier est **restreint à un réseau** (voir ci-dessous), la réservation se double de la condition
+de réseau : un acte réservé n'est alors servi qu'à une personne **connectée ET venue d'une adresse
+autorisée** — c'est ce qui permet de montrer les **actes internes** au recueil pour qui travaille
+dans l'intranet, sans les donner au public.
+
+**Restreindre l'atelier à un réseau.** L'espace public est ouvert à tout le monde ; l'**atelier**
+peut, lui, n'être ouvert qu'à certains réseaux — l'intranet d'une commune, par exemple. Le réglage
+(lui aussi dans **Administration › Publication › Accès à l'atelier**) est une **liste d'adresses**,
+une par ligne ou séparées par des virgules : une adresse (`10.0.0.24`), un préfixe CIDR
+(`192.168.0.0/16`, `2001:db8::/32`), un champ (`10.0.0.0-10.0.0.255`) ou une plage abrégée
+(`10.0.0.*`) ; un `#` ouvre un commentaire. **Vide, la liste ouvre l'atelier à toutes les
+adresses** ; renseignée, elle est la **seule porte**.
+
+La décision appartient au **service**, jamais au navigateur : c'est lui qui voit l'adresse de
+l'appelant, et une adresse annoncée par le client ne prouve rien. Le service applique la règle à
+**toutes les routes de l'atelier** (`/v1/db/…`, `/v1/actes/…`, `/v1/signatures/…`, `/v1/auth/…`) :
+depuis une adresse non autorisée, elles répondent **`403 atelier_hors_reseau`**, et l'écran du
+navigateur affiche « hors réseau » — un écran qui **n'ouvre rien** et rappelle que le recueil
+public, lui, reste accessible. La variable **`SCRIBA_ATELIER_IPS`** du `.env` **l'emporte** sur ce
+qui est écrit dans l'interface (`SCRIBA_ATELIER_MESSAGE` fait de même pour le message) : c'est le
+recours quand on s'est **fermé la porte à soi-même**. Une liste **entièrement illisible** n'ouvre
+pas l'atelier : elle le **ferme** (mieux vaut fermer devant une liste fautive que l'ouvrir à tout le
+monde), et une entrée incomprise est **signalée** dans l'écran, jamais ignorée. L'écran
+d'administration montre l'**état** tel que le service le voit, laisse **écrire** la liste, et
+**simule** une adresse (« et si j'arrivais de là ? ») — `GET /v1/atelier/acces`, route **publique**
+et sans secret, qui accepte un paramètre `ip` de simulation. Une installation auto-hébergée peut
+poser une **seconde barrière** devant `/atelier` au niveau de nginx (`location /atelier`, directives
+`allow`/`deny` livrées en commentaire — voir `../server/nginx.conf`) : le service applique déjà la
+règle, celle-ci est facultative.
 
 **Abrogations et versions, ce que le recueil montre.** Un acte publié ne se supprime pas : il
 **s'abroge**, par un acte nouveau qui le vise. Sauf réglage contraire, la page d'un acte rend
@@ -1073,6 +1207,89 @@ joignable **depuis l'extérieur**, en HTTPS, et la convention avec le prestatair
 format de cette notification (l'application accepte le retour signé et **revérifie l'empreinte**
 du document avant de le tenir pour signé).
 
+### 5.5 septies Le bulletin (ou Journal) des actes
+
+Le recueil publie ses actes **au fil de l'eau** : chacun a son adresse, et l'on y arrive par la
+recherche, par l'ELI, ou par le flux d'actualité. Le **bulletin** fait l'inverse : il **rassemble**
+les actes publiés sur une **période**, les classe **par entité puis par thématique**, leur donne un
+**numéro**, et le diffuse. C'est le Journal officiel (ou Bulletin officiel) de la collectivité —
+utile quand les actes se lisent par « séance », « marché » ou « trimestre », et quand le public
+attend un rendez-vous régulier plutôt qu'un fil continu.
+
+**Où cela se règle.** *Administration › Bulletin* (le réglage vit aussi dans le référentiel, sous
+`config.publication.bulletin`, et peut être posé par le `.env` — voir § 5.2 : `SCRIBA_BULLETIN_*`).
+Un déploiement qui ne pose rien laisse le bulletin **éteint** : c'est une décision
+d'administration, pas un défaut. Tant qu'il est éteint, **ses adresses n'existent pas** — la
+sous-page du recueil répond `404`, le flux aussi, l'abonnement est fermé : on ne promet pas une
+page qu'on ne peut pas servir.
+
+**La cadence.** Elle découpe le temps en périodes, et le bulletin paraît à la **clôture** de
+chacune :
+
+| Cadence | Périodes |
+| --- | --- |
+| `quotidienne` | un jour |
+| `hebdomadaire` | lundi → dimanche |
+| `bimensuelle` | 1er → 15, puis 16 → fin de mois (deux numéros par mois) |
+| `mensuelle` | le mois civil |
+| `bimestrielle`, `trimestrielle`, `semestrielle`, `annuelle` | deux mois, un trimestre, un semestre, l'année civile |
+| `personnalisee` | toutes les N unités (jours, semaines, mois, années), **ancrée** sur une date de départ |
+
+**Jour de parution** : le jour du mois où le numéro paraît, une fois sa période close (`0` : dès le
+premier jour permis). Un numéro paraît **seulement s'il y a des actes** : une période sans
+publication ne donne **aucun bulletin** — pas de numéro vide, et la numérotation ne « saute » donc
+pas d'un cran pour rien, puisque c'est le rang des numéros **parus** qui compte.
+
+**Ce que voit le public.** Une **sous-page par numéro** (`/recueil/bulletins/<période>`) : les
+entités, leurs thématiques, les actes avec leur numéro, leur objet, leur date de publication, leur
+opposabilité et leurs représentations (`.json`, `.md`, `.txt`) ; un **sommaire** des numéros parus
+(`/recueil/bulletins`) ; un **flux RSS et Atom** (`/recueil/bulletins.rss`, `.atom`) ; et, si le
+service a un serveur SMTP et une adresse publique (voir plus bas), l'**abonnement par courriel**. La
+page d'accueil du recueil affiche les derniers numéros, et le pied de page renvoie au bulletin. Tous
+ces formats sont **sans JavaScript** : un lecteur de flux, un moteur de recherche ou un simple
+navigateur y accède directement.
+
+**L'abonnement par courriel, et les données personnelles.** L'inscription demande **deux gestes** :
+la personne saisit son adresse, le service lui adresse un **courriel de confirmation**, et
+l'abonnement ne prend effet qu'une fois le lien de ce courriel **ouvert** (double consentement).
+Chaque numéro porte un lien de **désabonnement** en un clic, et le tableau de bord permet de
+**retirer** un abonné. Le service ne conserve que l'adresse, le nom **facultatif**, les dates et
+l'état (en attente, confirmé, retiré) : l'adresse ne sert qu'à l'envoi du bulletin et n'est
+transmise à personne ; les fiches **retirées** sont élaguées les premières, et la liste des abonnés
+n'est **jamais** exposée par les adresses publiques (le recueil ne dit ni qui est inscrit, ni même
+si une adresse donnée l'est déjà : une adresse déjà confirmée reçoit simplement un nouveau courriel
+de confirmation). Les bornes du service sont `SCRIBA_BULLETIN_MAX_ABONNES` (défaut 2000) et
+`SCRIBA_BULLETIN_ENVOIS_PASSE` (défaut 40 courriels par passe, une livraison refusée étant
+réessayée trois fois).
+
+**Ce qu'il faut au service pour envoyer.** Deux choses, et l'écran le dit quand elles manquent :
+un **serveur SMTP** (`SMTP_HOST`, § 5.5 quinquies) et l'**adresse publique du recueil**
+(`SCRIBA_PUBLIQUE_URL`, par exemple `https://actes.exemple.fr`). La seconde est nécessaire parce que
+le service, quand il compose **seul** — la nuit, sans navigateur —, ne voit pas l'adresse du
+lecteur : c'est cette adresse qui donne leurs liens aux numéros adressés par courriel et au flux.
+Sans elle, l'abonnement n'est pas ouvert, le tableau de bord l'annonce, et les demandes déjà
+enregistrées **attendent** — elles ne sont pas perdues.
+
+**La passe de service.** Le bulletin ne dépend pas d'un clic : à chaque **démarrage**, puis toutes
+les `SCRIBA_BULLETIN_INTERVALLE_MIN` minutes (défaut 10), le service clôt les périodes échues,
+compose les numéros, puis vide la **file d'envoi** par petits paquets
+(`SCRIBA_BULLETIN_ENVOIS_PASSE`). Un service arrêté une semaine rattrape donc son retard seul, et un
+service lent étale ses envois au lieu de bloquer ses gestionnaires. La mise en service remonte à la
+plus ancienne publication détenue, **bornée à soixante périodes** et à `SCRIBA_BULLETIN_MAX`
+numéros conservés (défaut 60) : un recueil de dix ans ne fait pas paraître cent bulletins d'un coup.
+Le geste manuel *Administration › Bulletin › « Composer les numéros échus »* fait la même chose à la
+demande, et *« Voir un aperçu du numéro en cours »* montre le numéro **provisoire** de la période en
+cours — un numéro provisoire n'a **pas** d'adresse publique, et n'est jamais adressé : il devient
+définitif à la clôture.
+
+**Comment l'éprouver.** Ouvrez le bulletin, réglez la cadence, puis : (1) la page
+`/recueil/bulletins` montre la cadence, la **prochaine parution** et les numéros parus ; (2)
+`/recueil/bulletins.rss` se charge dans un lecteur de flux, et un numéro s'ouvre à son adresse ;
+(3) inscrivez une adresse d'essai, **ouvrez le lien du courriel de confirmation**, puis vérifiez que
+le tableau de bord compte un abonné **confirmé** ; (4) « Adresser aux abonnés » sur un numéro déjà
+paru suffit à éprouver la chaîne d'envoi sans attendre une clôture de période. Les échecs sont au
+**journal** (`sb_courriel`), avec leur motif.
+
 ### 5.6 Numérotation : séquence interne, ou service externe
 
 Par défaut, l'application tient elle-même la **séquence** des numéros d'acte
@@ -1150,11 +1367,25 @@ geste ne renumérote : un numéro attribué est un fait.
   `sb_journal.actor`, ce qui permet de savoir **quel client** a écrit.
 - **Prévoyez un jeton par usage** (l'application, un script de reprise, une supervision) :
   révoquer un jeton, c'est retirer une ligne de `API_TOKENS`.
+- **Clés d'API de l'application (comptes de service).** Un administrateur en crée aussi, à chaud,
+  depuis *Administration › Base de données* → « Créer une clé d'API » : chaque clé porte un
+  **rôle** (`lecteur`, `redacteur`, `editeur`, `administrateur`, `prestataire`) et un libellé. Elle
+  n'apparaît **nulle part** dans le référentiel — ni « Comptes et rôles », ni personnes, ni
+  annuaire : c'est un **compte de service**, remis à un script ou à un outil tiers. Le service n'en
+  conserve que l'empreinte SHA-256, et la valeur ne s'affiche qu'**une fois**, à la création. On les
+  **révoque** d'un clic ; le service refuse de révoquer la **dernière** clé d'administration
+  (`409 derniere_cle_admin`). Elles s'ajoutent aux jetons du `.env` **sans le modifier**.
+- **Journal d'audit du service.** `GET /v1/journal` rend un journal **append-only** dont chaque
+  ligne **scelle la précédente** par son empreinte SHA-256 : modifier une ligne rompt la chaîne, ce
+  que le champ `scelle` révèle. Les **2 000** dernières entrées sont conservées — exportez-le
+  régulièrement pour l'archiver hors du service.
 
-> En mode **comptes locaux** (`AUTH_MODE=password`), les jetons d'API ne sont **plus acceptés** :
-> c'est la session de l'agent qui porte l'autorisation, et une écriture sans session est refusée
-> (401). Un jeton écrit dans la page est public ; il ne peut pas protéger une donnée. `API_TOKENS`
-> peut donc rester vide dans ce mode.
+> En mode **comptes locaux** (`AUTH_MODE=password`), la **session** de l'agent porte
+> l'autorisation : une écriture sans session est refusée (401). Les **clés** restent néanmoins la
+> porte des **scripts** : une requête qui présente `Authorization: Bearer <clé>` — une clé d'API
+> créée dans l'application, ou un jeton de déploiement de `API_TOKENS` — est acceptée sans cookie,
+> et donc sans anti-CSRF. Un jeton écrit dans la page est public ; il ne peut pas protéger une
+> donnée. `API_TOKENS` peut donc rester vide dans ce mode.
 
 ### 6.1 bis Mots de passe et sessions
 
@@ -1230,14 +1461,18 @@ Ne placez **jamais** dans `src/`, `main.pjs`, `index.html` ou `config.js` : mot 
 base, clé privée, jeton de production durable, URL de suppression. Les secrets vivent dans
 `.env` (non versionné) et dans la configuration du serveur.
 
-**Le recueil public, lui, est public par destination.** La route `recueil` (`?recueil=1`,
-`?acte=<clé>`) ne demande aucun
+**Le recueil public, lui, est public par destination.** L'espace public est à la **racine** du site
+(`/`, `?acte=<clé>`, `?page=…`, `?info=<clé>`) et ne demande aucun
 compte : elle sert les actes **publiés** — et rien d'autre (ni brouillons, ni actes signés non
 publiés) — à quiconque atteint l'adresse. C'est le propre d'un recueil des actes administratifs.
 Si l'installation est exposée sur Internet, c'est donc le recueil qui est visible, avec les textes
 qui y ont été déposés : ne publiez que ce qui doit l'être (cf. § 3.4, trames non publiables), et
 n'oubliez pas que la **publication automatique** (§ 5.5) dépose les actes dès la signature —
-coupez-la si la publication doit passer par votre propre système. Le **recueil ouvert** (§ 5.5
+coupez-la si la publication doit passer par votre propre système. Un acte dont la publicité est
+restreinte se **réserve aux agents** (§ 5.5), et l'**atelier** — l'interface interne, sous
+`/atelier` — peut être **restreint au réseau de la collectivité** (`SCRIBA_ATELIER_IPS`, § 5.5) :
+c'est le moyen de tenir l'outil de travail hors d'Internet tout en laissant le recueil ouvert. Le
+**recueil ouvert** (§ 5.5
 bis) étend cette visibilité aux **moteurs de recherche** et aux **agents** : sur un déploiement
 auto-hébergé, le service expose `/robots.txt`, `/llms.txt`, `/sitemap.xml` et une adresse par
 acte, sans JavaScript. Tout ce qui est publié est donc **indexable** — ce qui est le but d'un
@@ -1293,24 +1528,24 @@ dans le `.env` du service, et le script serveur embarqué (démonstration) n'en 
 ### 7.1 Commandes courantes
 
 ```bash
-docker compose ps                  # état des trois services
+docker compose ps                  # état des quatre services (db, db-init, api, web)
 docker compose logs -f api         # journal du service
 docker compose restart api         # relance le service SANS relire le .env (les données sont en base)
 docker compose up -d --force-recreate api   # recrée le service : applique un .env modifié
-docker compose exec api node server.mjs --migrate   # appliquer schema.sql
+docker compose run --rm db-init             # aligne le compte sur DB_PASSWORD, APPLIQUE le schéma
+docker compose exec api node server.mjs --migrate   # appliquer schema.sql (compte déjà en règle)
 ```
 
-Le schéma s'applique **sans rien effacer** (`schema.sql` est idempotent). Si l'écran de
-connexion affiche `Table '…sb_record' doesn't exist`, la base répond mais n'a jamais reçu le
-schéma — le cas d'un dossier de données initialisé **avant** que `schema.sql` n'y soit monté
-(MariaDB ne rejoue ses scripts d'amorçage que sur un dossier vierge), ou d'une base externe
-fournie nue. La commande ci-dessus le corrige, `AUTO_MIGRATE=true` aussi (le temps d'un
-démarrage) ; `docker compose down -v`, lui, **efface** la base : il ne se justifie que si les
-données peuvent être perdues. **Recréez ensuite le service** (`docker compose up -d
---force-recreate api`) : le compte d'administration du `.env` n'est créé qu'au démarrage — sans
-cette recréation, la connexion répondra « aucun compte d'administration installé » alors que le
-`.env` est correct. Attention : `docker compose restart` **relance le conteneur sans relire le
-`.env`** ; seul `up -d` (qui recrée) applique un fichier modifié.
+Le schéma s'applique **sans rien effacer** (`schema.sql` est idempotent). Dans la pile Compose
+livrée, il s'applique **de lui-même au démarrage** (`AUTO_MIGRATE=true`) **et à chaque reprise de la
+base** : depuis la **1.5.3d**, un service qui a démarré avant que la base ne soit prête la rééprouve
+et se recharge tout seul — il n'y a donc pas à le recréer après avoir réparé le compte. Si, malgré
+cela, l'écran de connexion affiche `Table '…sb_record' doesn't exist`, la base répond mais n'a jamais
+reçu le schéma — le cas d'une base **externe** fournie nue, ou d'un `.env` qui porte
+`AUTO_MIGRATE=false`. La commande du haut (`db-init`) corrige **compte et schéma** d'un même geste.
+`docker compose down -v`, lui, **efface** la base : il ne se justifie que si les données peuvent être
+perdues. Attention : `docker compose restart` **relance le conteneur sans relire le `.env`** ; seul
+`up -d` (qui recrée) applique un fichier modifié.
 
 ### 7.2 Sonde de santé
 
@@ -1409,9 +1644,44 @@ connaître : 40 publications conservées et 80 circuits de signature (les plus a
 > d'archivage, NF Z42-013) relève de sa politique d'archivage et se traite **en dehors** de
 > Scribae : d'où l'export permanent des actes, de leurs originaux signés et du journal.
 
+### 7.5 bis Ce que le service tient (mesuré)
+
+`src/server/charge/` met le service à l'épreuve de postes simulés, à tous les rôles plus le
+public. Ce qui a été relevé sur le service lancé sur place, avec 60 actes, 25 trames et
+12 publications au recueil :
+
+| Charge | Résultat |
+|---|---|
+| 41 postes en saturation, sans temps de pensée | **3 200 requêtes/s**, aucune erreur |
+| 60 postes, connexions étalées sur 30 s | aucune attente notable (recueil à 1 ms au p99) |
+| 21 postes, tous les agents en enregistrement (`--ecriture pleine`) | aucune erreur, recueil à 2 ms |
+| 31 postes sur une base à 2 ms de latence | 1,3 ordre SQL par requête ; 24 % du temps en base |
+
+**Le réglage à connaître : `UV_THREADPOOL_SIZE`.** Le dérivé de mot de passe s'exécute sur le
+pool de fils de Node, qui compte **4 fils par défaut** : vingt agents qui se connectent dans la
+même minute attendent donc leur mot de passe en six vagues. Une collectivité où beaucoup
+d'agents arrivent à la même heure portera la valeur à **8 ou 16**, dans l'environnement de
+`api` (à côté de `DB_*`, dans `docker-compose.yml`) :
+
+```yaml
+  api:
+    environment:
+      UV_THREADPOOL_SIZE: "8"
+```
+
+C'est une variable de **Node**, pas de Scribae : elle est lue au lancement du processus et n'est
+pas modifiable ensuite. `SCRYPT_N` (le coût du dérivé) et cette valeur se règlent ensemble : le
+premier allonge chaque dérivation, la seconde décide combien avancent en parallèle.
+
+**Attention à la mémoire.** Un dérivé réclame `128 × SCRYPT_N × r` octets, soit **~64 Mio** aux
+valeurs par défaut — et les dérivés **en cours** se cumulent : 8 fils ≈ 512 Mio, 16 fils ≈ 1 Gio,
+en plus du service, de la façade et de la base. Une petite machine gagnera à baisser `SCRYPT_N`
+plutôt qu'à ouvrir le pool. Le détail des mesures, les scénarios et ce qui reste ouvert sont dans
+[`docs/PERFORMANCE.md`](PERFORMANCE.md).
+
 ### 7.6 La démonstration publique n'est pas un service
 
-La démonstration publique (<https://aplds.github.io/scribae>) est une **édition statique** :
+La démonstration publique (<https://demo.scribae.eu>) est une **édition statique** :
 la page est servie par **GitHub Pages**, sans aucun serveur applicatif. Les deux services que
 l'application attend sont alors fournis **dans le navigateur** (`src/pages/host.js`) — un
 stockage `IndexedDB`, et le service de signature et de publication **embarqué**, relu depuis
@@ -1432,6 +1702,16 @@ stockage `IndexedDB`, et le service de signature et de publication **embarqué**
    existe **ni sauvegarde ni restauration** (elles existent, elles, ci-dessus, § 8) ;
 3. **il n'y a pas d'accès SMTP** : les notifications par courriel y sont constatées « non
    envoyées », avec leur motif.
+
+**L'adresse décide du stockage.** Le stockage d'un navigateur est attaché à l'**origine** du
+site — son adresse. Une même démonstration servie sous **deux adresses** (le domaine du dépôt et
+l'adresse `*.github.io` de GitHub, par exemple) constitue donc **deux installations distinctes** :
+chacune a son référentiel, ses actes et ses publications, et un visiteur qui passe d'une adresse à
+l'autre **ne retrouve pas son travail**. C'est pourquoi la démonstration publiée par les auteurs
+du logiciel **fixe son adresse** par un fichier `CNAME` à la racine du dépôt
+(`demo.scribae.eu`), et pourquoi il faut **communiquer une seule adresse** — celle-là. Servir la
+même page sous un second nom ne partage rien : pour un état réellement partagé entre postes, il
+faut le service (§ 1).
 
 La démonstration sert à essayer, à montrer et à former — jamais à conserver.
 
@@ -1474,8 +1754,9 @@ sauvegarde mensuelle de longue durée, copie hors site.
 
 1. Sauvegarder la base (§ 8) ;
 2. remplacer le dossier de l'application (le code) — dans un clone du dépôt : `git pull` ;
-3. `docker compose up -d --build` ;
-4. `docker compose exec api node server.mjs --migrate` si le schéma a changé ;
+3. `docker compose up -d --build` (le service `db-init` repose le compte et applique le schéma) ;
+4. `docker compose exec api node server.mjs --migrate` si l'on a mis `AUTO_MIGRATE=false` et que
+   le schéma a changé ;
 5. vérifier `/v1/db/health` et ouvrir l'application.
 
 Les mises à jour **ne touchent pas** aux données : la synchronisation est incrémentale et les
@@ -1522,14 +1803,16 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
 | Symptôme | Cause probable | Remède |
 |---|---|---|
 | Bandeau « base hors ligne » | service injoignable | vérifier `docker compose ps` ; l'application continue sur son miroir local, les écritures sont mises en file |
-| « Aucun compte d'administration installé » **alors que** `ADMIN_LOGIN` et `ADMIN_PASSWORD` sont renseignés | le compte n'a pas pu être **créé** : soit la table des comptes n'existe pas (schéma non appliqué) — l'écran le dit comme une panne de base, remède compris —, soit le mot de passe **reçu par le service** ne respecte pas la politique (le journal donne le motif exact) | appliquer le schéma puis **recréer** le service (`docker compose up -d --force-recreate api`) ; l'amorçage n'a lieu qu'au démarrage |
+| « Aucun compte d'administration installé » **alors que** `ADMIN_LOGIN` et `ADMIN_PASSWORD` sont renseignés | le compte n'a pas pu être **créé** : soit la table des comptes n'existe pas (schéma non appliqué) — l'écran le dit comme une panne de base, remède compris —, soit le mot de passe **reçu par le service** ne respecte pas la politique (le journal donne le motif exact) | appliquer le schéma d'un geste qui répare aussi le compte (`docker compose run --rm db-init`) : depuis la **1.5.3d**, le service **réamorce lui-même** le compte dès que la base répond ; sur une version antérieure, recréez le service (`docker compose up -d --force-recreate api`), l'amorçage n'ayant lieu qu'au démarrage |
+| `Table '…sb_record' doesn't exist` sur l'écran de connexion | la base répond, mais le **schéma** n'y a jamais été appliqué à CETTE base : le service a démarré avant que le compte ne soit réparé (`AUTO_MIGRATE` ne court qu'au démarrage), ou la base est **externe** et reçue nue, ou le `.env` porte `AUTO_MIGRATE=false` | un seul geste répare compte **et** schéma : `docker compose run --rm db-init` (`schema.sql` est idempotent et **n'efface rien**). Depuis la **1.5.3d**, le service rééprouve la base et se recharge **de lui-même** — le bandeau disparaît sans qu'on recrée le conteneur |
 | Une valeur refusée au démarrage (« RÉGLAGE DE SERVICE REFUSÉ », « REFUSÉE ») qui **ne correspond pas** au `.env` | le conteneur a gardé l'environnement de sa **création** : `docker compose restart` relance le même conteneur sans relire le `.env` | `docker compose config` (ce que compose calcule, `.env` compris), `docker compose exec api env \| grep SCRIBA_` (ce que le conteneur porte), puis `docker compose up -d --force-recreate api` |
 | Message de conflit en enregistrant | un autre poste a modifié le même objet | la version de la base a été reprise ; ressaisir la modification |
 | Écritures qui ne partent pas | jeton refusé (401/403) en mode à jeton | corriger le jeton dans le réglage du poste ; ces refus ne sont pas mis en file |
 | Écritures refusées **alors que les lectures passent**, et pastille « base : erreur » à chaque geste | le poste se présente avec un **jeton** là où le service attend une **session** (mode « mot de passe ») : l'écriture part sans l'anti-CSRF, et le service la refuse (`csrf_invalide`). Cas d'un `.env` muet sur `AUTH_MODE` : le navigateur n'est alors prévenu de rien | `docker compose logs web` dit le mode annoncé (« mode : password » ou « mode : référentiel ») ; poser `AUTH_MODE=password` dans le `.env` puis **recréer** le service `web`. Une application à jour (**1.3.2** et au-delà) reprend d'elle-même le mode que le service annonce, sans ce réglage |
 | Captures / guides sans images | ressources distantes bloquées | vérifier l'accès réseau aux images du guide |
-| L'application ne charge pas (page inaccessible) | conteneur `web` arrêté, ou `src/` mal monté côté `web` | `docker compose ps` (les trois services doivent être *running*) et `docker compose logs web` ; `APP_DIR` doit désigner le dossier qui contient `src/` et `index.html`. Le service d'API, lui, peut être en refus de base sans empêcher la page de s'afficher |
-| `Access denied for user 'scriba'@…` après avoir modifié le `.env` | le mot de passe **en base** est celui de la **création** du dossier de données : changer `DB_PASSWORD` ne le change pas après coup (voir § 7.1 et le § 9 de `../server/README.md`) | remettre l'ancien `DB_PASSWORD`, ou repartir d'un dossier de données vierge (`docker compose down -v && docker compose up -d`) si les données peuvent être perdues |
+| L'application ne charge pas (page inaccessible) | conteneur `web` arrêté, ou façade construite sur un code périmé | `docker compose ps` (les quatre services : `db`, `db-init` — *exited (0)*, c'est normal —, `api` et `web`) et `docker compose logs web` ; le code est **dans l'image de la façade** : après une mise à jour du dépôt, `docker compose up -d --build web`. Le service d'API, lui, peut être en refus de base sans empêcher la page de s'afficher |
+| `web` en boucle, `find: /docker-entrypoint.d/40-scriba-web.sh: Permission denied` puis `[emerg] open() "/etc/nginx/conf.d/default.conf" failed (13: Permission denied)` | la machine **refuse au conteneur la lecture des fichiers montés depuis l'hôte** (SELinux, AppArmor, système de fichiers réseau, espace de noms d'utilisateurs) : `stat` lui-même est refusé, `root` dans le conteneur n'y peut rien | depuis la **1.5.3b**, la pile ne monte plus aucun fichier de l'hôte (tout est construit dans l'image) : mettre le dépôt à jour, puis `docker compose build --pull && docker compose up -d`. Sur une version antérieure : `:z` sur les montages de `web`, ou l'**image autonome** (`../docs/DOCKER.md`), qui n'en exige aucun |
+| `Access denied for user 'scriba'@…` après avoir modifié le `.env` | le compte applicatif **en base** porte encore l'ancien mot de passe : MariaDB ne le pose qu'au premier démarrage du dossier de données. La pile le repose elle-même à chaque démarrage (service `db-init`, voir § 7.1 et le § 9 de `../server/README.md`) — si l'erreur dure, `db-init` n'a pas pu le faire : c'est le mot de passe **root** qui a changé, et lui n'est posé qu'à la création | `docker compose logs db-init` (il dit pourquoi), puis `docker compose run --rm db-init` pour réessayer (il repose le compte **et** applique le schéma). Mot de passe root perdu : repartir d'un dossier de données vierge (`docker compose down -v && docker compose up -d`), si les données peuvent être perdues |
 | Plus personne ne peut se connecter après avoir branché l'annuaire | fournisseur injoignable, ou adresse de retour refusée | ouvrir la **porte de secours** de l'écran de connexion (« L'annuaire est injoignable ? ») pour revenir aux comptes de l'application, puis corriger le réglage |
 | « Découverte impossible » dans Administration › Annuaire | découverte bloquée (réseau, CORS) | saisir les points de terminaison à la main, et autoriser l'adresse de l'application chez le fournisseur |
 | « Jeton d'identité refusé » à la connexion | émetteur, audience, horloge ou signature | lire l'encart de contrôle affiché après une connexion : il nomme le contrôle en échec |
@@ -1545,8 +1828,9 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
   non public. Il reste à faire : réinitialisation du mot de passe par l'agent, second facteur
   (TOTP), journal des connexions, et purge planifiée des sessions.
 - **Signature non qualifiée** — prestataire simulé (§ 6.6).
-- **PDF/A certifié** — le PDF s'obtient par impression du HTML ; la chaîne PDF/A reste à
-  valider (veraPDF).
+- **Export PDF/A** — la chaîne est **livrée** (`src/lib/pdfa.js` : PDF/A-2b et PDF/A-1b, polices
+  et profil sRGB embarqués, métadonnées, langue, identifiant ELI) ; il reste à en faire valider la
+  **conformité par `veraPDF`** sur un déploiement.
 - **Fusion par champ** — un conflit est résolu « la base gagne » ; une fusion par champ (par
   horodatage) serait plus juste pour les objets longs.
 - **Journal lisible dans l'application** — le **journal d'audit de l'application** est

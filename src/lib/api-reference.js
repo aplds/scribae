@@ -27,12 +27,13 @@
 // puis la porte (authentification), puis les données, puis le domaine.
 export const GROUPES_API = [
   { id: "service", label: "Service", resume: "Santé du service et description machine (OpenAPI)." },
-  { id: "autorisation", label: "Autorisation", resume: "Les clés d'API et leurs rôles, le journal d'audit." },
+  { id: "autorisation", label: "Autorisation", resume: "Le provisionnement du service, les clés d'API et leurs rôles, le journal d'audit." },
   { id: "comptes", label: "Comptes et sessions", resume: "Le mode d'authentification, l'ouverture de session, les mots de passe locaux." },
   { id: "persistance", label: "Persistance partagée", resume: "Les collections du référentiel, enregistrement par enregistrement." },
   { id: "actes", label: "Actes", resume: "Dépôt des actes finalisés, suivi, dossier interne." },
   { id: "signature", label: "Signature", resume: "Circuits de signature, notification du prestataire, circuits externes." },
   { id: "publication", label: "Publication et ELI", resume: "Recueil public, identifiants persistants, retrait et épinglage." },
+  { id: "bulletins", label: "Bulletins", resume: "Le Journal des actes : numéros par période, abonnés et flux." },
   { id: "courriel", label: "Courriel", resume: "État du service SMTP et envoi de notifications." },
   { id: "site", label: "Adresses publiques du site", resume: "Recueil, robots, plan de site — hors /v1/." },
 ];
@@ -83,18 +84,38 @@ export const API_REFERENCE = [
 
   // ====================================================== Autorisation
   {
+    id: "autorisation-etat", groupe: "autorisation", methode: "GET", chemin: "/v1/auth/etat", auth: "public",
+    resume: "État de l'autorisation du service",
+    service: "plateforme",
+    description: "Route PUBLIQUE : dit si le service est administrable (`provisionne` — soit une session l'administre, soit il a reçu sa première clé), les rôles que peuvent porter les clés, et par quel mode il s'administre (`session` en mode « mot de passe » ou par annuaire, `service` quand il faut déposer la première clé). N'apprend rien des clés elles-mêmes.",
+    reponses: [{ code: 200, description: "{ provisionne, roles, mode }" }],
+    champs: [
+      { cle: "provisionne", type: "booléen", description: "Le service est-il administrable ?" },
+      { cle: "mode", type: "string", description: "session | service" },
+      { cle: "roles", type: "array", description: "Les rôles qu'une clé peut porter" },
+    ],
+  },
+  {
+    id: "autorisation-bootstrap", groupe: "autorisation", methode: "POST", chemin: "/v1/auth/bootstrap", auth: "public",
+    resume: "Provisionner le service (première clé)",
+    service: "plateforme",
+    description: "Geste d'INSTALLATION : dépose la PREMIÈRE clé d'administration d'un service neuf, quand il n'en a encore aucune. Une seule fois — un service déjà pourvu répond 409 `service_deja_provisionne`. La clé est tirée par le client ; le service n'en conserve que l'empreinte SHA-256.",
+    corps: { cle: "<clé tirée au hasard, 32 caractères ou plus>", label: "Administrateur", role: "administrateur" },
+    reponses: [{ code: 201, description: "Service provisionné" }, { code: 409, description: "Déjà provisionné (service_deja_provisionne)" }, { code: 422, description: "Clé trop courte (cle_trop_courte)" }],
+  },
+  {
     id: "cles-lister", groupe: "autorisation", methode: "GET", chemin: "/v1/auth/cles", auth: "administrateur",
     resume: "Lister les clés d'API",
     service: "plateforme",
-    description: "Les clés d'API que le service accepte : leur libellé, leur rôle, et l'empreinte — jamais la clé elle-même, que le service ne connaît pas (c'est le client qui la tire, et n'en transmet que l'empreinte SHA-256).",
+    description: "Les clés d'API que le service accepte : leur identifiant, leur libellé, leur rôle et leur date de création — jamais la valeur, ni l'empreinte (c'est le client qui tire la clé, et n'en transmet que l'empreinte SHA-256). Ces clés sont des COMPTES DE SERVICE : elles n'apparaissent nulle part dans le référentiel.",
     reponses: [{ code: 200, description: "Les clés" }, { code: 403, description: "Rôle administrateur requis" }],
   },
   {
     id: "cles-creer", groupe: "autorisation", methode: "POST", chemin: "/v1/auth/cles", auth: "administrateur",
     resume: "Créer une clé d'API",
     service: "plateforme",
-    description: "Enregistre une clé (son empreinte) et son rôle. Le rôle `prestataire` n'ouvre que la notification de signature.",
-    corps: { cle: "<empreinte sha256 de la clé>", role: "redacteur", label: "Intégration intranet" },
+    description: "Enregistre une clé (son empreinte SHA-256) et son rôle. Le rôle commande les routes que la clé ouvre : `lecteur` ne peut pas publier, `redacteur` ne peut pas gérer les clés, `prestataire` n'ouvre que la notification de signature.",
+    corps: { cle: "<la clé, 32 caractères ou plus — le service n'en garde que l'empreinte>", role: "redacteur", label: "Intégration intranet" },
     reponses: [{ code: 201, description: "Clé créée" }, { code: 422, description: "Clé trop courte (cle_trop_courte)" }],
   },
   {
@@ -102,7 +123,7 @@ export const API_REFERENCE = [
     resume: "Révoquer une clé",
     service: "plateforme",
     params: [{ nom: "id", type: "string", description: "Identifiant de la clé" }],
-    reponses: [{ code: 200, description: "Clé révoquée" }, { code: 404, description: "Clé inconnue" }],
+    reponses: [{ code: 200, description: "Clé révoquée" }, { code: 404, description: "Clé inconnue" }, { code: 409, description: "Dernière clé d'administration (derniere_cle_admin)" }],
   },
   {
     id: "journal", groupe: "autorisation", methode: "GET", chemin: "/v1/journal", auth: "administrateur",
@@ -395,7 +416,78 @@ export const API_REFERENCE = [
     reponses: [{ code: 200, description: "Service purgé" }, { code: 400, description: "Confirmation absente (confirmation_absente)" }],
   },
 
-  // ============================================================= Courriel
+  // ============================================================= Bulletins
+  // Le BULLETIN (ou Journal) rassemble les actes publiés par PÉRIODE et les
+  // diffuse : une sous-page du recueil par numéro, un flux RSS/Atom, un courriel
+  // aux abonnés. Il n'existe que si l'administration l'a allumé (voir
+  // src/server/mysql/bulletins.mjs) ; éteint, ces routes répondent 404.
+  {
+    id: "bulletin-etat", groupe: "bulletins", methode: "GET", chemin: "/v1/bulletins", auth: "public",
+    resume: "État public du bulletin",
+    description: "L'état du bulletin tel qu'un lecteur le voit : ouvert ou non, titre, cadence, prochaine parution, bulletins parus et — si le service a un serveur SMTP ET une adresse publique déclarée — l'ouverture de l'abonnement par courriel. Aucun abonné n'y figure.",
+    reponses: [{ code: 200, description: "{ actif, titre, cadence, prochaine, bulletins, abonnement }" }],
+  },
+  {
+    id: "bulletin-lire", groupe: "bulletins", methode: "GET", chemin: "/v1/bulletins/{id}", auth: "public",
+    resume: "Lire un bulletin",
+    description: "Un numéro : son titre, sa période, son rang dans l'année, et ses actes classés par entité puis par thématique. Un numéro provisoire (la période en cours) n'est pas servi ici.",
+    params: [{ nom: "id", type: "string", description: "Identifiant du bulletin (sa date de début, « 2026-09-01 »)" }],
+    reponses: [{ code: 200, description: "Le bulletin" }, { code: 404, description: "Bulletin inconnu (bulletin_inconnu)" }],
+  },
+  {
+    id: "bulletin-abonner", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/abonnement", auth: "public",
+    resume: "Demander l'abonnement au bulletin",
+    description: "Enregistre une demande d'abonnement et adresse un courriel de CONFIRMATION (double consentement) : l'abonnement ne prend effet qu'une fois le lien du message ouvert. La réponse ne dit JAMAIS si l'adresse était déjà inscrite. La page publique du bulletin poste ici depuis un vrai formulaire (`application/x-www-form-urlencoded`), mais l'API attend du JSON.",
+    corps: { courriel: "lecteur@exemple.fr", nom: "Camille Dupont" },
+    reponses: [
+      { code: 202, description: "Demande enregistrée, courriel de confirmation adressé" },
+      { code: 409, description: "Le bulletin n'est pas ouvert sur ce recueil" },
+      { code: 422, description: "Adresse électronique invalide" },
+      { code: 507, description: "Le nombre maximal d'abonnés est atteint" },
+    ],
+  },
+  {
+    id: "bulletin-confirmer", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/abonnement/confirmation", auth: "public",
+    resume: "Confirmer un abonnement",
+    description: "Le jeton reçu par courriel. Un jeton inconnu répond 404 sans rien révéler de l'existence d'une fiche.",
+    corps: { jeton: "…" },
+    reponses: [{ code: 200, description: "Abonnement confirmé" }, { code: 404, description: "Jeton inconnu" }],
+  },
+  {
+    id: "bulletin-desabonner", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/abonnement/desabonnement", auth: "public",
+    resume: "Se désabonner du bulletin",
+    description: "Le jeton de désabonnement — propre à chaque abonné, et présent au bas de chaque message. Les livraisons encore en file pour cette personne sont retirées dans le même geste.",
+    corps: { jeton: "…" },
+    reponses: [{ code: 200, description: "Désabonnement enregistré" }, { code: 404, description: "Jeton inconnu" }],
+  },
+  {
+    id: "bulletin-tableau", groupe: "bulletins", methode: "GET", chemin: "/v1/bulletins/administration/tableau", auth: "editeur",
+    resume: "Tableau de bord du bulletin",
+    description: "L'état vu par l'administration : réglages effectifs, cadences possibles, période en cours et prochaine parution, abonnés (avec leurs liens de désabonnement), file d'envoi en attente, dernières passes, état du serveur SMTP et adresses des flux.",
+    reponses: [{ code: 200, description: "Le tableau de bord" }],
+  },
+  {
+    id: "bulletin-generer", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/administration/generer", auth: "editeur",
+    resume: "Composer les bulletins échus",
+    description: "Déclenche la passe : elle clôt les périodes échues, compose les numéros qui ont des actes (une période sans publication ne donne pas de bulletin) et vide la file d'envoi. `{ \\\"enCours\\\": true }` recompose en plus la période EN COURS à titre PROVISOIRE, pour la relire avant parution — un numéro provisoire n'est jamais adressé aux abonnés.",
+    corps: { enCours: false },
+    reponses: [{ code: 200, description: "La passe, et les numéros composés" }],
+  },
+  {
+    id: "bulletin-envoyer", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/{id}/envoyer", auth: "editeur",
+    resume: "Adresser un bulletin aux abonnés",
+    description: "Met le numéro en file pour chaque abonné CONFIRMÉ et vide la file tout de suite, sans attendre la passe suivante. Un numéro provisoire ne s'envoie pas (bulletin_provisoire) : les abonnés reçoivent le numéro définitif, à la clôture.",
+    params: [{ nom: "id", type: "string", description: "Identifiant du bulletin" }],
+    reponses: [{ code: 200, description: "Bulletin mis en file, livraisons tentées" }, { code: 409, description: "Bulletin provisoire" }],
+  },
+  {
+    id: "bulletin-retirer-abonne", groupe: "bulletins", methode: "POST", chemin: "/v1/bulletins/abonnes/{id}/retirer", auth: "administrateur",
+    resume: "Retirer un abonné",
+    description: "Le geste d'administration : retirer une adresse du bulletin sans attendre qu'elle se désabonne elle-même.",
+    params: [{ nom: "id", type: "string", description: "Identifiant de l'abonné" }],
+    reponses: [{ code: 200, description: "Abonné retiré" }, { code: 404, description: "Abonné inconnu (abonne_inconnu)" }],
+  },
+
   {
     id: "courriel-etat", groupe: "courriel", methode: "GET", chemin: "/v1/courriel", auth: "lecteur",
     resume: "État du service de courriel",
@@ -451,6 +543,25 @@ export const API_REFERENCE = [
     description: "Le plan de site, engendré depuis les publications : chaque acte publié y figure avec son adresse.",
     reponses: [{ code: 200, description: "Le plan de site" }],
   },
+  {
+    id: "site-bulletins", groupe: "site", methode: "GET", chemin: "/recueil/bulletins", auth: "public",
+    resume: "Les bulletins parus",
+    description: "La page HTML des bulletins : le sommaire des numéros, la cadence, la prochaine parution, et le formulaire d'abonnement — un vrai formulaire, qui fonctionne sans JavaScript en postant sur `/recueil/bulletins/abonnement`. Elle rend 404 si le bulletin est éteint.",
+    reponses: [{ code: 200, description: "La page des bulletins" }, { code: 404, description: "Bulletin non ouvert" }],
+  },
+  {
+    id: "site-bulletin", groupe: "site", methode: "GET", chemin: "/recueil/bulletins/{id}", auth: "public",
+    resume: "Un bulletin, en ligne",
+    description: "Un numéro, en HTML : les entités, leurs thématiques, les actes et leurs liens. Les extensions `.json`, `.md` et `.txt` rendent les mêmes données dans les autres formats.",
+    params: [{ nom: "id", type: "string", description: "Identifiant du bulletin" }],
+    reponses: [{ code: 200, description: "Le bulletin" }, { code: 404, description: "Bulletin inconnu" }],
+  },
+  {
+    id: "site-bulletins-rss", groupe: "site", methode: "GET", chemin: "/recueil/bulletins.rss", auth: "public",
+    resume: "Le flux du bulletin (RSS 2.0)",
+    description: "Une entrée par numéro — c'est la PARUTION que l'on suit, pas l'acte. `.atom` rend le même fil en Atom 1.0.",
+    reponses: [{ code: 200, description: "Le flux" }, { code: 404, description: "Bulletin non ouvert" }],
+  },
 ];
 
 export const OPERATION = Object.fromEntries(API_REFERENCE.map((o) => [o.id, o]));
@@ -486,6 +597,9 @@ export const CODES_ERREUR = [
   { code: "prestataire_indisponible", sens: "Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse)." },
   { code: "circuit_non_externe", sens: "L'acte ne suit pas le circuit externe." },
   { code: "publication_inconnue", sens: "Aucune publication ne porte cette clé." },
+  { code: "bulletin_inconnu", sens: "Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique)." },
+  { code: "bulletin_provisoire", sens: "Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés." },
+  { code: "abonne_inconnu", sens: "Aucun abonné au bulletin ne porte cet identifiant." },
   { code: "date_publication_anterieure", sens: "La date de publication précède la date de signature." },
   { code: "base_indisponible", sens: "La base de données ne répond pas : l'état du service n'est pas lisible." },
   { code: "etat_non_ecrit", sens: "Le service n'a pas pu écrire son état (disque, base)." },

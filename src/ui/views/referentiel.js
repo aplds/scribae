@@ -1,4 +1,4 @@
-import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour } from "../state.js";
+import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, oublierBulletinsRecueil } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
 import { download, pickFile, uid, formatDate, todayIso, copyText } from "../../lib/util.js";
 import * as cles from "../../lib/cles-service.js";
@@ -11,13 +11,20 @@ import { abrogationVocab } from "../../lib/abrogations.js";
 import { newService, newBureau } from "../../lib/scope.js";
 import { ENTITY_KINDS, newEntite } from "../../lib/organigramme.js";
 import { newConseil } from "../../lib/conseils.js";
-import { newCircuit, newStep, STEP_ROLES, STEP_KINDS, natureEtape, etapeDefauts } from "../../lib/validation.js";
+import { newCircuit, newStep, STEP_ROLES, STEP_KINDS, STEP_TARGETS, natureEtape, etapeDefauts, etapeCible } from "../../lib/validation.js";
 import { newCompetence, competenceLabel } from "../../lib/revision.js";
 import { DELAIS_DEFAUT } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE } from "../../lib/legalite.js";
 import { publicationSettings } from "../../lib/eli.js";
+import { chargerAcces, acces, CLE_IPS, CLE_MESSAGE, MESSAGE_DEFAUT } from "../../lib/atelier-acces.js";
+import { VARIABLES_CSS, EXEMPLE_CSS, PORTEE_CSS } from "../../lib/informations.js";
 import { TYPES_RECUEIL_EXTERNE, newRecueilExterne, RENVOIS_RECOMMANDES, MENTIONS_PUBLIQUES, MENTIONS_DEFAUT, mentionsParDefaut } from "../../lib/recueil.js";
 import { LICENCE_DEFAUT } from "../../lib/recueil.js";
+import {
+  CADENCES_BULLETIN, UNITES_BULLETIN, bulletinReglages, normaliserCadence, libelleCadence,
+  adresseBulletins, adresseFluxBulletin,
+} from "../../lib/bulletins.js";
+import * as bs from "../../lib/bulletins-service.js";
 import {
   signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, MODES_TRAME, trameModeLabel,
   circuitPour, circuitsDisponibles, modeLabel,
@@ -169,6 +176,29 @@ export function renderReferentiel(root) {
           c.brand.demoText = v; save();
           const live = document.querySelector(".app-demo__text");
           if (live) live.textContent = v.trim() || DEMO_TEXT;
+        },
+      }),
+    ));
+    // LA MENTION DE L'ÉDITEUR DU LOGICIEL. Elle vit dans les trois pieds de page —
+    // recueil public, atelier, écran de connexion (voir src/ui/mention.js). Le
+    // réglage est ici, avec la marque, parce que c'est une affaire d'identité :
+    // une collectivité a sa charte, et le recueil peut être intégré dans un
+    // portail qui porte déjà la mention.
+    body.appendChild(card("Mention de l'éditeur du logiciel",
+      "Les pieds de page portent « Propulsé par Scribae — GPLv3 », avec le lien vers la documentation du logiciel. Scribae est un logiciel libre, publié sous licence GPL-3.0 : la mention dit d'où vient l'application, et où trouver ses explications.",
+      choiceField({
+        label: "Afficher la mention dans les pieds de page",
+        value: c.brand.mentionScribae !== false,
+        options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
+        help: "Réglage du référentiel (il suit les données exportées et importées). Éteint, plus aucune mention de l'éditeur n'apparaît : ni sur le recueil public, ni dans l'atelier, ni à l'écran de connexion.",
+        onChange: (v) => {
+          c.brand.mentionScribae = v; save();
+          // Le pied de l'atelier appartient à la COQUILLE, que le redessin d'une
+          // vue ne reconstruit pas : on l'éteint et on le rallume sur-le-champ —
+          // même geste que le texte du bandeau de démonstration ci-dessus.
+          const live = document.querySelector(".app-pied");
+          if (live) live.hidden = v === false;
+          redraw();
         },
       }),
     ));
@@ -642,12 +672,47 @@ function databasePanel() {
               modal({ title: "Clés du service", body: contenu, actions: (close) => [button("Fermer", { onClick: close })] });
             },
           }));
-          gestes.appendChild(button("Générer une clé de poste", {
+          gestes.appendChild(button("Créer une clé d'API", {
             variant: "secondary", size: "sm", icon: "plus",
+            title: "Créer une clé d'API : un compte de SERVICE, avec le rôle de votre choix",
             onClick: async () => {
-              const r = await cles.creerCle({ role: "editeur", label: "Poste", token: cleEnService() });
-              if (!r.ok) { toast(r.detail, "error"); return; }
-              montrerCle(r.cle, "Clé de poste (rôle éditeur)");
+              // Le rôle et le libellé se CHOISISSENT : une clé de service n'a pas
+              // toujours à pouvoir tout faire. Une clé de lecture suffit à une
+              // reprise de données ; une clé d'écriture sert à un poste, ou à un
+              // outil tiers. Ces clés ne sont PAS des comptes du référentiel :
+              // elles n'apparaissent ni dans « Comptes et rôles », ni dans les
+              // personnes, ni dans l'annuaire.
+              const etat = { label: "", role: "editeur" };
+              const corps = h("div", { class: "fr-stack" },
+                h("p", { class: "fr-small fr-muted", text: "Une clé d'API est un COMPTE DE SERVICE : un script, un poste ou un outil tiers s'en sert à la place d'une personne. Elle ne figure nulle part dans « Comptes et rôles » — le référentiel l'ignore. Le service n'en conserve que l'empreinte SHA-256 : elle ne s'affiche qu'UNE fois, au moment de sa création." }),
+                textField({ label: "Libellé (pour la reconnaître plus tard)", value: "", onChange: (v) => { etat.label = v; } }),
+                selectField({
+                  label: "Rôle de la clé", value: etat.role,
+                  options: [
+                    { value: "lecteur", label: "Lecteur — consulter les actes déposés" },
+                    { value: "redacteur", label: "Rédacteur — déposer et publier des actes" },
+                    { value: "editeur", label: "Éditeur — publier, épingler, retirer" },
+                    { value: "administrateur", label: "Administrateur — tout, y compris les clés" },
+                    { value: "prestataire", label: "Prestataire — notification de signature seulement" },
+                  ],
+                  help: "Le rôle commande les routes que la clé ouvre : donnez-lui le moins de droits possible.",
+                  onChange: (v) => { etat.role = v; },
+                }));
+              const dlg = modal({
+                title: "Créer une clé d'API", body: corps,
+                actions: (close) => [
+                  button("Renoncer", { variant: "secondary", onClick: close }),
+                  button("Créer la clé", {
+                    variant: "primary", icon: "lock",
+                    onClick: async () => {
+                      const r = await cles.creerCle({ role: etat.role, label: etat.label || "Clé de service", token: cleEnService() });
+                      if (!r.ok) { toast(r.detail, "error"); return; }
+                      close();
+                      montrerCle(r.cle, "Clé d'API — rôle " + r.role);
+                    },
+                  }),
+                ],
+              });
             },
           }));
           gestes.appendChild(button("Journal d'audit du service", {
@@ -900,7 +965,7 @@ function servicesPanel(save, redraw) {
       onClick: () => { c.services.push(newService({ entityId: c.entities?.[0]?.id || "" })); save(); redraw(); },
     }),
   ));
-  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Un service regroupe des bureaux. Les comptes sont rattachés à des services : par défaut, un compte a accès à tous les bureaux de son service, et l'administrateur peut ensuite restreindre son accès à certains bureaux (onglet « Comptes et rôles »)." }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Un service regroupe des bureaux. Les comptes sont rattachés à des services : par défaut, un compte a accès à tous les bureaux de son service, et l'administrateur peut ensuite restreindre son accès à certains bureaux (onglet « Comptes et rôles »). Un service peut aussi DÉPENDRE d'un autre service, ou du bureau d'un autre service : ce rattachement — qui élargit le périmètre des agents du service de tête — se pose dans l'écran Organigramme." }));
 
   const listEl = h("div", { class: "fr-stack", style: { marginTop: "10px" } });
   wrap.appendChild(listEl);
@@ -1020,6 +1085,12 @@ async function removeService(rec, save, redraw) {
     `« ${rec.code || "?"} — ${rec.name} » sera retiré du référentiel.${n ? ` ${n} compte(s) y sont rattachés : ce rattachement sera également supprimé.` : ""}`,
     { confirmLabel: "Supprimer", danger: true });
   if (!ok) return;
+  // Les services qui PENDAIENT sous celui-ci (ou sous l'un de ses bureaux)
+  // remontent à la racine de leur entité : ils ne disparaissent pas avec lui.
+  const bureaux = rec.bureaux || [];
+  for (const s of state.config.services) {
+    if (s.parentId === rec.id || bureaux.some((b) => b.id === s.parentId)) s.parentId = "";
+  }
   state.config.services = state.config.services.filter((s) => s.id !== rec.id);
   let touchedUsers = false;
   for (const u of state.users) {
@@ -1038,6 +1109,8 @@ async function removeBureau(service, bureau, save, redraw) {
     `« ${bureau.name || "Bureau"} » sera retiré du service « ${service.name} ».${n ? ` Son retrait élargit l'accès de ${n} compte(s) restreint(s) à certains bureaux.` : ""}`,
     { confirmLabel: "Supprimer", danger: true });
   if (!ok) return;
+  // Un service qui pendait sous ce bureau remonte au service qui le porte.
+  for (const s of state.config.services) if (s.parentId === bureau.id) s.parentId = service.id;
   service.bureaux = service.bureaux.filter((b) => b.id !== bureau.id);
   let touchedUsers = false;
   for (const u of state.users) for (const m of u.memberships || []) {
@@ -1230,30 +1303,80 @@ async function purgerService() {
 // valide. Le parapheur (src/lib/validation.js) ne fait que l'appliquer — un
 // référentiel sans circuit n'a donc aucun parapheur, ce qui préserve le
 // comportement d'origine.
+// La fiche d'un circuit s'ouvre à part (une « sous-vue ») : la liste des
+// circuits reste lisible quand ils sont nombreux, là où les empiler faisait une
+// page interminable. La liste dit l'essentiel — actif, nombre d'étapes, à quoi
+// il s'applique — et un clic ouvre la fiche complète.
+const ciblageResume = (cir) => {
+  const n = (a) => (Array.isArray(a) ? a.filter(Boolean).length : 0);
+  const parts = [];
+  if (n(cir.trameIds)) parts.push(n(cir.trameIds) + " trame(s)");
+  if (n(cir.familyIds)) parts.push(n(cir.familyIds) + " famille(s)");
+  if (n(cir.entityIds)) parts.push(n(cir.entityIds) + " entité(s)");
+  return parts.length ? parts.join(" · ") : "tous les actes";
+};
+
+const etapesResume = (cir) => (cir.steps || []).map((s) => natureEtape(s.kind).label).join(" → ");
+
 function circuitsPanel(save, redraw) {
   const c = state.config;
   c.circuits = c.circuits || [];
+  const ui = (state.ui = state.ui || {});
   const wrap = h("div", { class: "fr-stack", style: { maxWidth: "980px" } });
   const paint = () => { save(); redraw(); };
+
+  const ouvert = (c.circuits || []).find((x) => x.id === ui.circuitOuvert) || null;
+  if (ouvert) {
+    wrap.appendChild(h("div", { class: "fr-row", style: { alignItems: "center" } },
+      button("Tous les circuits", { variant: "tertiary", size: "sm", icon: "left", onClick: () => { ui.circuitOuvert = ""; redraw(); } }),
+      h("span", { class: "fr-small fr-muted", text: "Fiche d'un circuit de validation" })));
+    wrap.appendChild(circuitCard(ouvert, c.circuits.indexOf(ouvert), paint, { seul: true }));
+    return wrap;
+  }
 
   wrap.appendChild(h("div", { class: "fr-card" },
     h("div", { class: "fr-row" },
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Circuits de validation" }),
-      button("Nouveau circuit", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { c.circuits.push(newCircuit()); paint(); } }),
+      button("Nouveau circuit", { variant: "secondary", size: "sm", icon: "plus", onClick: () => {
+        const cir = newCircuit();
+        c.circuits.push(cir);
+        paint();
+        ui.circuitOuvert = cir.id;
+        redraw();
+      } }),
     ),
-    h("p", { class: "fr-card__sub", text: "Le chemin que suit un acte avant d'être signé : une suite d'étapes, chacune d'une nature — vérification, visa ou signature — et confiée à un rôle. Les étapes sont séquentielles, et un circuit s'ouvre en principe par la vérification du réviseur. Un circuit sans ciblage s'applique à tous les actes ; un circuit ciblé l'emporte sur lui. Sans circuit, les actes partent directement en signature." }),
+    h("p", { class: "fr-card__sub", text: "Le chemin que suit un acte avant d'être signé : une suite d'étapes, chacune d'une nature — vérification, visa ou signature — et confiée à un rôle, à une personne nommée ou à un service. Les étapes sont séquentielles, et un circuit s'ouvre en principe par la vérification du réviseur. Un circuit sans ciblage s'applique à tous les actes ; un circuit ciblé l'emporte sur lui. Sans circuit, les actes partent directement en signature." }),
   ));
 
   if (!c.circuits.length) {
     wrap.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucun circuit : les actes partent en signature sans validation préalable." }));
   }
-  c.circuits.forEach((cir, i) => wrap.appendChild(circuitCard(cir, i, paint)));
+  for (const [i, cir] of c.circuits.entries()) wrap.appendChild(ligneCircuit(cir, i, paint, () => { ui.circuitOuvert = cir.id; redraw(); }));
   return wrap;
 }
 
-function circuitCard(cir, i, paint) {
+// Une ligne du récapitulatif : ce qu'il faut pour choisir, et rien de plus.
+function ligneCircuit(cir, i, paint, ouvrir) {
+  const c = state.config;
+  const etapes = cir.steps || [];
+  return h("div", { class: "fr-card recapitulatif" },
+    h("div", { class: "fr-row" },
+      button(cir.label || "Circuit sans nom", { variant: "secondary", size: "sm", icon: "right", onClick: ouvrir }),
+      h("span", { class: "fr-badge fr-badge--" + (cir.active === false ? "warning" : "success"), text: cir.active === false ? "inactif" : "actif" }),
+      h("span", { class: "fr-small fr-muted", text: etapes.length + " étape(s)" }),
+      h("span", { class: "fr-small fr-muted", text: ciblageResume(cir) }),
+      h("div", { class: "fr-spacer" }),
+      button("", { variant: "tertiary", size: "sm", icon: "up", title: "Monter", onClick: () => { if (i === 0) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i - 1, 0, x); paint(); } }),
+      button("", { variant: "tertiary", size: "sm", icon: "down", title: "Descendre", onClick: () => { if (i >= c.circuits.length - 1) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i + 1, 0, x); paint(); } }),
+    ),
+    etapes.length ? h("p", { class: "fr-small fr-muted", text: etapesResume(cir) }) : h("p", { class: "fr-small fr-muted", text: "Aucune étape : ce circuit n'ouvrira pas de parapheur." }),
+  );
+}
+
+function circuitCard(cir, i, paint, opts = {}) {
   const c = state.config;
   const garder = () => touch("config", { rerender: false });
+  const fermer = () => { state.ui.circuitOuvert = ""; redrawView(); };
   const box = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
 
   box.appendChild(h("div", { class: "fr-row" },
@@ -1261,13 +1384,14 @@ function circuitCard(cir, i, paint) {
     h("span", { class: "fr-badge fr-badge--" + (cir.active === false ? "warning" : "success"), text: cir.active === false ? "inactif" : "actif" }),
     h("span", { class: "fr-small fr-muted", text: (cir.steps || []).length + " étape(s)" }),
     h("div", { class: "fr-spacer" }),
-    button("", { variant: "tertiary", size: "sm", icon: "up", title: "Monter", onClick: () => { if (i === 0) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i - 1, 0, x); paint(); } }),
-    button("", { variant: "tertiary", size: "sm", icon: "down", title: "Descendre", onClick: () => { if (i >= c.circuits.length - 1) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i + 1, 0, x); paint(); } }),
+    opts.seul ? null : button("", { variant: "tertiary", size: "sm", icon: "up", title: "Monter", onClick: () => { if (i === 0) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i - 1, 0, x); paint(); } }),
+    opts.seul ? null : button("", { variant: "tertiary", size: "sm", icon: "down", title: "Descendre", onClick: () => { if (i >= c.circuits.length - 1) return; const [x] = c.circuits.splice(i, 1); c.circuits.splice(i + 1, 0, x); paint(); } }),
     button("", { variant: "tertiary", size: "sm", icon: "trash", title: "Supprimer", onClick: async () => {
       const ok = await confirmDialog("Supprimer le circuit", `« ${cir.label} » cessera de s'appliquer aux nouveaux actes. Les circuits déjà ouverts sur des actes en cours restent inchangés.`, { confirmLabel: "Supprimer", danger: true });
       if (!ok) return;
       c.circuits.splice(i, 1);
-      paint();
+      if (opts.seul) fermer();
+      else paint();
     } }),
   ));
 
@@ -1308,10 +1432,11 @@ function circuitCard(cir, i, paint) {
 }
 
 function etapeEdit(s, j, cir, paint) {
+  const c = state.config;
   const garder = () => touch("config", { rerender: false });
   const sub = h("div", { class: "fr-card", style: { background: "var(--bg)" } });
   sub.appendChild(h("div", { class: "fr-row" },
-    h("strong", { class: "fr-small", text: `Étape ${j + 1} — ${s.label || ""}` }),
+    h("strong", { class: "fr-small", text: `Étape ${j + 1} — ${s.label || ""} · ${etapeCible(s, state.config)}` }),
     h("div", { class: "fr-spacer" }),
     button("", { variant: "tertiary", size: "sm", icon: "up", title: "Monter", onClick: () => { if (j === 0) return; const [x] = cir.steps.splice(j, 1); cir.steps.splice(j - 1, 0, x); paint(); } }),
     button("", { variant: "tertiary", size: "sm", icon: "down", title: "Descendre", onClick: () => { if (j >= cir.steps.length - 1) return; const [x] = cir.steps.splice(j, 1); cir.steps.splice(j + 1, 0, x); paint(); } }),
@@ -1337,12 +1462,41 @@ function etapeEdit(s, j, cir, paint) {
       paint();
     },
   }));
+  // À QUI l'étape est confiée : un rôle (le cas ordinaire), une personne nommée
+  // du référentiel, ou un service. Le service est utile aux circuits qui ne
+  // passent pas par la chaîne de décision — « la direction des finances »,
+  // « les affaires juridiques » —, et la personne nommée, aux visas nominatifs.
+  const cible = s.targetType || "role";
   sub.appendChild(selectField({
-    label: "Rôle attendu", value: s.role || etapeDefauts(s.kind).role,
-    help: "Qui tient cette étape. Le rôle naturel de la nature choisie est proposé, mais rien ne l'impose : l'administrateur tient de toute façon n'importe quelle étape, comme recours.",
-    options: STEP_ROLES.map((r) => ({ value: r.id, label: r.label })),
-    onChange: (v) => { s.role = v; garder(); },
+    label: "Qui porte l'étape", value: cible,
+    help: "Un rôle : tout compte qui le porte peut franchir l'étape. Une personne nommée : seule la sienne (le compte rattaché à cette personne). Un service : tout agent qui en relève, rattachement compris.",
+    options: STEP_TARGETS.map((t) => ({ value: t.id, label: t.label })),
+    onChange: (v) => { s.targetType = v; garder(); paint(); },
   }));
+  if (cible === "personne") {
+    sub.appendChild(selectField({
+      label: "Personne", value: s.personId || "",
+      options: (c.people || []).map((p) => ({ value: p.id, label: [p.firstName, p.lastName].filter(Boolean).join(" ") || p.id })),
+      placeholder: "— Choisir la personne —",
+      help: "C'est le compte rattaché à cette personne (Administration › Comptes et rôles, « Personne du référentiel ») qui verra l'étape dans son parapheur.",
+      onChange: (v) => { s.personId = v; garder(); },
+    }));
+  } else if (cible === "service") {
+    sub.appendChild(selectField({
+      label: "Service", value: s.serviceId || "",
+      options: (c.services || []).map((x) => ({ value: x.id, label: (x.code ? x.code + " — " : "") + x.name })),
+      placeholder: "— Choisir le service —",
+      help: "Tout agent de ce service — ou d'un service au-dessus, par le rattachement — peut franchir l'étape.",
+      onChange: (v) => { s.serviceId = v; garder(); },
+    }));
+  } else {
+    sub.appendChild(selectField({
+      label: "Rôle attendu", value: s.role || etapeDefauts(s.kind).role,
+      help: "Qui tient cette étape. Le rôle naturel de la nature choisie est proposé, mais rien ne l'impose : l'administrateur tient de toute façon n'importe quelle étape, comme recours.",
+      options: STEP_ROLES.map((r) => ({ value: r.id, label: r.label })),
+      onChange: (v) => { s.role = v; garder(); },
+    }));
+  }
   const scope = h("input", { type: "checkbox", checked: s.serviceScoped !== false });
   scope.addEventListener("change", () => { s.serviceScoped = scope.checked; garder(); });
   sub.appendChild(h("label", { class: "fr-check" }, scope, "Le valideur doit relever du service de l'acte"));
@@ -1973,7 +2127,363 @@ function publicationPanel(save, redraw) {
     }));
   }
   wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Le recueil public est le pendant « citoyen » de la publication : il ne demande aucun compte, et ne montre que les actes réellement publiés. Sa présentation suit la charte de la structure (Administration › Identité) et la feuille de style de chaque acte." }));
-  return h("div", { class: "fr-stack" }, wrap, recueilsExternesBloc(save, redraw), mentionsPubliquesBloc(save, redraw));
+  return h("div", { class: "fr-stack" }, wrap, recueilsExternesBloc(save, redraw), mentionsPubliquesBloc(save, redraw),
+    apparencePubliqueBloc(save, redraw), bulletinBloc(reglageDuBulletin(save), redraw), accesAtelierBloc(save, redraw));
+}
+
+// ENREGISTRER UN RÉGLAGE DU BULLETIN, c'est aussi en OUBLIER les copies : le
+// référentiel est lu par le service (qui compose et qui diffuse), et le recueil
+// public garde en mémoire ce qu'il a lu de lui. Sans cet oubli, l'écran du
+// Bulletin et la page publique continueraient d'afficher ce qui n'est plus vrai
+// — un bulletin éteint qu'on vient d'allumer, une cadence qu'on vient de
+// changer (voir src/lib/bulletins-service.js, `oublier`).
+function reglageDuBulletin(save) {
+  return () => {
+    bs.oublier();
+    oublierBulletinsRecueil();
+    save();
+  };
+}
+
+// ------------------------------------------------------- le Bulletin des actes
+// Le recueil publie au fil de l'eau ; le BULLETIN le rassemble par PÉRIODE et le
+// diffuse — une sous-page du recueil par numéro, un flux RSS et Atom, un courriel
+// aux abonnés. Ce bloc règle CE QU'ON PUBLIE et À QUELLE CADENCE ; les gestes
+// (composer, adresser) et les abonnés sont sur leur propre écran
+// (« Administration › Bulletin », voir src/ui/views/bulletin.js).
+//
+// Rien n'est calculé ici : la cadence est une UNITÉ et un PAS, exactement comme
+// le moteur du service les compte (voir src/lib/bulletins.js et
+// src/server/mysql/bulletins.mjs).
+function bulletinBloc(save, redraw) {
+  const p = (state.config.publication = state.config.publication || {});
+  const b = (p.bulletin = p.bulletin || {});
+  const d = bulletinReglages(state.config);
+  const cadence = d.cadence;
+  const personnalisee = cadence.id === "personnalisee";
+
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("h2", { class: "fr-card__title", text: "Bulletin des actes" }));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Le Journal des actes : le recueil rassemblé par période, publié sur son propre jeu de pages, suivi par un flux RSS et Atom, et adressé par courriel à ses abonnés. Une période sans publication ne donne aucun numéro. "
+    + "Il demande le service de données (le courriel et le flux viennent de lui) : en mode local, il n'est pas disponible." }));
+
+  wrap.appendChild(choiceField({
+    label: "Bulletin", value: d.actif,
+    options: [{ value: true, label: "Ouvert" }, { value: false, label: "Éteint (défaut)" }],
+    help: "Ouvert : le recueil publie un numéro à la clôture de chaque période, sa page devient publique et l'abonnement par courriel s'ouvre. Éteint : les adresses du bulletin n'existent pas — le recueil reste exactement ce qu'il était.",
+    onChange: (v) => { b.actif = v === true; save(); redraw(); },
+  }));
+
+  if (d.actif) {
+    wrap.appendChild(textField({
+      label: "Titre du bulletin", value: b.titre ?? d.titre,
+      help: "Le titre porté par le bulletin : en-tête des pages, objet des courriels, titre du flux.",
+      onChange: (v) => { b.titre = v; save(); },
+    }));
+    wrap.appendChild(textField({
+      label: "Titre de chaque numéro", value: b.titreBulletin || "", placeholder: d.titre,
+      help: "Le titre de chaque numéro, devant le rang et la période — par exemple « Bulletin officiel » donne « Bulletin officiel n° 12 — septembre 2026 ». Vide : le titre du bulletin sert.",
+      onChange: (v) => { b.titreBulletin = v; save(); redraw(); },
+    }));
+    wrap.appendChild(textField({
+      label: "Sous-titre", value: b.sousTitre ?? d.sousTitre,
+      help: "Une phrase d'introduction : sous les pages, en tête du courriel, et comme description du flux.",
+      onChange: (v) => { b.sousTitre = v; save(); },
+    }));
+
+    wrap.appendChild(h("hr", { class: "fr-sep" }));
+    wrap.appendChild(sectionHeader("Cadence de parution"));
+    wrap.appendChild(selectField({
+      label: "Cadence", value: cadence.id,
+      options: CADENCES_BULLETIN.map((c) => ({ value: c.id, label: c.label })),
+      help: "La périodicité du bulletin. Chaque période donne UN numéro, s'il y a des actes publiés dedans. « Bimensuelle » paraît deux fois par mois (1er–15, puis 16–fin) : c'est la cadence des bulletins municipaux.",
+      onChange: (v) => {
+        const c = CADENCES_BULLETIN.find((x) => x.id === v);
+        b.cadence = c && c.id !== "personnalisee"
+          ? { id: c.id, unite: "", pas: 0, ancre: "" }
+          : { id: "personnalisee", unite: cadence.unite || "mois", pas: cadence.pas || 1, ancre: cadence.ancre || "" };
+        save(); redraw();
+      },
+    }));
+    if (personnalisee) {
+      wrap.appendChild(selectField({
+        label: "Unité", value: cadence.unite,
+        options: UNITES_BULLETIN.map((u) => ({ value: u.id, label: u.label })),
+        onChange: (v) => { b.cadence = { id: "personnalisee", unite: v, pas: v === "demi-mois" ? 1 : cadence.pas, ancre: cadence.ancre || "" }; save(); redraw(); },
+      }));
+      wrap.appendChild(textField({
+        label: "Toutes les", type: "number", value: String(cadence.pas),
+        help: cadence.unite === "demi-mois" ? "Le demi-mois vaut toujours 1 : la découpe est 1→15, puis 16→fin." : "Un entier de 1 à 60.",
+        onChange: (v) => { b.cadence = { id: "personnalisee", unite: cadence.unite, pas: Number(v) || 1, ancre: cadence.ancre || "" }; save(); redraw(); },
+      }));
+      wrap.appendChild(textField({
+        label: "Ancrage (facultatif)", value: cadence.ancre || "", placeholder: "AAAA-MM-JJ",
+        help: "La date à partir de laquelle les périodes se comptent. Utile pour caler une cadence longue (un trimestre qui commence en février, une année scolaire) : c'est la période qui CONTIENT cette date qui sert de repère.",
+        onChange: (v) => { b.cadence = { id: "personnalisee", unite: cadence.unite, pas: cadence.pas, ancre: /^\d{4}-\d{2}-\d{2}$/.test(String(v).trim()) ? String(v).trim() : "" }; save(); redraw(); },
+      }));
+    }
+    wrap.appendChild(textField({
+      label: "Jour de parution", type: "number", value: String(d.parutionJours),
+      help: "Le jour du mois où le numéro paraît, une fois sa période close (0 : dès le premier jour permis). Il décale la parution, jamais la période couverte.",
+      onChange: (v) => { b.parutionJours = Math.max(0, Math.min(31, Number(v) || 0)); save(); },
+    }));
+    wrap.appendChild(h("p", { class: "fr-small fr-muted", text: "Cadence lue : " + libelleCadence(cadence) + ". Titre d'un numéro : « " + (d.titreBulletin || d.titre) + " n° 12 — septembre 2026 »." }));
+  }
+
+  wrap.appendChild(h("hr", { class: "fr-sep" }));
+  wrap.appendChild(sectionHeader("Courriel du bulletin"));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", text: "Le bulletin part par le serveur SMTP de la collectivité (Administration › Courriel, et SMTP_HOST dans le .env du service). Sans SMTP, l'abonnement reste fermé — la page et le flux, eux, fonctionnent." }));
+  wrap.appendChild(textField({
+    label: "En-tête du message", value: b.entete ?? d.entete, rows: 3,
+    help: "Quelques lignes en tête de chaque courriel (l'objet du message reste le titre du numéro).",
+    onChange: (v) => { b.entete = v; save(); },
+  }));
+  wrap.appendChild(textField({
+    label: "Pied du message", value: b.pied ?? d.pied, rows: 3,
+    help: "Le pied de chaque courriel. Y rappeler l'adresse de la collectivité, ou la mention légale que vous devez porter.",
+    onChange: (v) => { b.pied = v; save(); },
+  }));
+  wrap.appendChild(textField({
+    label: "Nom de l'expéditeur", value: b.expediteurNom || "", placeholder: "Service des affaires générales",
+    help: "Le nom affiché à la place de l'adresse d'expédition. Facultatif.",
+    onChange: (v) => { b.expediteurNom = v; save(); },
+  }));
+  wrap.appendChild(textField({
+    label: "Adresse de réponse", value: b.repondreA || "", placeholder: "actes@exemple.fr",
+    help: "L'adresse à laquelle un abonné écrit s'il répond au bulletin. Facultatif.",
+    onChange: (v) => { b.repondreA = v; save(); },
+  }));
+
+  if (d.actif) {
+    wrap.appendChild(h("p", { class: "fr-small", style: { marginTop: "10px" } },
+      h("span", { class: "fr-muted", text: "Adresse publique : " }),
+      h("a", { class: "fr-link", href: adresseBulletins(), target: "_blank", rel: "noopener", text: adresseBulletins() }),
+      h("span", { class: "fr-muted", text: " · flux : " }),
+      h("a", { class: "fr-link", href: adresseFluxBulletin("rss"), target: "_blank", rel: "noopener", text: adresseFluxBulletin("rss") })));
+  }
+  wrap.appendChild(h("p", { class: "fr-small fr-muted" },
+    button("Ouvrir l'écran du Bulletin", { variant: "secondary", size: "sm", icon: "list", onClick: () => navigate("bulletin") }),
+    h("span", { text: " — la composition des numéros, les abonnés et les envois." })));
+  return wrap;
+}
+
+// ------------------------------------------------- l'apparence du site public
+// Une collectivité a une charte : deux couleurs, une police, une largeur. Le
+// site public la porte, l'atelier garde l'apparence du logiciel. On ne demande
+// pas de réécrire la feuille du recueil : on pose une feuille LIBRE, écrite ici,
+// injectée après celle de l'application et limitée au conteneur du site public
+// (`.recueil`) — voir `cssPersonnalisee` (src/lib/recueil.js) et `VARIABLES_CSS`
+// (src/lib/informations.js).
+//
+// Le texte est du CSS : il ne peut pas exécuter de code, et il n'est écrit que
+// par un administrateur. La liste des variables n'est qu'une aide — une
+// collectivité peut viser n'importe quel élément de la page.
+function apparencePubliqueBloc(save, redraw) {
+  const p = (state.config.publication = state.config.publication || {});
+  const infos = (p.informations = p.informations || { actif: true, titre: "", intro: "" });
+
+  const zone = h("textarea", {
+    class: "fr-textarea code-area", rows: 14, spellcheck: "false",
+    placeholder: EXEMPLE_CSS,
+    "aria-label": "Feuille de style du site public",
+    on: { input: (e) => { p.css = e.target.value; save(); } },
+  });
+  zone.value = p.css || "";
+
+  const variables = h("div", { class: "fr-table-wrap" },
+    h("table", { class: "fr-table fr-small" },
+      h("thead", {}, h("tr", {}, h("th", { text: "Variable" }), h("th", { text: "Ce qu'elle change" }))),
+      h("tbody", {}, ...VARIABLES_CSS.map((v) => h("tr", {},
+        h("td", {}, h("code", { class: "fr-mono", text: v.nom })),
+        h("td", { text: v.role }))))));
+
+  const bloc = card("Apparence du site public",
+    "La feuille de style de la collectivité s'ajoute à celle du recueil : ses couleurs, sa police, la largeur de son contenu. Elle ne s'applique QU'AU site public — l'atelier garde l'apparence du logiciel.",
+    h("div", { class: "fr-field" },
+      h("label", { class: "fr-label", text: "Feuille de style (CSS)" }),
+      h("p", { class: "fr-hint", text: `Écrivez du CSS ordinaire. La portée utile est « ${PORTEE_CSS} », le conteneur du site public : les variables ci-dessous s'y posent, et tout élément de la page peut s'y viser.` }),
+      zone),
+    h("div", { class: "fr-row" },
+      button("Exemple : une couleur et une largeur", { variant: "tertiary", size: "sm", icon: "palette", onClick: () => { zone.value = EXEMPLE_CSS; p.css = EXEMPLE_CSS; save(); } }),
+      button("Vider", { variant: "tertiary", size: "sm", icon: "trash", onClick: () => { zone.value = ""; p.css = ""; save(); } }),
+      h("div", { class: "fr-spacer" }),
+      button("Ouvrir le recueil public", { variant: "secondary", size: "sm", icon: "globe", onClick: () => navigate("recueil") })),
+    h("details", { class: "fr-details" },
+      h("summary", { class: "fr-small", text: "Les variables que le recueil honore" }),
+      variables));
+
+  // ------------------------------- la rubrique « Informations » du recueil
+  const bInfos = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+  bInfos.appendChild(h("div", { class: "fr-row" },
+    h("strong", { class: "fr-small", text: "Rubrique « Informations »" }),
+    h("div", { class: "fr-spacer" }),
+    button("Écrire les informations", { variant: "tertiary", size: "sm", icon: "bulle", onClick: () => navigate("informations") })));
+  bInfos.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 10px" }, text: "Les billets publiés par la collectivité (actualités, avis, communications) apparaissent sur le recueil public : les trois derniers en page d'accueil, tous dans la page « Informations ». Une collectivité peut renommer la rubrique — « Actualités », « Communications » — ou l'éteindre." }));
+  bInfos.appendChild(choiceField({
+    label: "Afficher la rubrique sur le recueil public",
+    value: infos.actif !== false,
+    options: [{ value: true, label: "Affichée" }, { value: false, label: "Éteinte" }],
+    help: "Éteinte, la rubrique disparaît du recueil public et de son pied de page — les billets restent dans l'atelier, et se republient d'un clic.",
+    onChange: (v) => { infos.actif = v === true; save(); redraw(); },
+  }));
+  if (infos.actif !== false) {
+    bInfos.appendChild(textField({
+      label: "Titre de la rubrique", value: infos.titre || "",
+      placeholder: "Informations",
+      help: "Le titre affiché — « Informations », « Actualités », « Communications »… à défaut, « Informations ».",
+      onChange: (v) => { infos.titre = v; save(); },
+    }));
+    bInfos.appendChild(textField({
+      label: "Chapeau", value: infos.intro || "", rows: 3,
+      placeholder: "Les nouvelles de la commune : travaux, réunions publiques, événements.",
+      help: "La phrase qui présente la rubrique, sous son titre.",
+      onChange: (v) => { infos.intro = v; save(); },
+    }));
+  }
+  bloc.appendChild(h("hr", { class: "fr-sep" }));
+  bloc.appendChild(bInfos);
+  return bloc;
+}
+
+// ------------------------------------------------------ l'accès à l'atelier
+// Le recueil public est ouvert à tous ; l'atelier peut n'être ouvert qu'à
+// certains réseaux — l'intranet d'une commune, par exemple (voir
+// src/server/mysql/atelier.mjs et src/server/mysql/ips.mjs). Deux réglages, et
+// une seule règle : la LISTE est vide → l'atelier est ouvert ; elle est
+// renseignée → seules les adresses qu'elle contient entrent.
+//
+// La décision appartient au SERVICE, jamais au navigateur : c'est lui qui voit
+// l'adresse de l'appelant, et une adresse annoncée par le client ne prouve rien.
+// L'écran ne fait que montrer l'état, laisser écrire la liste, et SIMULER une
+// adresse (« et si j'arrivais de là ? ») — la réponse venant toujours du service.
+//
+// Le piège de ce réglage est connu : on peut se fermer la porte à soi-même. Il
+// est donc annoncé en clair, et la simulation est là pour l'éprouver AVANT
+// d'enregistrer.
+function accesAtelierBloc(save, redraw) {
+  const p = (state.config.publication = state.config.publication || {});
+  const a = (p.atelier = p.atelier || { ips: "", message: "" });
+  const imposee = poseParLeDeploiement(CLE_IPS);
+  const messageImpose = poseParLeDeploiement(CLE_MESSAGE);
+
+  const zone = h("textarea", {
+    class: "fr-textarea code-area", rows: 6, spellcheck: "false",
+    placeholder: "10.0.0.0/8\n192.168.1.0/24\n172.16.0.0-172.31.255.255\n…# commentaire",
+    "aria-label": "Adresses autorisées à ouvrir l'atelier",
+    // L'état montré plus bas est celui du SERVICE : on le lui redemande quand la
+    // liste change — sinon le panneau continuerait d'afficher « atelier ouvert »
+    // pendant que l'administrateur vient d'écrire une liste blanche. Un délai
+    // court regroupe la frappe, et laisse l'enregistrement partir devant.
+    on: { input: (e) => { a.ips = e.target.value; save(); planifierEtat(); } },
+  });
+  zone.value = imposee ? "" : (a.ips || "");
+
+  const champMessage = h("textarea", {
+    class: "fr-textarea", rows: 2, spellcheck: "false",
+    placeholder: MESSAGE_DEFAUT,
+    "aria-label": "Message affiché à une adresse refusée",
+    on: { input: (e) => { a.message = e.target.value; save(); } },
+  });
+  champMessage.value = a.message || "";
+
+  // ------------------------------------------------ l'état, tel que le service le voit
+  const etatBox = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+  function majEtat() {
+    clear(etatBox);
+    const ligne = (label, valeur) => h("p", { class: "fr-small", style: { margin: "0" } },
+      h("span", { class: "fr-muted", text: label + " : " }),
+      h("span", { class: valeur.mono ? "fr-mono" : "", text: valeur.texte }));
+    etatBox.appendChild(h("p", { class: "fr-small", style: { margin: "0 0 6px" } },
+      h("span", { class: "fr-badge fr-badge--" + (acces.actif ? "warning" : "success"), text: acces.actif ? "Atelier restreint" : "Atelier ouvert à toutes les adresses" }),
+      acces.charge ? null : h("span", { class: "fr-small fr-muted", text: "  (le service n'a pas encore répondu)" })));
+    if (acces.source) etatBox.appendChild(ligne("Liste appliquée", { texte: acces.source === "deploiement" ? "celle du déploiement (.env)" : "celle du référentiel" }));
+    if (acces.ip) etatBox.appendChild(ligne("Votre adresse, vue du service", { texte: acces.ip, mono: true }));
+    if (acces.actif) {
+      etatBox.appendChild(ligne("Vous entrez", { texte: acces.autorise
+        ? (acces.regle ? "oui — autorisé par " + acces.regle : "oui")
+        : "non — cette adresse n'est pas dans la liste" }));
+    }
+    if ((acces.erreurs || []).length) {
+      etatBox.appendChild(h("p", { class: "fr-small", style: { margin: "6px 0 0" } },
+        h("span", { class: "fr-badge fr-badge--error", text: acces.erreurs.length + " entrée(s) refusée(s)" })));
+      for (const e of acces.erreurs) etatBox.appendChild(ligne("Entrée incomprise", { texte: `« ${e.entree} » — ${e.motif}`, mono: true }));
+    }
+    if (acces.actif) etatBox.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" }, text: acces.message }));
+    // Ce que le service dit de lui-même quand il ne peut pas décider — le cas du
+    // service de démonstration de la plateforme, qui ne voit pas l'adresse de
+    // l'appelant. Le panneau doit le dire, sinon son « ouvert » passerait pour
+    // un mensonge (voir src/lib/atelier-acces.js et index.html).
+    if (acces.note) etatBox.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" }, text: acces.note }));
+  }
+  majEtat();
+
+  // Redemande son état au service, en regroupant la frappe : la liste enregistrée
+  // vient d'être modifiée, et c'est le service qui la juge. Sans cela, le panneau
+  // montrerait l'état d'AVANT le changement — « atelier ouvert » sous une liste
+  // blanche que l'on vient d'écrire.
+  let minuteurEtat = null;
+  function planifierEtat() {
+    if (minuteurEtat) clearTimeout(minuteurEtat);
+    minuteurEtat = setTimeout(async () => {
+      minuteurEtat = null;
+      await chargerAcces({ silencieuse: true }).catch(() => null);
+      majEtat();
+    }, 700);
+  }
+
+  // ------------------------------------------------------------- le simulateur
+  const champEssai = h("input", { class: "fr-input", placeholder: "203.0.113.10", "aria-label": "Adresse à essayer", style: { maxWidth: "220px" } });
+  const resultat = h("p", { class: "fr-small", style: { margin: "8px 0 0" } });
+  const tester = async () => {
+    const ip = champEssai.value.trim();
+    if (!ip) return;
+    clear(resultat);
+    resultat.appendChild(h("span", { class: "fr-small fr-muted", text: "Essai…" }));
+    const e = await chargerAcces({ simulee: ip, silencieux: true });
+    clear(resultat);
+    if (!e) { resultat.appendChild(h("span", { text: "Le service n'a pas répondu : l'essai n'a pas pu être fait." })); return; }
+    // Une adresse illisible ne se juge pas : le dire vaut mieux que la déclarer
+    // « Refusée », ce qui ferait croire à une règle là où il y a une faute de
+    // frappe (le service distingue les deux — voir src/server/mysql/atelier.mjs).
+    if (e.connue === false) {
+      resultat.appendChild(h("span", { class: "fr-badge fr-badge--info", text: "Adresse illisible" }));
+      resultat.appendChild(h("span", { text: ` — « ${ip} » n'est pas une adresse réseau : écrivez-en une (10.0.0.24, 192.168.0.0/16, 10.0.0.0-10.0.0.255…).` }));
+      return;
+    }
+    resultat.appendChild(h("span", { class: "fr-badge fr-badge--" + (e.autorise ? "success" : "error"), text: e.autorise ? "Entre" : "Refusée" }));
+    resultat.appendChild(h("span", { text: e.autorise
+      ? (e.regle ? " — autorisée par la règle " + e.regle : "")
+      : " — cette adresse n'est dans aucun champ de la liste" }));
+    if (e.interne && !e.autorise) resultat.appendChild(h("div", { class: "fr-small fr-muted", text: "C'est pourtant un espace réseau réservé (intranet, VPN, partage de connexion) : la liste ne le couvre pas." }));
+  };
+  champEssai.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); tester(); } });
+
+  const bloc = card("Accès à l'atelier",
+    "L'espace public du recueil est ouvert à tout le monde ; l'atelier peut, lui, n'être ouvert qu'à certains réseaux — l'intranet de la commune, par exemple. La liste ci-dessous est appliquée par le SERVICE, sans exception : elle décide de l'accès, et de la visibilité des actes à diffusion restreinte.",
+    imposee
+      ? h("p", { class: "fr-hint" }, h("strong", { text: "Liste imposée par le déploiement. " }),
+      "La variable SCRIBA_ATELIER_IPS est posée dans le fichier .env du service : elle l'emporte sur tout ce qui s'écrit ici, et doit être modifiée dans ce fichier (voir src/server/env.example).")
+      : null,
+    h("div", { class: "fr-field" },
+      h("label", { class: "fr-label", text: "Adresses autorisées (une par ligne, ou séparées par des virgules)" }),
+      h("p", { class: "fr-hint", text: "Une adresse (10.0.0.24), un préfixe (192.168.0.0/16), un champ (10.0.0.0-10.0.0.255), une plage abrégée (10.0.0.*). Un « # » ouvre un commentaire. Une entrée incomprise est signalée plus bas — jamais ignorée en silence. Laissez vide pour ouvrir l'atelier à toutes les adresses." }),
+      imposee ? null : zone),
+    imposee ? h("p", { class: "fr-small fr-mono", style: { margin: "0" }, text: (optionsDeployees().variables[CLE_IPS] || "") || "(vide)" }) : null,
+    h("p", { class: "fr-small", style: { margin: "10px 0 6px" } },
+      h("strong", { text: "Attention : " }),
+      "une liste qui ne couvre pas votre propre adresse vous ferme la porte de l'atelier. Vérifiez votre adresse ci-dessous, et éprouvez la vôtre avant d'enregistrer."),
+    h("div", { class: "fr-field" },
+      h("label", { class: "fr-label", text: "Message affiché à une adresse refusée" }),
+      h("p", { class: "fr-hint", text: "Le texte que voit la personne qui arrive d'un réseau non autorisé — il doit lui dire que le recueil public, lui, reste ouvert." }),
+      messageImpose ? null : champMessage),
+    messageImpose ? h("p", { class: "fr-small fr-mono", style: { margin: "0" }, text: (optionsDeployees().variables[CLE_MESSAGE] || "") || MESSAGE_DEFAUT }) : null,
+    h("div", { class: "fr-field" },
+      h("label", { class: "fr-label", text: "Essayer une adresse" }),
+      h("p", { class: "fr-hint", text: "La réponse est calculée par le service, avec la liste enregistrée. Rien n'est décidé par le navigateur." }),
+      h("div", { class: "fr-row" }, champEssai, button("Essayer", { variant: "secondary", size: "sm", icon: "search", onClick: tester }))),
+    resultat,
+    etatBox);
+  return bloc;
 }
 
 // ---------------------------------------------- mentions du recueil public
@@ -2557,8 +3067,11 @@ const JOURNAL_ACTIONS = {
   "suppression": ["Suppression définitive", "error"],
   "trame.disponible": ["Trame mise à disposition", "success"],
   "trame.retiree": ["Trame retirée", "warning"],
+  "referentiel.entite": ["Organigramme — entité", "info"],
+  "referentiel.service": ["Organigramme — service", "info"],
+  "referentiel.bureau": ["Organigramme — bureau", "info"],
 };
 
 const actionLabel = (a) => (JOURNAL_ACTIONS[a] ? JOURNAL_ACTIONS[a][0] : (a || "Fait"));
 const actionColor = (a) => (JOURNAL_ACTIONS[a] ? JOURNAL_ACTIONS[a][1] : "info");
-const libelleTo = (v) => (String(v).startsWith("role:") ? "rôle " + String(v).slice(5) : String(v).startsWith("service:") ? "service " + String(v).slice(8) : v);
+const libelleTo = (v) => (String(v).startsWith("role:") ? "rôle " + String(v).slice(5) : String(v).startsWith("service:") ? "service " + String(v).slice(8) : String(v).startsWith("personne:") ? "personne " + String(v).slice(9) : v);

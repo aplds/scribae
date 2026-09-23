@@ -6,6 +6,7 @@
 //   • `trames`   — les trames (liste d'objets identifiés par `id`)
 //   • `actes`    — les actes (liste)
 //   • `users`    — les comptes (liste)
+//   • `informations` — les billets publiés au recueil public (liste)
 //   • `journal`  — le registre des faits (qui a fait quoi) et la source des
 //                  notifications : liste d'entrées, les plus anciennes évincées
 //   • `presence` — un enregistrement par poste connecté (battement de cœur,
@@ -27,6 +28,7 @@ export const COLLECTIONS = {
   trames: { kind: LIST, label: "Trames", table: "trame" },
   actes: { kind: LIST, label: "Actes", table: "acte" },
   users: { kind: LIST, label: "Comptes", table: "compte" },
+  informations: { kind: LIST, label: "Informations", table: "information" },
   journal: { kind: LIST, label: "Journal", table: "journal" },
   presence: { kind: LIST, label: "Présence", table: "presence" },
   meta: { kind: SINGLETON, label: "Métadonnées", table: "meta" },
@@ -43,7 +45,7 @@ export const SILENT_COLLECTIONS = new Set(["journal", "presence"]);
 export const SHARED_COLLECTIONS = Object.keys(COLLECTIONS).filter((n) => !COLLECTIONS[n].local);
 
 // Collections écrites automatiquement par l'application au démarrage.
-export const DOCUMENT_COLLECTIONS = ["config", "trames", "actes", "users"];
+export const DOCUMENT_COLLECTIONS = ["config", "trames", "actes", "users", "informations"];
 
 export const isSingleton = (name) => COLLECTIONS[name]?.kind === SINGLETON;
 export const isLocalOnly = (name) => !!COLLECTIONS[name]?.local;

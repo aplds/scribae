@@ -20,7 +20,7 @@ import { emptyState, helpLink } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 import {
-  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, etiquetteEtape, STEP_ROLES,
+  etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, etiquetteEtape, STEP_ROLES, etapeCible,
 } from "../../lib/validation.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
 import { docOfActe } from "./modifier.js";
@@ -131,6 +131,15 @@ function libelleRole(role) {
   return (r ? r.label.split(" (")[0] : role || "valideur").toLowerCase();
 }
 
+// À qui l'étape est confiée, en clair, pour les phrases de l'écran : « un
+// réviseur », « la personne X », « le service Y ». Le libellé FIGÉ au démarrage
+// du circuit est préféré : il dit ce que l'étape attendait ce jour-là.
+function libelleCible(etape) {
+  const type = etape?.targetType || "role";
+  if (type === "role") return libelleRole(etape?.role);
+  return etape?.cibleLabel || etapeCible(etape, state.config);
+}
+
 function videDe(tab) {  if (tab === "aMoi") return "Rien ne vous attend : aucun acte de votre périmètre n'est à votre étape.";
   if (tab === "enCours") return "Aucun acte en attente d'un autre valideur.";
   if (tab === "valides") return "Aucun acte validé en attente de signature.";
@@ -205,7 +214,7 @@ function carteActe(a, paint) {
     const suivante = etapeActive(v);
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small", text: suivante
-        ? `L'étape ouverte est « ${suivante.label} » (${etiquetteEtape(suivante.kind).label.toLowerCase()} — ${libelleRole(suivante.role)}${suivante.serviceScoped ? ", du service concerné" : ""}). Elle n'est pas de votre ressort.`
+        ? `L'étape ouverte est « ${suivante.label} » (${etiquetteEtape(suivante.kind).label.toLowerCase()} — ${libelleCible(suivante)}${suivante.serviceScoped ? ", du service concerné" : ""}). Elle n'est pas de votre ressort.`
         : "Toutes les étapes sont franchies." })));
   }
   if (v.statut === "valide" && !caduque) {
@@ -240,7 +249,7 @@ function etapeEl(s, i, v) {
         h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: nature.label }),
         s.optional ? h("span", { class: "fr-badge", style: { marginLeft: "4px" }, text: "facultative" }) : null,
       ),
-      h("p", { class: "sig-step__line", text: s.at ? `${s.byName || "—"} · le ${formatDate(String(s.at).slice(0, 10))}` : (ouverte ? "Étape ouverte" : "En attente") }),
+      h("p", { class: "sig-step__line", text: (s.targetType && s.targetType !== "role" ? libelleCible(s) + " · " : "") + (s.at ? `${s.byName || "—"} · le ${formatDate(String(s.at).slice(0, 10))}` : (ouverte ? "Étape ouverte" : "En attente")) }),
       s.comment ? h("p", { class: "sig-step__line parapheur-comment", text: "« " + s.comment + " »" }) : null,
     ),
   );

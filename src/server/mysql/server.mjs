@@ -21,9 +21,13 @@
 // n'est écrit dans ce fichier.
 //
 // Démarrage :
-//   1. créer la base et l'utilisateur (voir README.md)
+//   1. préparer la base — le COMPTE applicatif et le SCHÉMA, dans cet ordre :
+//      `node server.mjs --reconcilier` remet le compte au mot de passe du .env,
+//      PUIS applique `schema.sql` (les deux gestes sont idempotents ; c'est
+//      exactement ce que fait le service `db-init` de la pile Compose à chaque
+//      démarrage, et c'est ce qui garantit une base utilisable) ;
 //   2. npm install
-//   3. node server.mjs --migrate        (crée les tables : schema.sql)
+//   3. node server.mjs --migrate        (schéma seul, si le compte est déjà bon)
 //   4. node server.mjs                  (ou: npm start)
 //
 // Toute la configuration passe par des variables d'environnement (env.example).
@@ -33,17 +37,20 @@ import http from "node:http";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 import { createActesApi, emptyState } from "./actes.mjs";
+import { createBulletins } from "./bulletins.mjs";
 import * as courriel from "./courriel.mjs";
 import { loadState, saveState } from "./state.mjs";
 import { SERVICE_ID, entetesSurs, ecrireEntetes } from "./entetes.mjs";
 import { amorcerAdministrateur, nomDe, slug } from "./amorcage.mjs";
 import { createComptes, createStoreMysql, normaliserLogin, motDePasseFaible } from "./comptes.mjs";
 import { lireVariables } from "./variables.mjs";
+import { sqlCompteApplicatif } from "./compte-base.mjs";
 import { createPrestataire } from "./signature.mjs";
+import { CLE_IPS, CLE_MESSAGE, etat as etatAtelier, corpsRefus, resume as resumeAtelier, adresseDeLEntete } from "./atelier.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVICE = "Scribae — service de la collectivité";
@@ -91,6 +98,19 @@ const RATE_MAX_CONNEXIONS = num("RATE_MAX_CONNEXIONS", 30);
 // plusieurs origines se séparent par des virgules. `*` reste possible, mais il
 // faut l'écrire — et il n'expose alors aucune session (pas de cookies).
 const CORS_ORIGINS = env("CORS_ORIGINS", "").split(",").map((s) => s.trim()).filter(Boolean);
+
+// --- le BULLETIN des actes ---------------------------------------------------
+// Le Bulletin rassemble les actes publiés par PÉRIODE et les diffuse : une
+// sous-page du recueil par numéro, un flux RSS/Atom, un courriel aux abonnés
+// (voir src/server/mysql/bulletins.mjs). Ce qui se règle ici tient au SERVICE :
+// l'adresse PUBLIQUE du recueil — c'est elle qui donne leurs liens aux
+// courriels et au flux, puisque le service, quand il compose seul, ne voit pas
+// l'adresse du lecteur — et les bornes de ce qu'il conserve et expédie.
+const PUBLIQUE_URL = String(opt("SCRIBA_PUBLIQUE_URL") || "").replace(/\/+$/, "");
+const BULLETIN_MAX = opt("SCRIBA_BULLETIN_MAX") || 60;
+const BULLETIN_MAX_ABONNES = opt("SCRIBA_BULLETIN_MAX_ABONNES") || 2000;
+const BULLETIN_ENVOIS_PASSE = opt("SCRIBA_BULLETIN_ENVOIS_PASSE") || 40;
+const BULLETIN_INTERVALLE_MIN = opt("SCRIBA_BULLETIN_INTERVALLE_MIN") || 10;
 
 // --- Authentification --------------------------------------------------------
 //   demo      la porte reste celle d'aujourd'hui : jeton d'API pour écrire, et
@@ -146,9 +166,12 @@ const DEMO_JEU = opt("DEMO") === undefined ? (AUTH_MODE === "demo" || DEMO_ACCOU
 // Les collections qui portent l'IDENTITÉ et les RÉGLAGES ne sont écrites que par
 // un administrateur : sinon un compte ordinaire pourrait se donner des droits.
 const COLLECTIONS_ADMIN = new Set(["users", "config"]);
+// Collections dont l'écriture demande au moins le rôle éditeur : les billets du
+// recueil public (voir la permission « informations.gerer », src/lib/users.js).
+const COLLECTIONS_EDITEUR = new Set(["informations"]);
 
 
-const COLLECTIONS = ["config", "trames", "actes", "users", "meta", "journal", "presence"];
+const COLLECTIONS = ["config", "trames", "actes", "users", "meta", "journal", "presence", "informations"];
 // Collections qui ne sont pas recopiées dans le journal technique : elles sont
 // elles-mêmes un flux (présence des postes, journal d'audit de l'application).
 // Les y inscrire produirait un bruit continu sans valeur d'audit.
@@ -221,7 +244,22 @@ const pool = mysql.createPool(DB);
 const cryptoPort = {
   randomBytes: (n) => randomBytes(n),
   // `maxmem` : scrypt réclame 128·N·r octets ; on laisse de la marge.
-  scrypt: (mdp, sel, { N, r, p, keylen }) => scryptSync(String(mdp), Buffer.from(sel), keylen, { N, r, p, maxmem: 256 * N * r }),
+  //
+  // ASYNCHRONE, ET C'EST DÉLIBÉRÉ. `scryptSync` dérive le mot de passe SUR LE FIL
+  // PRINCIPAL : pendant ~130 ms, le service ne répond plus à PERSONNE — pas même
+  // aux visiteurs du recueil, qui n'ont pourtant pas de mot de passe à vérifier.
+  // Une matinée où vingt agents se connectent ensemble gelait donc le service
+  // deux secondes et demie, tout compris (mesuré : voir src/server/charge).
+  // `scrypt` (asynchrone) fait le même travail sur le pool de fils de libuv : le
+  // fil principal reste libre, et seules les connexions concurrentes attendent.
+  // La taille du pool (`UV_THREADPOOL_SIZE`) décide de combien de dérivés
+  // avancent en même temps — voir docs/ADMINISTRATION.md.
+  scrypt: (mdp, sel, { N, r, p, keylen }) => new Promise((resoudre, rejeter) => {
+    scrypt(String(mdp), Buffer.from(sel), keylen, { N, r, p, maxmem: 256 * N * r }, (err, cle) => {
+      if (err) rejeter(err);
+      else resoudre(new Uint8Array(cle));
+    });
+  }),
   sha256,
   b64: (octets) => Buffer.from(octets).toString("base64"),
   deb64: (texte) => new Uint8Array(Buffer.from(String(texte), "base64")),
@@ -310,6 +348,22 @@ const etatService = {
   baseMessage: "",
 };
 
+// L'ÉTAT DE LA BASE EST RÉÉPROUVÉ À LA DEMANDE. Un verdict de démarrage n'est pas
+// un verdict éternel : sans cette réépreuve, une panne RÉPARÉE (compte aligné par
+// « docker compose run --rm db-init », dossier de données recréé) laissait à
+// l'écran le bandeau « base indisponible » — et, `AUTO_MIGRATE` ne courant qu'au
+// démarrage, laissait aussi la base SANS TABLES, jusqu'à ce qu'on recrée le
+// conteneur du service. C'est exactement la panne que ce bandeau conseillait de
+// réparer sans recréer quoi que ce soit : on va donc jusqu'au bout. Voir
+// `reevaluerBase`.
+//
+// Le délai borne les réépreuves : un écran de connexion qui se recharge, ou
+// plusieurs postes derrière la même panne, ne déclenchent pas une connexion à la
+// base par requête. Cinq secondes laissent le temps à l'exploitant de réparer et
+// de recharger son écran sans attendre.
+const REESSAI_BASE_MS = 5000;
+let reessaiBaseAt = 0;
+
 // Enregistre la disponibilité de la base, avec le remède adapté à l'erreur
 // (identifiants refusés, base absent, schéma non migré…). Le client s'en sert
 // pour afficher un bandeau au lieu d'écrans vides.
@@ -320,13 +374,14 @@ function noterBase(disponible, message = "", e = null) {
 }
 
 // Le remède DIT le geste à faire, et dans le bon ordre. Un schéma absent
-// s'applique SANS RIEN EFFACER (`schema.sql` est idempotent) ; l'effacement du
-// dossier de données (« docker compose down -v ») n'est proposé que s'il est
-// vraiment la cause — un dossier initialisé AVANT que `schema.sql` n'y soit
-// monté. Confondre les deux ferait perdre les données d'un service en marche.
+// s'applique SANS RIEN EFFACER (`schema.sql` est idempotent — et la pile Compose
+// l'applique d'elle-même au démarrage) ; l'effacement du dossier de données
+// (« docker compose down -v ») n'est proposé que pour les identifiants du compte
+// applicatif, qui, eux, ne se corrigent pas après coup. Confondre les deux
+// ferait perdre les données d'un service en marche.
 function remedeBase(code) {
   if (code === "ER_ACCESS_DENIED_ERROR" || code === "ER_ACCESS_DENIED_NO_PASSWORD_ERROR") {
-    return "La base refuse les identifiants du service. Le mot de passe d'un compte MariaDB est celui de la CRÉATION du dossier de données : corriger DB_PASSWORD / MARIADB_* dans le .env ne le change PAS après coup. Remettez l'ancien mot de passe (il est encore dans l'environnement du conteneur de base : « docker compose exec db env »), ou repartez d'un dossier de données vierge (« docker compose down -v && docker compose up -d » — au prix des données).";
+    return "La base refuse les identifiants du service. Le compte applicatif et son mot de passe sont inscrits au PREMIER démarrage de la base : si DB_PASSWORD a changé depuis, la base garde l'ancien — c'est la cause la plus fréquente. Alignez le compte sur le .env (« docker compose run --rm db-init », ou « node server.mjs --reconcilier ») : ce seul geste remet aussi le SCHÉMA, et le service se rétablit de lui-même, sans être recréé. Si l'alignement échoue à son tour, c'est le mot de passe ROOT qui n'est plus celui du dossier de données — « docker compose logs db-init » le dit ; ne recréez alors le dossier de données (« docker compose down -v ») qu'en dernier recours : il efface les données.";
   }
   if (CONNEXION_PERDUE.has(code)) {
     return "Le service n'atteint pas la base : vérifiez DB_HOST / DB_PORT (et, sous Docker, que le service de base tourne — « docker compose ps », « docker compose logs db »).";
@@ -335,7 +390,7 @@ function remedeBase(code) {
     return `La base « ${DB.database} » n'existe pas : créez-la, ou posez DB_NAME sur une base existante (sous Docker, c'est MARIADB_DATABASE qui la crée au premier démarrage).`;
   }
   if (code === "ER_NO_SUCH_TABLE") {
-    return "La base répond, mais le SCHÉMA n'y est pas encore appliqué : lancez « node server.mjs --migrate » (ou posez AUTO_MIGRATE=true le temps d'un démarrage), PUIS recréez le service (« docker compose up -d --force-recreate api ») — le compte d'administration du .env n'est créé qu'au démarrage, et « docker compose restart » ne relit PAS le .env. Rien n'est effacé. Ne recréez le dossier de données (« docker compose down -v ») que si vous l'avez initialisé AVANT d'y monter schema.sql.";
+    return "La base répond, mais le SCHÉMA n'y est pas appliqué : les tables manquent. Le geste qui répare les deux pannes d'un coup : « docker compose run --rm db-init » — il aligne le compte ET applique le schéma — et le service se recharge alors de lui-même, sans être recréé. Sans Docker : « node server.mjs --migrate », puis « docker compose up -d --force-recreate api » (le compte d'administration du .env n'est installé qu'au démarrage, et « docker compose restart » ne relit PAS le .env). Rien n'est effacé.";
   }
   return "Vérifiez la configuration DB_* / MARIADB_* du .env, puis « node server.mjs --migrate » pour appliquer le schéma (cette commande ne supprime rien), ou « docker compose down -v && docker compose up -d --build » pour rejouer schéma et amorçage sur un dossier de données vierge — au prix des données.";
 }
@@ -438,6 +493,73 @@ function authenticate(req) {
   return { ok: false, status: 403, message: "Jeton d'API invalide.", code: "jeton_invalide" };
 }
 
+// Le jeton porté par l'en-tête `Authorization: Bearer …`, ou "".
+const jetonBearer = (req) => {
+  const m = /^Bearer\s+(.+)$/.exec(String(req.headers.authorization || "").trim());
+  return m ? m[1].trim() : "";
+};
+
+// ------------------------------------------------------------------- clés d'API
+// Les COMPTES DE SERVICE de l'API : un administrateur crée une clé dans
+// l'interface, lui donne un rôle, et la remet à un script, un poste ou un outil
+// tiers. Ces clés n'existent que pour l'API — ce ne sont pas des comptes du
+// référentiel, et elles n'apparaissent donc nulle part dans les interfaces
+// (Comptes et rôles, personnes, annuaire). Le domaine signature/publication les
+// gère (actes.mjs) : ici, on ne fait que les INTERROGER pour autoriser.
+
+// L'identité portée par une clé : celle du déploiement (`API_TOKENS`), ou une
+// clé d'API créée dans l'administration. `null` si aucune ne correspond.
+function cleValide(req) {
+  const token = jetonBearer(req);
+  if (!token) return null;
+  const a = authenticate(req);
+  if (a.ok) return { role: a.role, label: a.label, parCle: true };
+  const k = api && typeof api.cleDeJeton === "function" ? api.cleDeJeton(token) : null;
+  return k ? { role: k.role, label: k.label || k.id, parCle: true, cleId: k.id } : null;
+}
+
+// La règle de rôle, appliquée à une identité : `null` si elle passe, sinon le
+// refus à rendre.
+function roleRefuse(role, regle) {
+  if (roleAutorise(role, regle)) return null;
+  return { status: 403, headers: {}, body: err("Rôle insuffisant pour cette opération (rôle : « " + role + " »).", { code: "role_insuffisant", role }) };
+}
+
+// L'autorisation d'une route, telle que la reçoit le domaine : une SESSION
+// (mode « mot de passe »), ou une CLÉ — du déploiement ou de l'administration.
+function autoriser(req, session, regle) {
+  if (MOT_DE_PASSE && session) {
+    // Le jeton anti-CSRF ne concerne que les requêtes menées par un COOKIE : une
+    // clé d'API ne s'accompagne pas d'un cookie, et n'a donc rien à prouver de
+    // ce côté.
+    if (comptes.csrfObligatoire(req) && !comptes.csrfValide(req)) return refusCsrf();
+    return roleRefuse(roleDeCompte(session.compte), regle);
+  }
+  const id = cleValide(req);
+  if (!id) {
+    return MOT_DE_PASSE
+      ? refusSession()
+      : { status: 401, headers: {}, body: err("Jeton d'API absent ou invalide. Ajoutez l'en-tête « Authorization: Bearer <jeton> ».", { code: "jeton_absent" }) };
+  }
+  return roleRefuse(id.role, regle);
+}
+
+// La requête porte-t-elle l'identité d'un AGENT (session, ou clé de service) ?
+// C'est ce qui décide si les publications à diffusion restreinte sont servies.
+//
+// Être connecté ne suffit PAS : quand l'accès à l'atelier est restreint à
+// certaines adresses, un agent qui se connecte depuis ailleurs (télétravail,
+// réseau mobile) reste un lecteur du recueil public — il ne reçoit pas les
+// circulaires internes. C'est la règle demandée : « les actes réservés
+// s'affichent sur l'accès public comme les autres pour les personnes
+// authentifiées ET venant d'une adresse autorisée ».
+async function estAgent(req) {
+  const identifie = (MOT_DE_PASSE && !!(await sessionHTTP(req))) || !!cleValide(req);
+  if (!identifie) return false;
+  const etat = await etatDeLAtelier(ipOf(req));
+  return etat.actif ? etat.autorise : true;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -452,7 +574,100 @@ function readBody(req) {
   });
 }
 
-const ipOf = (req) => String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+// L'adresse de l'appelant, normalisée (`::ffff:10.0.0.1` devient `10.0.0.1` :
+// une pile double annonce l'une ou l'autre forme pour la même adresse, et une
+// liste blanche écrite en IPv4 doit reconnaître les deux).
+const ipOf = (req) => adresseDeLEntete(req.headers, req.socket && req.socket.remoteAddress);
+
+// Le corps d'une requête, selon ce que le client ANNONCE. L'API parle JSON ;
+// les formulaires du recueil parlent `application/x-www-form-urlencoded` — un
+// abonnement au Bulletin doit pouvoir se faire sans JavaScript, donc avec un
+// vrai formulaire, dont le corps n'est pas du JSON. Une seule lecture, deux
+// formats : les routes en aval reçoivent toujours un objet.
+function corpsDeRequete(raw, contentType = "") {
+  const texte = String(raw || "");
+  if (!texte) return {};
+  const type = String(contentType).split(";")[0].trim().toLowerCase();
+  if (type === "application/x-www-form-urlencoded") {
+    const o = {};
+    for (const [k, v] of new URLSearchParams(texte)) o[k] = v;
+    return o;
+  }
+  return JSON.parse(texte);
+}
+
+// L'origine PUBLIQUE telle que le visiteur l'a demandée : les pages du recueil
+// (et les liens qu'elles portent) doivent être justes quel que soit le domaine
+// du déploiement. `SCRIBA_PUBLIQUE_URL` l'emporte quand il est déclaré : c'est
+// l'adresse que le service emploie pour les courriels et le flux, où il n'a
+// aucune requête sous les yeux.
+function originePublique(req) {
+  if (PUBLIQUE_URL) return PUBLIQUE_URL;
+  const h = (req && req.headers) || {};
+  const host = String(h["x-forwarded-host"] || h.host || "").split(",")[0].trim();
+  if (!host) return "";
+  const proto = String(h["x-forwarded-proto"] || "").split(",")[0].trim()
+    || (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host) ? "http" : "https");
+  return proto + "://" + host;
+}
+
+// ------------------------------------------------------ l'accès à l'atelier
+// La restriction d'accès est une décision de SERVICE, et elle se prend ici :
+// c'est le seul endroit qui voit l'adresse réelle de l'appelant, et un
+// navigateur ne peut pas décider de son propre droit d'entrer.
+//
+// La liste vient de deux endroits, dans cet ordre : la variable de déploiement
+// `SCRIBA_ATELIER_IPS` (portée référentiel), puis le référentiel enregistré
+// (`publication.atelier.ips`, réglé dans Administration › Accès à l'atelier).
+// Le `.env` l'emporte : c'est lui qui survit à une remise à zéro du référentiel,
+// et le seul qu'un exploitant puisse poser AVANT la première connexion.
+//
+// Le référentiel est relu au plus une fois toutes les dix secondes : la décision
+// d'accès ne doit pas coûter une requête à chaque appel d'API, mais elle doit
+// suivre un changement de réglage sans qu'il faille redémarrer le service.
+const ATELIER_CACHE_MS = 10 * 1000;
+let atelierRefCache = { valeur: undefined, at: 0 };
+
+async function ipsAtelierReferentiel() {
+  if (atelierRefCache.valeur !== undefined && Date.now() - atelierRefCache.at < ATELIER_CACHE_MS) return atelierRefCache.valeur;
+  let liste;
+  try {
+    const [rows] = await pool.query("SELECT payload FROM sb_record WHERE collection = 'config' AND id = 'self'");
+    const doc = rows.length ? JSON.parse(rows[0].payload) : null;
+    liste = doc && doc.publication && doc.publication.atelier ? doc.publication.atelier.ips : undefined;
+  } catch (e) {
+    liste = undefined;
+  }
+  atelierRefCache = { valeur: liste, at: Date.now() };
+  return liste;
+}
+const oublierIpsAtelier = () => { atelierRefCache = { valeur: undefined, at: 0 }; };
+
+// L'état de l'accès pour une adresse (l'appelant, ou une adresse simulée par
+// l'écran d'administration).
+async function etatDeLAtelier(ip, { simulation = false } = {}) {
+  const e = etatAtelier({
+    ip,
+    ipsDeploiement: OPTIONS.valeurs[CLE_IPS],
+    ipsReferentiel: await ipsAtelierReferentiel(),
+    message: OPTIONS.valeurs[CLE_MESSAGE],
+  });
+  return simulation ? { ...e, simulation: true } : e;
+}
+
+// Les routes qui appartiennent à l'ATELIER : hors réseau autorisé, elles
+// répondent 403. Les routes PUBLIQUES (recueil, publications, résolution ELI,
+// santé, configuration du service, état de l'accès) ne passent jamais par cette
+// porte : un visiteur extérieur doit pouvoir lire le recueil.
+const ATELIER_PUBLIC = new Set(["/v1/config", "/v1/health", "/v1/db/health", "/v1/atelier/acces", "/v1/auth/config"]);
+const estRouteAtelier = (pathname) => {
+  if (ATELIER_PUBLIC.has(pathname)) return false;
+  if (/^\/v1\/db(\/|$)/.test(pathname)) return true;
+  if (/^\/v1\/atelier(\/|$)/.test(pathname)) return true;
+  if (/^\/v1\/journal(\/|$)/.test(pathname)) return true;
+  if (/^\/v1\/(actes|signatures|auth|comptes|courriel|admin)(\/|$)/.test(pathname)) return true;
+  return false;
+};
 
 // ------------------------------------------------------------------- projections
 // Recopie dans des colonnes indexées les champs utiles aux recherches. Aucune
@@ -623,6 +838,15 @@ function authPaths() {
     "/v1/auth/deconnexion": { post: { operationId: "deconnexion", summary: "Fermer la session", description: "Efface la session en base et les cookies.", tags: ["Comptes"], responses: { 200: { description: "Session fermée" }, ...gardeSession } } },
     "/v1/auth/mot-de-passe": { post: { operationId: "changerMotDePasse", summary: "Changer son mot de passe", description: "Exige le mot de passe actuel. Les autres sessions ne sont pas fermées (aucune session n'est privilégiée par rapport à une autre).", tags: ["Comptes"], responses: { 200: { description: "Mot de passe changé" }, 400: { description: "Mot de passe actuel incorrect" }, 422: { description: "Nouveau mot de passe trop faible" }, ...gardeSession } } },
     "/v1/auth/comptes": { get: { operationId: "etatComptes", summary: "État des mots de passe", description: "Pour chaque compte : mot de passe défini ou non, changement exigé, date, échecs, blocage. **Aucun dérivé n'est renvoyé.** Réservé au rôle administrateur.", tags: ["Comptes"], responses: { 200: { description: "État des comptes" }, 403: { description: "Rôle administrateur requis" }, ...gardeSession } } },
+    // --- clés d'API (comptes de service) et journal du service ---------------
+    "/v1/auth/etat": { get: { operationId: "etatAutorisation", summary: "État de l'autorisation du service", description: "Route PUBLIQUE : dit si le service est administrable (`provisionne`), quels rôles existent, et par quel mode (`session` quand l'administration se fait par une session — mode « mot de passe » ou annuaire —, `service` quand il faut la première clé).", tags: ["Autorisation"], responses: { 200: { description: "État de l'autorisation" } } } },
+    "/v1/auth/bootstrap": { post: { operationId: "provisionnerService", summary: "Provisionner le service (dépôt de la première clé)", description: "Geste d'installation : dépose la PREMIÈRE clé d'administration, quand le service n'en a aucune. La valeur est tirée par le client ; le service n'en conserve que l'empreinte SHA-256. Un service déjà pourvu refuse (409 `service_deja_provisionne`).", tags: ["Autorisation"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["cle"], properties: { cle: { type: "string", minLength: 32 }, role: { type: "string", default: "administrateur" }, label: { type: "string" } } } } } }, responses: { 201: { description: "Service provisionné" }, 409: { description: "Service déjà provisionné (code `service_deja_provisionne`)" }, 422: { description: "Clé trop courte (code `cle_trop_courte`)" } } } },
+    "/v1/auth/cles": {
+      get: { operationId: "listerCles", summary: "Lister les clés d'API (comptes de service)", description: "Rend les clés connues du service — identifiant, libellé, rôle, date de création —, jamais leur valeur ni leur empreinte. Ce ne sont PAS des comptes du référentiel : elles n'apparaissent nulle part dans « Comptes et rôles », ni dans les personnes, ni dans l'annuaire. Réservé à l'administration (session, ou clé de rôle administrateur).", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les clés connues" }, 403: { description: "Rôle administrateur requis" } } },
+      post: { operationId: "creerCle", summary: "Créer une clé d'API (compte de service)", description: "Crée une clé rattachée à un rôle (`lecteur`, `redacteur`, `editeur`, `administrateur`, ou `prestataire` pour la seule notification de signature). C'est le client qui tire la valeur et n'en transmet que l'empreinte. Réservé à l'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["cle", "role"], properties: { cle: { type: "string", minLength: 32 }, role: { type: "string", enum: ["lecteur", "redacteur", "editeur", "administrateur", "prestataire"] }, label: { type: "string" } } } } } }, responses: { 201: { description: "Clé créée" }, 403: { description: "Rôle administrateur requis" }, 422: { description: "Clé trop courte (code `cle_trop_courte`)" } } },
+    },
+    "/v1/auth/cles/{id}/revoquer": { post: { operationId: "revoquerCle", summary: "Révoquer une clé d'API", description: "Retire une clé. Le service refuse de révoquer la DERNIÈRE clé d'administration (409 `derniere_cle_admin`).", security: [{ bearerAuth: [] }], tags: ["Autorisation"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Clé révoquée" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Clé inconnue (code `cle_inconnue`)" }, 409: { description: "Dernière clé d'administration (code `derniere_cle_admin`)" } } } },
+    "/v1/journal": { get: { operationId: "lireJournal", summary: "Lire le journal d'audit du service", description: "Journal APPEND-ONLY tenu par le service : chaque geste sensible — dépôt, signature, publication, retrait, épinglage, provisionnement et gestion des clés — y laisse une ligne, et chaque ligne scelle la précédente par son empreinte (le champ `scelle` révèle une chaîne rompue). Réservé à l'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les dernières entrées, et l'état du scellement" }, 403: { description: "Rôle administrateur requis" } } } },
     "/v1/auth/comptes/{id}/mot-de-passe": {
       post: { operationId: "definirMotDePasse", summary: "Définir ou remettre un mot de passe", description: "Définit le mot de passe d'un compte, ou le REMET. Sans `motDePasse` dans le corps, le service en ENGENDRE un (16 caractères, à changer à la première connexion) et ne le rend qu'ici, une seule fois — c'est la remise d'un accès à un agent. Réservé au rôle administrateur.", tags: ["Comptes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { motDePasse: { type: "string", format: "password" }, mustChange: { type: "boolean", description: "Exiger un changement à la première connexion (vrai par défaut pour un mot de passe choisi à la main)." } } } } } }, responses: { 200: { description: "Mot de passe défini (le mot de passe provisoire figure dans la réponse s'il a été engendré)" }, 404: { description: "Compte inconnu" }, 422: { description: "Mot de passe trop faible" }, 403: { description: "Rôle administrateur requis" }, ...gardeSession } },
       delete: { operationId: "retirerMotDePasse", summary: "Retirer le mot de passe d'un compte", description: "Le compte cesse de pouvoir ouvrir de session, et ses sessions ouvertes sont fermées. Le compte lui-même reste au référentiel. Réservé au rôle administrateur.", tags: ["Comptes"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Mot de passe retiré" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Compte inconnu" }, ...gardeSession } },
@@ -634,6 +858,7 @@ function authPaths() {
 function deploiementPaths() {
   return {
     "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif), et l'ÉTAT DU PRESTATAIRE DE SIGNATURE (`prestataire` : transport, adresse, niveau, délai, chemins, et `cle` — un booléen, jamais la clé elle-même —, avec le `motif` quand le circuit électronique est simulé). Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés, valeurs refusées, et état du prestataire" } } } },
+    "/v1/atelier/acces": { get: { operationId: "accesAtelier", summary: "L'accès à l'atelier depuis cette adresse", description: "Route PUBLIQUE. Dit si l'accès à l'atelier est restreint (`actif`), si l'adresse de l'appelant y est autorisée (`autorise`), d'où vient l'adresse (`ip`, `interne`), quelle liste s'applique (`liste`, `source` : `deploiement` ou `referentiel`) et le message à montrer en cas de refus. Le paramètre `ip` permet de DEMANDER « et si j'arrivais de là ? » — c'est le simulateur de l'écran d'administration —, et la réponse porte alors `simulation: true` sans valeur de décision. La restriction est appliquée par le service à toutes les routes de l'atelier (`/v1/db/…`, `/v1/actes/…`, `/v1/signatures/…`, `/v1/auth/…`) : depuis une adresse non autorisée, elles répondent 403 `atelier_hors_reseau`. Elle vaut aussi pour les publications RÉSERVÉES AUX AGENTS, qui ne sont servies qu'aux personnes connectées venant d'une adresse autorisée (voir `SCRIBA_ATELIER_IPS`).", tags: ["Service"], responses: { 200: { description: "État de l'accès depuis cette adresse" }, 403: { description: "Adresse non autorisée (code `atelier_hors_reseau`)" } } } },
   };
 }
 
@@ -687,8 +912,65 @@ async function derniersCourriels(n = 20) {
   return rows.map((r) => ({ ...r, envoye: r.envoye === 1 || r.envoye === true }));
 }
 
+// ------------------------------------------------------- les réglages du Bulletin
+// Le service lit `publication.bulletin` là où l'administration l'écrit (le
+// référentiel), et le `.env` l'emporte par-dessus : les variables déclaratives
+// survivent à une remise à zéro du référentiel, et c'est par elles qu'un
+// exploitant règle le Bulletin sans entrer dans l'application.
+//
+// La lecture est gardée dix secondes, comme celle de l'accès à l'atelier : une
+// page du recueil ne doit pas coûter une requête à chaque visite, mais un
+// réglage changé doit se voir sans redémarrer le service — la copie est donc
+// OUBLIÉE dès que le référentiel est réécrit (voir `sync`).
+let bulletinRefCache = { valeur: undefined, at: 0 };
+const oublierBulletin = () => { bulletinRefCache = { valeur: undefined, at: 0 }; };
+
+// Ce que le `.env` impose au Bulletin (portée référentiel : ces variables sont
+// aussi transmises au navigateur par `GET /v1/config`).
+function bulletinDepuisEnv() {
+  const v = OPTIONS.valeurs;
+  const o = {};
+  if (v.SCRIBA_BULLETIN_ACTIF !== undefined) o.actif = v.SCRIBA_BULLETIN_ACTIF === true;
+  if (v.SCRIBA_BULLETIN_TITRE !== undefined) o.titre = v.SCRIBA_BULLETIN_TITRE;
+  if (v.SCRIBA_BULLETIN_TITRE_BULLETIN !== undefined) o.titreBulletin = v.SCRIBA_BULLETIN_TITRE_BULLETIN;
+  if (v.SCRIBA_BULLETIN_SOUS_TITRE !== undefined) o.sousTitre = v.SCRIBA_BULLETIN_SOUS_TITRE;
+  if (v.SCRIBA_BULLETIN_CADENCE !== undefined) o.cadence = v.SCRIBA_BULLETIN_CADENCE;
+  if (v.SCRIBA_BULLETIN_PARUTION_JOURS !== undefined) o.parutionJours = v.SCRIBA_BULLETIN_PARUTION_JOURS;
+  if (PUBLIQUE_URL) o.base = PUBLIQUE_URL;
+  return o;
+}
+
+async function reglagesBulletin() {
+  if (bulletinRefCache.valeur !== undefined && Date.now() - bulletinRefCache.at < ATELIER_CACHE_MS) return bulletinRefCache.valeur;
+  let ref = {};
+  try {
+    const [rows] = await pool.query("SELECT payload FROM sb_record WHERE collection = 'config' AND id = 'self'");
+    const doc = rows.length ? JSON.parse(rows[0].payload) : null;
+    ref = (doc && doc.publication && doc.publication.bulletin) || {};
+  } catch (e) {
+    ref = {};
+  }
+  const valeur = { ...ref, ...bulletinDepuisEnv() };
+  bulletinRefCache = { valeur, at: Date.now() };
+  return valeur;
+}
+
+// La trace d'un courriel de Bulletin — abonnement, confirmation, parution — va
+// au MÊME journal que les notifications d'actes (`sb_courriel`) : le corps du
+// message n'y est pas conservé, seulement l'événement, la cible et le résultat.
+// `tracer` est appelé sans être attendu (voir bulletins.mjs) : on ne fait donc
+// pas échouer un envoi parce que sa trace n'a pas pu s'écrire.
+function tracerBulletin({ evenement, cible, destinataires, sujet, envoye, motif } = {}) {
+  journaliserCourriel({ evenement, cible, destinataires, sujet, envoye, motif, acteur: "service", ip: null })
+    .catch((e) => console.error("[bulletin] trace impossible :", e.message));
+}
+
 // --------------------------------------------------------------------- routage
 let api = null;   // renseigné au démarrage, après lecture de l'état
+// Le domaine des bulletins (voir bulletins.mjs) : instancié avec l'API, sur le
+// même état — c'est lui qui compose les numéros, tient les abonnés, expédie la
+// file d'envoi et sert les routes `/v1/bulletins…`.
+let bulletins = null;
 
 async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
@@ -696,6 +978,31 @@ async function handle(req, res) {
   const ip = ipOf(req);
 
   if (req.method === "OPTIONS") { send(req, res, 204, null); return; }
+
+  // --- l'accès à l'atelier : /v1/atelier/acces ------------------------------
+  // Route PUBLIQUE : l'application en a besoin AVANT toute session (elle décide
+  // quoi afficher à qui arrive), et elle ne révèle rien de secret — l'adresse de
+  // l'appelant, il la connaît déjà. `?ip=` permet de demander « et si j'arrivais
+  // de là ? » : c'est le simulateur de l'écran d'administration, et sa réponse
+  // ne vaut pas décision (elle est marquée `simulation`).
+  if (pathname === "/v1/atelier/acces" && req.method === "GET") {
+    const simulee = url.searchParams.get("ip");
+    const etat = await etatDeLAtelier(simulee ? simulee : ip, { simulation: !!simulee });
+    send(req, res, 200, { ...etat, appelant: ip });
+    return;
+  }
+
+  // La porte de l'atelier : hors du réseau autorisé, tout ce qui appartient à
+  // l'atelier s'arrête ici. Un 403 explicite, jamais un 404 muet — l'agent doit
+  // comprendre que l'outil existe et que c'est le réseau qui l'en sépare.
+  if (estRouteAtelier(pathname)) {
+    const etat = await etatDeLAtelier(ip);
+    if (!etat.autorise) {
+      console.warn(`[atelier] refusé à ${etat.ip || "adresse inconnue"} (${pathname})`);
+      send(req, res, 403, corpsRefus(etat));
+      return;
+    }
+  }
 
   if (pathname === "/" || pathname === "/v1" || pathname === "/v1/") {
     const doc = api.openapi();
@@ -726,6 +1033,47 @@ async function handle(req, res) {
     return;
   }
 
+  // --- clés d'API et journal du service : le domaine signature/publication -----
+  // Ces adresses servent les COMPTES DE SERVICE de l'API (créer, lister, révoquer
+  // une clé), l'état de l'autorisation et la piste d'audit du service : elles
+  // appartiennent au domaine `actes.mjs`, qui détient l'état (`db.cles`,
+  // `db.journal`). Elles sont donc traitées ICI, AVANT la porte des comptes —
+  // sinon `/v1/auth/cles` tomberait dans le routage des sessions, qui ne les
+  // connaît pas. Aucune de ces routes ne pose ni ne lit de cookie de session :
+  // elles s'autorisent par une session EXISTANTE ou par une clé.
+  if (/^\/v1\/(auth\/(etat|bootstrap|cles)|journal)(\/|$)/.test(pathname)) {
+    if (tooMany("a:" + ip, RATE_MAX_CONNEXIONS, RATE_WINDOW_MS)) {
+      send(req, res, 429, err("Trop de requêtes : ralentissez.", { code: "trop_de_requetes" }), { "retry-after": String(Math.ceil(RATE_WINDOW_MS / 1000)) });
+      return;
+    }
+    let corps = null;
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+      try {
+        const raw = await readBody(req);
+        corps = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        const status = e.status || 400;
+        send(req, res, status, err(status === 413 ? "Requête trop volumineuse." : "Requête illisible (JSON attendu).", { code: status === 413 ? "corps_trop_volumineux" : "json_invalide" }));
+        return;
+      }
+    }
+    const sessionCles = await sessionHTTP(req);
+    const out = await api.route({ method: req.method, path: pathname, headers: req.headers, body: corps, ip }, {
+      agent: !!sessionCles || !!cleValide(req),
+      authorize: (headers, regle) => autoriser(req, sessionCles, regle),
+      rate: () => false,
+    });
+    if (!out) { send(req, res, 404, err("Ressource inconnue : " + pathname, { code: "ressource_inconnue" })); return; }
+    const sale = api.takeDirty();
+    if (sale) {
+      if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
+      try { await saveState(pool, sale); }
+      catch (e) { send(req, res, 500, err("L'écriture de l'état a échoué : " + e.message, { code: "etat_non_ecrit" })); return; }
+    }
+    send(req, res, out.status, out.body, out.headers || {});
+    return;
+  }
+
   // --- comptes et sessions : /v1/auth/… --------------------------------------
   // La porte des comptes répond AVANT tout le reste : c'est par elle que le
   // navigateur apprend le mode du service (voir `GET /v1/auth/config`) et ouvre
@@ -733,6 +1081,12 @@ async function handle(req, res) {
   // elle-même (`/v1/auth/session`, comptes, changement de mot de passe).
   if (pathname === "/v1/auth" || pathname.startsWith("/v1/auth/")) {
     if (pathname === "/v1/auth/config" && req.method === "GET") {
+      // La base a pu être RÉPARÉE depuis le démarrage (compte aligné par
+      // « docker compose run --rm db-init », schéma appliqué à la main) : c'est
+      // ici, le seul appel que fait l'écran de connexion, qu'on rééprouve et
+      // qu'on se rétablit — plutôt que de laisser un bandeau périmé (voir
+      // `reevaluerBase`).
+      await reevaluerBase();
       // L'écran de connexion lit TOUT ici : le mode du service, les règles du
       // mot de passe, les comptes de démonstration éventuels, ET l'état du
       // déploiement — un compte d'administration a-t-il pu être amorcé ? la base
@@ -780,6 +1134,7 @@ async function handle(req, res) {
       });
       return;
     }
+
     if (!MOT_DE_PASSE) {
       send(req, res, 404, err("Le service est en mode « comptes de l'application » : aucune session n'est ouverte ici (AUTH_MODE=demo).", { code: "auth_desactivee" }));
       return;
@@ -856,11 +1211,13 @@ async function handle(req, res) {
     // collections qui portent l'identité et les réglages.
     let acteur = "";
     let estAdmin = false;
+    let roleActeur = "";
     if (MOT_DE_PASSE) {
       const s = await sessionHTTP(req);
       if (!s) { send(req, res, 401, refusSession().body); return; }
       if (comptes.csrfObligatoire(req) && !comptes.csrfValide(req)) { send(req, res, 403, refusCsrf().body); return; }
       estAdmin = comptes.estAdmin(s.compte);
+      roleActeur = roleDeCompte(s.compte);
       if (COLLECTIONS_ADMIN.has(name) && !estAdmin) {
         send(req, res, 403, err(`Seul un administrateur écrit la collection « ${name} ».`, { code: "droit_requis" }));
         return;
@@ -871,6 +1228,17 @@ async function handle(req, res) {
       if (!jeton.ok) { send(req, res, jeton.status, err(jeton.message, { code: jeton.code })); return; }
       acteur = jeton.label;
       estAdmin = jeton.role === "administrateur";
+      roleActeur = jeton.role;
+    }
+    // Les billets du recueil public s'écrivent par la COMMUNICATION, pas par
+    // n'importe quel compte : la collection « informations » demande le rôle
+    // éditeur, comme la permission « informations.gerer » de l'application
+    // (voir src/lib/users.js) et comme le service de démonstration
+    // (index.html, DBC_ECRITURE). Sans ce seuil, un rédacteur pourrait publier
+    // une communication sur le site public.
+    if (COLLECTIONS_EDITEUR.has(name) && !roleAutorise(roleActeur, { min: "editeur" })) {
+      send(req, res, 403, err(`La collection « ${name} » demande au moins le rôle éditeur (rôle : « ${roleActeur} »).`, { code: "droit_requis", role: roleActeur }));
+      return;
     }
     let body;
     try {
@@ -883,10 +1251,43 @@ async function handle(req, res) {
     }
     try {
       const out = await sync(name, body || {}, acteur, ip, estAdmin);
-      send(req, res, out.status, out.body);
+      // Le référentiel vient d'être écrit : la liste d'accès à l'atelier est
+      // peut-être dedans. On oublie la copie gardée, pour que le prochain appel
+      // relise la règle à jour (voir `ipsAtelierReferentiel`).
+      if (name === "config") oublierIpsAtelier();
+      // Les réglages du Bulletin sont dans le même document : ils doivent suivre
+      // le même chemin, sinon un réglage changé attendrait dix secondes.
+      if (name === "config") oublierBulletin();      send(req, res, out.status, out.body);
     } catch (e) {
       console.error("[sync]", name, e);
       send(req, res, 500, err("Écriture impossible : " + e.message, { code: "ecriture_impossible" }));
+    }
+    return;
+  }
+
+  // --- les informations publiées au recueil (les billets) --------------------
+  // Route PUBLIQUE, comme le recueil lui-même : elle ne rend que les billets
+  // PUBLIÉS (`publie: true`). Un brouillon ne sort que vers une identité de rôle
+  // `editeur` au moins — c'est ce que la collection `informations` exige à
+  // l'écriture (COLLECTIONS_EDITEUR), et c'est aussi la règle du service de
+  // démonstration (index.html, `hInformations`). Un billet n'est ni signé ni
+  // numéroté : il n'entre pas dans le registre des actes, et la restriction
+  // d'accès à l'atelier ne le concerne pas — le recueil public est ouvert à tous.
+  if (pathname === "/v1/informations" && req.method === "GET") {
+    try {
+      const records = await listCollection(pool, "informations");
+      const session = MOT_DE_PASSE ? await sessionHTTP(req) : null;
+      const peutVoirBrouillons = !autoriser(req, session, { min: "editeur" });
+      const liste = records
+        .map((r) => r.payload)
+        .filter((i) => i && typeof i === "object")
+        .filter((i) => i.publie === true || peutVoirBrouillons)
+        .sort((a, b) => String(b.date || b.creeLe || "").localeCompare(String(a.date || a.creeLe || "")));
+      noterBase(true);
+      send(req, res, 200, { informations: liste });
+    } catch (e) {
+      noterBaseSelonErreur(e);
+      send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" }));
     }
     return;
   }
@@ -971,7 +1372,12 @@ async function handle(req, res) {
     // ne se lit qu'avec une session. Les publications, les identifiants ELI, le
     // recueil et la santé du service restent, eux, ouverts à tous.
     const session = await sessionHTTP(req);
-    if (MOT_DE_PASSE && /^\/v1\/(actes|signatures)(\/|$)/.test(pathname) && !session) {
+    // En mode « mot de passe », ce qui n'est pas encore publié au recueil ne se
+    // lit pas sans identité — une SESSION (l'agent), ou une CLÉ d'API (le compte
+    // de service d'un script ou d'un outil tiers). Les publications, les
+    // identifiants ELI, le recueil et la santé du service restent, eux, ouverts à
+    // tous.
+    if (MOT_DE_PASSE && /^\/v1\/(actes|signatures)(\/|$)/.test(pathname) && !session && !cleValide(req)) {
       send(req, res, 401, refusSession().body);
       return;
     }
@@ -979,33 +1385,30 @@ async function handle(req, res) {
     // `await` : un gestionnaire peut avoir à SORTIR sur le réseau — l'ouverture
     // d'un circuit de signature auprès du prestataire (voir signature.mjs). Le
     // routage rend alors une promesse, et l'état n'est écrit qu'après coup.
-    const out = await api.route(request, {
-      authorize: (headers, regle) => {
-        if (MOT_DE_PASSE) {
-          if (!session) return { status: 401, headers: {}, body: refusSession().body };
-          if (comptes.csrfObligatoire(request) && !comptes.csrfValide({ headers })) {
-            return { status: 403, headers: {}, body: refusCsrf().body };
-          }
-          const role = roleDeCompte(session.compte);
-          if (!roleAutorise(role, regle)) {
-            return { status: 403, headers: {}, body: err("Rôle insuffisant pour cette opération (rôle du compte : « " + role + " »).", { code: "role_insuffisant", role }) };
-          }
-          return null;
-        }
-        const a = authenticate({ headers });
-        if (!a.ok) return { status: a.status, headers: {}, body: err(a.message, { code: a.code }) };
-        if (!roleAutorise(a.role, regle)) {
-          return { status: 403, headers: {}, body: err("Cette clé d'API n'a pas le rôle requis (« " + a.role + " »).", { code: "role_insuffisant", role: a.role }) };
-        }
-        return null;
-      },
+    const ctxRoute = {
+      // `agent` : la requête porte-t-elle une session, ou une clé de service ?
+      // Les publications RÉSERVÉES AUX AGENTS ne se servent qu'à celles-là (voir
+      // src/server/mysql/actes.mjs).
+      agent: !!session || !!cleValide(req),
+      authorize: (headers, regle) => autoriser(request, session, regle),
       rate: (r) => tooMany("w:" + ip + ":" + pathname, RATE_MAX_WRITES, RATE_WINDOW_MS),
-    });
+      base: originePublique(req),
+    };
+    let out = await api.route(request, ctxRoute);
+    // LE BULLETIN appartient à son propre domaine (voir bulletins.mjs) : le
+    // service l'essaie dans la foulée, sur le même état et avec les mêmes
+    // règles d'accès — c'est ce qui fait de `/v1/bulletins…` une partie du
+    // service, sans que le domaine des actes ait à le connaître.
+    if (!out && bulletins) out = await bulletins.route(request, ctxRoute);
     if (!out) { send(req, res, 404, err("Ressource inconnue : " + pathname, { code: "ressource_inconnue" })); return; }
     // L'état n'est écrit qu'après un changement effectif : une lecture ne touche
-    // pas la base.
-    const dirty = api.takeDirty();
+    // pas la base. Les deux domaines écrivent le MÊME document — on draine donc
+    // les deux, et le dernier sérialisé fait foi.
+    const dirty = api.takeDirty() || (bulletins ? bulletins.takeDirty() : null);
     if (dirty) {
+      // Un état VIDE de secours ne s'écrit jamais par-dessus l'état enregistré
+      // (voir `refusEtatDegrade`).
+      if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
       try { await saveState(pool, dirty); }
       catch (e) {
         console.error("[etat]", e);
@@ -1020,13 +1423,48 @@ async function handle(req, res) {
   // --- le recueil ouvert : /robots.txt, /llms.txt, /sitemap.xml, /recueil… ----
   // Ces adresses sont celles du SITE, pas de l'API : elles sont servies par le
   // domaine du recueil (voir nginx.conf) et le domaine `actes.mjs` les tient,
-  // puisqu'il détient les publications. Une lecture ne touche pas la base.
-  if (req.method === "GET" || req.method === "HEAD") {
-    const out = api.route({ method: req.method, path: pathname + url.search, headers: req.headers, body: null, ip }, {
+  // puisqu'il détient les publications — et, avec elles, les pages du Bulletin.
+  //
+  // Les LECTURES sont publiques et ne touchent pas la base. Les ÉCRITURES du
+  // recueil — la demande d'abonnement au Bulletin, qui poste depuis un VRAI
+  // formulaire HTML, pour fonctionner sans JavaScript — passent par le même
+  // domaine, avec les garde-fous de l'API : corps lu et converti, débit borné,
+  // et état écrit uniquement après un changement effectif.
+  {
+    const lecture = req.method === "GET" || req.method === "HEAD";
+    let corps = null;
+    if (!lecture) {
+      try {
+        corps = corpsDeRequete(await readBody(req), req.headers["content-type"] || "");
+      } catch (e) {
+        const status = e.status || 400;
+        send(req, res, status, err(status === 413 ? "Requête trop volumineuse." : "Requête illisible.", { code: status === 413 ? "corps_trop_volumineux" : "corps_invalide" }));
+        return;
+      }
+    }
+    // Une publication RÉSERVÉE AUX AGENTS ne se montre qu'à une identité connue
+    // (session ou clé de service) — voir src/server/mysql/actes.mjs.
+    const agent = lecture ? await estAgent(req) : false;
+    const out = await api.route({ method: req.method, path: pathname + url.search, headers: req.headers, body: corps, ip }, {
+      agent,
       authorize: () => null,
-      rate: () => false,
+      rate: () => tooMany("w:" + ip + ":" + pathname, RATE_MAX_WRITES, RATE_WINDOW_MS),
+      base: originePublique(req),
     });
-    if (out) { send(req, res, out.status, out.body, out.headers || {}); return; }
+    if (out) {
+      const dirty = api.takeDirty() || (bulletins ? bulletins.takeDirty() : null);
+      if (dirty) {
+        if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
+        try { await saveState(pool, dirty); }
+        catch (e) {
+          console.error("[etat]", e);
+          send(req, res, 500, err("L'écriture de l'état a échoué : " + e.message, { code: "etat_non_ecrit" }));
+          return;
+        }
+      }
+      send(req, res, out.status, out.body, out.headers || {});
+      return;
+    }
   }
 
   send(req, res, 404, err("Ressource inconnue : " + pathname, { code: "ressource_inconnue" }));
@@ -1034,6 +1472,11 @@ async function handle(req, res) {
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((e) => {
+    // Une requête qui échoue sur la BASE (table manquante, identifiants refusés)
+    // n'est pas qu'une erreur de requête : c'est l'état du déploiement qui a
+    // changé. On le note, pour que l'écran de connexion porte le bon remède et
+    // que le service se rétablisse (voir `reevaluerBase`).
+    noterBaseSelonErreur(e);
     console.error("[http]", e);
     if (!res.headersSent) send(req, res, 500, err("Erreur interne du service.", { code: "erreur_interne" }));
     else res.end();
@@ -1041,15 +1484,82 @@ const server = http.createServer((req, res) => {
 });
 
 // ------------------------------------------------------------------ migration
-async function migrate() {
+// LE SCHÉMA, appliqué en une fois. `schema.sql` ne contient que des
+// `CREATE TABLE IF NOT EXISTS` et des vues (`CREATE OR REPLACE`) : l'appliquer à
+// une base en service ne détruit rien, et c'est ce qui rend le geste répétable —
+// au démarrage (AUTO_MIGRATE), après une reprise de la base (voir
+// `reevaluerBase`), ou à la main (`--migrate`, et `--reconcilier`, qui l'appelle
+// après avoir aligné le compte).
+async function appliquerSchema(conn) {
   const sql = await readFile(path.join(HERE, "schema.sql"), "utf8");
+  await conn.query(sql);
+}
+
+async function migrate() {
   const conn = await mysql.createConnection({ ...DB, multipleStatements: true });
   try {
-    await conn.query(sql);
+    await appliquerSchema(conn);
     console.log("Schéma appliqué (schema.sql).");
   } finally {
     await conn.end();
   }
+}
+
+// ------------------------------------------------------- le compte applicatif
+// LE COMPTE APPLICATIF SUIT LE `.env` : c'est ce que fait ce geste, et c'est le
+// SEUL endroit du logiciel qui parle à la base en ROOT (le mot de passe root est
+// lu ici, et n'est ni journalisé, ni transmis).
+//
+// MariaDB ne crée son compte qu'au PREMIER démarrage d'un dossier de données
+// VIERGE : changer `DB_PASSWORD` ensuite ne change plus rien en base, et le
+// service se voit refuser l'accès (« Access denied for user 'scriba'@… ») alors
+// que le `.env` est correct — c'est la panne d'installation la plus fréquente.
+// On remet donc le compte au mot de passe du `.env` (voir compte-base.mjs pour
+// les ordres SQL, et `docker compose`, service `db-init`, qui l'appelle à chaque
+// démarrage). Rien n'est DÉTRUIT : ni table, ni contenu.
+//
+// LE SCHÉMA SUIT LE COMPTE, dans le même geste. Les deux pannes vont de pair : une
+// base dont le compte était refusé n'a jamais reçu son schéma (l'application
+// n'avait pas de quoi le créer), et l'exploitant qui répare le compte avec cette
+// commande doit repartir d'une base UTILISABLE — sinon il voit « Table … doesn't
+// exist » au premier écran, et doit chercher une seconde commande. `schema.sql`
+// étant idempotent, l'appliquer ici ne touche à aucune donnée, même sur une base
+// en service.
+//
+// Le geste est BON ENFANT : s'il échoue (mot de passe root périmé, base
+// injoignable), il le DIT et n'empêche rien de démarrer — le service journalise
+// ensuite, à son tour, l'état réel de la base et le remède.
+async function reconcilierCompte() {
+  const motDePasseRoot = env("DB_ROOT_PASSWORD", "");
+  if (!motDePasseRoot) {
+    console.error("Compte applicatif : DB_ROOT_PASSWORD est vide — alignement impossible. Renseignez-le (il est dans le .env du déploiement), ou alignez le compte à la main.");
+    return false;
+  }
+  if (!DB.password) {
+    console.error("Compte applicatif : DB_PASSWORD est vide — refus d'inscrire un mot de passe vide sur le compte de la base.");
+    return false;
+  }
+  const conn = await mysql.createConnection({
+    host: DB.host, port: DB.port, socketPath: DB.socketPath,
+    user: "root", password: motDePasseRoot,
+    charset: DB.charset, multipleStatements: true, timezone: DB.timezone,
+  });
+  try {
+    await conn.query(sqlCompteApplicatif({ base: DB.database, utilisateur: DB.user, motDePasse: DB.password }));
+    console.log(`Compte applicatif « ${DB.user} » aligné sur le .env (base « ${DB.database} »).`);
+  } finally {
+    await conn.end();
+  }
+  // Le compte vient d'être remis au mot de passe du `.env` : on se connecte avec
+  // LUI, comme le ferait le service, pour que les tables lui appartiennent.
+  try {
+    await migrate();
+  } catch (e) {
+    console.error("Schéma non appliqué :", e.message);
+    console.error("Le compte est en règle, mais les tables manquent encore. Quand la base répondra : « node server.mjs --migrate », ou « docker compose up -d --force-recreate api » (AUTO_MIGRATE les crée au démarrage de son côté).");
+    return false;
+  }
+  return true;
 }
 
 // ------------------------------------------------------- comptes : amorçage
@@ -1130,8 +1640,155 @@ async function motDePasseCLI(login) {
   console.log(`Mot de passe défini pour « ${l} » (ses sessions ouvertes restent valides).`);
 }
 
+// ------------------------------------------------- l'état du service en mémoire
+// L'état de signature/publication (actes, circuits, publications) vit en mémoire
+// et est écrit dans `sb_etat` après chaque changement. On le tient ici, hors de
+// `main`, pour pouvoir le RECHARGER après une reprise de la base (voir
+// `reevaluerBase`) : sans cela, un service parti sur un état vide y resterait.
+let etatApp = null;
+// L'état en mémoire est-il un état VIDE de secours, faute d'avoir pu lire le
+// véritable ? C'est ce drapeau qui empêche de l'écrire par-dessus celui de la
+// base (voir les deux `saveState` de `handle`) : ce serait une perte silencieuse.
+let etatDegrade = false;
+
+// Charge l'état depuis la base, ou repart d'un état vide EN LE DISANT (voir
+// state.mjs). Démarrage DÉGRADÉ, explicite : si l'état est illisible, on ne sort
+// PAS en `process.exit(1)` (le conteneur redémarrerait en boucle, nginx servirait
+// des 502) et on ne bascule pas en silence sur un état vide — on démarre, on le
+// journalise, et le client l'apprend par `/v1/auth/config`.
+async function chargerEtatService() {
+  etatDegrade = false;
+  try {
+    return await loadState(pool, {
+      onDegrade: (e) => {
+        etatDegrade = true;
+        noterBase(false, "L'état du service est illisible : " + e.message, e);
+        console.error("Démarrage DÉGRADÉ : l'état du service n'a pas pu être chargé. Le registre paraîtra vide tant que la base ne sera pas rétablie.");
+        if (etatService.baseRemede) console.error(etatService.baseRemede);
+      },
+    });
+  } catch (e) {
+    // `loadState` ne devrait pas lever (il retombe sur un état vide), mais un
+    // démarrage ne doit jamais dépendre de cette promesse.
+    etatDegrade = true;
+    noterBase(false, "L'état du service est illisible : " + e.message, e);
+    console.error("Démarrage DÉGRADÉ :", e.message);
+    return emptyState();
+  }
+}
+
+// Le domaine (`actes.mjs`) est un objet SANS état propre : on peut le
+// réinstancier sur un état rechargé, sans redémarrer le service.
+function instancierApi(state) {
+  // LE DOMAINE DES BULLETINS d'abord : l'API des actes le reçoit, pour servir
+  // ses pages publiques (voir actes.mjs, `pageBulletins`). On lui passe les
+  // LECTURES dont il a besoin — les publications du recueil, les réglages, le
+  // courriel — et rien de plus : il ne connaît ni MySQL, ni le réseau.
+  bulletins = createBulletins({
+    state,
+    sha256,
+    alea: (n = 32) => randomBytes(Math.max(8, Math.ceil(Number(n) / 2))).toString("hex"),
+    now: () => new Date().toISOString(),
+    save: (json) => json.length <= MAX_STATE_CHARS,
+    reglages: reglagesBulletin,
+    // Les publications, dans la forme qu'attend le composeur : la dernière
+    // version de chaque identifiant ELI, et JAMAIS une publication réservée aux
+    // agents — un bulletin part par courriel et se lit en clair sur le recueil.
+    // `api` est lu AU MOMENT DE L'APPEL, pas à l'instanciation (elle n'existe
+    // pas encore ici).
+    publications: async () => (api ? api.publicationsPubliques(false) : []),
+    courriel,
+    tracer: tracerBulletin,
+    maxBulletins: BULLETIN_MAX,
+    maxAbonnes: BULLETIN_MAX_ABONNES,
+    maxEnvoisParPasse: BULLETIN_ENVOIS_PASSE,
+    baseUrl: PUBLIQUE_URL,
+    journal: (m) => console.log("[bulletin] " + m),
+  });
+  api = createActesApi({
+    state,
+    sha256,
+    save: (json) => json.length <= MAX_STATE_CHARS,
+    maxDoc: MAX_DOC, maxPublies: MAX_PUBLIES, maxSignatures: MAX_SIGNATURES, maxActes: MAX_ACTES,
+    prestataire: prestataireSignature,
+    authMode: AUTH_MODE,
+    bulletins,
+  });
+  const b = bulletins.compter();
+  console.log(`État du service : ${Object.keys(state.actes).length} acte(s), ${Object.keys(state.signatures).length} circuit(s), ${Object.keys(state.publies).length} publication(s), ${b.bulletins} bulletin(s), ${b.abonnes} abonné(s).`);
+}
+
+// L'ÉTAT DÉGRADÉ NE S'ÉCRIT PAS. Un service qui a démarré sans avoir pu lire son
+// état a, en mémoire, un état VIDE : l'écrire remplacerait celui de la base — la
+// pire perte possible, parce qu'elle serait silencieuse. On refuse le temps que la
+// base revienne ; le service recharge alors son état tout seul (`reevaluerBase`).
+function refusEtatDegrade() {
+  return err("Le service a démarré sans pouvoir lire son état (base indisponible au démarrage) : écrire maintenant effacerait l'état enregistré. Rétablissez la base — le service se recharge de lui-même — puis recommencez.", { code: "etat_degrade" });
+}
+
+// RÉÉPROUVER LA BASE, ET SE RÉTABLIR SANS ÊTRE RECRÉÉ.
+//
+// `baseDisponible` était un VERDICT DE DÉMARRAGE : une fois posé, il ne changeait
+// plus. Un exploitant qui suivait le conseil du bandeau (« docker compose run --rm
+// db-init ») réparait donc bien le compte, mais gardait un service qui se croyait
+// en panne — et, `AUTO_MIGRATE` ne courant qu'au démarrage, une base sans tables :
+// le « Table … doesn't exist » au premier écran. On rééprouve donc la base À LA
+// DEMANDE, depuis le seul appel que fait l'écran de connexion
+// (`GET /v1/auth/config`), au plus une fois toutes les `REESSAI_BASE_MS` :
+// schéma si `AUTO_MIGRATE`, épreuve de santé, amorçage de l'administrateur s'il
+// avait échoué FAUTE DE BASE, et rechargement de l'état si le service était parti
+// sur un état vide.
+async function reevaluerBase() {
+  if (etatService.baseDisponible !== false) return;
+  const maintenant = Date.now();
+  if (maintenant - reessaiBaseAt < REESSAI_BASE_MS) return;
+  reessaiBaseAt = maintenant;
+  if (opt("AUTO_MIGRATE") === true) {
+    try { await migrate(); }
+    catch (e) { console.error("[reprise] Migration automatique impossible :", e.message); }
+  }
+  let h;
+  try {
+    h = await health();
+  } catch (e) {
+    noterBaseSelonErreur(e);
+    if (etatService.baseDisponible === null) noterBase(false, e.message, e);
+    console.error("[reprise] La base ne répond toujours pas :", e.message);
+    return;
+  }
+  noterBase(true);
+  console.log(`[reprise] Base « ${h.base.schema} » de nouveau joignable.`);
+  // L'administrateur du `.env` n'est amorcé qu'au démarrage : si c'est la base qui
+  // manquait, il ne l'a jamais été, et personne ne pourrait entrer. On ne le
+  // refait que sur une PANNE (`adminPanne`) : un mot de passe refusé pour cause de
+  // configuration n'est pas à rejouer.
+  if (MOT_DE_PASSE && etatService.adminPanne && etatService.adminAmorce !== true) {
+    try { await amorcerAdmin(); }
+    catch (e) { console.error("[reprise] Amorçage du compte administrateur impossible :", e.message); }
+  }
+  if (etatDegrade) {
+    etatApp = await chargerEtatService();
+    instancierApi(etatApp);
+  }
+}
+
 // -------------------------------------------------------------------- démarrage
 async function main() {
+  if (process.argv.includes("--reconcilier")) {
+    // Le compte applicatif, avant tout le reste : c'est ce qui répare
+    // « Access denied for user 'scriba'@… » quand le .env a changé depuis la
+    // création du dossier de données. Le schéma est appliqué dans la foulée, avec
+    // le compte qui vient d'être aligné (voir la fonction) : la base ressort
+    // utilisable. Toujours en succès (voir la fonction).
+    try {
+      await reconcilierCompte();
+    } catch (e) {
+      console.error("Alignement du compte applicatif impossible :", e.message);
+      console.error("Le compte et son mot de passe sont inscrits au PREMIER démarrage de la base. Si DB_ROOT_PASSWORD n'est plus celui du dossier de données, il n'y a que deux issues : retrouver l'ancien, ou repartir d'un dossier de données vierge (« docker compose down -v && docker compose up -d » — au prix des données).");
+    }
+    await pool.end();
+    return;
+  }
   if (process.argv.includes("--migrate")) {
     await migrate();
     await pool.end();
@@ -1143,8 +1800,15 @@ async function main() {
     await pool.end();
     return;
   }
+  // LE SCHÉMA D'ABORD (idempotent) : il rend la base UTILISABLE, et son échec
+  // porte le remède le plus juste (compte refusé, base absente, schéma refusé).
+  // On GARDE son erreur : le verdict est reposé APRÈS l'épreuve de santé, pour
+  // qu'une base qui répond — mais sans ses tables — ne l'efface pas en annonçant
+  // « joignable ».
+  let echecSchema = null;
   if (opt("AUTO_MIGRATE") === true) {
-    try { await migrate(); } catch (e) { console.error("Migration automatique impossible :", e.message); }
+    try { await migrate(); }
+    catch (e) { echecSchema = e; console.error("Migration automatique impossible :", e.message); }
   }
   try {
     const h = await health();
@@ -1158,35 +1822,42 @@ async function main() {
     console.error("La base ne répond pas encore :", e.message);
     console.error(etatService.baseRemede || "Vérifiez DB_HOST / DB_USER / DB_PASSWORD / DB_NAME, puis lancez « node server.mjs --migrate ».");
   }
-  // Démarrage DÉGRADÉ, explicite : si l'état de signature/publication est
-  // illisible, on ne sort PAS en `process.exit(1)` (le conteneur redémarrerait
-  // en boucle, nginx servirait des 502) et on ne bascule pas en silence sur un
-  // état vide — on démarre, on le journalise, et le client l'apprend par
-  // `/v1/auth/config` (bandeau « base de données indisponible »).
-  let state;
-  try {
-    state = await loadState(pool, {
-      onDegrade: (e) => {
-        noterBase(false, "L'état du service est illisible : " + e.message, e);
-        console.error("Démarrage DÉGRADÉ : l'état du service n'a pas pu être chargé. Le registre paraîtra vide tant que la base ne sera pas rétablie.");
-        if (etatService.baseRemede) console.error(etatService.baseRemede);
-      },
-    });
-  } catch (e) {
-    // `loadState` ne devrait pas lever (il retombe sur un état vide), mais un
-    // démarrage ne doit jamais dépendre de cette promesse.
-    noterBase(false, "L'état du service est illisible : " + e.message, e);
-    console.error("Démarrage DÉGRADÉ :", e.message);
-    state = emptyState();
+  // Le verdict de la MIGRATION prime : une base joignable dont le schéma n'a pas
+  // pu être appliqué n'est pas une base utilisable, et c'est le motif que l'écran
+  // de connexion doit montrer. La base se rétablit ensuite toute seule (voir
+  // `reevaluerBase`) — et l'écriture de l'état reste refusée jusque-là.
+  if (echecSchema) {
+    noterBase(false, "Le schéma n'a pas pu être appliqué : " + echecSchema.message, echecSchema);
+    console.error(etatService.baseRemede);
   }
-  api = createActesApi({
-    state,
-    sha256,
-    save: (json) => json.length <= MAX_STATE_CHARS,
-    maxDoc: MAX_DOC, maxPublies: MAX_PUBLIES, maxSignatures: MAX_SIGNATURES, maxActes: MAX_ACTES,
-    prestataire: prestataireSignature,
-  });
-  console.log(`État du service : ${Object.keys(state.actes).length} acte(s), ${Object.keys(state.signatures).length} circuit(s), ${Object.keys(state.publies).length} publication(s).`);
+  etatApp = await chargerEtatService();
+  instancierApi(etatApp);
+  // LA PASSE DU BULLETIN : tout de suite, puis à intervalle régulier. C'est elle
+  // qui clôt les périodes échues, compose les numéros et vide la file d'envoi —
+  // un service redémarré rattrape donc son retard seul, sans attendre la
+  // première échéance d'un minuteur. Elle n'écrit JAMAIS sur un état dégradé :
+  // ce serait effacer l'état enregistré (voir `refusEtatDegrade`).
+  const passeBulletins = async () => {
+    if (!bulletins || etatDegrade) return;
+    try {
+      const r = await bulletins.assurer();
+      const sale = bulletins.takeDirty();
+      if (sale) await saveState(pool, sale);
+      if (r.composees.length) console.log(`[bulletin] ${r.composees.length} numéro(s) composé(s) : ${r.composees.join(", ")}`);
+      if (r.envois.total) console.log(`[bulletin] envois de cette passe : ${r.envois.ok} parti(s), ${r.envois.echecs} échec(s).`);
+    } catch (e) {
+      console.error("[bulletin] passe impossible :", e.message);
+    }
+  };
+  await passeBulletins();
+  const minuteurBulletin = setInterval(passeBulletins, Math.max(1, Number(BULLETIN_INTERVALLE_MIN) || 10) * 60000);
+  // Le minuteur ne doit pas retenir le processus : un service qu'on arrête
+  // s'arrête, il n'attend pas la passe suivante.
+  if (minuteurBulletin.unref) minuteurBulletin.unref();
+  // Le service de courriel : actif, ou POURQUOI il ne l'est pas. Le bulletin part
+  // par courriel (voir `bulletins.mjs`) et l'exploitant doit lire ici, au
+  // démarrage, si ses envois sortiront — plutôt que de découvrir au premier
+  // numéro que `SMTP_HOST` manquait. `etat()` ne rend aucun secret.
   const etatCourriel = courriel.etat();
   console.log(etatCourriel.disponible
     ? `Courriel : notifications actives — ${etatCourriel.hote}:${etatCourriel.port} (${etatCourriel.securise}), expéditeur ${etatCourriel.expediteur}${etatCourriel.authentifie ? ", authentifié" : ", sans authentification"}.`
@@ -1220,6 +1891,9 @@ async function main() {
   // a été REFUSÉ. Une valeur refusée n'est jamais appliquée en silence — elle le
   // sera aussi dans `GET /v1/config`, pour l'administrateur.
   console.log(`Réglages déclaratifs du référentiel : ${Object.keys(OPTIONS.valeurs).length} variable(s) posée(s).`);
+  // L'accès à l'atelier, dit une fois au démarrage : c'est la première chose
+  // qu'un exploitant veut vérifier quand il n'arrive plus à entrer.
+  console.log(resumeAtelier(OPTIONS.valeurs[CLE_IPS], OPTIONS.valeurs[CLE_MESSAGE]));
   for (const e of OPTIONS.erreurs) console.error(`  REFUSÉE : ${e.variable}=${e.valeur} — ${e.motif}`);
   for (const e of OPTIONS_SERVICE.erreurs) console.error(`  RÉGLAGE DE SERVICE REFUSÉ : ${e.variable} — ${e.motif}`);
   // Le piège qui fait perdre le plus de temps : un conteneur ne relit PAS le

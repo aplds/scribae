@@ -100,11 +100,67 @@ curl -X GET 'https://api.exemple.fr/v1/config' \
 
 ## Autorisation
 
-Les clés d'API et leurs rôles, le journal d'audit.
+Le provisionnement du service, les clés d'API et leurs rôles, le journal d'audit.
+
+### `GET /v1/auth/etat` — État de l'autorisation du service
+
+Route PUBLIQUE : dit si le service est administrable (`provisionne` — soit une session l'administre, soit il a reçu sa première clé), les rôles que peuvent porter les clés, et par quel mode il s'administre (`session` en mode « mot de passe » ou par annuaire, `service` quand il faut déposer la première clé). N'apprend rien des clés elles-mêmes.
+
+- **Authentification** : publique
+- **Service** : plateforme
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/auth/etat' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | { provisionne, roles, mode } |
+
+| Champ | Type | Description |
+|---|---|---|
+| provisionne | booléen | Le service est-il administrable ? |
+| mode | string | session \| service |
+| roles | array | Les rôles qu'une clé peut porter |
+
+### `POST /v1/auth/bootstrap` — Provisionner le service (première clé)
+
+Geste d'INSTALLATION : dépose la PREMIÈRE clé d'administration d'un service neuf, quand il n'en a encore aucune. Une seule fois — un service déjà pourvu répond 409 `service_deja_provisionne`. La clé est tirée par le client ; le service n'en conserve que l'empreinte SHA-256.
+
+- **Authentification** : publique
+- **Service** : plateforme
+
+**Corps de la requête**
+
+```json
+{
+  "cle": "<clé tirée au hasard, 32 caractères ou plus>",
+  "label": "Administrateur",
+  "role": "administrateur"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/auth/bootstrap' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"cle":"<clé tirée au hasard, 32 caractères ou plus>","label":"Administrateur","role":"administrateur"}'
+```
+
+| Code | Signification |
+|---|---|
+| 201 | Service provisionné |
+| 409 | Déjà provisionné (service_deja_provisionne) |
+| 422 | Clé trop courte (cle_trop_courte) |
 
 ### `GET /v1/auth/cles` — Lister les clés d'API
 
-Les clés d'API que le service accepte : leur libellé, leur rôle, et l'empreinte — jamais la clé elle-même, que le service ne connaît pas (c'est le client qui la tire, et n'en transmet que l'empreinte SHA-256).
+Les clés d'API que le service accepte : leur identifiant, leur libellé, leur rôle et leur date de création — jamais la valeur, ni l'empreinte (c'est le client qui tire la clé, et n'en transmet que l'empreinte SHA-256). Ces clés sont des COMPTES DE SERVICE : elles n'apparaissent nulle part dans le référentiel.
 
 - **Authentification** : administrateur
 - **Service** : plateforme
@@ -124,7 +180,7 @@ curl -X GET 'https://api.exemple.fr/v1/auth/cles' \
 
 ### `POST /v1/auth/cles` — Créer une clé d'API
 
-Enregistre une clé (son empreinte) et son rôle. Le rôle `prestataire` n'ouvre que la notification de signature.
+Enregistre une clé (son empreinte SHA-256) et son rôle. Le rôle commande les routes que la clé ouvre : `lecteur` ne peut pas publier, `redacteur` ne peut pas gérer les clés, `prestataire` n'ouvre que la notification de signature.
 
 - **Authentification** : administrateur
 - **Service** : plateforme
@@ -133,7 +189,7 @@ Enregistre une clé (son empreinte) et son rôle. Le rôle `prestataire` n'ouvre
 
 ```json
 {
-  "cle": "<empreinte sha256 de la clé>",
+  "cle": "<la clé, 32 caractères ou plus — le service n'en garde que l'empreinte>",
   "role": "redacteur",
   "label": "Intégration intranet"
 }
@@ -146,7 +202,7 @@ curl -X POST 'https://api.exemple.fr/v1/auth/cles' \
   -H 'accept: application/json' \
   -H 'authorization: Bearer VOTRE_JETON' \
   -H 'content-type: application/json' \
-  -d '{"cle":"<empreinte sha256 de la clé>","role":"redacteur","label":"Intégration intranet"}'
+  -d '{"cle":"<la clé, 32 caractères ou plus — le service n'en garde que l'empreinte>","role":"redacteur","label":"Intégration intranet"}'
 ```
 
 | Code | Signification |
@@ -175,6 +231,7 @@ curl -X POST 'https://api.exemple.fr/v1/auth/cles/ACT-12/revoquer' \
 |---|---|
 | 200 | Clé révoquée |
 | 404 | Clé inconnue |
+| 409 | Dernière clé d'administration (derniere_cle_admin) |
 
 ### `GET /v1/journal` — Journal d'audit du service
 
@@ -1168,6 +1225,237 @@ curl -X POST 'https://api.exemple.fr/v1/admin/purge' \
 | 200 | Service purgé |
 | 400 | Confirmation absente (confirmation_absente) |
 
+## Bulletins
+
+Le Journal des actes : numéros par période, abonnés et flux.
+
+### `GET /v1/bulletins` — État public du bulletin
+
+L'état du bulletin tel qu'un lecteur le voit : ouvert ou non, titre, cadence, prochaine parution, bulletins parus et — si le service a un serveur SMTP ET une adresse publique déclarée — l'ouverture de l'abonnement par courriel. Aucun abonné n'y figure.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/bulletins' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | { actif, titre, cadence, prochaine, bulletins, abonnement } |
+
+### `GET /v1/bulletins/{id}` — Lire un bulletin
+
+Un numéro : son titre, sa période, son rang dans l'année, et ses actes classés par entité puis par thématique. Un numéro provisoire (la période en cours) n'est pas servi ici.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant du bulletin (sa date de début, « 2026-09-01 ») |
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/bulletins/ACT-12' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Le bulletin |
+| 404 | Bulletin inconnu (bulletin_inconnu) |
+
+### `POST /v1/bulletins/abonnement` — Demander l'abonnement au bulletin
+
+Enregistre une demande d'abonnement et adresse un courriel de CONFIRMATION (double consentement) : l'abonnement ne prend effet qu'une fois le lien du message ouvert. La réponse ne dit JAMAIS si l'adresse était déjà inscrite. La page publique du bulletin poste ici depuis un vrai formulaire (`application/x-www-form-urlencoded`), mais l'API attend du JSON.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Corps de la requête**
+
+```json
+{
+  "courriel": "lecteur@exemple.fr",
+  "nom": "Camille Dupont"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/abonnement' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"courriel":"lecteur@exemple.fr","nom":"Camille Dupont"}'
+```
+
+| Code | Signification |
+|---|---|
+| 202 | Demande enregistrée, courriel de confirmation adressé |
+| 409 | Le bulletin n'est pas ouvert sur ce recueil |
+| 422 | Adresse électronique invalide |
+| 507 | Le nombre maximal d'abonnés est atteint |
+
+### `POST /v1/bulletins/abonnement/confirmation` — Confirmer un abonnement
+
+Le jeton reçu par courriel. Un jeton inconnu répond 404 sans rien révéler de l'existence d'une fiche.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Corps de la requête**
+
+```json
+{
+  "jeton": "…"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/abonnement/confirmation' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"jeton":"…"}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Abonnement confirmé |
+| 404 | Jeton inconnu |
+
+### `POST /v1/bulletins/abonnement/desabonnement` — Se désabonner du bulletin
+
+Le jeton de désabonnement — propre à chaque abonné, et présent au bas de chaque message. Les livraisons encore en file pour cette personne sont retirées dans le même geste.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Corps de la requête**
+
+```json
+{
+  "jeton": "…"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/abonnement/desabonnement' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"jeton":"…"}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Désabonnement enregistré |
+| 404 | Jeton inconnu |
+
+### `GET /v1/bulletins/administration/tableau` — Tableau de bord du bulletin
+
+L'état vu par l'administration : réglages effectifs, cadences possibles, période en cours et prochaine parution, abonnés (avec leurs liens de désabonnement), file d'envoi en attente, dernières passes, état du serveur SMTP et adresses des flux.
+
+- **Authentification** : editeur
+- **Service** : les deux
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/bulletins/administration/tableau' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Le tableau de bord |
+
+### `POST /v1/bulletins/administration/generer` — Composer les bulletins échus
+
+Déclenche la passe : elle clôt les périodes échues, compose les numéros qui ont des actes (une période sans publication ne donne pas de bulletin) et vide la file d'envoi. `{ \"enCours\": true }` recompose en plus la période EN COURS à titre PROVISOIRE, pour la relire avant parution — un numéro provisoire n'est jamais adressé aux abonnés.
+
+- **Authentification** : editeur
+- **Service** : les deux
+
+**Corps de la requête**
+
+```json
+{
+  "enCours": false
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/administration/generer' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON' \
+  -H 'content-type: application/json' \
+  -d '{"enCours":false}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | La passe, et les numéros composés |
+
+### `POST /v1/bulletins/{id}/envoyer` — Adresser un bulletin aux abonnés
+
+Met le numéro en file pour chaque abonné CONFIRMÉ et vide la file tout de suite, sans attendre la passe suivante. Un numéro provisoire ne s'envoie pas (bulletin_provisoire) : les abonnés reçoivent le numéro définitif, à la clôture.
+
+- **Authentification** : editeur
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant du bulletin |
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/ACT-12/envoyer' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Bulletin mis en file, livraisons tentées |
+| 409 | Bulletin provisoire |
+
+### `POST /v1/bulletins/abonnes/{id}/retirer` — Retirer un abonné
+
+Le geste d'administration : retirer une adresse du bulletin sans attendre qu'elle se désabonne elle-même.
+
+- **Authentification** : administrateur
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant de l'abonné |
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/bulletins/abonnes/ACT-12/retirer' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Abonné retiré |
+| 404 | Abonné inconnu (abonne_inconnu) |
+
 ## Courriel
 
 État du service SMTP et envoi de notifications.
@@ -1356,6 +1644,67 @@ curl -X GET 'https://api.exemple.fr/sitemap.xml' \
 |---|---|
 | 200 | Le plan de site |
 
+### `GET /recueil/bulletins` — Les bulletins parus
+
+La page HTML des bulletins : le sommaire des numéros, la cadence, la prochaine parution, et le formulaire d'abonnement — un vrai formulaire, qui fonctionne sans JavaScript en postant sur `/recueil/bulletins/abonnement`. Elle rend 404 si le bulletin est éteint.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/recueil/bulletins' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | La page des bulletins |
+| 404 | Bulletin non ouvert |
+
+### `GET /recueil/bulletins/{id}` — Un bulletin, en ligne
+
+Un numéro, en HTML : les entités, leurs thématiques, les actes et leurs liens. Les extensions `.json`, `.md` et `.txt` rendent les mêmes données dans les autres formats.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant du bulletin |
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/recueil/bulletins/ACT-12' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Le bulletin |
+| 404 | Bulletin inconnu |
+
+### `GET /recueil/bulletins.rss` — Le flux du bulletin (RSS 2.0)
+
+Une entrée par numéro — c'est la PARUTION que l'on suit, pas l'acte. `.atom` rend le même fil en Atom 1.0.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/recueil/bulletins.rss' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Le flux |
+| 404 | Bulletin non ouvert |
+
 ## Les rôles
 
 Un rôle est un droit d'ensemble. Une clé, un compte ou une session en porte un, et chaque route exige le sien.
@@ -1391,6 +1740,9 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | prestataire_indisponible | Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse). |
 | circuit_non_externe | L'acte ne suit pas le circuit externe. |
 | publication_inconnue | Aucune publication ne porte cette clé. |
+| bulletin_inconnu | Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique). |
+| bulletin_provisoire | Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés. |
+| abonne_inconnu | Aucun abonné au bulletin ne porte cet identifiant. |
 | date_publication_anterieure | La date de publication précède la date de signature. |
 | base_indisponible | La base de données ne répond pas : l'état du service n'est pas lisible. |
 | etat_non_ecrit | Le service n'a pas pu écrire son état (disque, base). |
@@ -1406,6 +1758,8 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/health` | public | État du service |
 | GET | `/v1/` | public | Description OpenAPI 3.1 |
 | GET | `/v1/config` | public | Réglages de référentiel et état du prestataire |
+| GET | `/v1/auth/etat` | public | État de l'autorisation du service |
+| POST | `/v1/auth/bootstrap` | public | Provisionner le service (première clé) |
 | GET | `/v1/auth/cles` | administrateur | Lister les clés d'API |
 | POST | `/v1/auth/cles` | administrateur | Créer une clé d'API |
 | POST | `/v1/auth/cles/{id}/revoquer` | administrateur | Révoquer une clé |
@@ -1443,6 +1797,15 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/eli/{actTypeId}/{annee}/{numero}/{entite}` | public | Résoudre un identifiant ELI |
 | GET | `/v1/eli/{actTypeId}/{annee}/{numero}/{entite}/original` | public | L'original signé d'un acte publié |
 | POST | `/v1/admin/purge` | administrateur | Remettre le service à zéro |
+| GET | `/v1/bulletins` | public | État public du bulletin |
+| GET | `/v1/bulletins/{id}` | public | Lire un bulletin |
+| POST | `/v1/bulletins/abonnement` | public | Demander l'abonnement au bulletin |
+| POST | `/v1/bulletins/abonnement/confirmation` | public | Confirmer un abonnement |
+| POST | `/v1/bulletins/abonnement/desabonnement` | public | Se désabonner du bulletin |
+| GET | `/v1/bulletins/administration/tableau` | editeur | Tableau de bord du bulletin |
+| POST | `/v1/bulletins/administration/generer` | editeur | Composer les bulletins échus |
+| POST | `/v1/bulletins/{id}/envoyer` | editeur | Adresser un bulletin aux abonnés |
+| POST | `/v1/bulletins/abonnes/{id}/retirer` | administrateur | Retirer un abonné |
 | GET | `/v1/courriel` | lecteur | État du service de courriel |
 | POST | `/v1/courriel/envoi` | administrateur | Envoyer un courriel de notification |
 | POST | `/v1/courriel/test` | administrateur | Envoyer un courriel de test |
@@ -1451,6 +1814,9 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/robots.txt` | public | robots.txt |
 | GET | `/llms.txt` | public | llms.txt |
 | GET | `/sitemap.xml` | public | sitemap.xml |
+| GET | `/recueil/bulletins` | public | Les bulletins parus |
+| GET | `/recueil/bulletins/{id}` | public | Un bulletin, en ligne |
+| GET | `/recueil/bulletins.rss` | public | Le flux du bulletin (RSS 2.0) |
 
 ---
 

@@ -3,6 +3,172 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Demandes 1.6.0 (livrées en 1.6.0)
+
+- [x] **Le bulletin (ou Journal) des actes.** La collectivité **ouvre un bulletin** et lui donne
+      une **cadence** (quotidienne, hebdomadaire, bimensuelle — deux numéros par mois —,
+      mensuelle, bimestrielle, trimestrielle, semestrielle, annuelle, ou **personnalisée** :
+      toutes les N unités, ancrée sur une date) et un **jour de parution**. Chaque numéro
+      **rassemble les actes publiés sur sa période**, classés **par entité puis par thématique**,
+      et **une période sans publication ne donne aucun numéro**. Le bulletin se diffuse par une
+      **sous-page par numéro** au recueil public (avec `.json`, `.md`, `.txt`), par un **flux RSS
+      2.0 et Atom 1.0**, et par **courriel aux abonnés** (abonnement à **double consentement**,
+      désabonnement d'un clic). Le service clôt les périodes, compose les numéros et vide sa
+      **file d'envoi** à chaque passe (au démarrage, puis toutes les dix minutes) ; le numéro de
+      la période en cours se lit en **aperçu provisoire**, sans adresse publique, et n'est jamais
+      adressé. Moteur : `src/server/mysql/bulletins.mjs` (44 épreuves avec
+      `bulletins.test.mjs` et `actes-bulletins.test.mjs`), pages publiques dans
+      `src/server/mysql/actes.mjs`, écran d'administration `src/ui/views/bulletin.js`,
+      réglages `config.publication.bulletin`, variables `SCRIBA_BULLETIN_*` et
+      `SCRIBA_PUBLIQUE_URL`.
+
+Reste ouvert, par ordre d'intérêt :
+
+- [ ] **Un numéro en PDF.** Le bulletin se sert en HTML, JSON, Markdown et texte, mais **pas en
+      PDF** : or c'est la forme qu'une collectivité affiche, archive et joint à un courrier. Les
+      pièces du projet savent déjà produire un **PDF/A** (`src/pdfa/`) ; un numéro de bulletin
+      y trouverait tout naturellement sa place, avec sa page de garde et son sommaire.
+- [ ] **Un bulletin par entité (ou un recueil « bis »).** Le recueil public connaît déjà les
+      recueils extérieurs et les recueils « bis » (un office public de l'habitat tient ses actes
+      à part) ; le bulletin, lui, n'en connaît qu'**un** par service. Une collectivité dont
+      l'établissement satellite publie son propre bulletin devrait pouvoir l'ouvrir sur le même
+      service, avec ses abonnés et son flux.
+- [ ] **Purge des demandes jamais confirmées.** Une demande d'abonnement non confirmée reste en
+      `attente` indéfiniment : le service élague d'abord les fiches **retirées** et borne le
+      nombre d'abonnés, mais rien ne retire une adresse inscrite puis jamais confirmée. Une
+      **purge au bout de quelques semaines** (avec son compte rendu au journal) serait plus
+      propre au regard de la protection des données.
+- [ ] **Modèles de message du bulletin.** L'en-tête et le pied du courriel viennent du
+      référentiel (`entete`, `pied`, `expediteurNom`, `repondreA`), mais le **corps** est écrit
+      dans le code (`enveloppeHtml`, `src/server/mysql/bulletins.mjs`). Des modèles éditables,
+      comme ceux des six notifications, le rendraient adaptable sans toucher au logiciel.
+- [ ] **Adresser un numéro à un seul abonné.** « Adresser aux abonnés » écrit à toute la liste ;
+      réadresser à **une** personne (après un rejet de son serveur de messagerie, par exemple)
+      demande aujourd'hui de passer par le journal. Un geste dans le tableau de bord, avec
+      l'historique des livraisons de cet abonné, serait la suite logique.
+- [ ] **Un flux pour le recueil lui-même.** Le bulletin a son RSS et son Atom ; le **fil
+      d'actualité du recueil** (les actes publiés au fil de l'eau, et les billets d'informations)
+      n'en a pas, alors que c'est ce que suivrait un lecteur de flux qui ne veut pas attendre la
+      clôture d'une période.
+
+## Performance (relevé en 1.5.4a, voir `docs/PERFORMANCE.md`)
+
+Le gel des connexions simultanées est corrigé (dérivé de mot de passe asynchrone).
+Ce que la campagne de charge a montré **sans le corriger** :
+
+- [ ] **La vérification de session coûte deux lectures** (la session, puis le compte)
+      à chaque requête authentifiée — 17 ms sur une base à 2 ms de latence. Un cache
+      court par jeton de session le supprimerait, au prix d'un délai de propagation
+      pour la révocation. À mesurer avant de trancher : la révocation immédiate est
+      une propriété de sécurité, pas un détail.
+- [ ] **Une lecture de collection coûte une dizaine d'ordres SQL.** S'il s'agit d'un
+      balayage ligne par ligne, c'est le prochain gisement de performance.
+- [ ] **Chiffrer `UV_THREADPOOL_SIZE`** (8 et 16) sur le scénario d'affluence, plutôt
+      que de le recommander de principe.
+
+## Demandes 1.5.3 (livrées en 1.5.3)
+
+Quatre demandes reçues ensemble, autour d'une même idée : **l'espace public et
+l'atelier cessent de partager une adresse**, et l'atelier peut se fermer à un
+réseau.
+
+- [x] **1. L'espace public passe à la RACINE ; l'atelier se demande.** Le recueil
+      s'ouvre à `/` (`https://recueil.exemple.fr/`), ses actes gardant leur adresse
+      en requête (`?acte=`, `?eli=`) ; l'atelier se demande — `?atelier` sur une
+      page statique, `/atelier` sur une installation auto-hébergée (nginx sert le
+      même `index.html`). Rien à ajouter au serveur web pour les sous-pages
+      (`?page=…`) ni pour les billets (`?info=…`).
+- [x] **2. Restreindre l'atelier à certaines adresses (liste blanche).** Deux
+      réglages, le `.env` l'emportant : `SCRIBA_ATELIER_IPS` /
+      `SCRIBA_ATELIER_MESSAGE`, puis `publication.atelier.ips` /
+      `.message` dans le référentiel (Administration › Publication › Accès à
+      l'atelier). Adresse, préfixe, champ ou plage abrégée ; entrée incomprise
+      **signalée**, jamais ignorée. La décision appartient au **service** (seul à
+      voir l'adresse de l'appelant) : hors liste, 403 `atelier_hors_reseau` sur
+      toutes les routes de l'atelier, le recueil public restant ouvert. La liste
+      du `.env` n'est jamais remplacée en silence ; une liste **illisible ferme**
+      l'atelier (fail-closed) ; l'écran porte un **simulateur** d'adresse.
+- [x] **3. Les actes réservés s'affichent au public pour un agent authentifié
+      venant d'une IP autorisée.** `estAgent` = identité **et** (pas de
+      restriction **ou** adresse autorisée) : un agent connecté les voit sur le
+      recueil public, signalés « Réservé aux agents » ; un agent en télétravail
+      ne les voit pas, et l'écran le lui dit.
+- [x] **4. Interface publique modernisée, CSS de la collectivité, « Se
+      connecter », mentions et accessibilité en sous-pages.** En-tête collant,
+      entrée avec recherche et chiffres, bande « Informations », carrousel,
+      thèmes, registre, pied de page avec ses pages, sa licence et la porte de
+      l'application ; feuille de style libre (`config.publication.css`) portée sur
+      `.recueil`, posée avant le premier rendu et après les feuilles de
+      l'application ; mentions légales, conditions de réutilisation et
+      accessibilité **en sous-pages** (`?page=…`), chacune avec titre,
+      description, adresse canonique et fil d'Ariane.
+- [x] **4 bis. Publier des « Informations » sur le recueil (billets).** Une
+      collection `informations`, servie au public par `GET /v1/informations`
+      (billets publiés seulement), un écran d'atelier (permission
+      `informations.gerer`), une rubrique sur la page d'accueil et une page
+      complète, chaque billet ayant son adresse (`?info=<slug>`).
+
+## Demandes 1.5.3a (livrées en 1.5.3a)
+
+- [x] **La démonstration montre enfin quelque chose au public.** Le recueil public
+      d'une démonstration neuve était vide — « Aucun acte publié pour l'instant »,
+      pas un billet — alors que sa fiction déclare dix-sept actes publiés et quatre
+      informations. Le recueil lit le service de publication, et une démonstration
+      ne provisionnait jamais le sien (un service sans clé est en lecture seule),
+      ni ne lui déposait ses billets : la démonstration prend maintenant les deux
+      gestes elle-même (`assurerServiceDemo`, `amorcerInformations`), et le recueil
+      relit le registre du poste quand le service se tait
+      (`src/lib/publications-locales.js`). Au premier lancement, la page annonce
+      « Le recueil se prépare » au lieu de nier ce qu'elle va montrer.
+
+## Reste à faire (petits chantiers ouverts)
+
+- **Imports inutilisés** : quelques modules importent des noms qu'ils n'emploient
+  plus (`views/signature.js`, `views/rediger.js`, `ui/components.js`,
+  `lib/oidc.js`, `lib/export.js`…). Sans effet à l'exécution, mais ils trompent
+  la lecture — à nettoyer au passage, un fichier à la fois.
+- **Le service de démonstration ne voit pas l'adresse de l'appelant** : sa
+  réponse le dit (`restriction_appliquee: false` + note), et le simulateur reste
+  juste, mais l'aperçu ne peut donc pas montrer la restriction appliquée — c'est
+  l'installation auto-hébergée qui décide. À garder en tête en testant : un
+  réglage écrit dans l'aperçu ne s'y voit pas appliqué.
+- **PDF/A** : conformité à valider sur un déploiement (`veraPDF`), voir plus bas.
+
+## Demandes 1.5.2 (livrées en 1.5.2)
+
+Six demandes reçues ensemble ; chacune touche plusieurs couches, et elles sont
+traitées dans cet ordre.
+
+- [x] **1. Recueil public : publications réservées aux agents.** Un acte publié
+      peut être **réservé aux personnes connectées** (circulaires internes,
+      consignes aux agents). Il reste « publié » (ELI, version en ligne, pièces),
+      mais le recueil public ne le sert **qu'aux porteurs d'une session** ; les
+      routes ouvertes (`/v1/publications`, `/recueil.json`, `llms.txt`,
+      `sitemap.xml`, `/recueil/<clé>`) l'écartent pour un visiteur anonyme. Mention
+      en ce sens dans le bloc « Vous ne trouvez pas ce que vous cherchez ? » du recueil.
+- [x] **2. Organigramme : services rattachés à un autre service ou au bureau
+      d'un autre service.** Un service peut dépendre d'un service, ou du bureau
+      d'un autre service (`service.parentId`) ; les agents affectés à un service
+      **en haut de chaîne** voient tous les actes de la chaîne en contrebas
+      (périmètre = service + descendants).
+- [x] **3. Éditeurs et administrateurs éditent l'organigramme.** Ajouter/retirer
+      services et bureaux, régler leurs rattachements ; l'ajout ou la suppression
+      d'une **entité** reste à l'administrateur. Nouvelle permission
+      `organigramme.gerer` (administrateur + éditeur).
+- [x] **4. Clés d'API à rôles (comptes de service).** L'administrateur crée, depuis
+      l'interface, des clés d'API portant un rôle, qui agissent comme des comptes
+      de service **invisibles dans le reste de l'interface** (hors de « Comptes et
+      rôles »). Empreinte SHA-256 conservée par le service, jamais la clé.
+- [x] **5. Interface du rédacteur : le bon geste au bon moment.** L'export ne doit
+      plus paraître l'aboutissement ; « Soumettre au circuit » (ou « Envoyer en
+      signature ») doit être le geste mis en avant, avec un chemin lisible
+      (rédiger → soumettre → signer/publier).
+- [x] **6. Parapheur : étapes visant une personne ou un service, et vue
+      récapitulative des circuits.** Une étape peut viser un **rôle**, une
+      **personne** nommée ou un **service** (hors chaîne de décision) ; dans
+      Administration › Circuits, une **vue récap** liste les circuits et ouvre une
+      **sous-vue par circuit** au lieu de les empiler.
+
 ## Circuits de validation, exécution, registre et collaboration (livrés — suite possible)
 
 Livré en une fois, quatre manques qui tenaient ensemble (un acte n'était ni
@@ -584,7 +750,10 @@ Restent ouverts :
 
 ## Autres chantiers (déjà listés dans SPEC § 5)
 
-- [ ] Export PDF/A certifié (chaîne à valider par veraPDF).
+- [x] **Export PDF/A** — livré : **PDF/A-2b** (défaut) et **PDF/A-1b**, mis en page par
+      l'application elle-même (`src/lib/pdfa.js` : polices et profil sRGB embarqués, XMP,
+      `OutputIntents`, langue, métadonnées, identifiant ELI). Chaîne à valider par `veraPDF` sur un
+      déploiement réel.
 - [ ] **Import d'un document : aller plus loin dans la relecture.** La lecture directe du XML
       (`src/lib/doc-import.js`) reconnaît la structure courante d'un acte — autorité, intitulé,
       visas, considérants, formule d'édiction, articles, divisions, listes, tableaux, mention de

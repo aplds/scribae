@@ -76,7 +76,11 @@
                       cheminDocument, cheminSignataires, cheminDemarrer, cheminStatut } },
                                          // réglages du PRESTATAIRE de signature (voir § 2.6). La CLÉ n'est PAS ici :
                                          // elle vit au service (SCRIBA_SIGNATURE_API_CLE) et n'y entre jamais
-  services:   [ { id, code, name, entityId, bureaux:[ { id, name } ] } ],
+  services:   [ { id, code, name, entityId,
+                  parentId,          // le service dont celui-ci DÉPEND, ou le BUREAU d'un autre
+                                     // service — l'identifiant désigne l'un ou l'autre, sans
+                                     // préfixe ; "" s'il tient directement à son entité (§ 2.7.1)
+                  bureaux:[ { id, name } ] } ],
   roles:      [ { id, label, m, f } ],   // deux formes : « maire »/« maire », « directeur… »/« directrice… »
   delegations:[ { id, fromId, toId, qualiteM, qualiteF, matieres, familyId, actTypeId,
                   entityId, acteRefId, acte, du, au, active } ], // délégations de signature, chaînables (sous-délégation) ;
@@ -88,7 +92,13 @@
                                                // est la phrase de présentation publique du thème (accueil du recueil)
   circuits:   [ { id, label, description, active, trameIds:[], familyIds:[], entityIds:[],
                   steps:[ { id, label, role:"reviseur"|"editeur"|"administrateur"|"signataire",
-                            kind:"verification"|"visa"|"signature", serviceScoped, optional, help } ] } ],
+                            kind:"verification"|"visa"|"signature", serviceScoped, optional, help,
+                            targetType:"role"|"personne"|"service",
+                                     // À QUI l'étape est confiée : un RÔLE (défaut), une
+                                     // PERSONNE nommée (`personId`), ou un SERVICE
+                                     // (`serviceId`) qui n'a pas à faire partie de la chaîne
+                                     // de décision (voir § 2.8.1)
+                            personId, serviceId } ] } ],
                                             // le circuit de validation (parapheur) est une fonction
                                             // ORDINAIRE : trois natures d'étape — vérification
                                             // (marche du réviseur, qui ouvre le circuit), visa (le bon
@@ -249,6 +259,9 @@ Le tableau de l'écran et les exports lisent **la même déclaration de colonnes
   reglement,               // annexe : true = RÈGLEMENT, publié à part au recueil à titre informatif (§ 2.2.4 ter)
   divisions: [],           // l'échelle des divisions de CETTE trame (§ 2.2.3) ; vide = échelle livrée
   publishable,             // true par défaut ; false = trame non publiable
+  reserve,                 // false par défaut ; true = diffusion RÉSERVÉE AUX AGENTS connectés
+                           // (le recueil public ne sert l'acte qu'aux porteurs d'une session ou
+                           // d'une clé de service) — voir § 2.6 bis
   styleId,                 // feuille de style (charte) désignée, "" = automatique
   circuitId,               // circuit de validation désigné, "" = automatique, "aucun" = pas de parapheur
   transmission,            // "" (règle générale) | "requise" | "aucune" — transmission au contrôle de légalité
@@ -491,8 +504,8 @@ L'impression directe de l'aperçu (Ctrl+P) prend les marges de la feuille **gén
 
 `styleCss(style, config, {scope})` produit le CSS de la feuille ; `scope` le confine à un
 document (`[data-sheet="…"]`) dans l'aperçu de l'application — les documents portent
-`data-sheet` sur leur racine `.doc`. Ce même CSS habille **tous** les rendus, pour que le
-document ne se présente pas autrement selon le support :
+`data-sheet` sur leur racine `.doc`. Ce CSS habille le **papier** — tous les rendus où l'acte se
+présente comme un document à archiver ou à imprimer, et qui doivent se superposer :
 
 | Support | Chemin |
 |---|---|
@@ -500,7 +513,12 @@ document ne se présente pas autrement selon le support :
 | HTML autonome, fichier Word | `documentCss(config, style)` (`src/lib/export.js`) |
 | Impression / PDF | `printDocument` → `exportStandaloneHtml` → même CSS |
 | Original signé (prestation de signature) | `originalPageHtml(pack, pageHtml, brand, pageCss)` (`src/lib/signature.js`) |
-| Version en ligne publiée (ELI) | `buildWebVersion` → `documentCss` (`src/lib/eli.js`) |
+| PDF/A (archivage) | `creerPdfA` (`src/lib/pdfa.js`) — mise en page faite par l'application, hors CSS, sur les mêmes valeurs de charte |
+
+La **version en ligne publiée** fait exception, et c'est voulu : elle ne suit pas la charte.
+L'acte publié au recueil se présente selon une **feuille de style web** unique
+(`CSS_DOCUMENT_WEB`, `src/lib/recueil.js`), si bien que deux entités aux chartes différentes
+présentent leurs actes **à l'identique** sur le site public (voir 2.5 et § 3).
 
 L'en-tête (logo + ligne de recueil) et le pied de page font partie du rendu : `renderDocument`
 les ajoute au document à partir de la feuille, et leur texte accepte des jetons
@@ -1035,17 +1053,41 @@ elle-même. Le service expose :
 | `POST` | `/v1/publications/{cle}/retrait` | retirer un acte du recueil (motif technique exigé, administrateur seul) |
 | `POST` | `/v1/publications/{cle}/epingle` | épingler un acte à la « une » du recueil public (corps `{ epingle, auteur }`) |
 | `GET` | `/v1/publications`, `/v1/publications/{cle}`, `/v1/eli/{...}` | registre public et résolution ELI |
+| `GET` | `/v1/informations` | **informations publiées** au recueil (actualités, avis, communications) — route **publique** : seuls les billets `publie: true` sont rendus, un brouillon ne sort que vers une identité d'`editeur` au moins |
+| `GET` | `/v1/atelier/acces` | **état de l'accès à l'atelier** pour l'adresse de l'appelant (`actif`, `autorise`, `ip`, `interne`, `connue`, `liste`, `source`, `regle`, `erreurs`, `message`) — route **publique**, l'application en a besoin AVANT toute session ; `?ip=` **simule** une adresse (« et si j'arrivais de là ? »), la réponse portant alors `simulation: true` |
 | `POST` | `/v1/admin/purge` | **remettre le service à zéro** (actes déposés, circuits, publications ; corps `{ confirmation: "repurge" }`, administrateur seul) — le pendant, côté service, de « Repartir d'un référentiel vierge » |
 | `GET` | `/v1/config` | **réglages de référentiel posés par le `.env`** (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés, avec les valeurs refusées ; public, sans secret (§ 2.7 bis.3) |
+| `GET` | `/v1/auth/etat` | état de l'**autorisation** du service : `provisionne`, rôles connus, et par quel mode (`session` ou `service`) il s'administre — **public** (§ 2.9.1 bis) |
+| `POST` | `/v1/auth/bootstrap` | **provisionner** un service neuf (dépôt de la PREMIÈRE clé d'API ; une seule fois) |
+| `GET`/`POST` | `/v1/auth/cles` | **lister** / **créer** une clé d'API (un **compte de service** : rôle au choix, `lecteur` … `administrateur`) — administration seule |
+| `POST` | `/v1/auth/cles/{id}/revoquer` | **révoquer** une clé d'API (refus de la dernière clé d'administration, `409 derniere_cle_admin`) |
+| `GET` | `/v1/journal` | **journal d'audit scellé** du service (chaîne SHA-256, `scelle`) — administration seule |
 
-Les lectures sont publiques ; les écritures exigent `Authorization: Bearer <jeton>`
-(`401` sans jeton, `403` si le jeton est invalide, `429` au-delà de 90 écritures par
+Les **ressources publiques** — le recueil (`/v1/publications`, `/v1/eli/…`), les informations
+publiées (`/v1/informations`), l'état de l'accès à l'atelier (`/v1/atelier/acces`), la santé du
+service, l'OpenAPI et `GET /v1/auth/etat` — se lisent **sans jeton**. Le reste — les actes
+**déposés** (`/v1/actes…`), les circuits de signature, les comptes et le journal — exige un
+**jeton d'API** (ou une **session**, en mode « mot de passe » ou par annuaire) portant au moins
+le rôle `lecteur` : `/v1/actes` était ouvert en lecture anonyme, et c'était un défaut. Les
+écritures exigent `Authorization: Bearer <clé>`
+(`401` sans jeton, `403` si le jeton est invalide **ou si son rôle ne couvre pas la route**,
+`429` au-delà de 90 écritures par
 minute et par réseau, `409` pour un acte déjà signé **ou dont le circuit de validation
 n'est pas achevé** (`409 validation_incomplete` — voir § 2.8.1) **ou dont la
 transmission au contrôle de légalité manque** (`409 transmission_absente` — voir
 § 2.8.2 bis), `422` si la date de publication précède la signature, `422 motif_absent` si le
 motif d'un retrait du recueil manque).
 `POST /v1/actes/{id}/publication` accepte un en-tête `Idempotency-Key`.
+
+**La porte de l'atelier.** Quand l'accès est restreint à certaines adresses
+(`SCRIBA_ATELIER_IPS`, § 2.6 bis), le service refuse **toutes** les routes de l'atelier aux
+appelants qui n'en viennent pas — `/v1/db/…`, `/v1/actes/…`, `/v1/signatures/…`, `/v1/auth/…` —,
+par un **403 explicite** (`atelier_hors_reseau`), jamais un 404 muet : l'agent doit comprendre que
+l'outil existe et que c'est le réseau qui l'en sépare, pas une panne. Le **recueil public** et les
+**informations** restent ouverts à tout le monde. La décision appartient au **service seul** :
+c'est le seul endroit qui voit l'adresse réelle de l'appelant (premier maillon de
+`X-Forwarded-For`, ou adresse de la prise), et le navigateur ne décide jamais de son propre droit
+d'entrer — il ne fait que **refléter** l'état, et **simuler** une adresse.
 
 **Trames non publiables (actes individuels).** Une trame peut être déclarée
 `publishable: false` (onglet « Trame » de l'éditeur ; défaut `true`). Les actes qui en
@@ -1079,6 +1121,11 @@ d'un même acte partagent le même ELI : c'est le même « work », seules les e
 datées diffèrent. La consultation publique est un client de `GET /v1/publications` :
 rien n'est lu dans les données locales. Le recueil public et la consultation d'une
 publication rendent le texte **dans la page** (§ 2.6 bis).
+
+Une publication peut en outre être **réservée aux agents** (`reserve`, posé sur la trame et
+repris — et modifiable — au formulaire de publication) : l'acte reste *publié* (ELI, version en
+ligne, pièces, versions), mais le **recueil public ne le sert qu'aux porteurs d'une session ou
+d'une clé de service** ; un visiteur anonyme ne le voit nulle part (§ 2.6 bis).
 
 L'**encart des annexes** (§ 2.2.4) fait partie de la version en ligne : le document publié dit
 s'il est lui-même une annexe — et de quel acte — ou quels documents il annexe. C'est nécessaire,
@@ -1348,7 +1395,12 @@ sont séparés parce qu'ils ne s'adressent pas au même lecteur : l'administrati
 signature), le public lit le **recueil**.
 
 **Le recueil** (`src/ui/views/recueil-public.js`) est un **site sans compte**, servi par la même
-page sous la route `#/recueil` (la liste) et `#/recueil/<clé>` (un acte). Il est rendu **avant la
+page, à la **RACINE** du site — `https://recueil.exemple.fr/` (la liste) et ses adresses d'actes
+(`?acte=<clé>`, `?eli=<identifiant>`). Il n'a plus rien à demander pour s'ouvrir : c'est
+l'**accueil**, et c'est ce qu'on communique. L'**atelier**, lui, se **demande** — `?atelier` sur une
+page statique, `/atelier` sur une installation auto-hébergée (`demandeAtelier`, `src/ui/state.js`) —
+et c'est cette séparation qui permet de **restreindre l'atelier** à un réseau sans fermer le recueil
+au public (§ ci-dessous). Il est rendu **avant la
 porte de connexion** (`app.js`, `EST_PUBLIQUE`) : ni écran de connexion, ni cloche, ni rien du
 logiciel — seulement la **structure** (son logo, son nom), le **titre du recueil**
 (`config.publication.recueil`) et les actes **réellement publiés**. Le **bandeau de
@@ -1356,6 +1408,38 @@ démonstration** (« mention de démonstration », § 2.7 bis) s'y affiche aussi
 un visiteur doit savoir quand l'installation qu'il consulte est une démonstration. Il ne lit
 aucune donnée locale : il **interroge le service** (`GET /v1/publications`), comme le ferait
 n'importe quel visiteur.
+
+**Le registre du poste prend le relais quand le service se tait** (`src/lib/publications-locales.js`).
+Un service remis à zéro, un aperçu qui reconstruit son état ou une page hors ligne ne doivent pas
+faire disparaître du recueil des actes **réellement publiés** : les enregistrements rendus à la
+publication sont gardés sur leurs actes, et le recueil les relit alors — la notice
+(`publicationsLocales`, avec le rangement des versions par identifiant ELI et le drapeau `latest`)
+et la fiche complète de l'acte (`publicationLocale` : version en ligne, formats, original signé).
+Le service reste la **source** ; c'est le **même** enregistrement, gardé au poste. La règle de
+diffusion est appliquée à l'identique — un acte `reserve` n'est montré qu'à un agent connecté venu
+d'un réseau autorisé —, et les informations suivent la même logique **en régime local seulement**
+(en régime « service », la collection du service est la base de l'atelier : fusionner ferait
+ressurgir un billet que l'atelier vient de dépublier).
+
+**Les publications réservées aux agents.** Le recueil sert les actes **publiés** — sauf ceux qui
+sont **réservés** (`reserve` : circulaires internes, consignes aux agents). Ceux-là ne sont rendus
+qu'à l'appelant qui porte une **session** ou une **clé de service**, **et** qui vient d'une adresse
+**autorisée** quand l'accès à l'atelier est restreint (`SCRIBA_ATELIER_IPS`, § 2.6 bis in fine) :
+être connecté ne suffit pas, il faut venir du **réseau**. C'est la règle demandée — « les actes
+réservés s'affichent sur l'accès public comme les autres pour les personnes authentifiées **et**
+venant d'une adresse autorisée » —, et elle a une conséquence voulue : un agent en **télétravail**,
+ou sur son réseau mobile, reste un lecteur du recueil public. Le service les **écarte**
+pour un visiteur anonyme partout où il les servirait — `GET /v1/publications` et
+`/v1/publications/{clé}`, la résolution ELI, `/recueil.json`, `llms.txt`, `sitemap.xml`, et la
+page HTML servie sans JavaScript. C'est la **diffusion** qui est restreinte, non l'acte : il a
+bien son identifiant ELI, sa version en ligne et ses versions successives, et il se publie
+normalement. Pour qui y a droit, il se présente comme les autres, avec un badge **« Réservé aux
+agents »** dans la liste et un bandeau sur la version en ligne ; le bloc **« Vous ne trouvez pas
+ce que vous cherchez ? »** du pied de page paraît désormais **en toutes circonstances** et le
+rappelle, pour qu'un visiteur qui ne voit pas un acte comprenne qu'une **connexion** peut le lui
+montrer. En mode **démonstration** (où il n'y a pas de session), un visiteur anonyme ne voit donc
+pas les actes réservés : la fonction est pleinement active en mode « mot de passe » ou par
+annuaire, et pour tout appel qui présente une clé de service.
 
 **Le recueil est aussi la porte d'entrée de l'application.** Pour qui n'a pas de compte, c'est
 l'interface de l'installation (§ 2.7.3) : son en-tête porte donc **« Se connecter »** tant
@@ -1369,9 +1453,11 @@ paramètre — ouvre le recueil, jamais l'atelier. La route par défaut de l'app
 `recueil` (`src/ui/state.js`), et **une adresse inconnue y ramène** (`normaliserRoute`,
 `src/ui/app.js`) : une ancre mal recopiée, ou un écran qui n'existe plus, ne doit pas ouvrir
 l'atelier — et encore moins l'écran de connexion. L'atelier s'ouvre par la porte **« Se
-connecter »** du recueil, ou par l'ancre `#/trames` — que l'application n'écrit jamais
-elle-même : elle n'écrit dans l'adresse que les paramètres du recueil (`?acte=`, `?recueil=1`),
-parce que ce sont eux qui donnent à un acte publié une adresse citable.
+connecter »** du recueil, ou par le drapeau `?atelier` (le chemin `/atelier` sur une installation
+auto-hébergée) — que l'application n'écrit **jamais** d'elle-même : elle n'écrit dans l'adresse que
+les clés du recueil (`?acte=`, `?eli=`, `?page=`, `?info=`),
+parce que ce sont elles qui donnent à un acte publié, à une sous-page et à un billet une adresse
+citable.
 
 **La page d'accueil du recueil** — la « page d'accueil de l'interface publique » — n'est pas un
 registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
@@ -1379,18 +1465,29 @@ registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
 1. **L'entrée** (`hero`) : le nom de la collectivité, le titre du recueil, une phrase qui dit ce
    qu'on y trouve, la **recherche**, et une ligne de chiffres (actes publiés, thèmes, dernière
    publication).
-2. **Les derniers actes administratifs publiés** : un **carrousel** (`carrousel`) des actes en
+2. **Les informations de la collectivité** (`informationsZone`) : les billets publiés par
+   l'administration (§ « Les informations » ci-dessous), les trois derniers, avec la mention
+   **« Épinglé »** sur celui qui ouvre la rubrique et un renvoi vers la page complète. La rubrique
+   n'apparaît que si la collectivité a **publié** au moins un billet et ne l'a pas **éteinte** :
+   un recueil sans nouvelle reste un recueil, et l'entrée n'attend pas après elle (§ `informationsZone`).
+3. **Les derniers actes administratifs publiés** : un **carrousel** (`carrousel`) des actes en
    **vigueur** les plus récents. La piste défile au doigt, à la molette ou par deux **flèches**,
    avec des **points** qui disent où l'on est ; le défilement est **natif** (`scroll-snap`), donc
    il fonctionne même sans JavaScript — les flèches ne sont qu'un confort. Chaque **carte** met
    en avant le **thème** de l'acte (voir plus bas), puis son objet, son numéro et sa date.
-3. **Parcourir par thème** (`themesZone`) : une **grille de tuiles**, une par thème présent dans
+4. **Parcourir par thème** (`themesZone`) : une **grille de tuiles**, une par thème présent dans
    le recueil, avec sa **présentation** — le texte écrit dans Administration › Familles — et le
    nombre d'actes. La tuile **filtre** la liste sur son thème (et se dé-filtre au second clic) ;
    elle porte une **teinte** stable, déduite de l'identifiant de la famille, qui n'est qu'un
    repère visuel.
-4. **Tous les actes publiés** : la **recherche** et les filtres fins (**thème**, nature, année,
+5. **Tous les actes publiés** : la **recherche** et les filtres fins (**thème**, nature, année,
    organisation), puis la liste **groupée par année**.
+
+Le **pied de page** (`pied`) ferme le site : le bloc des renvois (« Vous ne trouvez pas ce que
+vous cherchez ? »), la **licence** de réutilisation, le **sommaire de ses pages** (mentions
+légales, conditions de réutilisation, accessibilité, informations — chacune une **sous-page**), et
+la **porte de l'application** : « Se connecter » pour un visiteur, « Retour à l'application » pour
+un agent, « Mon accès » pour un visiteur authentifié sans rôle.
 
 - **Recherche, thèmes et navigation** (`src/lib/recueil.js`) : un texte libre (numéro, objet,
   nature, thème, entité, ELI), quatre filtres déduits des actes réellement présents (**thème**,
@@ -1413,16 +1510,23 @@ registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
   Familles et s'affiche sous le nom du thème, sur le recueil public.
 - **L'acte est rendu dans la page**, jamais dans une fenêtre ni dans une feuille : la version en
   ligne publiée est une page HTML autonome ; on en prélève le **document** (`extraireVersion`),
-  **pas sa feuille de style** — la **charte** d'un acte vaut pour le **papier** (PDF, Word, page
-  autonome), pas pour la version en ligne. `CSS_DOCUMENT_WEB` pose la présentation web à partir
-  des styles de lecture de l'application (`.doc*`, `src/css/app.css`) : la décision n'est donc
-  **pas enfermée dans une feuille**, elle fait partie de la page, dans l'apparence du recueil
-  (l'interface publique a sa propre personnalisation, indépendante des chartes d'actes). Le
-  **texte occupe toute la largeur disponible** et adopte la **police de l'interface**
-  (`--font-ui`), pour une lecture homogène avec le reste du site ; la **liste** des actes garde,
-  elle, une largeur de lecture. Les jetons de couleur sont ramenés aux valeurs **thémées** du site
-  (`--ink-public`, `--brand-public`, copies posées sur `:root` dans `src/css/app.css`) : le texte
-  reste lisible en mode sombre, sans redevenir une feuille blanche.
+  **ni sa feuille de style, ni son en-tête ni son pied** — l'extraction retire même l'attribut
+  `data-sheet` du document, sans quoi les règles confinées de l'application le ré-habilleraient.
+  C'est la règle du § 2.5 : **la charte vaut pour le papier** (aperçu, PDF, Word, page autonome,
+  PDF/A) ; la version en ligne suit une **feuille de style web** unique.
+  `CSS_DOCUMENT_WEB` (`src/lib/recueil.js`) porte cette feuille : elle est **autosuffisante** —
+  elle définit tout ce dont le corps de l'acte a besoin (intitulé, visas, considérants, formule
+  d'édiction, divisions, articles, listes, tableaux, citations, signature, mentions, annexes,
+  articles abrogés, certificat de transmission) et n'emprunte rien à la charte de l'entité. Deux
+  entités qui suivent deux chartes différentes présentent donc leurs actes **à l'identique** sur
+  le site public. Elle s'accorde seulement au **thème public** du recueil quand il existe
+  (`--ink-public`, `--brand-public`, `--font-ui`, `--border-strong`…, posés sur `:root` dans
+  `src/css/app.css`), avec une valeur de repli partout, et elle repose les jetons de **bloc**
+  (`--doc-rule`, `--doc-grid`, `--doc-neutral`…) sur ces mêmes valeurs — un paragraphe encadré ou
+  un tableau zébré suit ainsi le thème du recueil, jamais la charte. Le **texte occupe toute la
+  largeur disponible** et adopte la **police de l'interface** (`--font-ui`), pour une lecture
+  homogène avec le reste du site ; la **liste** des actes garde, elle, une largeur de lecture. Le
+  texte reste lisible en mode sombre, sans redevenir une feuille blanche.
 - **La présentation est la même** dans le recueil public et dans la consultation de
   l'administration : `views/acte-publie.js` réunit la **notice** (marques de version, titre, bloc
   de métadonnées), le **texte**, puis les blocs **pièces**, **signature** et **versions**.
@@ -1436,7 +1540,7 @@ registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
   **même** corps, par le **même** `corpsDeLActe` ; l'écran « Publications (ELI) » renvoie au
   recueil plutôt que d'ouvrir la page HTML autonome — qui reste pour l'impression, le PDF et le
   téléchargement. Deux adresses à ne pas confondre : `hrefRecueil`/`hrefActe` (adresses **relatives**,
-  `?recueil=1` et `?acte=<clé>`) servent à **naviguer** dans la page, `adresseRecueil`/`adresseActe`
+  la racine et ses clés — `?acte=<clé>`) servent à **naviguer** dans la page, `adresseRecueil`/`adresseActe`
   (adresses **absolues**, `perchance.org/<générateur>?acte=<clé>`) à **citer et partager** l'acte —
   et, sur un déploiement serveur, `/recueil` et `/recueil/<clé>` (§ 2.6 ter).
 
@@ -1475,27 +1579,39 @@ registre : c'est l'entrée d'un site. Elle se lit de haut en bas :
   revenir d'un clic. La migration additive `migrateRecueilsExternes` (`src/lib/store.js`) pose une
   **liste vide** sur un référentiel réel et les renvois livrés sur le jeu de démonstration.
 
-**Mentions du pied de page.** L'espace public se termine par ses **mentions** : les **mentions
-légales** — qui rappellent à quelles conditions un acte publié est exécutoire et opposable (publication
+**Mentions et sous-pages.** L'espace public se termine par ses **mentions**, et elles ont
+désormais **leurs propres pages** : les **mentions légales** — qui rappellent à quelles conditions
+un acte publié est exécutoire et opposable (publication
 et transmission au représentant de l'État, article L. 2131-1 du CGCT ; délai de recours de deux mois,
-article R. 421-1 du CJA) — et les **mentions d'accessibilité** (article 47 de la loi n° 2005-102 du
+article R. 421-1 du CJA) —, les **conditions de réutilisation** (L. 321-1 et L. 322-1 du CRPA) et les
+**mentions d'accessibilité** (article 47 de la loi n° 2005-102 du
 11 février 2005, RGAA, déclaration d'accessibilité et voie de recours devant le Défenseur des droits).
 Elles suivent le même régime que les renvois : ce sont des **données du référentiel**
-(`config.publication.mentions`, voir `src/lib/recueil.js`, `MENTIONS_PUBLIQUES` / `MENTIONS_DEFAUT` /
-`mentionsPubliques`), que l'administration écrit, remplace ou éteint.
+(`config.publication.mentions`, voir `src/lib/recueil.js`, `MENTIONS_PUBLIQUES` / `MENTIONS_DEFAUT`),
+que l'administration écrit, remplace ou éteint.
+
+**Une sous-page, une adresse.** Chaque page a la sienne (`?page=legales`, `?page=reutilisation`,
+`?page=accessibilite`, et `?page=informations` pour la rubrique) : elle se **cite**, se **partage**
+et s'**indexe** comme un acte (`adressePage`, `hrefPage`, `PAGES_PUBLIQUES`/`estPagePublique`,
+`src/lib/recueil.js`). Elle porte l'ossature du site — bandeau de démonstration, en-tête, pied —, un
+**fil d'Ariane** (« Recueil des actes › Mentions légales »), un **titre**, une **description** et une
+**adresse canonique** (`metaSousPage`), et le sommaire du pied de page les énumère. C'est pourquoi
+l'ancien bloc replié du pied de page (`<details>`, `blocMentions`) a disparu : une mention repliée en
+bas d'accueil n'est ni lisible ni citée, quand une page l'est.
 
 Chaque mention se présente de **trois façons** (`mode`) : **`texte`** — le texte du référentiel
-s'affiche dans un bloc **replié sous son titre** (`<details>`, `blocMentions`) : présent dans la page,
-donc trouvable par un moteur comme lisible par un agent, sans noyer le pied de page ; **`lien`** — le
-pied de page ne porte qu'un **renvoi** vers la page de la collectivité (les mentions légales du site
-principal, la déclaration d'accessibilité, par exemple) ; **`aucune`** — la mention ne s'affiche pas.
-Une mention **à moitié remplie ne s'imprime pas** : un lien sans adresse, un texte vide et une mention
+s'affiche en **paragraphes et listes** sur sa page (`blocsDeMention`) ; **`lien`** — la page ne porte
+qu'un **renvoi** vers celle de la collectivité (les mentions légales du site principal, la
+déclaration d'accessibilité, par exemple) ; **`aucune`** — la mention ne s'affiche pas, et sa page
+n'existe pas — la même règle vaut pour son entrée au sommaire du pied de page. Une mention **à moitié
+remplie ne s'imprime pas** : un lien sans adresse, un texte vide et une mention
 éteinte ne rendent rien (`mentionPublique` renvoie `null`) — mieux vaut une mention absente qu'une
-rubrique vide ou un lien mort. L'adresse est complétée d'un schéma si l'administration a saisi
+rubrique vide ou un lien mort. Une adresse de page **inconnue** (`?page=…`) rend un écran
+« Cette page n'existe pas » — jamais l'accueil en silence, qui laisserait croire à un lien cassé de
+son fait. L'adresse est complétée d'un schéma si l'administration a saisi
 « www.exemple.fr » (`urlAvecSchema`, employé aussi par les renvois du recueil). Le texte se découpe en
 **blocs** (`blocsMention`) selon deux règles qu'on devine sans les apprendre : une **ligne vide** sépare
 deux paragraphes, une ligne qui commence par **« - »** (ou « • », « * », « 1. ») devient une **puce**.
-Le rendu habille ces blocs (`.recueil-mention__texte`, `.recueil-mention__liste`, `src/css/app.css`).
 
 Ces mentions se règlent dans Administration › **Publication**, sous la carte **« Mentions du recueil
 public »** (`mentionsPubliquesBloc`, `views/referentiel.js`) : présentation (texte / lien / aucune),
@@ -1507,9 +1623,108 @@ les mentions légales de la Ville de Valmont-sur-Loire y sont **écrites** (édi
 publication, tribunal administratif d'Orléans), et l'accessibilité y est un **lien** vers la déclaration
 publiée sur le site principal — les deux formes à l'écran.
 
+**La feuille de style de la collectivité.** Le site public suit une **charte par défaut**, mais une
+collectivité a la sienne : Administration › Publication › **« Apparence du site public »**
+(`apparencePubliqueBloc`, `views/referentiel.js`) reçoit du **CSS libre**, conservé dans
+`config.publication.css` (`cssPersonnalisee`, `src/lib/recueil.js`). C'est du CSS, jamais du code :
+il ne peut rien exécuter, il n'est écrit que par un administrateur, et il n'est injecté que dans un
+`<style>` porteur d'un identifiant (`recueil-css-personnalisee`). La **portée utile** est `.recueil`,
+le conteneur du site — les variables de la charte y sont **posées**, et tout élément de la page peut
+s'y viser ; l'écran donne la table des variables que le recueil honore (`VARIABLES_CSS`,
+`src/lib/informations.js`), avec un exemple et un bouton « Vider ».
+
+Trois points tiennent la promesse de cet écran, et chacun a coûté une correction :
+
+- la feuille est posée **avant le premier rendu** (`poserCssPersonnalisee`, appelé avant d'ajouter la
+  vue), pour que le lecteur ne voie pas la charte par défaut **clignoter** ;
+- elle est posée **à la fin du corps**, et non dans l'en-tête : la feuille de l'application est
+  chargée deux fois (le `<link>` de `index.html` et le module de style), et un `<style>` d'en-tête
+  passerait **avant** le `<link>`, donc perdrait contre lui — une charte qui reprend
+  `--recueil-largeur` n'aurait alors **aucun effet**, alors que c'est justement ce que l'exemple
+  propose ;
+- elle ne vaut que pour le **site public** : en quittant le recueil, l'application la **retire**
+  (`retirerMetaRecueil`) — l'atelier garde l'apparence du logiciel.
+
+**Les informations publiées.** Une collectivité ne publie pas que des actes : elle **communique** —
+travaux, réunions publiques, avis, événements. Le recueil porte donc une rubrique **« Informations »**,
+faite de **billets** (titre, date, auteur, résumé, texte en Markdown, drapeau **`publie`**, drapeau
+**`epingle`**), comme un blog. Le modèle et ses règles vivent dans `src/lib/informations.js` (module
+pur) : `informationsPubliees` (les billets servis au public), `informationsOrdonnees` (l'ordre du
+**site** : épinglés d'abord, puis du plus récent au plus ancien — il ne connaît **que** les billets
+publiés), `informationsDeLAtelier` (l'ordre de l'**écran d'administration** : tous les billets,
+**brouillons compris** — deux ordres, deux fonctions, parce que le filtre « Brouillons » doit avoir
+quelque chose à filtrer), `informationParSlug`, `resumeInfo`, `minutesDeLecture`, et
+`manquePourPublier` (un billet sans **titre** ni **texte** ni **date** ne se publie pas).
+
+Les billets sont une **collection du service** (`informations`, `src/lib/db/contract.js`) servie au
+public par une route dédiée — `GET /v1/informations` —, et non par le recueil des actes : la page
+publique charge les deux séparément, une erreur sur l'un n'empêche pas l'autre, et un service qui ne
+sert pas encore les informations laisse la rubrique **vide** plutôt qu'en erreur (le recueil ne
+s'arrête pas parce qu'il n'a pas de nouvelles à donner). Le service ne rend que les billets
+**publiés** ; un brouillon ne sort que vers une identité d'`editeur` au moins. L'écran
+**« Informations »** (`views/informations.js`, permission `informations.gerer` : éditeur,
+administrateur) les écrit : liste à gauche (recherche, filtre publié/brouillon), billet à droite
+(titre, date, auteur, résumé, texte, deux cases, **aperçu** au rendu réel, publier/dépublier,
+supprimer). Publier est un **geste**, pas une case : `manquePourPublier` refuse un billet vide, et
+le dit. La rubrique se **règle** dans Administration › Publication › Apparence (affichée ou éteinte,
+titre — « Informations », « Actualités », « Communications » —, chapeau).
+
+Les billets publiés s'affichent à **deux endroits** : les trois derniers sur la **page d'accueil**
+(`informationsZone`), et **tous** sur leur page (`?page=informations`, `pageInformations`). Chaque
+billet a son adresse (`?info=<slug>`) et sa page (`informationVue`) — date, auteur, temps de lecture,
+texte rendu par le même `renderMarkdown` que le reste du logiciel, et, comme les actes, un **écran
+« Cette information n'existe pas »** pour une adresse inconnue, jamais un silence.
+
+**L'accès à l'atelier restreint à un réseau.** L'espace public est ouvert à tout le monde ; l'atelier
+peut, lui, n'être ouvert qu'à **certains réseaux** — l'intranet d'une commune, par exemple. Le
+réglage vit dans deux endroits, et le premier l'emporte : `SCRIBA_ATELIER_IPS` (`SCRIBA_ATELIER_MESSAGE`
+pour le texte du refus) dans le `.env` du **déploiement**, puis `publication.atelier.ips`
+(`publication.atelier.message`) dans le **référentiel** — Administration › Publication ›
+**« Accès à l'atelier »**. Le `.env` l'emporte parce que c'est lui qui survit à une remise à zéro du
+référentiel, et le seul qu'un exploitant puisse poser **avant** la première connexion ; l'écran le dit
+et n'offre alors qu'une **lecture** du réglage.
+
+Le format de la liste est celui des adresses réseau (`src/server/mysql/ips.mjs` et son jumeau dans le
+script du service) : une adresse (`10.0.0.24`), un **préfixe** (`192.168.0.0/16`, IPv4 ou IPv6), un
+**champ** (`10.0.0.0-10.0.0.255`), une **plage abrégée** (`10.0.0.*`) ; une entrée par ligne ou
+séparées par des virgules ; `#` ouvre un commentaire. Une entrée **incomprise** est **signalée**
+(`erreurs` : l'écriture de l'exploitant et le motif), jamais ignorée en silence.
+
+Trois règles décident, et il faut les trois (`src/server/mysql/atelier.mjs`, `etat`) :
+
+- la liste est **vide** (`demandee: false`) → l'atelier est **ouvert** : c'est le défaut, celui d'une
+  installation que rien ne restreint ;
+- une liste est **demandée** → seules les adresses qu'elle contient entrent. Elle est réputée
+  demandée dès qu'elle porte autre chose qu'un commentaire, **même si aucune entrée n'en est
+  lisible** : une liste écrite de travers **ferme** l'atelier au lieu de l'ouvrir (le « fail-closed »
+  — une faute de frappe dans `SCRIBA_ATELIER_IPS` ne doit pas laisser la porte que l'on croyait
+  gardée), et le journal de démarrage l'annonce comme **fermé**, pas comme ouvert ;
+- les **actes réservés aux agents** ne sont servis qu'aux personnes **connectées** venant d'une
+  adresse **autorisée** (voir plus haut) — et la liste d'accès n'est **jamais** remplacée en silence
+  par une autre : la valeur du déploiement, si elle est présente, est celle qui s'applique.
+
+La décision appartient au **service** : c'est le seul qui **voit** l'adresse réelle de l'appelant (premier
+maillon de `X-Forwarded-For`, ou adresse de la prise — `adresseDeLEntete`). L'application, elle, a
+trois usages de cet état (`src/lib/atelier-acces.js` : `chargerAcces`, `acces`, `atelierRestreint`,
+`horsReseau`, `agentsAvecActesReserves`) : **savoir** si l'atelier est ouvert (et montrer un écran
+« Atelier hors réseau » plutôt qu'un 403 découvert au hasard du premier clic, `views/hors-reseau.js`),
+**dire** au recueil public si les actes réservés s'affichent, et laisser un administrateur
+**essayer** une adresse (« et si j'arrivais de là ? »). Rien de tout cela n'accorde ni ne refuse un
+droit : c'est un **reflet**, et le service le sait — la réponse de l'écran d'administration porte
+`restriction_appliquee: false` quand le service qui répond ne peut pas voir l'adresse de l'appelant
+(le service de démonstration de la plateforme), avec la **note** qui l'explique.
+
 **Amorçage de la démonstration.** Un service neuf ne contient aucune publication, donc le recueil
 serait vide : `src/ui/demo-publications.js` (`amorcerRecueil`, appelé en fin d'amorçage par
-`app.js`) publie au premier démarrage les actes que la fiction déclare publiés — ceux qui portent
+`app.js`) fait **trois gestes** au premier démarrage. D'abord il **provisionne le service**
+(`assurerServiceDemo`) : un service neuf est en **lecture seule** tant qu'aucune clé n'y a été
+déposée, et une démonstration n'a pas d'administrateur pour le faire — la clé est tirée par le
+poste (seule son empreinte vit au service) et rangée dans les réglages locaux ; le verdict n'est
+pas retenu pour la session, un service pouvant être remis à zéro pendant qu'une page vit. Ensuite
+il **dépose les billets** (`amorcerInformations`) : en régime **local**, l'atelier n'écrit pas
+dans la collection du service, et la rubrique *Informations* du recueil public restait donc vide ;
+le dépôt n'a lieu que si le service en est dépourvu ou en désaccord (comparaison des empreintes).
+Enfin il publie les actes que la fiction déclare publiés — ceux qui portent
 une constatation de publication —, par le **même chemin** que l'écran de signature
 (`publierActeDuSeed`), de sorte que le registre local et le service racontent la même chose. Le
 geste vaut pour les actes **signés** comme pour les actes **déjà publiés au registre local** : un
@@ -1679,7 +1894,8 @@ réviseur, ou celle de signataire, à un rédacteur ne le transforme pas en « p
 Le contrôle d'accès repose sur des **permissions** nommées (`trames.voir`, `trames.gerer`,
 `trames.styles`, `actes.rediger`, `actes.gerer`, `actes.tous`, `actes.valider`, `actes.reviser`,
 `actes.signer`, `signature.gerer`, `delegations.gerer`, `publications.depublier`,
-`publications.epingler`, `referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`), chacune
+`publications.epingler`, `informations.gerer`, `referentiel.gerer`, `comptes.gerer`, `api.gerer`,
+`docs.voir`), chacune
 accordée à un ensemble de rôles. **Signer** (`actes.signer`) et **publier** (`signature.gerer`)
 sont deux permissions distinctes : la première ouvre l'écran de signature et les gestes qui
 engagent la signature — un signataire peut donc signer sans pouvoir conduire la publication.
@@ -1763,10 +1979,26 @@ l'organigramme sans cesser d'être une personne morale distincte. Un rattachemen
 
 Trois niveaux, trois fiches : celle d'une **entité** (forme, code, nom, dénomination légale, ville
 du siège, tribunal, personnalité morale, rattachement, **signataire principal**), celle d'un
-**service** (code, nom, entité de rattachement, et ses **bureaux**, qu'on ajoute et retire sur
-place) et celle d'un **bureau**. L'écran se lit en **arbre** ou en **liste** ; il est ouvert à
-tous les comptes (`organigramme: null` dans `VIEW_PERMS` — savoir qui existe n'est pas un secret
-d'administration), la modification passant par les gestes habituels des écrans d'administration.
+**service** (code, nom, entité de rattachement, **service ou bureau dont il dépend**, et ses
+**bureaux**, qu'on ajoute et retire sur place) et celle d'un **bureau**. L'écran se lit en
+**arbre** ou en **liste** ; il est ouvert à tous les comptes (`organigramme: null` dans
+`VIEW_PERMS` — savoir qui existe n'est pas un secret d'administration).
+
+**Un service peut dépendre d'un autre service, ou du bureau d'un autre service**
+(`service.parentId` : l'identifiant désigne l'un ou l'autre, sans préfixe). Le rattachement sert
+**deux choses** (`src/lib/organigramme.js`) : l'**ordre** de l'arbre — un service rattaché
+s'affiche sous son parent, non à la racine de son entité — et le **périmètre** — le périmètre d'un
+service couvre **ce service et ses descendants** (`servicesSous`, `servicesRattachesA`,
+`src/lib/scope.js`), si bien qu'un agent affecté à un service de **tête de chaîne** voit les actes
+de toute la chaîne **en contrebas**. Un rattachement qui forme une **boucle** est ignoré (le
+service remonte à la racine, plutôt que de disparaître), comme pour l'entité.
+
+**Qui édite l'organigramme.** La permission `organigramme.gerer` (portée par l'**administrateur**
+et par l'**éditeur**, `src/lib/users.js`) ouvre la modification : ajouter ou retirer un
+**service** ou un **bureau**, régler leurs rattachements. L'ajout ou la suppression d'une
+**entité** reste à l'**administrateur** — un éditeur n'en règle que les **relations descendantes**
+(les services et bureaux qu'elle porte). Les retraits opérés depuis le référentiel sont **tracés
+au journal d'audit** (`views/referentiel.js`).
 
 **Le SIGNATAIRE PRINCIPAL d'une entité** (`entite.signerPersonId`, et la **qualité** sous
 laquelle elle signe, `signerRoleId`) est la personne qui signe les actes de cette entité **quand
@@ -2312,6 +2544,27 @@ les valeurs proposées quand on ajoute une étape, et l'administrateur peut les 
 `migrateCircuitsNatures` (`src/lib/store.js`), et régénérés avec les actes quand `SEED_VERSION`
 change.
 
+**À qui l'étape est confiée : un rôle, une personne, un service.** Le rôle n'est plus la seule
+cible. Chaque étape porte un `targetType` :
+
+- **`role`** (le défaut) — toute personne portant le rôle franchit l'étape ;
+- **`personne`** (`personId`) — une **personne nommée** du référentiel : c'est le compte qui lui
+  est rattaché (`user.personId`) qui agit, et lui seul — utile pour une étape qui ne doit pas
+  s'ouvrir à un rôle entier ;
+- **`service`** (`serviceId`) — un **service** désigné, qui **n'a pas à faire partie de la chaîne
+  de décision** : un avis ou une vérification demandés à un service tiers, hors circuit
+  hiérarchique.
+
+`etapeCible` rend le libellé de la cible et `peutFranchirEtape` tranche pour un compte donné
+(`src/lib/validation.js`). L'administrateur choisit la cible dans *Administration › Circuits de
+validation* ; les champs correspondants (la personne, le service) n'apparaissent qu'au choix
+retenu.
+
+**Les circuits se lisent un par un.** L'onglet « Circuits de validation » présente d'abord un
+**récapitulatif** — cible, nombre d'étapes, circuit actif ou non — et ouvre une **sous-vue par
+circuit** (« Tous les circuits », puis le détail de celui qu'on choisit) : les circuits ne
+s'empilent plus à la suite sur la même page, ce qui rendait la comparaison et la relecture longues.
+
 Un acte n'est pas signé à l'issue de sa rédaction : il franchit un **circuit de validation**,
 défini dans le référentiel (§ 2.1 `circuits`) et résolu par `circuitFor` — le circuit désigné
 par la trame, sinon le plus **spécifique** des circuits actifs correspondant à la trame, à sa
@@ -2685,12 +2938,16 @@ L'application ne connaît pas son support de rangement : elle s'adresse à une
 | **Service de démonstration — partagé** | `db/service.js`, transport `socket` | partagé via l'état durable du service de démonstration |
 | **Serveur externe — MySQL / MariaDB** | `db/service.js`, transport `http` | la base de la collectivité, via `src/server/mysql/` |
 
-**Modèle.** Huit collections : `config`, `meta` (objets uniques), `trames`,
-`actes`, `users`, `journal`, `presence` (listes d'objets identifiés par `id`), et
+**Modèle.** Neuf collections : `config`, `meta` (objets uniques), `trames`,
+`actes`, `users`, `informations` (les **billets** du recueil public, une liste d'objets
+identifiés par `id`), `journal`, `presence` (listes d'objets identifiés par `id`), et
 `session` (**strictement locale**). `journal` et `presence` sont **silencieuses** :
 leurs conflits ne déclenchent pas de toast (ce sont des flux, pas des documents).
 L'unité d'échange est l'**enregistrement** : un objet
 de liste, ou l'objet unique d'un singleton (id `self`) ; `ord` porte la position.
+Les collections **éditées par un rôle** le déclarent (`COLLECTIONS_EDITEUR`,
+`src/server/mysql/server.mjs` : `informations` demande au moins `editeur`) : une écriture
+d'un rôle inférieur reçoit `403`, plutôt que d'être acceptée puis ignorée.
 
 **Synchronisation.** Chaque écriture est comparée à l'index connu du serveur
 (comparaison JSON canonique) ; seuls les enregistrements modifiés sont envoyés,
@@ -2744,6 +3001,20 @@ MySQL) et `db` (MariaDB). Ni `api` ni `db` ne publient de port. La base peut aus
 hébergée sur le réseau local de la collectivité (`DB_HOST`), ce qui était l'objet de la
 requête initiale.
 
+**Aucun fichier de l'hôte n'est monté dans les conteneurs** : `api` (voir `server/mysql/Dockerfile`)
+et `web` (voir `server/web/Dockerfile`) sont **construits** — le service, la façade, la coquille et
+le code de l'application entrent dans les images, avec leurs droits. Le démarrage ne dépend donc ni
+des droits des fichiers du dépôt, ni de son système de fichiers, ni de l'étiquette de sécurité de
+la machine qui héberge (SELinux, AppArmor, espace de noms d'utilisateurs). Le **schéma** suit la
+même règle : il n'est pas monté dans MariaDB, c'est le service qui l'applique au démarrage
+(`AUTO_MIGRATE`, `schema.sql` étant idempotent) — et de nouveau chaque fois qu'il se rétablit après
+une panne de base, puisqu'il rééprouve la base à la demande plutôt que de garder un verdict de
+démarrage. Le **compte applicatif** de la base suit le `.env` de la même façon : un quatrième
+conteneur (`db-init`) le remet au mot de passe du `.env` **et applique le schéma** avant que le
+service ne se connecte (`server/mysql/compte-base.mjs`, `node server.mjs --reconcilier`) — le seul
+moment où le service parle à la base en root, et le remède aux deux pannes d'installation les plus
+fréquentes (`Access denied for user 'scriba'@…`, et la table absente qui suit).
+
 La coquille de cette édition est `server/web/index.html` : l'`index.html` et le `main.pjs`
 d'origine ne servent qu'à l'édition en ligne. En auto-hébergement, le mode de persistance par
 défaut est « serveur externe » sur la même origine, et le jeton d'écriture est injecté au
@@ -2756,6 +3027,43 @@ environnements. Son état vit dans la table `sb_etat`.
 
 Références : `src/server/README.md` (installation, réseau, TLS, sauvegardes) et
 `src/docs/ADMINISTRATION.md` (sécurité, exploitation, migration, limites).
+
+### 2.9.1 bis Les clés d'API, les comptes de service et le journal du service
+
+Le service ne contient **aucun secret** : pas même l'empreinte d'une clé inscrite dans le code
+servi. Les clés sont des **clés portables** remises à des postes, à des scripts ou à des outils
+tiers.
+
+- **Des comptes de service.** L'administrateur crée, depuis *Administration › Base de données*,
+  autant de clés qu'il en faut ; chacune porte un **rôle** (`administrateur`, `editeur`,
+  `redacteur`, `lecteur`, `prestataire`) et un **libellé**. Le rôle commande les routes que la clé
+  ouvre : une clé de lecture ne peut pas publier, une clé de rédaction ne peut pas gérer les clés.
+  Ce ne sont **pas** des comptes du référentiel : elles n'apparaissent ni dans « Comptes et
+  rôles », ni parmi les personnes, ni dans l'annuaire — elles vivent dans l'état privé du service
+  (`db.cles`), où seule leur **empreinte SHA-256** est conservée. La valeur est **tirée par le
+  poste** (`crypto.getRandomValues`, 32 octets → 64 caractères hexadécimaux,
+  `src/lib/cles-service.js`) et ne s'affiche qu'**une fois**, à la création.
+- **Le provisionnement.** Un service neuf n'accepte aucun jeton : il reste en **lecture seule**
+  (le recueil et la résolution ELI sont servis) tant qu'il n'a pas reçu sa **première** clé
+  (`POST /v1/auth/bootstrap`, une seule fois). En mode « mot de passe » ou par annuaire,
+  l'administration se fait par la **session** et le provisionnement n'a pas lieu d'être :
+  `GET /v1/auth/etat` (public) dit `mode: "session"` ou `mode: "service"`.
+- **La révocation.** `POST /v1/auth/cles/{id}/revoquer` retire une clé. Le service refuse de
+  révoquer la **dernière** clé d'administration (`409 derniere_cle_admin`), sans quoi il ne serait
+  plus administrable.
+- **Le journal d'audit scellé.** Le service tient un journal **append-only** (`db.journal`,
+  `GET /v1/journal`, administration seule) : chaque geste sensible — dépôt, signature, publication,
+  retrait, épinglage, provisionnement, création et révocation de clé — y laisse une ligne
+  `{ n, le, geste, detail, sceau }`, où `sceau` est le **SHA-256** du sceau précédent et de la
+  ligne. Modifier une ligne rompt la chaîne, ce que le champ `scelle` révèle à la relecture. Les
+  **2 000** dernières entrées sont conservées (les plus anciennes sortent) : c'est une piste
+  d'audit **opposable**, tenue par le service et non par le poste qui a agi.
+
+L'autorisation est appliquée par `server.mjs` (`autoriser(req, session, regle)`) : une **session**
+vaut pour le rôle de son compte, une **clé** pour le sien (`cleDeJeton`, `actes.mjs`), et
+`roleRefuse` compare le rôle exigé par la route. L'application voit les clés par
+`src/lib/cles-service.js` (`etatService`, `provisionnerService`, `listerCles`, `creerCle`,
+`revoquerCle`, `journalService`).
 
 ### 2.9.2 Édition statique (GitHub Pages)
 
@@ -2826,6 +3134,14 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
 
 ## 4. Parcours
 
+La barre de gauche range les écrans en six rubriques, dans l'ordre de la vie de l'acte :
+**Produire** (trames, rédaction, modification, registre, corbeille), **Valider** (parapheur,
+révision), **Publier** (signature et publication, exécution et délais, publications ELI,
+recueil public), **Organisation** (organigramme, délégations, chrono de numérotation),
+**Configurer** (administration, feuilles de style) et **Aide** (guide, API REST, documentation
+technique). Une rubrique dont aucune entrée n'est permise pour le profil disparaît, et les
+écrans s'y rangent sans changer d'identifiant de route.
+
 0. **Se connecter** — l'écran d'ouverture liste les comptes (« Qui se connecte ? ») ; on
    choisit le sien, et le **rôle** du compte décide de ce qui est permis tandis que son
    **périmètre** décide de ce qui est visible (voir 2.7). Le menu du compte permet de
@@ -2885,9 +3201,13 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    flèches sur le bloc, ou un glisser par la poignée ⠿ ou par le numéro de l'article/division —
    et l'ordre choisi renumérote le dispositif, sans rien changer à la trame (§ 2.4.1). Export
    bloqué seulement par un contrôle
-   bloquant de la trame. L'en-tête indique **où en est l'acte dans son circuit de validation**
-   (« Soumettre au circuit » tant qu'il n'a pas été soumis) et la fiche de l'acte porte la carte
-   du parapheur (voir 2.8.1).
+   bloquant de la trame. Le **parcours** de l'acte est affiché en tête (Rédiger → Soumettre au
+   circuit → Révision → Signer → Publier, l'étape courante marquée), et le **geste du moment**
+   est proposé à la suite du document en **bouton principal** — « Soumettre au circuit » tant que
+   l'acte n'a pas été soumis, ou « Aller à la signature » quand il est validé et que l'on peut
+   signer. L'**export** n'y est plus présenté comme l'aboutissement : il reste disponible,
+   discret, avec la phrase qui dit ce qu'il est (« ce n'est pas la fin du parcours »). La fiche de
+   l'acte porte la carte du parapheur (voir 2.8.1).
 4 bis. **Parapheur** (voir 2.8.1) — l'écran du valideur : *à valider par moi*, *en cours*,
    *validés*, *renvoyés ou refusés*. On y **vérifie** un dossier, on donne son **visa** (bon pour
    accord) ou l'on **marque son accord pour signer**, selon la nature de l'étape — on
@@ -2985,12 +3305,18 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    ELI, consultation du texte (rendu dans la page), des métadonnées, des versions et de
    l'original signé (avec vérification de la signature) ; il donne accès au **recueil
    public**. (permission `signature.gerer`)
-8 bis. **Le recueil public** — un **site sans compte** (routes `recueil`, servies avant la porte
-   de connexion : `?recueil=1` et `?acte=<clé>` dans la page, `/recueil` et `/recueil/<clé>` sur un
-   déploiement serveur). Sa **page d'accueil** se lit comme celle d'un site : une entrée avec la
-   recherche, un **carrousel des derniers actes publiés** (le thème mis en avant sur chaque carte),
+8 bis. **Le recueil public** — un **site sans compte**, à la **racine** du site (routes `recueil`,
+   servies avant la porte de connexion : la page y ouvre son accueil, et ses clés
+   `?acte=<clé>`, `?eli=…`, `?page=…`, `?info=…` portent ses adresses ; `/recueil` et
+   `/recueil/<clé>` sur un déploiement serveur). L'**atelier**, lui, se demande (`?atelier`, ou le
+   chemin `/atelier`), et c'est ce qui permet de le **restreindre à un réseau**. Sa **page
+   d'accueil** se lit comme celle d'un site : une entrée avec la
+   recherche, la bande des **informations** publiées, un **carrousel des derniers actes publiés**
+   (le thème mis en avant sur chaque carte),
    les **thèmes** en grille — la matière de chaque acte, par laquelle on accède à ses actes —, puis
-   la liste complète groupée par année. Chaque acte s'y lit dans la page, avec ses métadonnées.
+   la liste complète groupée par année, et un pied de page qui porte ses **sous-pages** (mentions
+   légales, conditions de réutilisation, accessibilité, informations), sa licence et la **porte de
+   l'application**. Chaque acte s'y lit dans la page, avec ses métadonnées.
    **Dès qu'une recherche est en cours** — on frappe dans l'entrée, ou l'on choisit un thème —, le
    carrousel et la grille des thèmes **s'effacent** au profit des seuls résultats ; ils reviennent
    quand on efface la recherche ou les filtres. Les **règlements** publiés à titre informatif
@@ -3005,6 +3331,14 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
    ajoute ce que lisent les moteurs et les agents : une adresse stable par acte, ses
    représentations (JSON, Markdown, texte, Akoma Ntoso), ses métadonnées de page, et les fichiers
    du site (`llms.txt`, `recueil.json`, `sitemap.xml`, `robots.txt`). (public)
+8 ter. **Informations du recueil** — l'écran d'**atelier** qui écrit les billets publics
+   (« actualités » de la collectivité) : liste à gauche (recherche, filtre publié/brouillon), billet
+   à droite (titre, date, auteur, résumé, texte en Markdown, aperçu au rendu réel, publier /
+   dépublier / supprimer). Publier exige un **titre**, un **texte** et une **date** — un billet
+   vide est refusé, et le refus se dit. Le billet **épinglé** ouvre la rubrique. La rubrique
+   elle-même — affichée ou éteinte, son **titre** (« Informations », « Actualités »,
+   « Communications ») et son **chapeau** — se règle dans Administration › Publication ›
+   *Apparence du site public*. (permission `informations.gerer`)
 9. **Guide** — wiki d'utilisation intégré, écrit pour un agent administratif peu à
    l'aise avec l'informatique (voir section 6).
 10. **Documentation technique** — les documents livrés avec le logiciel, lus dans
@@ -3057,9 +3391,11 @@ dont les positions sont calculées à partir des éléments de l'interface (voir
 
 ## 5. Hors périmètre v1 (prochaine étape)
 
-- Export PDF/A certifié (chaîne à valider par veraPDF) : aujourd'hui le PDF s'obtient par
-  l'impression du HTML, et l'original signé est un paquet JSON + page HTML. De même,
-  l'export **Word** est un `.doc` (HTML balisé pour Word, section A4) et non un `.docx` natif.
+- **Export PDF/A** : la chaîne est **livrée** (`src/lib/pdfa.js` — PDF/A-2b et PDF/A-1b, polices
+  et profil sRGB embarqués, XMP, `OutputIntents`, langue, métadonnées, ELI) ; il reste à en
+  faire **valider la conformité par `veraPDF`** sur un déploiement. L'original signé, lui, est un
+  paquet JSON + page HTML. De même, l'export **Word** est un `.doc` (HTML balisé pour Word,
+  section A4) et non un `.docx` natif.
 - **Signature réellement qualifiée** : la démonstration signe avec un certificat créé dans
   le navigateur (ECDSA P-256, vérifiable) ; la production doit se brancher sur le
   prestataire de la collectivité et sa chaîne de certification eIDAS.

@@ -33,6 +33,7 @@ import { textField, selectField, choiceField, confirmDialog, sectionHeader, help
 import {
   ENTITY_KINDS, kindLabel, newEntite,
   entitesOf, entiteById, estAutonome, enfantsDe,
+  parentDeService, servicesSous, enfantsServices,
   organigramme, entitesHorsArbre, statsOrganigramme,
 } from "../../lib/organigramme.js";
 import { personName } from "../../lib/render.js";
@@ -64,24 +65,31 @@ export function renderOrganigramme(root) {
   c.services = c.services || [];
   const ui = (state.ui = state.ui || {});
   if (ui.orgView !== "liste") ui.orgView = "organigramme";
-  const peutGerer = can("referentiel.gerer");
+  // DEUX DROITS, distincts : l'ENTITÉ (la personne morale) reste à
+  // l'administrateur ; les SERVICES et leurs bureaux sont aussi à l'éditeur
+  // (permission `organigramme.gerer`). Un éditeur dessine donc la structure de
+  // la collectivité sans pouvoir créer ni supprimer une personne morale.
+  const peutEntites = can("referentiel.gerer");
+  const peutServices = can("organigramme.gerer");
+  const peutGerer = peutEntites;
   const stats = statsOrganigramme(c);
 
   const save = () => touch("config", { rerender: false });
   const paint = () => { save(); redrawView(); };
+  const droits = { peutEntites, peutServices, save, paint };
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: "Organigramme" }),
-      h("p", { class: "page-head__sub", text: "La structure au nom de laquelle les actes sont pris : les entités (commune, établissements, régies…), les services qui les composent, et les bureaux auxquels les comptes sont rattachés. Cliquez un nœud pour ouvrir sa fiche — y désigner le signataire principal d'une entité, la rattacher à une autre, ou renseigner ses services et leurs bureaux. Une entité rattachée agit au nom d'une autre (une régie municipale, par exemple) sans perdre sa vie propre : son directeur, ses services, ses actes." }),
+      h("p", { class: "page-head__sub", text: "La structure au nom de laquelle les actes sont pris : les entités (commune, établissements, régies…), les services qui les composent, et les bureaux auxquels les comptes sont rattachés. Cliquez un nœud pour ouvrir sa fiche — y désigner le signataire principal d'une entité, la rattacher à une autre, ou renseigner ses services et leurs bureaux. Un service peut dépendre d'un autre service, ou du bureau d'un autre service : les agents affectés à un service de tête voient alors les actes de toute la chaîne en contrebas. Une entité rattachée agit au nom d'une autre (une régie municipale, par exemple) sans perdre sa vie propre : son directeur, ses services, ses actes." }),
     ),
     h("div", { class: "page-head__actions" },
-      peutGerer ? button("Nouvelle entité", { variant: "primary", icon: "plus", onClick: () => ouvrirFicheEntite(c, { peutGerer, save, paint, creer: true }) }) : null,
+      peutGerer ? button("Nouvelle entité", { variant: "primary", icon: "plus", onClick: () => ouvrirFicheEntite(c, { ...droits, creer: true }) }) : null,
       helpLink("administrateurs", "Aide"),
     ),
   ));
 
-  if (!peutGerer) {
+  if (!peutServices) {
     root.appendChild(h("p", { class: "org-lecseule" },
       h("span", { class: "fr-badge fr-badge--info", text: "Consultation" }),
       h("span", { text: " L'organigramme est visible par tous ; seuls les administrateurs et les éditeurs peuvent le modifier." })));
@@ -90,7 +98,7 @@ export function renderOrganigramme(root) {
   if (!c.entities.length) {
     root.appendChild(emptyState(
       "Aucune entité au référentiel : la collectivité se décrit dans Administration › Entités, ou se dessine ici.",
-      peutGerer ? button("Créer la première entité", { variant: "primary", icon: "plus", onClick: () => ouvrirFicheEntite(c, { peutGerer, save, paint, creer: true }) }) : null,
+      peutGerer ? button("Créer la première entité", { variant: "primary", icon: "plus", onClick: () => ouvrirFicheEntite(c, { ...droits, creer: true }) }) : null,
     ));
     return;
   }
@@ -103,6 +111,7 @@ export function renderOrganigramme(root) {
   root.appendChild(h("div", { class: "chrono-kpis" },
     carte("Entités", stats.entites, stats.rattachees ? stats.rattachees + " rattachée(s)" : "toutes autonomes"),
     carte("Services", stats.services, stats.bureaux + " bureau(x)"),
+    carte("Services rattachés", stats.servicesRattaches, stats.servicesRattaches ? "au-dessous d'un autre" : "tous à la racine"),
     carte("Sans signataire principal", stats.sansSignataire, stats.sansSignataire ? "à désigner" : "toutes désignées", stats.sansSignataire ? "warning" : ""),
   ));
 
@@ -110,9 +119,9 @@ export function renderOrganigramme(root) {
   root.appendChild(barreOutils(ui, arbre.length));
 
   const fiche = (noeud) => {
-    if (noeud.type === "service") ouvrirFicheService(c, { peutGerer, save, paint, service: noeud.service });
-    else if (noeud.type === "bureau") ouvrirFicheBureau(c, { peutGerer, save, paint, service: noeud.service, bureau: noeud.bureau });
-    else ouvrirFicheEntite(c, { peutGerer, save, paint, entite: noeud.entite });
+    if (noeud.type === "service") ouvrirFicheService(c, { ...droits, service: noeud.service });
+    else if (noeud.type === "bureau") ouvrirFicheBureau(c, { ...droits, service: noeud.service, bureau: noeud.bureau });
+    else ouvrirFicheEntite(c, { ...droits, entite: noeud.entite });
   };
 
   root.appendChild(ui.orgView === "liste" ? vueListe(c, arbre, fiche) : vueOrganigramme(c, arbre, fiche));
@@ -163,20 +172,32 @@ function brancheEntite(c, noeud, fiche) {
   return el;
 }
 
-function brancheService(c, { service, bureaux }, fiche) {
+// Un SERVICE peut pendre sous un autre service, ou sous le BUREAU d'un autre
+// service (voir src/lib/organigramme.js) : la branche descend donc récursivement,
+// et un bureau peut à son tour porter des services.
+function brancheService(c, noeud, fiche) {
   const el = h("div", { class: "org-branch" });
-  el.appendChild(noeudService(c, service, bureaux, fiche));
-  if ((bureaux || []).length) {
+  el.appendChild(noeudService(c, noeud.service, noeud.bureaux, noeud.parent, fiche));
+  const enfants = [];
+  for (const b of noeud.bureaux || []) enfants.push(brancheBureau(c, noeud.service, b.bureau, b.enfants, fiche));
+  for (const s of noeud.enfants || []) enfants.push(brancheService(c, s, fiche));
+  if (enfants.length) {
     const kids = h("div", { class: "org-children" });
-    for (const b of bureaux) kids.appendChild(brancheBureau(c, service, b, fiche));
+    for (const k of enfants) kids.appendChild(k);
     el.appendChild(kids);
   }
   return el;
 }
 
-function brancheBureau(c, service, bureau, fiche) {
+function brancheBureau(c, service, bureau, enfants, fiche) {
   const el = h("div", { class: "org-branch" });
-  el.appendChild(noeudBureau(c, service, bureau, fiche));
+  el.appendChild(noeudBureau(c, service, bureau, enfants, fiche));
+  const kids = (enfants || []).map((s) => brancheService(c, s, fiche));
+  if (kids.length) {
+    const box = h("div", { class: "org-children" });
+    for (const k of kids) box.appendChild(k);
+    el.appendChild(box);
+  }
   return el;
 }
 
@@ -205,7 +226,9 @@ function noeudEntite(c, noeud, fiche) {
   );
 }
 
-function noeudService(c, service, bureaux, fiche) {
+function noeudService(c, service, bureaux, parent, fiche) {
+  const nb = enfantsServices(c, service.id).length
+    + (bureaux || []).reduce((n, b) => n + (b.enfants || []).length, 0);
   return h("button", {
     class: "org-node org-node--svc",
     type: "button",
@@ -216,14 +239,16 @@ function noeudService(c, service, bureaux, fiche) {
       h("span", { class: "org-node__init org-node__init--svc", text: "§" }),
       h("span", { class: "org-node__corps" },
         h("span", { class: "org-node__nom", text: service.name }),
-        h("span", { class: "org-node__qual", text: (bureaux || []).length + " bureau(x)" }))),
+        h("span", { class: "org-node__qual", text: (bureaux || []).length + " bureau(x)" + (nb ? " · " + nb + " rattaché(s)" : "") }))),
     h("span", { class: "org-node__pied" },
       h("span", { class: "org-badge org-badge--svc", text: "Service" }),
-      service.code ? h("span", { class: "org-node__ent", text: service.code }) : null),
+      service.code ? h("span", { class: "org-node__ent", text: service.code }) : null,
+      parent ? h("span", { class: "org-badge org-badge--sous", text: "de " + (parent.type === "bureau" ? parent.bureau.name : parent.service.name) }) : null),
   );
 }
 
-function noeudBureau(c, service, bureau, fiche) {
+function noeudBureau(c, service, bureau, enfants, fiche) {
+  const nb = (enfants || []).length;
   return h("button", {
     class: "org-node org-node--sous org-node--petit",
     type: "button",
@@ -234,7 +259,7 @@ function noeudBureau(c, service, bureau, fiche) {
       h("span", { class: "org-node__init org-node__init--sous", text: "·" }),
       h("span", { class: "org-node__corps" },
         h("span", { class: "org-node__nom", text: bureau.name }),
-        h("span", { class: "org-node__qual", text: service.name }))),
+        h("span", { class: "org-node__qual", text: service.name + (nb ? " · " + nb + " service(s) rattaché(s)" : "") }))),
   );
 }
 
@@ -245,12 +270,17 @@ function vueListe(c, arbre, fiche) {
     wrap.appendChild(h("div", { class: "org-liste__ligne", style: { paddingLeft: niveau * 26 + "px" } },
       niveau > 0 ? h("span", { class: "org-liste__cran", "aria-hidden": "true", text: "└" }) : null, el));
   };
+  const parcourirService = (noeud, niveau) => {
+    poser(noeudService(c, noeud.service, noeud.bureaux, noeud.parent, fiche), niveau);
+    for (const b of noeud.bureaux || []) {
+      poser(noeudBureau(c, noeud.service, b.bureau, b.enfants, fiche), niveau + 1);
+      for (const s of b.enfants || []) parcourirService(s, niveau + 2);
+    }
+    for (const s of noeud.enfants || []) parcourirService(s, niveau + 1);
+  };
   const parcourir = (noeud, niveau) => {
     poser(noeudEntite(c, noeud, fiche), niveau);
-    for (const s of noeud.services || []) {
-      poser(noeudService(c, s.service, s.bureaux, fiche), niveau + 1);
-      for (const b of s.bureaux || []) poser(noeudBureau(c, s.service, b, fiche), niveau + 2);
-    }
+    for (const s of noeud.services || []) parcourirService(s, niveau + 1);
     for (const e of noeud.enfants || []) parcourir(e, niveau + 1);
   };
   for (const r of arbre) parcourir(r, 0);
@@ -275,7 +305,7 @@ function horsArbre(c, orphelines, fiche) {
 // Les fiches — une par sorte de nœud.
 // ============================================================================
 function ouvrirFicheEntite(c, opts) {
-  const { peutGerer, save, paint } = opts;
+  const { peutEntites, peutServices, save, paint } = opts;
   const nouvelle = !!opts.creer;
   const e = nouvelle ? newEntite() : opts.entite;
 
@@ -285,7 +315,7 @@ function ouvrirFicheEntite(c, opts) {
     body, wide: true,
     actions: (close) => {
       const out = [];
-      if (peutGerer && nouvelle) out.push(button("Créer l'entité", { variant: "primary", icon: "plus", onClick: () => {
+      if (peutEntites && nouvelle) out.push(button("Créer l'entité", { variant: "primary", icon: "plus", onClick: () => {
         if (!String(e.name || "").trim()) { toast("Donnez un nom à l'entité.", "warning"); return; }
         if (entitesOf(c).some((x) => x.code && x.code === e.code)) { toast("Le code « " + e.code + " » est déjà pris par une autre entité : il alimente la numérotation.", "warning"); return; }
         c.entities.push(e);
@@ -293,7 +323,7 @@ function ouvrirFicheEntite(c, opts) {
         paint();
         close();
       } }));
-      if (peutGerer && !nouvelle) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
+      if (peutEntites && !nouvelle) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
         const enfants = enfantsDe(c, e.id);
         if (enfants.length) { toast("Détachez d'abord les entités rattachées à celle-ci : " + enfants.map((x) => x.name).join(", ") + ".", "warning"); return; }
         if (!(await confirmDialog("Supprimer cette entité ?", "Les actes déjà pris en son nom ne sont pas touchés, mais elle ne sera plus proposée à la rédaction."))) return;
@@ -317,7 +347,7 @@ function ouvrirFicheEntite(c, opts) {
   const peindre = () => {
     clear(body);
     body.appendChild(tete());
-    if (!peutGerer) {
+    if (!peutEntites) {
       body.appendChild(sectionHeader("L'entité"));
       body.appendChild(h("div", { class: "org-fiche__bloc" },
         ligneInfo("Nom", e.name), ligneInfo("Code", e.code), ligneInfo("Nature", kindLabel(e.kind)),
@@ -385,22 +415,47 @@ function ouvrirFicheEntite(c, opts) {
       ligneInfo("Bureaux", bureaux ? String(bureaux) : ""),
       ligneInfo("Entités rattachées", enfantsDe(c, e.id).map((x) => x.name).join(", "))));
 
-    if (peutGerer) {
+    if (peutServices) {
       body.appendChild(h("p", { class: "fr-small" },
         button("Ajouter un service", { variant: "tertiary", size: "sm", icon: "plus", onClick: () => {
           const s = newService({ entityId: e.id });
           c.services.push(s);
           save();
           m.close();
-          ouvrirFicheService(c, { peutGerer, save, paint, service: s });
+          ouvrirFicheService(c, { peutEntites, peutServices, save, paint, service: s });
         } })));
     }
   };
   peindre();
 }
 
+// Les options du sélecteur « Dépend de » : les autres services, et les bureaux
+// des autres services — c'est ainsi qu'un service pend sous un bureau. On écarte
+// le service lui-même et tout ce qui pend sous lui : la chaîne bouclerait.
+function optionsParent(c, s) {
+  const interdits = servicesSous(c, s.id);
+  const out = [];
+  for (const x of c.services) {
+    if (interdits.has(x.id)) continue;
+    out.push({ value: x.id, label: "Service — " + x.name + (x.code ? " (" + x.code + ")" : "") });
+  }
+  for (const x of c.services) {
+    if (interdits.has(x.id)) continue;
+    for (const b of (x.bureaux || [])) out.push({ value: b.id, label: "Bureau — " + x.name + " › " + b.name });
+  }
+  return out;
+}
+
+// Ce qui pend sous un service : ses services rattachés, et ceux qui pendent sous
+// ses bureaux. Sert à montrer le périmètre sans le décrire.
+function sousDeService(c, s) {
+  const vus = servicesSous(c, s.id);
+  vus.delete(s.id);
+  return c.services.filter((x) => vus.has(x.id));
+}
+
 function ouvrirFicheService(c, opts) {
-  const { peutGerer, save, paint } = opts;
+  const { peutEntites, peutServices, save, paint } = opts;
   const s = opts.service;
   const body = h("div", { class: "org-fiche" });
   const m = modal({
@@ -408,10 +463,21 @@ function ouvrirFicheService(c, opts) {
     body, wide: true,
     actions: (close) => {
       const out = [];
-      if (peutGerer) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
-        if (!(await confirmDialog("Supprimer ce service ?", "Les comptes qui lui sont rattachés garderont leur rattachement, mais le service ne figurera plus dans l'organigramme."))) return;
+      if (peutServices) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
+        // Un service qui en porte d'autres ne part pas sans prévenir : on
+        // DÉTACHE sa descendance, qui remonte à la racine de son entité.
+        const enfants = enfantsServices(c, s.id)
+          .concat((s.bureaux || []).flatMap((b) => enfantsServices(c, b.id)));
+        if (enfants.length) {
+          const ok = await confirmDialog("Supprimer ce service et détacher sa descendance ?",
+            "Il porte " + enfants.length + " service(s) rattaché(s) : " + enfants.map((x) => x.name).join(", ") + ". Ils remonteront à la racine de leur entité.",
+            { confirmLabel: "Supprimer et détacher", danger: true });
+          if (!ok) return;
+          for (const x of enfants) x.parentId = "";
+        } else if (!(await confirmDialog("Supprimer ce service ?", "Les comptes qui lui sont rattachés garderont leur rattachement, mais le service ne figurera plus dans l'organigramme."))) return;
         const i = c.services.indexOf(s);
         if (i >= 0) c.services.splice(i, 1);
+        journaliser({ action: "referentiel.service", cible: "referentiel", cibleLabel: s.name, detail: "suppression depuis l'organigramme" });
         save();
         close();
         paint();
@@ -423,16 +489,24 @@ function ouvrirFicheService(c, opts) {
 
   const peindre = () => {
     clear(body);
+    const parent = parentDeService(c, s);
     body.appendChild(h("div", { class: "org-fiche__tete" },
       h("span", { class: "org-node__init org-node__init--lg org-node__init--svc", text: "§" }),
       h("div", { class: "org-fiche__ident" },
         h("span", { class: "org-fiche__nom", text: s.name }),
         h("span", { class: "org-fiche__qual", text: [s.code, entiteById(c, s.entityId)?.name].filter(Boolean).join(" · ") }))));
 
-    if (!peutGerer) {
+    const sous = sousDeService(c, s);
+    const libelleParent = parent
+      ? (parent.type === "bureau" ? parent.bureau.name + " (bureau de " + parent.service.name + ")" : parent.service.name)
+      : "— rattaché directement à l'entité —";
+
+    if (!peutServices) {
       body.appendChild(h("div", { class: "org-fiche__bloc" },
         ligneInfo("Nom", s.name), ligneInfo("Code", s.code), ligneInfo("Entité", entiteById(c, s.entityId)?.name || ""),
-        ligneInfo("Bureaux", (s.bureaux || []).map((b) => b.name).join(", "))));
+        ligneInfo("Dépend de", libelleParent),
+        ligneInfo("Bureaux", (s.bureaux || []).map((b) => b.name).join(", ")),
+        ligneInfo("Services rattachés", sous.length ? sous.map((x) => x.name).join(", ") : "")));
       return;
     }
 
@@ -449,15 +523,34 @@ function ouvrirFicheService(c, opts) {
       })));
 
     body.appendChild(h("hr", { class: "fr-sep" }));
+    body.appendChild(sectionHeader("Rattachement"));
+    body.appendChild(h("p", { class: "fr-small fr-muted", text: "Un service peut dépendre d'un autre service, ou du BUREAU d'un autre service. Les agents affectés au service de tête voient alors les actes de toute la chaîne en contrebas : le périmètre suit le rattachement." }));
+    body.appendChild(selectField({
+      label: "Dépend de", value: s.parentId || "",
+      options: optionsParent(c, s),
+      placeholder: "— Rattaché directement à l'entité —",
+      help: "Laisser vide pour un service de tête. Choisir un service, ou le bureau d'un service.",
+      onChange: (v) => { s.parentId = v; save(); peindre(); },
+    }));
+    if (sous.length) body.appendChild(h("p", { class: "fr-small fr-muted", text: "Couvert par ce service : " + sous.map((x) => x.name).join(", ") + "." }));
+
+    body.appendChild(h("hr", { class: "fr-sep" }));
     body.appendChild(sectionHeader("Les bureaux"));
-    body.appendChild(h("p", { class: "fr-small fr-muted", text: "Le bureau est la maille fine : un compte est rattaché à un service et, par défaut, à tous ses bureaux. L'administrateur peut ensuite restreindre son accès à certains bureaux (Administration › Comptes et rôles)." }));
+    body.appendChild(h("p", { class: "fr-small fr-muted", text: "Le bureau est la maille fine : un compte est rattaché à un service et, par défaut, à tous ses bureaux. L'administrateur peut ensuite restreindre son accès à certains bureaux (Administration › Comptes et rôles). Un service peut aussi pendre sous un bureau : les deux se combinent." }));
     s.bureaux = s.bureaux || [];
     for (const b of s.bureaux) {
+      const enfants = enfantsServices(c, b.id);
       body.appendChild(h("div", { class: "org-bureau-ligne" },
-        textField({ label: "Bureau", value: b.name, onChange: (v) => { b.name = v; save(); } }),
+        textField({
+          label: "Bureau" + (enfants.length ? " — porte " + enfants.length + " service(s) rattaché(s)" : ""),
+          value: b.name,
+          onChange: (v) => { b.name = v; save(); },
+        }),
         button("Retirer", { variant: "tertiary", size: "sm", icon: "trash", onClick: () => {
           const i = s.bureaux.indexOf(b);
           if (i >= 0) s.bureaux.splice(i, 1);
+          // Les services qui pendaient sous ce bureau remontent au service.
+          for (const x of enfants) x.parentId = s.id;
           save();
           peindre();
         } })));
@@ -468,23 +561,32 @@ function ouvrirFicheService(c, opts) {
         save();
         peindre();
       } })));
+    if (!peutEntites) {
+      body.appendChild(h("p", { class: "fr-small fr-muted", text: "L'ajout et la suppression d'une ENTITÉ restent réservés à l'administrateur ; les services et leurs bureaux se modifient ici." }));
+    }
   };
   peindre();
 }
 
 function ouvrirFicheBureau(c, opts) {
-  const { peutGerer, save, paint } = opts;
+  const { peutEntites, peutServices, save, paint } = opts;
   const { service, bureau } = opts;
+  const enfants = enfantsServices(c, bureau.id);
   const body = h("div", { class: "org-fiche" });
   const m = modal({
     title: "Fiche — " + bureau.name,
     body,
     actions: (close) => {
       const out = [];
-      if (peutGerer) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
-        if (!(await confirmDialog("Supprimer ce bureau ?", "Les comptes qui lui sont rattachés perdront cette restriction d'accès."))) return;
+      if (peutServices) out.push(button("Supprimer", { variant: "tertiary", icon: "trash", onClick: async () => {
+        if (!(await confirmDialog("Supprimer ce bureau ?",
+          enfants.length
+            ? enfants.length + " service(s) pendent sous ce bureau : ils remonteront au service « " + service.name + " ». Les comptes qui étaient restreints à ce bureau perdront cette restriction."
+            : "Les comptes qui lui sont rattachés perdront cette restriction d'accès."))) return;
         const i = (service.bureaux || []).indexOf(bureau);
         if (i >= 0) service.bureaux.splice(i, 1);
+        for (const x of enfants) x.parentId = service.id;
+        journaliser({ action: "referentiel.bureau", cible: "referentiel", cibleLabel: bureau.name, detail: "suppression depuis l'organigramme" });
         save();
         close();
         paint();
@@ -496,14 +598,15 @@ function ouvrirFicheBureau(c, opts) {
   body.appendChild(h("div", { class: "org-fiche__bloc" },
     ligneInfo("Bureau", bureau.name),
     ligneInfo("Service", service.name),
-    ligneInfo("Entité", entiteById(c, service.entityId)?.name || "")));
-  if (peutGerer) {
+    ligneInfo("Entité", entiteById(c, service.entityId)?.name || ""),
+    ligneInfo("Services rattachés", enfants.length ? enfants.map((x) => x.name).join(", ") : "")));
+  if (peutServices) {
     body.appendChild(sectionHeader("Renommer"));
     body.appendChild(textField({
       label: "Nom du bureau", value: bureau.name,
       onChange: (v) => { bureau.name = v; save(); },
     }));
     body.appendChild(h("p", { class: "fr-small" },
-      button("Ouvrir le service", { variant: "tertiary", size: "sm", icon: "org", onClick: () => { m.close(); ouvrirFicheService(c, { peutGerer, save, paint, service }); } })));
+      button("Ouvrir le service", { variant: "tertiary", size: "sm", icon: "org", onClick: () => { m.close(); ouvrirFicheService(c, { peutEntites, peutServices, save, paint, service }); } })));
   }
 }

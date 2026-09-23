@@ -160,7 +160,7 @@ function delai(promesse, ms, message) {
 // Rend toujours un objet : { envoye, destinataires, detail, raison }. Une erreur
 // SMTP est convertie en `raison` lisible — c'est ce que l'agent verra au
 // journal, et ce que l'administrateur doit lire pour corriger son .env.
-export async function envoyer({ destinataires, copie, sujet, texte, html, expediteurNom, repondreA } = {}) {
+export async function envoyer({ destinataires, copie, sujet, texte, html, expediteurNom, repondreA, entetes } = {}) {
   const st = etat();
   if (!st.disponible) return { envoye: false, raison: st.raison || "Le service de courriel n'est pas configuré." };
   const liste = (destinataires || []).map((d) => ({ nom: (d && d.nom) || "", courriel: String((d && d.courriel) || d || "").trim() })).filter((d) => d.courriel);
@@ -180,7 +180,7 @@ export async function envoyer({ destinataires, copie, sujet, texte, html, expedi
       a: liste,
       cc: (copie || []).map((c) => ({ nom: "", courriel: String((c && c.courriel) || c || "").trim() })).filter((c) => c.courriel),
       repondreA: repondreA || SMTP.repondreA,
-      sujet, texte, html,
+      sujet, texte, html, entetes,
       domain: SMTP.expediteur.split("@")[1] || "",
     }), SMTP.timeoutMs, "Le serveur SMTP n'a pas terminé le dialogue dans le délai imparti.");
     return { envoye: true, destinataires: r.destinataires, detail: "Accepté par le serveur (" + r.reponse + ")", trace, ms: Date.now() - t0 };

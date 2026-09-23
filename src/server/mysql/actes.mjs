@@ -6,11 +6,15 @@
 // **pur** : aucune dépendance à Node, à MySQL ou au réseau. Tout ce qui vient du
 // dehors est injecté —
 //
-//   state    l'état mutable (actes, signatures, publications)
+//   state    l'état mutable (actes, signatures, publications, bulletins)
 //   sha256   une empreinte SHA-256 synchrone (crypto de Node, ou l'implémentation
 //            embarquée côté plateforme)
 //   now      l'horloge
 //   save     la persistance : renvoie false si la capacité est dépassée
+//   bulletins  le domaine des Bulletins (voir bulletins.mjs) : les sous-pages
+//            par bulletin, les flux RSS/Atom et l'abonnement. Il est INJECTÉ —
+//            ce module n'en connaît que l'aperçu (`apercu`) et les lectures
+//            publiques, et il s'en passe quand le déploiement n'en a pas.
 //
 // Il expose `route(req, ctx)` où `req` est `{ method, path, headers, body }` et
 // `ctx` fournit l'autorisation (`authorize`) et la limitation de débit (`rate`).
@@ -18,12 +22,81 @@
 // que le service auto-hébergé et celui de la plateforme se comportent pareil.
 // ============================================================================
 
+import { etatBulletinsVide, intervalleTexte } from "./bulletins.mjs";
+
 const SERVICE = "Service de signature et de publication";
 const SERVICE_VERSION = "1.0.0";
 
 export function emptyState() {
-  return { v: 1, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {} };
+  return { v: 1, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, cles: {}, journal: [], bulletins: etatBulletinsVide() };
 }
+
+// LA FEUILLE DU RECUEIL OUVERT. Une seule copie : l'accueil du recueil, la page
+// d'un bulletin et les pages d'abonnement s'y réfèrent (voir `pageBulletins`).
+// Le recueil est SERVI ainsi, sans JavaScript, à des lecteurs qui n'ont que leur
+// navigateur : la feuille suit donc le thème clair ou sombre du système.
+const CSS_RECUEIL = `\n:root{--ink:#161616;--muted:#5a6472;--brand:#000091;--soft:#eef1fb;--line:#d5dbe4;--bg:#f5f6f8;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--ink:#e8e8ea;--muted:#a4adba;--brand:#8fa4ff;--soft:#1d2334;--line:#39414c;--bg:#14161a;--card:#1b1e25}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+a{color:var(--brand)}main{max-width:1000px;margin:0 auto;padding:0 20px 60px}
+.hdr{background:var(--card);border-bottom:1px solid var(--line)}
+.hdr__in{max-width:1000px;margin:0 auto;padding:12px 20px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.hdr__org{font-size:.84rem;color:var(--muted)}.hdr__titre{font-weight:700}
+.hero{margin:0 0 8px;padding:30px 0 22px}
+.hero h1{font-size:2rem;line-height:1.2;margin:0 0 8px}
+.hero p{margin:0;color:var(--muted);max-width:70ch}
+.hero .stats{margin-top:10px;font-size:.86rem}
+h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:30px 0 10px}
+/* Les derniers actes : une ligne qui défile, sans JavaScript. */
+.piste{list-style:none;display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 12px;margin:0}
+.carte{flex:0 0 min(84vw,300px);scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:6px;padding:14px 15px;display:flex;flex-direction:column;gap:5px}
+.carte__theme{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
+/* La bande « À la une » : les actes mis en avant par l'administration. */
+.carte--une{background:var(--soft);border-top-color:var(--brand)}
+.carte__epingle{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--brand)}
+.carte__objet{font-size:1.02rem;font-weight:600;line-height:1.35;color:var(--ink);text-decoration:none}
+.carte__objet:hover{color:var(--brand)}
+.carte__meta,.carte__date{font-size:.8rem;color:var(--muted)}
+.carte__date{margin-top:auto}
+/* Les thèmes : une grille de tuiles, qui mènent chacune à ses actes. */
+.tuiles{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;padding:0;margin:0}
+.tuile a{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px 14px;text-decoration:none;color:inherit;height:100%}
+.tuile a:hover{border-color:var(--brand)}
+.tuile__nom{font-weight:600;line-height:1.3}
+.tuile__n{font-size:.8rem;color:var(--muted)}
+.theme>h3{font-size:1.05rem;margin:26px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+ul{list-style:none;padding:0;margin:0}
+.acte{padding:9px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.acte__objet{color:var(--ink);text-decoration:none}.acte__objet:hover{color:var(--brand)}
+.acte__m{color:var(--muted);font-size:.82rem}
+.f{font-size:.78rem}.f a{text-decoration:none;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-right:3px}
+.vide{color:var(--muted)}
+.donnees{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:.86rem;color:var(--muted)}
+.donnees a{margin-right:10px}
+/* Le BULLETIN : un sommaire de numéros, puis, dans un numéro, les entités et
+   leurs thèmes — la même liste que le recueil, mais groupée par période. */
+.bul-list{list-style:none;padding:0;margin:0}
+.bul-item{display:flex;flex-direction:column;gap:2px;padding:11px 0;border-bottom:1px solid var(--line)}
+.bul-item__t{color:var(--ink);text-decoration:none;font-weight:600}
+.bul-item__t:hover{color:var(--brand)}
+.bul-item__m{color:var(--muted);font-size:.82rem}
+.bul__ent{margin:26px 0 0}
+.bul__ent>h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.07em;color:var(--brand);margin:0 0 4px;border-bottom:1px solid var(--line);padding-bottom:5px}
+.bul__ent .acte__objet{font-weight:500}
+.petit{font-size:.82rem;color:var(--muted)}
+.sommaire{margin:0 0 18px;font-size:.92rem}.sommaire a{margin-right:10px}
+/* Le formulaire d'abonnement : les pages du recueil se lisent sans JavaScript,
+   et s'abonner doit pouvoir se faire sans lui — un vrai formulaire, donc. */
+.abon{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px 18px;margin:22px 0 8px;max-width:560px}
+.abon h2{margin:0 0 6px;color:var(--ink);text-transform:none;letter-spacing:0;font-size:1.02rem}
+.abon p{margin:0 0 12px;color:var(--muted);font-size:.9rem}
+.abon form{display:flex;flex-direction:column;gap:8px}
+.abon label{font-size:.82rem;color:var(--muted);margin-bottom:-4px}
+.abon input{padding:9px 11px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);font:inherit;font-size:.95rem}
+.abon button{align-self:flex-start;margin-top:4px;padding:9px 16px;border:0;border-radius:4px;background:var(--brand);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.abon .ok{border-left:4px solid var(--brand);padding-left:12px;color:var(--ink)}
+.abon .ko{border-left:4px solid #b3261e;padding-left:12px;color:var(--ink)}
+`;
 
 export function createActesApi({
   state,
@@ -34,15 +107,37 @@ export function createActesApi({
   maxPublies = 40,
   maxSignatures = 80,
   maxActes = 80,
+  // LE DOMAINE DES BULLETINS (voir bulletins.mjs) — le Journal des actes, qui
+  // rassemble les publications d'une période en un bulletin, le diffuse par
+  // flux et par courriel. Il est INJECTÉ par le service, seul à connaître les
+  // réglages, le courriel et l'état des abonnés ; le recueil, lui, ne fait que
+  // servir ses pages publiques (voir `pageBulletins`). Absent, les adresses du
+  // Bulletin n'existent pas — c'est le cas du service embarqué de la
+  // plateforme, qui n'est pas un site.
+  bulletins = null,
   // Le PRESTATAIRE DE SIGNATURE (voir signature.mjs) : le seul composant qui
   // appelle réellement l'API du prestataire, avec la clé — qui ne quitte pas le
   // serveur. Absent (ou non configuré), le circuit électronique reste en
   // simulation : le service renvoie alors les réglages qu'on lui a transmis,
   // sans rien appeler au-dehors.
   prestataire = null,
+  // Le mode d'authentification du déploiement (« password », « oidc », « demo »).
+  // Il ne change pas la gestion des clés d'API — elles servent toujours de comptes
+  // de service — mais il dit à l'écran d'administration si le service est déjà
+  // administrable par une session (auquel cas il n'y a rien à « provisionner »).
+  authMode = "demo",
 }) {
   const db = state;
   let dirty = null;           // dernier état sérialisé, en attente d'écriture
+  // Le domaine des bulletins, s'il est branché. On éprouve l'INTERFACE plutôt
+  // que la simple présence : un objet d'une autre forme ne doit pas faire
+  // échouer le rendu du recueil.
+  const bul = bulletins && typeof bulletins.apercu === "function" && typeof bulletins.publicEtat === "function" ? bulletins : null;
+  // Les adresses du Bulletin, dérivées de celle du recueil : une seule règle,
+  // un seul endroit (voir `pageBulletins` et le flux).
+  const adresseBulletins = (base) => base + "/recueil/bulletins";
+  const adresseBulletin = (base, id) => adresseBulletins(base) + "/" + encodeURIComponent(id);
+  const adresseFlux = (base, mode) => adresseBulletins(base) + (mode === "atom" ? ".atom" : ".rss");
 
   const nowIso = () => now();
   const today = () => nowIso().slice(0, 10);
@@ -156,7 +251,32 @@ export function createActesApi({
     return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
   }
   function resumePublication(p, latest) {
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
+  }
+
+  // ------------------------------------------- publications réservées aux agents
+  // Une publication peut être RÉSERVÉE AUX AGENTS : elle est bien publiée (elle a
+  // son identifiant ELI, son original, ses versions), mais le recueil public ne
+  // la sert qu'aux porteurs d'une session — une circulaire interne, une consigne
+  // aux agents, un acte dont la diffusion est restreinte. Les adresses PUBLIQUES
+  // (`/v1/publications…`, le recueil, `recueil.json`, `llms.txt`, `sitemap.xml`)
+  // l'écartent donc pour un visiteur anonyme : c'est `agent` — vrai quand la
+  // requête porte une session ou une clé de service — qui l'autorise.
+  //
+  // Le drapeau suit la PUBLICATION, comme les autres réglages de diffusion : une
+  // nouvelle version d'une circulaire reprend la case de sa trame (voir
+  // src/lib/schema.js, `reserve`) ou du formulaire de publication.
+  const reservee = (p) => !!p && p.reserve === true;
+  const visiblePour = (p, agent) => !!p && (agent || !reservee(p));
+  // Les versions PUBLIQUES d'une publication : celles qu'un visiteur anonyme a
+  // le droit de voir. Un agent les voit toutes (il peut avoir besoin de
+  // l'historique d'une circulaire).
+  const versionsVisibles = (eliUri, agent) => versionsOf(eliUri).filter((p) => visiblePour(p, agent));
+  // Le repère de « dernière version » ne doit jamais désigner, pour un visiteur
+  // anonyme, une version réservée : la dernière version VISIBLE fait foi.
+  function dernierVisible(eliUri, agent) {
+    const v = versionsVisibles(eliUri, agent);
+    return v.length ? v[v.length - 1] : null;
   }
 
   function clePublication(eliUri, dateExpr) {
@@ -241,8 +361,9 @@ export function createActesApi({
           },
         },
         "/v1/admin/purge": { post: { operationId: "purgerService", summary: "Remettre le service à zéro", description: "Vide les actes déposés, les circuits de signature et les publications — le pendant côté service du bouton « Repartir d'un référentiel vierge ». Le recueil public lit le service : vider le seul navigateur laisserait les publications de démonstration en ligne. Exige `{ \"confirmation\": \"repurge\" }` : un appel accidentel ne doit pas l'emporter. Réservé à l'administration.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["confirmation"], properties: { confirmation: { type: "string", description: "Le mot « repurge »" } } } } } }, tags: ["Administration"], responses: { 200: { description: "Service purgé" }, 400: { description: "Confirmation absente (code `confirmation_absente`)" }, 403: { description: "Rôle insuffisant" } } } },
-        "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
-        "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
+        "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", description: "Les publications, de la plus récente à la plus ancienne. Les publications marquées `reserve` (circulaires internes) ne sont rendues qu'à l'appelant qui porte une session ou une clé de service ; elles sont invisibles aux visiteurs anonymes.", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
+        "/v1/informations": { get: { operationId: "listerInformations", summary: "Informations publiées au recueil", description: "Les billets publiés par la collectivité (actualités, avis, communications), du plus récent au plus ancien. Route PUBLIQUE : seuls les billets publiés (`publie: true`) sont rendus ; un brouillon ne sort que vers une identité de rôle `editeur` au moins.", tags: ["Publication"], responses: { 200: { description: "Les informations publiées" } } } },
+        "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", description: "Renvoie 404 pour une publication réservée quand l'appelant est anonyme — une publication réservée n'existe pas hors session.", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
         "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" } } } },
         "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
       },
@@ -536,6 +657,11 @@ export function createActesApi({
       // règlement intérieur qu'on modifie reste « à la une ». Voir
       // hEpinglerPublication.
       epingle: b.epingle === true || versionsOf(eliUri).some((v) => v.epingle === true),
+      // La publication peut être RÉSERVÉE AUX AGENTS (circulaire interne) : le
+      // recueil public ne la sert alors qu'aux porteurs d'une session. C'est le
+      // client qui le demande — d'après la trame (Administration › Trames) ou la
+      // case cochée au moment de publier ; le service le range tel quel.
+      reserve: b.reserve === true || undefined,
       sha256: sha256(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
       // La part PUBLIQUE de l'original : ce que le recueil montre et vérifie. On
       // lui applique `sansInterne` — un client qui aurait laissé le dossier
@@ -597,6 +723,7 @@ export function createActesApi({
       opposabilite: rec.opposabiliteRule,
       recueil: rec.recueil,
       epingle: rec.epingle === true,
+      reserve: rec.reserve === true,
       informative: rec.informative === true,
       juridique: rec.juridique === false ? false : undefined,
       natureDoc: rec.natureDoc || undefined,
@@ -640,7 +767,7 @@ export function createActesApi({
 
   function hResoudreEli(ctx) {
     const eliUri = eliKey(ctx.params);
-    const versions = versionsOf(eliUri);
+    const versions = versionsVisibles(eliUri, ctx.agent);
     if (!versions.length) return err(404, "Aucune publication ne porte l'identifiant " + eliUri + ".", { code: "eli_inconnu" });
     const enVigueur = versions[versions.length - 1];
     return ok(200, {
@@ -703,10 +830,49 @@ export function createActesApi({
   }
 
   // Les publications, de la plus récente à la plus ancienne : c'est l'ordre de
-  // lecture d'un recueil.
-  function publicationsTriees() {    return Object.keys(db.publies).map((k) => db.publies[k])
+  // lecture d'un recueil. `agent` écarte les publications réservées aux agents
+  // quand la requête ne porte pas de session (voir `reservee`).
+  function publicationsTriees(agent) {
+    return Object.keys(db.publies).map((k) => db.publies[k])
+      .filter((p) => visiblePour(p, agent))
       .sort((a, b) => String(b.datePublication || "").localeCompare(String(a.datePublication || ""))
         || String(b.publieeLe || "").localeCompare(String(a.publieeLe || "")));
+  }
+
+  // Les publications dans la forme qu'attend le COMPOSEUR DE BULLETINS (voir
+  // bulletins.mjs) : la dernière version de chaque identifiant ELI — un acte
+  // consolidé ne doit pas figurer deux fois dans le bulletin —, et seulement les
+  // champs dont le bulletin a besoin pour classer et présenter les actes. C'est
+  // le service qui la lui injecte : le bulletin et le recueil parlent ainsi
+  // d'une seule voix, sans que le module des bulletins connaisse les
+  // publications.
+  //
+  // `agent` vaut FAUX par défaut : un bulletin part par courriel et se lit en
+  // clair sur le recueil, il ne peut donc pas divulguer les publications
+  // réservées aux agents.
+  function publicationsPubliques(agent) {
+    const vue = [];
+    for (const p of publicationsTriees(agent === true)) {
+      if (dernierVisible(p.eliUri, agent === true) !== p) continue;
+      vue.push({
+        cle: p.cle,
+        eliUri: p.eliUri || "",
+        numero: p.numero || "",
+        objet: p.objet || "",
+        nature: p.nature || "",
+        themeId: p.themeId || "",
+        themeLabel: p.themeLabel || "",
+        entityName: p.entityName || "",
+        dateDocument: p.dateDocument || "",
+        datePublication: p.datePublication || "",
+        dateOpposabilite: p.dateOpposabilite || "",
+        kind: p.kind || "originale",
+        juridique: p.juridique === false ? false : undefined,
+        natureDoc: p.natureDoc || "",
+        recueil: p.recueil || "",
+      });
+    }
+    return vue;
   }
 
   // Une fiche d'index : ce qu'un moteur, un agent ou un lecteur a besoin de
@@ -743,8 +909,8 @@ export function createActesApi({
     };
   }
 
-  function indexRecueil(base) {
-    const liste = publicationsTriees();
+  function indexRecueil(base, agent) {
+    const liste = publicationsTriees(agent);
     const premier = liste[0] || {};
     return {
       recueil: { titre: premier.recueil || "", collectivite: premier.brandName || "", langue: "fr" },
@@ -950,8 +1116,8 @@ export function createActesApi({
   // une ligne, les THÈMES se présentent en grille, puis chaque thème donne ses
   // actes. Un lecteur qui n'exécute pas le JavaScript — un robot, un agent, une
   // machine — reçoit la même page que les autres.
-  function pageRecueil(base) {
-    const liste = publicationsTriees();
+  function pageRecueil(base, agent) {
+    const liste = publicationsTriees(agent);
     const premier = liste[0] || {};
     const titre = premier.recueil || "Recueil des actes administratifs";
     const collectivite = premier.brandName || "";
@@ -959,11 +1125,11 @@ export function createActesApi({
     // la page, dans la bande « À la une » (voir src/lib/recueil.js et la vue
     // src/ui/views/recueil-public.js : la même règle).
 
-    const epingles = liste.filter((p) => latestOf(p.eliUri) === p && p.epingle === true);
+    const epingles = liste.filter((p) => dernierVisible(p.eliUri, agent) === p && p.epingle === true);
     // Les derniers actes publiés : la version en vigueur de chaque identifiant
     // ELI, de la plus récente à la plus ancienne — SANS les actes épinglés, qui
     // ont déjà leur bande au-dessus : un acte ne se présente qu'une fois.
-    const dernieres = liste.filter((p) => latestOf(p.eliUri) === p && p.epingle !== true).slice(0, 8);
+    const dernieres = liste.filter((p) => dernierVisible(p.eliUri, agent) === p && p.epingle !== true).slice(0, 8);
     // Les actes rangés par thème, les thèmes les plus fournis d'abord.
     const groupes = new Map();
     for (const p of liste) {
@@ -983,7 +1149,7 @@ export function createActesApi({
       + `<span class="carte__date">${p.datePublication ? "publié le " + htmlEsc(dateLongue(p.datePublication)) : ""}</span></li>`;
 
     const ligne = (p) => `<li class="acte"><a class="acte__objet" href="${htmlEsc(adresseActe(base, p.cle))}">${htmlEsc(p.objet || p.numero || "Acte")}</a>`
-      + `<span class="acte__m">${htmlEsc([p.numero, p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "", latestOf(p.eliUri) === p ? "" : "version antérieure", p.epingle === true ? "à la une" : ""].filter(Boolean).join(" · "))}</span>`
+      + `<span class="acte__m">${htmlEsc([p.numero, p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "", dernierVisible(p.eliUri, agent) === p ? "" : "version antérieure", p.epingle === true ? "à la une" : ""].filter(Boolean).join(" · "))}</span>`
       + ` <span class="f">${["json", "md", "txt", "akn"].map((e) => `<a href="${htmlEsc(adresseFormat(base, p.cle, e))}">${e}</a>`).join(" ")}</span></li>`;
 
     const grille = themes.map((t) => `<li class="tuile"><a href="${htmlEsc(ancreTheme(t))}">`
@@ -999,6 +1165,17 @@ export function createActesApi({
       themes.length + (themes.length > 1 ? " thèmes" : " thème"),
       derniere ? "dernière publication le " + derniere : ""].filter(Boolean).join(" · ");
 
+    // LE BULLETIN, s'il est ouvert sur ce recueil : l'accueil en donne l'entrée,
+    // parce que c'est la forme sous laquelle beaucoup de lecteurs suivent les
+    // actes — un numéro à la fois, à la cadence que la collectivité a choisie.
+    // `apercu()` est SYNCHRONE (réglages en cache, bulletins en mémoire) : la
+    // page se rend sans attendre, et sans interroger la base.
+    const bulApercu = bul ? bul.apercu() : null;
+    const derniersBulletins = bulApercu && bulApercu.actif ? bulApercu.bulletins : [];
+    const blocBulletins = derniersBulletins.length
+      ? `<h2>Derniers bulletins</h2>\n<ul class="bul-list">${derniersBulletins.map((b) => `<li class="bul-item"><a class="bul-item__t" href="${htmlEsc(adresseBulletin(base, b.id))}">${htmlEsc(b.titre)}</a><span class="bul-item__m">${htmlEsc(intervalleTexte(b.debut, b.fin) + " · " + b.nombre + (b.nombre > 1 ? " actes" : " acte"))}</span></li>`).join("")}</ul>\n<p class="petit"><a href="${htmlEsc(adresseBulletins(base))}">Tous les bulletins</a>${bulApercu.cadence ? " — parution " + htmlEsc(bulApercu.cadence.resume) : ""} · <a href="${htmlEsc(adresseFlux(base, "rss"))}">flux RSS</a> · <a href="${htmlEsc(adresseFlux(base, "atom"))}">Atom</a></p>\n`
+      : "";
+
     return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${htmlEsc(titre)}${collectivite ? " — " + htmlEsc(collectivite) : ""}</title>
@@ -1006,46 +1183,7 @@ export function createActesApi({
 <link rel="canonical" href="${htmlEsc(adresseRecueil(base))}">
 <link rel="alternate" type="application/json" href="${htmlEsc(base + "/recueil.json")}" title="Index des actes (JSON)">
 <link rel="alternate" type="text/markdown" href="${htmlEsc(base + "/llms.txt")}" title="Recueil pour les agents (llms.txt)">
-<style>
-:root{--ink:#161616;--muted:#5a6472;--brand:#000091;--soft:#eef1fb;--line:#d5dbe4;--bg:#f5f6f8;--card:#fff}
-@media(prefers-color-scheme:dark){:root{--ink:#e8e8ea;--muted:#a4adba;--brand:#8fa4ff;--soft:#1d2334;--line:#39414c;--bg:#14161a;--card:#1b1e25}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-a{color:var(--brand)}main{max-width:1000px;margin:0 auto;padding:0 20px 60px}
-.hdr{background:var(--card);border-bottom:1px solid var(--line)}
-.hdr__in{max-width:1000px;margin:0 auto;padding:12px 20px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.hdr__org{font-size:.84rem;color:var(--muted)}.hdr__titre{font-weight:700}
-.hero{margin:0 0 8px;padding:30px 0 22px}
-.hero h1{font-size:2rem;line-height:1.2;margin:0 0 8px}
-.hero p{margin:0;color:var(--muted);max-width:70ch}
-.hero .stats{margin-top:10px;font-size:.86rem}
-h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:30px 0 10px}
-/* Les derniers actes : une ligne qui défile, sans JavaScript. */
-.piste{list-style:none;display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 2px 12px;margin:0}
-.carte{flex:0 0 min(84vw,300px);scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:6px;padding:14px 15px;display:flex;flex-direction:column;gap:5px}
-.carte__theme{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
-/* La bande « À la une » : les actes mis en avant par l'administration. */
-.carte--une{background:var(--soft);border-top-color:var(--brand)}
-.carte__epingle{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--brand)}
-.carte__objet{font-size:1.02rem;font-weight:600;line-height:1.35;color:var(--ink);text-decoration:none}
-.carte__objet:hover{color:var(--brand)}
-.carte__meta,.carte__date{font-size:.8rem;color:var(--muted)}
-.carte__date{margin-top:auto}
-/* Les thèmes : une grille de tuiles, qui mènent chacune à ses actes. */
-.tuiles{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;padding:0;margin:0}
-.tuile a{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px 14px;text-decoration:none;color:inherit;height:100%}
-.tuile a:hover{border-color:var(--brand)}
-.tuile__nom{font-weight:600;line-height:1.3}
-.tuile__n{font-size:.8rem;color:var(--muted)}
-.theme>h3{font-size:1.05rem;margin:26px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
-ul{list-style:none;padding:0;margin:0}
-.acte{padding:9px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.acte__objet{color:var(--ink);text-decoration:none}.acte__objet:hover{color:var(--brand)}
-.acte__m{color:var(--muted);font-size:.82rem}
-.f{font-size:.78rem}.f a{text-decoration:none;border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-right:3px}
-.vide{color:var(--muted)}
-.donnees{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:.86rem;color:var(--muted)}
-.donnees a{margin-right:10px}
-</style></head><body>
+${derniersBulletins.length ? `<link rel="alternate" type="application/rss+xml" href="${htmlEsc(adresseFlux(base, "rss"))}" title="${htmlEsc(bulApercu.titre)}">\n` : ""}<style>${CSS_RECUEIL}</style></head><body>
 <header class="hdr"><div class="hdr__in"><span class="hdr__org">${htmlEsc(collectivite)}</span><span class="hdr__titre">${htmlEsc(titre)}</span></div></header>
 <main>
 ${liste.length ? `<section class="hero">
@@ -1055,6 +1193,7 @@ ${liste.length ? `<section class="hero">
 </section>
 ${epingles.length ? `<h2>À la une</h2>\n<ul class="piste piste--une">${epingles.map(carte).join("")}</ul>\n` : ""}<h2>Derniers actes administratifs publiés</h2>
 <ul class="piste">${dernieres.map(carte).join("")}</ul>
+${blocBulletins}
 <h2>Parcourir par thème</h2>
 <ul class="tuiles">${grille}</ul>
 <h2>Tous les actes publiés</h2>
@@ -1063,7 +1202,7 @@ ${sections}` : vide}
 <a href="${htmlEsc(base + "/recueil.json")}">recueil.json</a>
 <a href="${htmlEsc(base + "/llms.txt")}">llms.txt</a>
 <a href="${htmlEsc(base + "/sitemap.xml")}">sitemap.xml</a>
-Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>.txt</code> et <code>.akn</code>.</p>
+${derniersBulletins.length ? `<a href="${htmlEsc(adresseBulletins(base))}">bulletins</a>\n<a href="${htmlEsc(adresseFlux(base, "rss"))}">bulletins.rss</a>\n` : ""}Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>.txt</code> et <code>.akn</code>.</p>
 </main></body></html>`;
   }
 
@@ -1078,6 +1217,7 @@ Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>
       "# Pour les assistants : le recueil est aussi décrit en Markdown.",
       "# llms.txt : " + base + "/llms.txt",
       "# Index des actes : " + base + "/recueil.json",
+      "# Bulletins et flux : " + base + "/recueil/bulletins, " + base + "/recueil/bulletins.rss",
       "",
       "Sitemap: " + base + "/sitemap.xml",
       "",
@@ -1086,8 +1226,8 @@ Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>
 
   // llms.txt : la convention qui présente un site aux agents. Le sommaire en
   // Markdown, une ligne par acte, avec ses métadonnées et son adresse.
-  function llmsTxt(base) {
-    const liste = publicationsTriees();
+  function llmsTxt(base, agent) {
+    const liste = publicationsTriees(agent);
     const premier = liste[0] || {};
     const titre = premier.recueil || "Recueil des actes administratifs";
     const annees = new Map();
@@ -1121,20 +1261,41 @@ Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>
         const d = [p.entityName, p.datePublication ? "publié le " + dateLongue(p.datePublication) : "",
           p.juridique === false ? "document non opposable" : p.dateOpposabilite ? "en vigueur le " + dateLongue(p.dateOpposabilite) : "",
           p.epingle === true ? "à la une" : "",
-          latestOf(p.eliUri) === p ? "" : "version antérieure"].filter(Boolean).join(" · ");
+          dernierVisible(p.eliUri, agent) === p ? "" : "version antérieure"].filter(Boolean).join(" · ");
         lignes.push(`- [${[p.numero, p.objet].filter(Boolean).join(" — ")}](${adresseActe(base, p.cle)}) : ${d}.${p.themeLabel ? " Thème : " + p.themeLabel + "." : ""} ELI : \`${p.eliUri || "—"}\`. Formats : [JSON](${adresseFormat(base, p.cle, "json")}), [Markdown](${adresseFormat(base, p.cle, "md")}), [texte](${adresseFormat(base, p.cle, "txt")}).`);
       }
+      lignes.push("");
+    }
+    // LE BULLETIN, quand il est ouvert : c'est le même recueil, mais rassemblé
+    // par période. Un agent qui suit l'actualité d'une collectivité suit le
+    // bulletin ; on le lui donne donc ici, avec son flux.
+    const apercuBul = bul ? bul.apercu() : null;
+    if (apercuBul && apercuBul.actif) {
+      lignes.push("## Bulletins", "");
+      lignes.push(`Le recueil rassemble aussi ses actes en un BULLETIN, à parution ${apercuBul.cadence ? (apercuBul.cadence.resume || apercuBul.cadence.label) : "périodique"} : chaque numéro couvre une période, et classe les actes par entité puis par thématique.`, "");
+      lignes.push(`- [Bulletins parus](${adresseBulletins(base)}) : un numéro par période, en HTML.`, "");
+      lignes.push(`- [Flux RSS](${adresseFlux(base, "rss")}) et [Atom](${adresseFlux(base, "atom")}) : une entrée par numéro.`, "");
+      const nums = bul.liste().filter((b) => !b.provisoire);
+      for (const b of nums.slice(0, 20)) lignes.push(`- [${b.titre}](${adresseBulletin(base, b.id)}) : ${intervalleTexte(b.debut, b.fin)}, ${b.nombre} acte${b.nombre > 1 ? "s" : ""}. Formats : [JSON](${adresseBulletin(base, b.id)}.json), [Markdown](${adresseBulletin(base, b.id)}.md), [texte](${adresseBulletin(base, b.id)}.txt).`);
+      if (nums.length > 20) lignes.push(`- … et ${nums.length - 20} autre(s) numéro(s), à l'adresse des bulletins.`);
       lignes.push("");
     }
     lignes.push("Toute réutilisation est libre sous réserve du droit applicable aux documents administratifs.", "");
     return lignes.join("\n");
   }
 
-  function sitemapXml(base) {
-    const urls = [{ loc: adresseRecueil(base), lastmod: "" }].concat(publicationsTriees().map((p) => ({
+  function sitemapXml(base, agent) {
+    const urls = [{ loc: adresseRecueil(base), lastmod: "" }].concat(publicationsTriees(agent).map((p) => ({
       loc: adresseActe(base, p.cle),
       lastmod: String(p.publieeLe || p.datePublication || "").slice(0, 10),
     })));
+    // LES BULLETINS PARUS sont des documents du recueil à part entière : une
+    // adresse par numéro, au plan du site comme les actes.
+    const apercuBul = bul ? bul.apercu() : null;
+    if (apercuBul && apercuBul.actif) {
+      urls.push({ loc: adresseBulletins(base), lastmod: "" });
+      for (const b of bul.liste()) urls.push({ loc: adresseBulletin(base, b.id), lastmod: String(b.composeLe || "").slice(0, 10) });
+    }
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ""}</url>`).join("\n")}
@@ -1162,12 +1323,251 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
   function hEliAdresse(ctx) {
     const base = origine(ctx.headers);
     const eliUri = eliKey(ctx.params);
-    const p = latestOf(eliUri);
+    const p = dernierVisible(eliUri, ctx.agent);
     if (!p) {
       const message = "Le recueil ne connaît pas l'identifiant ELI " + eliUri + ".";
       return ok(404, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Identifiant ELI inconnu</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}"></head><body><h1>Identifiant ELI inconnu</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p></body></html>`, HTML_PUBLIC);
     }
     return ok(302, "", { location: adresseActe(base, p.cle) });
+  }
+
+  // =============================================================== le BULLETIN
+  // Le Bulletin — le Journal des actes administratifs — se sert d'ICI, avec le
+  // recueil : même page, même feuille de style, même origine. Un lecteur qui
+  // suit les actes par numéro lit le même HTML que celui qui découvre le
+  // recueil, sans JavaScript ; et un abonné qui ouvre le lien d'un courriel
+  // tombe sur ces pages.
+  //
+  //   /recueil/bulletins                        le sommaire, et l'abonnement
+  //   /recueil/bulletins.rss  (et .atom)        le flux des numéros parus
+  //   /recueil/bulletins/<id>                   un numéro : entités → thèmes
+  //   /recueil/bulletins/<id>.<json|md|txt>     ses représentations
+  //   /recueil/bulletins/abonnement             (POST) la demande d'abonnement
+  //   /recueil/bulletins/confirmation?jeton=…   le lien du courriel d'abonnement
+  //   /recueil/bulletins/desabonnement?jeton=…  le désabonnement, en deux temps
+  //
+  // Un Bulletin ÉTEINT n'existe pas : ces adresses rendent 404, comme si le
+  // module n'avait jamais été branché. C'est un réglage de la collectivité, pas
+  // une panne — et un recueil sans bulletin ne doit pas annoncer une rubrique
+  // vide. Le formulaire d'abonnement, lui, poste sur une adresse du SITE (et non
+  // sur l'API) : il fonctionne donc sans JavaScript, et la réponse est une page.
+  const BULLETIN_ABSENT = "Le bulletin des actes n'est pas ouvert sur ce recueil.";
+
+  // Le titre du recueil et le nom de la collectivité, comme en tête de l'accueil :
+  // ils viennent des publications, qui les portent.
+  function enteteRecueil() {
+    const premier = publicationsTriees(false)[0] || {};
+    return { titre: premier.recueil || "Recueil des actes administratifs", collectivite: premier.brandName || "" };
+  }
+
+  // L'ossature d'une page du Bulletin : la même que le recueil, à ceci près
+  // qu'elle n'est jamais indexée en double — chaque page porte son adresse
+  // canonique.
+  function ossature(base, { titre, sous = "", corps, canonique = "" }) {
+    const c = enteteRecueil();
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${htmlEsc(titre)}${c.collectivite ? " — " + htmlEsc(c.collectivite) : ""}</title>
+<link rel="canonical" href="${htmlEsc(canonique || adresseBulletins(base))}">
+<link rel="alternate" type="application/rss+xml" href="${htmlEsc(adresseFlux(base, "rss"))}" title="${htmlEsc(titre)}">
+<style>${CSS_RECUEIL}</style></head><body>
+<header class="hdr"><div class="hdr__in"><span class="hdr__org">${htmlEsc(c.collectivite)}</span><a class="hdr__titre" href="${htmlEsc(adresseRecueil(base))}" style="color:inherit;text-decoration:none">${htmlEsc(c.titre)}</a></div></header>
+<main>
+<section class="hero"><h1>${htmlEsc(titre)}</h1>${sous ? "<p>" + sous + "</p>" : ""}</section>
+${corps}
+</main></body></html>`;
+  }
+
+  function pageBulletin404(base, message) {
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulletin introuvable</title><meta name="robots" content="noindex">
+<link rel="canonical" href="${htmlEsc(adresseRecueil(base))}">
+<style>${CSS_RECUEIL}</style></head><body>
+<header class="hdr"><div class="hdr__in"><span class="hdr__titre">Bulletin introuvable</span></div></header>
+<main><section class="hero"><h1>Bulletin introuvable</h1><p>${htmlEsc(message)}</p>
+<p class="sommaire"><a href="${htmlEsc(adresseRecueil(base))}">Le recueil des actes</a></p></section></main></body></html>`;
+  }
+
+  // Les réglages EFFECTIFS du bulletin, ou null s'il est éteint (ou absent). On
+  // les relit à chaque page : un réglage changé dans l'administration se voit
+  // donc tout de suite, sans redémarrer le service. La lecture qui suit recharge
+  // aussi l'aperçu synchrone de l'accueil (`apercu`) dans le même mouvement.
+  async function bulletinReglages() {
+    if (!bul) return null;
+    try { const r = await bul.lireReglages(); return r && r.actif ? r : null; } catch (e) { return null; }
+  }
+
+  // Le sommaire des numéros parus, et l'abonnement.
+  async function pageBulletins(base) {
+    const etatB = await bul.publicEtat();
+    const nums = (etatB.bulletins || []).filter((b) => b.provisoire !== true);
+    const liste = nums.length
+      ? `<ul class="bul-list">${nums.map((b) => `<li class="bul-item"><a class="bul-item__t" href="${htmlEsc(adresseBulletin(base, b.id))}">${htmlEsc(b.titre)}</a>`
+        + `<span class="bul-item__m">${htmlEsc([intervalleTexte(b.debut, b.fin), b.nombre + (b.nombre > 1 ? " actes" : " acte"), (b.entites || []).map((e) => e.nom).slice(0, 4).join(", ")].filter(Boolean).join(" · "))}</span>`
+        + `<span class="f">${["json", "md", "txt"].map((x) => `<a href="${htmlEsc(adresseBulletin(base, b.id) + "." + x)}">${x}</a>`).join(" ")}</span></li>`).join("")}</ul>`
+      : `<p class="vide">Aucun bulletin n'a encore paru. Le premier paraîtra à la clôture de la période en cours.</p>`;
+    const cadence = etatB.cadence ? `Le recueil rassemble ses actes en un bulletin ${htmlEsc(etatB.cadence.resume || etatB.cadence.label)}.` : "";
+    const prochaine = etatB.prochaine ? `Prochaine parution : ${htmlEsc(etatB.prochaine.libelle)}${etatB.prochaine.parution ? ", le " + htmlEsc(dateLongue(etatB.prochaine.parution)) : ""}.` : "";
+    const abon = etatB.abonnement
+      ? `<section class="abon" id="abonnement">
+<h2>Recevoir le bulletin par courriel</h2>
+<p>L'abonnement est gratuit. Chaque numéro vous est adressé le jour de sa parution, et vous pouvez vous désabonner d'un seul clic, depuis n'importe quel message.</p>
+<form method="post" action="${htmlEsc(base + "/recueil/bulletins/abonnement")}">
+<label for="courriel">Votre adresse électronique</label>
+<input type="email" id="courriel" name="courriel" required autocomplete="email" placeholder="prenom.nom@exemple.fr">
+<label for="nom">Votre nom (facultatif)</label>
+<input type="text" id="nom" name="nom" autocomplete="name">
+<button type="submit">Demander l'abonnement</button>
+</form>
+<p class="petit">Un courriel de confirmation vous sera adressé : l'abonnement ne prend effet qu'une fois le lien qu'il contient ouvert. Votre adresse ne sert qu'à l'envoi du bulletin et n'est transmise à personne.</p>
+</section>`
+      : `<section class="abon"><h2>Recevoir le bulletin par courriel</h2><p>${htmlEsc(etatB.motifAbonnement || "L'abonnement par courriel n'est pas ouvert sur ce recueil.")}</p></section>`;
+    return ossature(base, {
+      titre: etatB.titre,
+      sous: [cadence, prochaine].filter(Boolean).join(" "),
+      corps: `${abon}
+<h2>Bulletins parus</h2>
+${liste}
+<p class="petit" style="margin-top:16px">Suivre le bulletin : <a href="${htmlEsc(adresseFlux(base, "rss"))}">flux RSS</a> · <a href="${htmlEsc(adresseFlux(base, "atom"))}">Atom</a>.</p>
+<p class="donnees">Un bulletin rassemble les actes publiés sur sa période, classés par entité puis par thématique.
+<a href="${htmlEsc(adresseRecueil(base))}">Le recueil des actes</a></p>`,
+    });
+  }
+
+  // Un numéro, dans son classement : les ENTITÉS, puis leurs THÉMATIQUES, puis
+  // les actes — l'ordre de lecture d'un journal officiel.
+  function pageBulletin(b, base) {
+    const sections = (b.entites || []).map((e) => `<section class="bul__ent"><h2>${htmlEsc(e.nom)}</h2>`
+      + e.themes.map((t) => `<h3>${htmlEsc(t.label)}</h3><ul>${t.actes.map((a) => `<li class="acte">`
+        + `<a class="acte__objet" href="${htmlEsc(adresseActe(base, a.cle))}">${htmlEsc([a.numero, a.objet].filter(Boolean).join(" — ") || a.cle)}</a>`
+        + `<span class="acte__m">${htmlEsc([a.datePublication ? "publié le " + dateLongue(a.datePublication) : "", a.juridique === false ? "document non opposable" : a.dateOpposabilite ? "en vigueur le " + dateLongue(a.dateOpposabilite) : "", a.remplacee ? "version consolidée" : "", a.eliUri].filter(Boolean).join(" · "))}</span>`
+        + `<span class="f">${["json", "md", "txt"].map((x) => `<a href="${htmlEsc(adresseFormat(base, a.cle, x))}">${x}</a>`).join(" ")}</span></li>`).join("")}</ul>`).join(""))
+      .join("");
+    const sous = htmlEsc(intervalleTexte(b.debut, b.fin) + " · " + b.nombre + (b.nombre > 1 ? " actes" : " acte"));
+    return ossature(base, {
+      titre: b.titre,
+      canonique: adresseBulletin(base, b.id),
+      sous: b.sousTitre ? sous + "<br>" + htmlEsc(b.sousTitre) : sous,
+      corps: `${sections || `<p class="vide">Aucun acte n'a été publié sur cette période.</p>`}
+<p class="sommaire" style="margin-top:24px">Ce bulletin en données : ${["json", "md", "txt"].map((x) => `<a href="${htmlEsc(adresseBulletin(base, b.id) + "." + x)}">${x}</a>`).join(" ")}</p>
+<p class="donnees">Un bulletin rassemble les actes publiés sur sa période, classés par entité puis par thématique.
+<a href="${htmlEsc(adresseBulletins(base))}">Tous les bulletins</a> · <a href="${htmlEsc(adresseFlux(base, "rss"))}">flux RSS</a> · <a href="${htmlEsc(adresseRecueil(base))}">le recueil</a></p>`,
+    });
+  }
+
+  // Le résultat d'une demande d'abonnement, d'une confirmation, d'un
+  // désabonnement : une page, jamais du JSON — c'est un lecteur qui l'a demandé,
+  // depuis un formulaire ou depuis un courriel.
+  function pageAbonnement(base, res) {
+    const bon = !!(res && res.ok);
+    const message = (res && (res.message || res.motif)) || "";
+    return ossature(base, {
+      titre: bon ? "Abonnement enregistré" : "L'abonnement n'a pas pu être enregistré",
+      corps: `<section class="abon"><p class="${bon ? "ok" : "ko"}">${htmlEsc(message)}</p>
+<p><a href="${htmlEsc(bon ? adresseBulletins(base) : adresseBulletins(base) + "#abonnement")}">${bon ? "Voir les bulletins parus" : "Revenir au formulaire"}</a></p></section>`,
+    });
+  }
+
+  function pageConfirmation(base, res) {
+    const bon = !!(res && res.ok);
+    return ossature(base, {
+      titre: bon ? "Abonnement confirmé" : "Lien de confirmation invalide",
+      corps: bon
+        ? `<section class="abon"><p class="ok">Votre abonnement au bulletin est confirmé${res.abonne && res.abonne.courriel ? " pour " + htmlEsc(res.abonne.courriel) : ""} : vous recevrez chaque numéro par courriel, à sa parution.</p>
+<p class="petit">Vous pouvez vous désabonner à tout moment — le lien figure au bas de chaque message.</p>
+<p><a href="${htmlEsc(adresseBulletins(base))}">Voir les bulletins parus</a></p></section>`
+        : `<section class="abon"><p class="ko">${htmlEsc((res && res.motif) || "Ce lien n'est plus valable.")}</p>
+<p><a href="${htmlEsc(adresseBulletins(base))}">Retour aux bulletins</a></p></section>`,
+    });
+  }
+
+  // Le désabonnement se fait en DEUX temps : le lien du courriel montre une page,
+  // et c'est un second geste qui retire l'abonné. Un courriel ne se désabonne
+  // donc pas par le seul fait d'être ouvert ou scanné.
+  function pageDesabonnementDemande(base, jeton) {
+    const suite = adresseBulletins(base) + "/desabonnement?jeton=" + encodeURIComponent(String(jeton || "")) + "&confirmer=1";
+    return ossature(base, {
+      titre: "Se désabonner du bulletin",
+      corps: `<section class="abon">
+<p>Vous êtes sur le point de ne plus recevoir le bulletin par courriel.</p>
+<p><a href="${htmlEsc(suite)}" style="display:inline-block;background:var(--brand);color:#fff;padding:9px 14px;border-radius:4px;text-decoration:none;font-weight:600">Confirmer le désabonnement</a></p>
+<p class="petit">Rien n'est changé tant que vous n'avez pas confirmé : si vous fermez cette page, vous continuerez à recevoir le bulletin.</p></section>`,
+    });
+  }
+
+  function pageDesabonnementResultat(base, res) {
+    const bon = !!(res && res.ok);
+    return ossature(base, {
+      titre: bon ? "Désabonnement enregistré" : "Lien de désabonnement invalide",
+      corps: bon
+        ? `<section class="abon"><p class="ok">Vous ne recevrez plus le bulletin par courriel.</p>
+<p class="petit">Aucune autre donnée n'a été modifiée, et les bulletins parus restent lisibles ici comme par le flux.</p>
+<p><a href="${htmlEsc(adresseBulletins(base))}">Voir les bulletins parus</a></p></section>`
+        : `<section class="abon"><p class="ko">${htmlEsc((res && res.motif) || "Ce lien n'est plus valable.")}</p>
+<p><a href="${htmlEsc(adresseBulletins(base))}">Retour aux bulletins</a></p></section>`,
+    });
+  }
+
+  // ------------------------------------------------------------------ routage
+  const TEXTE_FLUX = (mode) => ({ "content-type": (mode === "atom" ? "application/atom+xml" : "application/rss+xml") + "; charset=utf-8", "cache-control": "public, max-age=600" });
+
+  async function hBulletins(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, pageBulletin404(base, BULLETIN_ABSENT), HTML_PUBLIC);
+    return ok(200, await pageBulletins(base), HTML_PUBLIC);
+  }
+
+  async function hBulletinFlux(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, BULLETIN_ABSENT, TEXTE);
+    const mode = String(ctx.params.id || "rss").toLowerCase() === "atom" ? "atom" : "rss";
+    return ok(200, await bul.flux({ base, mode }), TEXTE_FLUX(mode));
+  }
+
+  async function hBulletin(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, pageBulletin404(base, BULLETIN_ABSENT), HTML_PUBLIC);
+    let id = decodeURIComponent(String(ctx.params.id || ""));
+    let ext = "html";
+    const point = id.lastIndexOf(".");
+    if (point > 0 && ["json", "md", "txt", "markdown"].includes(id.slice(point + 1).toLowerCase())) {
+      ext = id.slice(point + 1).toLowerCase();
+      id = id.slice(0, point);
+    }
+    const b = bul.lire(id);
+    // Un bulletin PROVISOIRE (la période en cours) n'a pas d'adresse publique : il
+    // n'existe qu'au tableau de bord, où l'administration le relit avant parution.
+    if (!b || b.provisoire) {
+      const message = "Le bulletin demandé n'existe pas : " + id;
+      return ext === "html" ? ok(404, pageBulletin404(base, message), HTML_PUBLIC) : err(404, message, { code: "bulletin_inconnu" });
+    }
+    if (ext === "json") return ok(200, JSON.stringify(bul.jsonBulletin(b, { base }), null, 2), JSON_PUBLIC);
+    if (ext === "md" || ext === "markdown") return ok(200, bul.markdownBulletin(b), MARKDOWN);
+    if (ext === "txt") return ok(200, bul.texteBulletin(b, { base }), TEXTE);
+    return ok(200, pageBulletin(b, base), HTML_PUBLIC);
+  }
+
+  async function hAbonnementBulletins(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, pageBulletin404(base, BULLETIN_ABSENT), HTML_PUBLIC);
+    const corps = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+    const res = await bul.abonner({ courriel: corps.courriel || corps.email || "", nom: corps.nom || "", ip: ctx.ip || "", source: "recueil" });
+    return ok(200, pageAbonnement(base, res), HTML_PUBLIC);
+  }
+
+  async function hConfirmationBulletin(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, pageBulletin404(base, BULLETIN_ABSENT), HTML_PUBLIC);
+    return ok(200, pageConfirmation(base, await bul.confirmer(String((ctx.query && ctx.query.jeton) || ""))), HTML_PUBLIC);
+  }
+
+  async function hDesabonnementBulletin(ctx) {
+    const base = origine(ctx.headers);
+    if (!(await bulletinReglages())) return ok(404, pageBulletin404(base, BULLETIN_ABSENT), HTML_PUBLIC);
+    const jeton = String((ctx.query && ctx.query.jeton) || "");
+    if (String((ctx.query && ctx.query.confirmer) || "") !== "1") return ok(200, pageDesabonnementDemande(base, jeton), HTML_PUBLIC);
+    return ok(200, pageDesabonnementResultat(base, await bul.desabonner(jeton)), HTML_PUBLIC);
   }
 
   // /recueil/<clé> et /recueil/<clé>.<ext>
@@ -1182,7 +1582,9 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     }
     cle = decodeURIComponent(cle);
     const p = lirePublication(cle);
-    if (!p) {
+    // Une publication RÉSERVÉE AUX AGENTS ne se lit pas sans session : pour un
+    // visiteur anonyme, elle n'existe pas — et on ne dit pas qu'elle existe.
+    if (!p || !visiblePour(p, ctx.agent)) {
       const message = "Acte publié inconnu : " + cle;
       return ext === "html"
         ? ok(404, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Acte introuvable</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}"></head><body><h1>Acte introuvable</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p></body></html>`, HTML_PUBLIC)
@@ -1209,13 +1611,159 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     db.publies = {};
     db.idem = {};
     db.seq = 0;
+    // LES BULLETINS PARTENT AUSSI : ils rassemblent des publications qui
+    // n'existent plus, et leurs abonnés recevraient des numéros d'un référentiel
+    // effacé. La remise à zéro est donc complète, ou elle n'est pas.
+    if (bul && typeof bul.reinitialiser === "function") bul.reinitialiser();
     persist();
     return ok(200, { purge: true, avant });
+  }
+
+  // ======================================================== clés d'API et journal
+  // LES CLÉS D'API de l'administration — des COMPTES DE SERVICE : un
+  // administrateur en crée une depuis l'interface, lui donne un rôle, et la
+  // remet à un script, un poste, un outil tiers. Elles n'existent QUE pour
+  // l'API : ce ne sont pas des comptes du référentiel, elles n'apparaissent donc
+  // nulle part dans « Comptes et rôles », ni dans les listes de personnes, ni
+  // dans l'annuaire. Le service n'en conserve que l'empreinte SHA-256 — jamais
+  // la valeur, qui ne circule que du poste vers le service.
+  //
+  // Elles s'ajoutent aux jetons du DÉPLOIEMENT (`API_TOKENS`), que le serveur
+  // HTTP connaît déjà : celles-ci se gèrent à chaud, sans toucher au `.env`.
+  // Voir `cleDeJeton`, appelée par server.mjs pour l'autorisation.
+  const ROLES_CLE = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire"];
+
+  function cles() { db.cles = db.cles || {}; return db.cles; }
+
+  // L'identité portée par un jeton, ou null : on compare les EMPREINTES, jamais
+  // les valeurs. C'est la seule porte par laquelle une clé d'API entre.
+  function cleDeJeton(jeton) {
+    const h = sha256(String(jeton || ""));
+    const table = cles();
+    for (const id of Object.keys(table)) {
+      const c = table[id];
+      if (c && c.hash === h) return { id, role: c.role, label: c.label || "" };
+    }
+    return null;
+  }
+
+  function nouvelleCleId() {
+    return "CLE-" + String(Date.now()).slice(-6) + "-" + String(Math.floor(Math.random() * 46636)).padStart(3, "0");
+  }
+
+  // LE JOURNAL D'AUDIT DU SERVICE : chaque geste sensible y laisse une ligne, et
+  // chaque ligne scelle la précédente par son empreinte — modifier une ligne
+  // rompt la chaîne, ce que `scelle` révèle à la relecture. C'est la piste
+  // d'audit OPPOSABLE : elle ne dépend pas du bon vouloir du poste qui a agi.
+  function journaliser(geste, detail) {
+    db.journal = db.journal || [];
+    const precedent = db.journal.length ? db.journal[db.journal.length - 1].sceau : "";
+    const e = { n: db.journal.length + 1, le: nowIso(), geste: String(geste || "").slice(0, 60), detail: String(detail || "").slice(0, 400) };
+    e.sceau = sha256([precedent, e.n, e.le, e.geste, e.detail].join("|"));
+    db.journal.push(e);
+    if (db.journal.length > 2000) db.journal.splice(0, db.journal.length - 2000);
+    return e;
+  }
+  function journalScelle(j) {
+    let precedent = "";
+    for (const e of j || []) {
+      if (e.sceau !== sha256([precedent, e.n, e.le, e.geste, e.detail].join("|"))) return false;
+      precedent = e.sceau;
+    }
+    return true;
+  }
+
+  // ÉTAT PUBLIC de l'autorisation : le client apprend s'il doit proposer de
+  // provisionner le service, sans rien apprendre des clés elles-mêmes.
+  function hEtatAuth() {
+    // Un service dont l'administration se fait par SESSION (mode « mot de
+    // passe » ou annuaire) est déjà administré : il n'y a rien à « provisionner »,
+    // et l'écran montre la gestion des clés plutôt que le geste d'installation.
+    const parSession = authMode === "password" || authMode === "oidc";
+    return ok(200, { provisionne: parSession || Object.keys(cles()).length > 0, roles: ROLES_CLE, mode: parSession ? "session" : "service" });
+  }
+
+  // PROVISIONNEMENT : le tout premier dépôt de clé, quand le service n'en a
+  // aucune — le geste d'installation, en mode « demo » surtout (en mode
+  // « mot de passe », l'administration se fait par la session). La clé est
+  // tirée par le client : le service n'en voit jamais la valeur.
+  function hBootstrap(ctx) {
+    const table = cles();
+    if (Object.keys(table).length) {
+      return err(409, "Ce service est déjà provisionné : le provisionnement initial ne s'exécute qu'une fois.", { code: "service_deja_provisionne" });
+    }
+    const b = ctx.body || {};
+    const jeton = String(b.cle || b.token || "");
+    if (jeton.length < 32) return err(422, "La clé doit compter au moins 32 caractères (tirez-la au hasard).", { code: "cle_trop_courte" });
+    const role = ROLES_CLE.includes(b.role) && b.role !== "prestataire" ? b.role : "administrateur";
+    const id = nouvelleCleId();
+    table[id] = { hash: sha256(jeton), role, label: String(b.label || "Administrateur").slice(0, 80), creeLe: nowIso() };
+    journaliser("provisionnement", "Service provisionné (clé « " + table[id].label + " », rôle " + role + ").");
+    if (!persist()) { delete table[id]; return err(507, "Le service n'a plus de place disponible."); }
+    return ok(201, { id, role, label: table[id].label, creeLe: table[id].creeLe });
+  }
+
+  // La liste des clés — identifiant, libellé, rôle, date : jamais la valeur,
+  // jamais l'empreinte.
+  function hListeCles() {
+    const table = cles();
+    return ok(200, {
+      provisionne: Object.keys(table).length > 0,
+      cles: Object.keys(table).map((id) => ({ id, role: table[id].role, label: table[id].label || "", creeLe: table[id].creeLe })),
+    });
+  }
+
+  // Créer une clé : c'est le geste de l'administrateur qui dote un script, un
+  // poste ou un outil d'un compte de service. Le rôle est choisi exprès — une
+  // clé de lecture ne doit pas pouvoir publier.
+  function hCreerCle(ctx) {
+    const table = cles();
+    const b = ctx.body || {};
+    const jeton = String(b.cle || b.token || "");
+    if (jeton.length < 32) return err(422, "La clé doit compter au moins 32 caractères.", { code: "cle_trop_courte" });
+    const role = ROLES_CLE.includes(b.role) ? b.role : "lecteur";
+    const id = nouvelleCleId();
+    table[id] = { hash: sha256(jeton), role, label: String(b.label || "").slice(0, 80), creeLe: nowIso() };
+    journaliser("cle_creee", "Clé « " + (table[id].label || id) + " » créée (rôle " + role + ").");
+    if (!persist()) { delete table[id]; return err(507, "Le service n'a plus de place disponible."); }
+    return ok(201, { id, role, label: table[id].label, creeLe: table[id].creeLe });
+  }
+
+  // Révoquer une clé. On refuse de révoquer la DERNIÈRE clé d'administration :
+  // le service se retrouverait sans moyen d'être administré.
+  function hRevoquerCle(ctx) {
+    const table = cles();
+    const id = String(ctx.params.id || "");
+    if (!table[id]) return err(404, "Clé inconnue : " + id, { code: "cle_inconnue" });
+    const admins = Object.keys(table).filter((k) => table[k].role === "administrateur");
+    if (table[id].role === "administrateur" && admins.length <= 1) {
+      return err(409, "Impossible de révoquer la dernière clé d'administration : le service se retrouverait sans administrateur.", { code: "derniere_cle_admin" });
+    }
+    const label = table[id].label || id;
+    delete table[id];
+    journaliser("cle_revoquee", "Clé « " + label + " » révoquée.");
+    persist();
+    return ok(200, { id, revoquee: true });
+  }
+
+  function hJournal(ctx) {
+    const j = (db.journal || []).slice();
+    const limite = Math.max(1, Math.min(2000, Number(ctx.body && ctx.body.limite) || 200));
+    return ok(200, { entrees: j.slice(-limite), total: j.length, scelle: journalScelle(j), algorithme: "SHA-256 (chaîne)" });
   }
 
   const ROUTES = [
     { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
     { m: "GET", p: /^\/v1\/?$/, f: () => ok(200, openapi()), tag: "service" },
+    // --- clés d'API et journal du service (comptes de service de l'API) -------
+    // `/v1/auth/etat` est PUBLIC (le client doit savoir s'il doit provisionner) ;
+    // le reste est réservé à l'administration.
+    { m: "GET", p: /^\/v1\/auth\/etat$/, f: hEtatAuth },
+    { m: "POST", p: /^\/v1\/auth\/bootstrap$/, ecrit: true, f: hBootstrap },
+    { m: "GET", p: /^\/v1\/auth\/cles$/, role: { min: "administrateur" }, f: hListeCles },
+    { m: "POST", p: /^\/v1\/auth\/cles$/, role: { min: "administrateur" }, ecrit: true, f: hCreerCle },
+    { m: "POST", p: /^\/v1\/auth\/cles\/([^/]+)\/revoquer$/, role: { min: "administrateur" }, ecrit: true, f: hRevoquerCle },
+    { m: "GET", p: /^\/v1\/journal$/, role: { min: "administrateur" }, f: hJournal },
     // Les actes DÉPOSÉS ne sont pas publics : la publication l'est (voir
     // /v1/publications), le dépôt non — il porte les actes individuels
     // (sanctions, revalorisations), les circuits en cours et leurs empreintes.
@@ -1252,35 +1800,48 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     // ou la clé d'administration.
     { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
     { m: "POST", p: /^\/v1\/admin\/purge$/, role: { min: "administrateur" }, ecrit: true, f: hPurger },
-    { m: "GET", p: /^\/v1\/publications$/, f: () => {
-        const all = Object.keys(db.publies).map((k) => db.publies[k]);
-        const latestKeys = new Set(all.map((p) => latestOf(p.eliUri)).filter(Boolean).map((p) => p.cle));
+    { m: "GET", p: /^\/v1\/publications$/, f: (ctx) => {
+        const all = Object.keys(db.publies).map((k) => db.publies[k]).filter((p) => visiblePour(p, ctx.agent));
+        const latestKeys = new Set(all.map((p) => dernierVisible(p.eliUri, ctx.agent)).filter(Boolean).map((p) => p.cle));
         return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => String(b.publieeLe).localeCompare(String(a.publieeLe))) });
       } },
     { m: "POST", p: /^\/v1\/publications\/([^/]+)\/epingle$/, role: { min: "editeur" }, ecrit: true, f: hEpinglerPublication },
     { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
         const cle = decodeURIComponent(ctx.params.cle);
         const p = lirePublication(cle);
-        if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
-        const versions = versionsOf(p.eliUri).map((x) => resumePublication(x, latestOf(x.eliUri) === x));
+        // Une publication réservée aux agents n'existe pas, pour un visiteur
+        // anonyme : même réponse qu'une clé inconnue, et on ne dit rien de plus.
+        if (!p || !visiblePour(p, ctx.agent)) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+        const versions = versionsVisibles(p.eliUri, ctx.agent).map((x) => resumePublication(x, dernierVisible(x.eliUri, ctx.agent) === x));
         // Le dossier interne ne sort JAMAIS par cette route : c'est une lecture
         // de la publication, côté public comme côté agent, et il n'en fait pas
         // partie. Il se lit par /v1/actes/{id}/dossier-signature.
         const { originalInterne, ...pub } = p;
-        return ok(200, { ...pub, latest: latestOf(p.eliUri) === p, versions });
+        return ok(200, { ...pub, latest: dernierVisible(p.eliUri, ctx.agent) === p, versions });
       } },
     { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/original$/, f: (ctx) => {
         const eliUri = eliKey(ctx.params);
-        const p = latestOf(eliUri);
+        const p = dernierVisible(eliUri, ctx.agent);
         return p ? ok(200, { eli: eliUri, cle: p.cle, original: p.original, signature: p.signature }) : err(404, "ELI inconnu : " + eliUri);
       } },
     { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/, f: hResoudreEli },
     // --- le recueil ouvert (hors /v1/ : ce sont les adresses du site) ---------
     { m: "GET", p: /^\/robots\.txt$/, f: (ctx) => ok(200, robotsTxt(origine(ctx.headers)), TEXTE) },
-    { m: "GET", p: /^\/llms\.txt$/, f: (ctx) => ok(200, llmsTxt(origine(ctx.headers)), MARKDOWN) },
-    { m: "GET", p: /^\/sitemap\.xml$/, f: (ctx) => ok(200, sitemapXml(origine(ctx.headers)), XML) },
-    { m: "GET", p: /^\/recueil\.json$/, f: (ctx) => ok(200, JSON.stringify(indexRecueil(origine(ctx.headers)), null, 2), JSON_PUBLIC) },
-    { m: "GET", p: /^\/recueil\/?$/, f: (ctx) => ok(200, pageRecueil(origine(ctx.headers)), HTML_PUBLIC) },
+    { m: "GET", p: /^\/llms\.txt$/, f: (ctx) => ok(200, llmsTxt(origine(ctx.headers), ctx.agent), MARKDOWN) },
+    { m: "GET", p: /^\/sitemap\.xml$/, f: (ctx) => ok(200, sitemapXml(origine(ctx.headers), ctx.agent), XML) },
+    { m: "GET", p: /^\/recueil\.json$/, f: (ctx) => ok(200, JSON.stringify(indexRecueil(origine(ctx.headers), ctx.agent), null, 2), JSON_PUBLIC) },
+    { m: "GET", p: /^\/recueil\/?$/, f: (ctx) => ok(200, pageRecueil(origine(ctx.headers), ctx.agent), HTML_PUBLIC) },
+    // --- le BULLETIN (voir bulletins.mjs, injecté par le service) -------------
+    // Ces adresses viennent AVANT `/recueil/(.+)`, qui les avalerait : leur ordre
+    // est la seule chose qui les protège. Le sommaire et le flux d'abord, puis
+    // les gestes d'abonnement, puis un numéro — et enfin l'acte publié.
+    { m: "GET", p: /^\/recueil\/bulletins\.(rss|atom)$/, f: hBulletinFlux },
+    { m: "GET", p: /^\/recueil\/bulletins\/confirmation$/, f: hConfirmationBulletin },
+    { m: "GET", p: /^\/recueil\/bulletins\/desabonnement$/, f: hDesabonnementBulletin },
+    { m: "POST", p: /^\/recueil\/bulletins\/abonnement$/, ecrit: true, f: hAbonnementBulletins },
+    { m: "GET", p: /^\/recueil\/bulletins\/abonnement$/, f: (ctx) => ok(302, "", { location: adresseBulletins(origine(ctx.headers)) + "#abonnement" }) },
+    { m: "GET", p: /^\/recueil\/bulletins\/?$/, f: hBulletins },
+    { m: "GET", p: /^\/recueil\/bulletins\/([^/]+)$/, f: hBulletin },
     { m: "GET", p: /^\/recueil\/(.+)$/, f: hActePublic },
     // L'identifiant ELI comme adresse (le lien que porte un acte publié, et
     // qu'un lecteur peut recopier) : voir `hEliAdresse`.
@@ -1293,6 +1854,10 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     const path = String(req.path || "/");
     const q = path.indexOf("?");
     const clean = q >= 0 ? path.slice(0, q) : path;
+    // Les paramètres de l'adresse : les pages du Bulletin s'en servent — le jeton
+    // du courriel de confirmation, le « confirmer » du désabonnement.
+    const query = {};
+    if (q >= 0) for (const [k, v] of new URLSearchParams(path.slice(q + 1))) query[k] = v;
     const headers = req.headers || {};
 
     let cheminTrouve = false;
@@ -1316,7 +1881,7 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
       const params = { 0: m[0] };
       if (m[1] !== undefined) { params.id = m[1]; params.cle = m[1]; }
       if (m[2] !== undefined) { params.code = m[1]; params.annee = m[2]; params.numero = m[3]; params.entite = m[4]; }
-      return r.f({ params, body: req.body, headers, conn: req.conn, path: clean });
+      return r.f({ params, body: req.body, headers, conn: req.conn, path: clean, query, ip: req.ip, agent: ctx.agent === true });
     }
     return cheminTrouve
       ? err(405, "Méthode " + method + " non autorisée sur " + clean, { code: "methode_non_autorisee" })
@@ -1326,5 +1891,11 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
   // État à écrire après la requête (null s'il n'y a rien à faire).
   const takeDirty = () => { const d = dirty; dirty = null; return d; };
 
-  return { route, takeDirty, openapi, emptyState };
+  // L'identité d'une CLÉ d'API (un compte de service), pour l'autorisation du
+  // serveur HTTP : c'est par cette fonction que les clés créées dans
+  // l'administration ouvrent les routes (voir server.mjs). `null` si le jeton
+  // n'est pas une clé connue — ce n'est pas une erreur, seulement « pas une clé ».
+  const cleDeJetonOuNull = (jeton) => { try { return cleDeJeton(jeton); } catch (e) { return null; } };
+
+  return { route, takeDirty, openapi, emptyState, cleDeJeton: cleDeJetonOuNull, publicationsPubliques };
 }

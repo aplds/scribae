@@ -13,16 +13,28 @@
 // l'identifiant ELI, l'acte devient « publié » au registre local — les deux
 // états restent d'accord, puisqu'ils viennent du même appel.
 //
+// Trois choses, et pas une de plus :
+//   • le SERVICE est provisionné par la démonstration elle-même, une fois
+//     (`assurerServiceDemo`) : sans clé, un service neuf est en lecture seule,
+//     donc rien ne peut être publié — c'était la cause première du recueil vide ;
+//   • les BILLETS de la fiction sont déposés au service (`amorcerInformations`),
+//     sans quoi la rubrique Informations n'apparaissait jamais au public ;
+//   • les ACTES que la fiction déclare publiés sont publiés par le MÊME chemin
+//     que l'écran de signature, et leur fiche complète est gardée sur l'acte.
+//
 // C'est un amorçage de DÉMONSTRATION, et rien d'autre : il ne s'exécute que sur
 // le jeu de démonstration intact, il est idempotent (un acte déjà publié au
 // service est seulement repris au registre local), et il est silencieux — un
 // service injoignable est repris quelques fois de plus (voir `planifierReprise`)
 // avant de laisser le recueil tel quel.
 // ============================================================================
-import { state, touch, actePubliable } from "./state.js";
+import { state, touch, actePubliable, oublierBulletinsRecueil, redrawView } from "./state.js";
 import { demoActif } from "../lib/demo.js";
 import { get, post, beginFlow, bodyOf } from "../lib/remote.js";
 import { publicationSettings } from "../lib/eli.js";
+import { cleService } from "../lib/cle-service.js";
+import { etatService, provisionnerService } from "../lib/cles-service.js";
+import * as db from "../lib/db/index.js";
 import { docOfActe } from "./views/modifier.js";
 import { publierActeDuSeed } from "./views/signature.js";
 
@@ -41,7 +53,105 @@ const DELAI_AMORCAGE = 180000;
 // gestionnaires. Une pause entre deux actes étale la dépense : l'amorçage prend
 // quelques secondes de plus, et aboutit.
 const PAUSE_AMORCAGE = 800;
+// Ce budget n'existe QUE sur la plateforme. Le service embarqué de l'édition
+// statique et le service auto-hébergé (nginx + MySQL) n'ont rien à étaler : les
+// faire attendre ne protégeait rien et retardait le recueil public d'une
+// trentaine de secondes. La pause est donc celle du service qui la réclame.
+const pauseAmorcage = () => (globalThis.__SCRIBA_STATIC__ || globalThis.__SCRIBA_SELF_HOSTED__ ? 0 : PAUSE_AMORCAGE);
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------------------ le service
+// Une démonstration SE PROVISIONNE ELLE-MÊME son service.
+//
+// Un service neuf est en LECTURE SEULE tant qu'aucune clé n'y a été déposée, et
+// c'est l'administrateur qui pose la première (Administration › Base de
+// données). Or une démonstration n'a personne : son recueil public restait donc
+// vide, faute de pouvoir publier quoi que ce soit — c'est tout le problème que
+// ce module résout, mais il ne pouvait pas le résoudre sans clé.
+//
+// Le geste d'installation est donc fait ici, une fois, en silence : le service
+// reçoit une clé d'administration tirée au hasard par le poste (la clé ne vit
+// qu'au poste, comme toute clé d'écriture — voir src/lib/cles-service.js), elle
+// est rangée dans les réglages locaux, et l'amorçage peut publier.
+//
+// Rien de tout cela ne concerne une installation RÉELLE : le commutateur de
+// démonstration commande le geste (voir `jeuDeDemonstration`), et une
+// installation réelle laisse le provisionnement à son administrateur.
+let preparation = null;
+
+async function preparerService() {
+  const etat = await etatService().catch(() => ({ ok: false }));
+  if (!etat.ok) return false;
+  if (etat.provisionne) return true;
+  // La clé déjà réglée sur ce poste est REJOUÉE : le service a pu être remis à
+  // zéro (l'aperçu de l'éditeur reconstruit son état) alors que le poste garde
+  // la clé. En tirer une nouvelle laisserait une clé orpheline dans les
+  // réglages, et l'ancienne inutile.
+  const res = await provisionnerService({ cle: cleService() || undefined, label: "Démonstration" });
+  if (!res.ok) return false;
+  await db.setSettings({ token: res.cle }, { silent: true });
+  return true;
+}
+
+// Le verdict n'est PAS retenu pour toute la session : un service peut être
+// provisionné, puis remis à zéro pendant que la page vit (l'aperçu de l'éditeur
+// reconstruit son état), et une clé gardée « bonne » ferait échouer en silence
+// tout ce qui suit — c'est précisément ce qu'on a vu : des dépôts refusés 403
+// « service_non_provisionne » après un provisionnement réussi. On redemande donc
+// l'état à chaque amorçage ; l'appel ne coûte rien, et il est dédoublonné tant
+// qu'un précédent est en vol.
+async function assurerServiceDemo() {
+  if (preparation) return preparation;
+  preparation = preparerService().finally(() => { preparation = null; });
+  return preparation;
+}
+
+// Les BILLETS du recueil public : le service les sert par `/v1/informations`,
+// mais il ne connaît que ceux qu'on lui a déposés. En régime « service »,
+// l'atelier les y écrit lui-même (la collection fait partie de sa base) ; en
+// régime LOCAL — celui de la démonstration —, les billets ne quittent pas le
+// poste, et le recueil public n'en montrait donc aucun : l'onglet Informations
+// restait vide, et sa page absente du pied de page.
+//
+// La démonstration les dépose donc, comme elle dépose ses actes. Le dépôt n'a
+// lieu que si le service en est dépourvu ou en désaccord : comparer avant
+// d'écrire évite de réécrire — et de journaliser — à chaque démarrage.
+const empreinteBillet = (b) => JSON.stringify(Object.keys(b || {}).sort().map((k) => [k, b[k]]));
+
+async function amorcerInformations({ silencieux = true } = {}) {
+  if (!jeuDeDemonstration()) return 0;
+  // En régime « service », la collection EST la base de l'atelier : c'est lui
+  // qui écrit, et projeter une copie locale par-dessus écraserait son travail.
+  if (!db.isLocalMode()) return 0;
+  const billets = (state.informations || []).filter((b) => b && b.id);
+  if (!billets.length) return 0;
+  if (!(await assurerServiceDemo())) return 0;
+  const token = cleService();
+  if (!token) return 0;
+  try {
+    const lu = await get("/v1/db/collections/informations", { token, label: "Informations de la démonstration", source: "lecture" });
+    if (!lu.ok) return 0;
+    const records = bodyOf(lu).records || [];
+    const auService = new Map(records.map((r) => [String(r.id), r.payload]));
+    const meme = auService.size === billets.length
+      && billets.every((b) => auService.has(String(b.id)) && empreinteBillet(auService.get(String(b.id))) === empreinteBillet(b));
+    if (meme) return 0;
+    const upserts = billets.map((b, i) => ({ id: String(b.id), ord: i, payload: b }));
+    const auLocal = new Set(billets.map((b) => String(b.id)));
+    const deletes = records.filter((r) => !auLocal.has(String(r.id))).map((r) => ({ id: String(r.id) }));
+    // `force` est le geste de REPRISE de données (réservé à l'administration) :
+    // c'est bien de cela qu'il s'agit — la copie du service doit dire ce que dit
+    // l'atelier, et le service est ici un miroir, non la source.
+    const res = await post("/v1/db/collections/informations/sync", { force: true, upserts, deletes }, { token, label: "Dépôt des informations (démonstration)" });
+    if (!res.ok) return 0;
+    // Le recueil avait pu lire une liste vide : on l'invalide pour qu'il relise.
+    if (state.recueil) state.recueil.infos = null;
+    return upserts.length;
+  } catch (e) {
+    if (!silencieux) console.warn("Dépôt des informations (démonstration) :", e);
+    return 0;
+  }
+}
 
 // REPRISE. Au démarrage, l'amorçage part en même temps que le reste de
 // l'application : si la page est occupée (reconstruction du jeu de
@@ -65,9 +175,106 @@ function planifierReprise() {
   }, attente);
 }
 
+// L'amorçage est-il en cours ? Le recueil public le demande pour ne pas annoncer
+// « aucun acte publié » pendant que la démonstration dépose les siens : au
+// premier lancement, le recueil est vide SANS l'être — il le sera dans un
+// instant, et le dire vaut mieux que de le nier.
+let amorcage = false;
+export const amorcageEnCours = () => amorcage;
+
+// LE RÉGLAGE DU BULLETIN (1.6.0). Le bulletin se règle dans Administration ›
+// Publication — donc dans le RÉFÉRENTIEL du poste —, mais c'est le SERVICE qui
+// tient ses périodes, ses abonnés et ses courriels : c'est lui qui compose les
+// numéros et qui les diffuse. En régime LOCAL (celui de la démonstration), le
+// référentiel ne quitte pas le poste : sans ce dépôt, le service croirait le
+// bulletin éteint, la page publique n'en montrerait rien, et l'écran « Bulletin »
+// se contredirait lui-même — exactement le problème que `amorcerInformations`
+// résout pour les billets du recueil.
+//
+// On ne dépose QUE le bloc du bulletin, FUSIONNÉ dans le document de
+// configuration du service : le reste de ce que le service détient (quand il
+// détient quelque chose) est laissé tel quel.
+export async function amorcerBulletin({ silencieux = true } = {}) {
+  if (!jeuDeDemonstration()) return 0;
+  if (!db.isLocalMode()) return 0;
+  const b = state.config && state.config.publication && state.config.publication.bulletin;
+  if (!b || typeof b !== "object") return 0;
+  if (!(await assurerServiceDemo())) return 0;
+  const token = cleService();
+  if (!token) return 0;
+  try {
+    const lu = await get("/v1/db/collections/config", { token, label: "Réglages du bulletin (démonstration)", source: "lecture" });
+    if (!lu.ok) return 0;
+    const records = bodyOf(lu).records || [];
+    const actuel = (records.find((r) => String(r.id) === "self") || {}).payload || {};
+    let depose = 0;
+    if (empreinteBillet(actuel.publication && actuel.publication.bulletin) !== empreinteBillet(b)) {
+      const payload = { ...actuel, publication: { ...(actuel.publication || {}), bulletin: b } };
+      const res = await post("/v1/db/collections/config/sync", { force: true, upserts: [{ id: "self", ord: 0, payload }] }, { token, label: "Dépôt des réglages du bulletin (démonstration)" });
+      if (!res.ok) return 0;
+      depose = 1;
+      // L'ÉTAT PUBLIC vient de changer : la copie que le recueil garde (la cadence,
+      // les numéros parus, le flux) ne vaut plus rien. On l'oublie et on redessine,
+      // sans quoi une page publique ouverte pendant le dépôt continuerait d'ignorer
+      // le bulletin jusqu'au chargement suivant — et la démonstration, dont le
+      // dépôt suit le démarrage de quelques secondes, montrerait un recueil sans
+      // bulletin à un visiteur pourtant arrivé après. C'est le même geste que les
+      // écrans d'administration font après un réglage (voir src/ui/views/bulletin.js).
+      oublierBulletinsRecueil();
+      redrawView();
+    }
+    return depose;
+  } catch (e) {
+    if (!silencieux) console.warn("Dépôt des réglages du bulletin :", e);
+    return 0;
+  }
+}
+
+// COMPOSER LES NUMÉROS DU BULLETIN. Le service le fait de lui-même au démarrage,
+// puis à intervalle régulier (voir `passeBulletins`, src/server/mysql/server.mjs) :
+// c'est la CADENCE qui fait paraître les numéros, sans que personne ne les
+// demande. La démonstration n'a pas de passe de fond — quelqu'un doit donc le
+// faire à sa place, et ce quelqu'un, c'est l'amorçage du recueil : il compose
+// APRÈS avoir publié (un bulletin se compose des publications, pas avant elles),
+// et de nouveau chaque fois qu'une passe publie de nouveaux actes. Sans cela, le
+// bulletin serait ouvert sans qu'aucun numéro ne paraisse jamais, et la page
+// publique se lirait comme une promesse vide.
+let compositionFaite = false;
+async function composerBulletins() {
+  const token = cleService();
+  if (!token) return 0;
+  try {
+    const res = await post("/v1/bulletins/administration/generer", {}, { token, label: "Composition des numéros du bulletin (démonstration)" });
+    // Le drapeau ne se pose que sur un ACCORD du service : une composition
+    // refusée (service remis à zéro en cours de route) doit pouvoir être rejouée
+    // par la reprise de l'amorçage.
+    if (res.ok) compositionFaite = true;
+    return res.ok ? 1 : 0;
+  } catch (e) {
+    // Silencieux : le service a pu repartir entre-temps, l'amorçage s'en aperçoit
+    // par ailleurs (et les numéros se composeront à la reprise).
+    return 0;
+  }
+}
+
+// L'écran « Bulletin » l'appelle avant de lire, et avant chaque geste : les
+// réglages qu'un administrateur vient d'écrire doivent être ceux que le service
+// applique. Sur une installation réelle, la fonction ne fait rien (le référentiel
+// EST chez le service, qui lit donc les réglages tout seul).
 export async function amorcerRecueil({ silencieux = true } = {}) {
   if (enCours && Date.now() - enCoursDepuis < DELAI_AMORCAGE) return 0;
   if (!jeuDeDemonstration()) return 0;
+  amorcage = true;
+  // Le SERVICE d'abord : une démonstration neuve n'a pas de clé, et un service
+  // sans clé est en lecture seule — sans ce geste, rien ne peut être publié, ni
+  // acte ni billet (voir `assurerServiceDemo`).
+  await assurerServiceDemo();
+  // Les billets se déposent même quand il ne reste aucun acte à publier : ce
+  // sont deux contenus distincts du recueil public.
+  await amorcerInformations({ silencieux });
+  // Le RÉGLAGE DU BULLETIN suit le même chemin que les billets : le service en a
+  // besoin pour composer, et l'atelier, lui, travaille en local.
+  await amorcerBulletin({ silencieux });
   // Les actes que la fiction déclare publiés : signés d'abord, et déjà publiés
   // au registre local ensuite — un service remis à zéro (ou une installation
   // neuve) doit retrouver son recueil, sans quoi le registre local et le recueil
@@ -75,7 +282,14 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
   // ni redéposé ni republié.
   const aPublier = state.actes.filter((a) =>
     estDemonstration(a) && !a.deletedAt && (a.statut === "signee" || a.statut === "publie") && a.original && a.execution?.publication && actePubliable(a));
-  if (!aPublier.length) return 0;
+  if (!aPublier.length) {
+    amorcage = false;
+    // Rien à publier, mais le service peut détenir des publications que ce poste
+    // ne connaît plus (registre local remis à zéro) : le bulletin, lui, se
+    // compose de ce que le SERVICE détient.
+    if (!compositionFaite) await composerBulletins();
+    return 0;
+  }
 
   enCours = true;
   enCoursDepuis = Date.now();
@@ -110,7 +324,15 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
             mode: settings.opposabilite.mode, jours: settings.opposabilite.jours,
             recueil: settings.recueil, publishConsolide: false,
           });
-          if (ok) publies += 1;
+          if (ok) {
+            publies += 1;
+            // L'enregistrement rendu par le dépôt est AMPUTÉ : la réponse de
+            // publication ne porte ni les formats, ni l'original signé. On relit
+            // la fiche complète et on la garde sur l'acte, pour que le recueil
+            // puisse s'en servir si le service venait à se taire (voir
+            // src/lib/publications-locales.js).
+            await reprendre(acte, { cle: acte.publication && acte.publication.cle }, { force: true });
+          }
         }
         echecs = 0;
         // La MISE EN AVANT voyage à part : le service la porte par identifiant
@@ -118,7 +340,7 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
         // Un service déjà à jour n'est pas rappelé — l'amorçage reste jouable
         // autant de fois qu'on veut.
         await epinglerAuService(acte, { token: settings.jetonDemonstration, flow });
-        await dormir(PAUSE_AMORCAGE);
+        await dormir(pauseAmorcage());
       } catch (e) {
         echecs += 1;
         if (!silencieux) console.warn("Amorçage du recueil :", e);
@@ -143,6 +365,10 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
     // Amorçage interrompu en cours de route (le service a cessé de répondre) :
     // le recueil est incomplet, on repasse pour les actes qui manquent.
     if (interrompu) planifierReprise();
+    // LE BULLETIN, EN DERNIER : ses numéros se composent des publications, donc
+    // après elles — et de nouveau si cette passe vient d'en publier (une reprise
+    // de l'amorçage en publie au fil de l'eau).
+    if (publies || !compositionFaite) await composerBulletins();
   } catch (e) {
     // Première lecture impossible : le service n'était pas joignable. On repasse
     // (voir `planifierReprise`) — le journal du service garde la trace de
@@ -151,15 +377,25 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
     planifierReprise();
   } finally {
     enCours = false;
+    amorcage = false;
   }
   return publies;
 }
 
 // L'acte est déjà au recueil du service : on reprend son enregistrement local,
 // pour que le registre des actes et le recueil racontent la même chose.
-async function reprendre(acte, resume) {
-  if (acte.publication?.cle === resume.cle) return;
-  const one = await get("/v1/publications/" + encodeURIComponent(resume.cle), { label: "Publication existante", source: "lecture" });
+//
+// `force` relit la fiche même quand le registre local croit déjà la détenir :
+// c'est ce qu'il faut après une publication, dont la réponse est incomplète (ni
+// formats, ni original signé) — voir `publicationsLocales`.
+async function reprendre(acte, resume, { force = false } = {}) {
+  const cle = resume && resume.cle;
+  if (!cle) return;
+  if (!force && acte.publication?.cle === cle) return;
+  // La lecture porte le jeton du service : c'est l'amorçage, qui agit avec la
+  // clé de l'installation — sans lui, une publication RÉSERVÉE AUX AGENTS
+  // répondrait « inconnue » à un appel anonyme.
+  const one = await get("/v1/publications/" + encodeURIComponent(resume.cle), { token: publicationSettings(state.config).jetonDemonstration, label: "Publication existante", source: "lecture" });
   if (!one.ok) return;
   const p = one.body;
   acte.publication = { ...p, html: p.formats?.html || "", akn: p.formats?.akn || "", jsonld: p.formats?.jsonld || "" };

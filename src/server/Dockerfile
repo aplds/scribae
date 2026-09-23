@@ -3,10 +3,11 @@
 # Scribae — IMAGE AUTONOME (un seul conteneur : service + façade + application).
 #
 # C'est l'alternative au `docker-compose.yml` de ce dossier. La pile Compose
-# sépare trois services (db, api, web) et MONTE le dossier de l'application ;
-# cette image-ci embarquE tout — le service Node, nginx et le code de
-# l'application — pour être publiée sur un registre (Docker Hub, GHCR…) et
-# lancée d'une commande, sans dépôt ni dossier local.
+# sépare trois services (db, api, web), tous CONSTRUITS (aucun fichier de l'hôte
+# n'y est monté : voir web/Dockerfile) ; cette image-ci embarque tout — le
+# service Node, nginx et le code de l'application — pour être publiée sur un
+# registre (Docker Hub, GHCR…) et lancée d'une commande, sans dépôt ni dossier
+# local.
 #
 # La base de données reste EXTERNE : MariaDB / MySQL est un état qui se sauvegarde
 # et se conserve à part, pas une couche d'image. Voir src/docs/DOCKER.md.
@@ -51,6 +52,15 @@ RUN chmod +x /usr/local/bin/scribae-entrypoint
 # Ce que sert nginx sous /src/ : le client, le guide intégré et les documents
 # (« Documentation technique »).
 COPY src /srv/app/src
+
+# `COPY` REPREND les droits de la source — le dépôt, ou l'archive décompressée
+# dont il vient. Un fichier arrivé en 0600, ou une arborescence en 0700, donnerait
+# des 403 dans le navigateur : le processus de travail de nginx n'est pas root et
+# ne peut pas lire ce que seul root peut lire. On rétablit donc franchement la
+# lecture — il n'y a là ni secret, ni donnée d'exécution (le seul fichier qui
+# porte un jeton, `config.js`, est engendré au démarrage dans /srv/www).
+RUN chmod 644 /etc/nginx/http.d/default.conf \
+ && chmod -R a+rX /srv/templates /srv/app
 
 ENV SCRIBA_SERVICE_DIR=/srv/service
 EXPOSE 80

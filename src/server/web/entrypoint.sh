@@ -1,12 +1,18 @@
 #!/bin/sh
 # ============================================================================
-# Prépare la racine de nginx (/srv/www) à partir des modèles (web/*) et de
-# l'environnement du conteneur. Exécuté par l'entrypoint de l'image nginx (volume
-# monté dans /docker-entrypoint.d/), avant le démarrage de nginx.
+# Prépare la racine de nginx (/srv/www) à partir des modèles de /srv/templates et
+# de l'environnement du conteneur.
 #
-# Le script est « sourcé » (il n'est pas exécutable) : il évite donc `exit` et
-# `set -e`, pour ne pas interrompre l'entrypoint de l'image ; il signale ses
-# erreurs dans le journal du conteneur.
+# Ce script est CUIT DANS L'IMAGE de la façade (`Dockerfile`), à l'emplacement
+# /docker-entrypoint.d/40-scriba-web.sh, et c'est l'entrée de l'image nginx qui
+# l'appelle — avant de démarrer nginx. Rien n'est monté depuis la machine qui
+# déploie : les modèles sont dans l'image, et /srv/www est un volume (il se vide
+# quand le conteneur est recréé, d'où cette préparation à chaque démarrage).
+#
+# Il est écrit pour être EXÉCUTÉ comme pour être SOURCÉ (selon que l'entrée de
+# l'image le trouve exécutable ou non) : il évite donc `exit` et `set -e`, qui
+# interrompraient l'entrée dans le second cas, et il signale ses erreurs dans le
+# journal du conteneur sans empêcher nginx de démarrer pour un favicon manquant.
 # ============================================================================
 
 WWW=/srv/www
@@ -18,8 +24,11 @@ mkdir -p "$WWW" || erreur=1
 for f in index.html host.js favicon.svg; do
   if [ -r "$TPL/$f" ]; then
     cp "$TPL/$f" "$WWW/$f" || erreur=1
+    # Le processus de travail de nginx n'est pas root : la coquille doit être
+    # lisible par tous, quel que soit le mode du modèle dans l'image.
+    chmod 644 "$WWW/$f" 2>/dev/null || true
   else
-    echo "Scribae — modèle manquant : $TPL/$f"
+    echo "Scribae — modèle manquant dans l'image : $TPL/$f"
     erreur=1
   fi
 done
@@ -43,7 +52,7 @@ if [ -r "$TPL/config.js.template" ]; then
 fi
 
 if [ "$erreur" = "1" ]; then
-  echo "Scribae — la préparation de $WWW a échoué ; vérifiez le montage de ./web."
+  echo "Scribae — la préparation de $WWW a échoué (image incomplète : reconstruisez la façade, « docker compose build web »)."
 else
   echo "Scribae — application préparée dans $WWW (API : ${API_BASE:-même origine}, mode : ${AUTH_MODE:-référentiel})."
 fi

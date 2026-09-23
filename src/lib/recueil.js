@@ -39,6 +39,18 @@ export function extraireVersion(html) {
   const paper = dom.querySelector(".paper");
   const transmis = dom.querySelector(".transmis");
   const titreEl = dom.querySelector(".doc-title");
+  // La version publiée ne porte PAS la charte de l'entité : on retire
+  // l'attribut qui la désigne (`data-sheet`, posé par `renderDocument`), sinon
+  // les règles confinées que l'application tient à jour pour l'aperçu
+  // (`[data-sheet="…"]`, voir `styleRuntimeCss`, lib/styles.js) habilleraient
+  // la page du recueil — et deux entités aux chartes différentes ne se
+  // présenteraient pas de la même façon. L'en-tête et le pied de la charte, eux,
+  // sont de la présentation : ils ne sont pas repris.
+  if (doc) {
+    doc.removeAttribute("data-sheet");
+    for (const n of doc.querySelectorAll("[data-sheet]")) n.removeAttribute("data-sheet");
+    for (const n of doc.querySelectorAll(".doc-sheet-header, .doc-sheet-footer")) n.remove();
+  }
   return {
     html: doc ? doc.outerHTML : (paper ? paper.innerHTML : (dom.body ? dom.body.innerHTML : "")),
     transmis: transmis ? transmis.outerHTML : "",
@@ -49,70 +61,239 @@ export function extraireVersion(html) {
 }
 
 // ------------------------------------------------------------------ mise en page du texte
-// Le texte publié est INTÉGRÉ à la page du recueil : plus de feuille A4 dans un
-// cadre, mais un texte qui occupe TOUTE la largeur disponible — la présentation
-// d'un recueil officiel en ligne. La charte de l'acte n'entre pas ici : le
-// document est rendu avec les styles de lecture de l'application (`.doc*`,
-// src/css/app.css), que cette feuille-ci ajuste pour le web — police de
-// l'interface, largeur, et couleurs ramenées sur l'apparence thémée du recueil
-// (`--ink-public`, `--brand-public` — voir src/css/app.css).
+// LA FEUILLE DE STYLE WEB de l'acte publié.
+//
+// C'est la règle de la version en ligne : l'acte publié NE SUIT PAS la charte
+// graphique de son entité. Deux entités qui ont deux feuilles de style
+// différentes — en-tête, logo, police, filets, couleurs, marges — présentent
+// leurs actes à l'IDENTIQUE sur le recueil public. C'est aussi plus juste : la
+// charte habille le PAPIER (aperçu, « Imprimer / PDF », Word, page autonome,
+// PDF/A) ; une page de site internet a sa propre cohérence, celle du recueil.
+//
+// Cette feuille est donc AUTOSUFFISANTE : elle définit tout ce dont le corps de
+// l'acte a besoin et n'emprunte rien à la feuille de l'acte. Elle s'accorde
+// simplement au thème PUBLIC du recueil quand il en a un (`--ink-public`,
+// `--brand-public`, `--font-ui`… — voir src/css/app.css), avec une valeur de
+// repli partout : la version en ligne reste lisible hors de l'application.
+//
+// Les variables `--doc-*` sont celles que lisent les réglages de BLOC
+// (paragraphe encadré, filets et bandes d'un tableau — voir app.css,
+// « Paramètres propres aux blocs ») : on les pose ici aussi, sinon la version en
+// ligne les emprunterait à la charte de l'acte.
 export const CSS_DOCUMENT_WEB = `
-.recueil-acte {
-  background: none;
-  --ink: var(--ink-public); --ink-2: var(--ink-2-public); --brand: var(--brand-public);
+/* La marque de la feuille web : ces règles ne s'appliquent QU'aux documents
+   publiés en ligne — jamais à l'aperçu de l'atelier, où plusieurs chartes
+   cohabitent et doivent rester distinctes. */
+.recueil-acte.doc-web { background: none; }
+.doc-web {
+  /* Le thème de la version en ligne : celui du recueil public, ou des valeurs
+     neutres. Les variables de l'application (--ink, --ink-2, --brand) et celles
+     des blocs (--doc-*) sont ramenées dessus. */
+  --web-ink: var(--ink-public, #1e1e1e);
+  --web-ink-2: var(--ink-2-public, #4a4a4a);
+  --web-muted: var(--ink-muted, #6b6b6b);
+  --web-brand: var(--brand-public, #000091);
+  --web-rule: var(--border-strong, #c8c8c8);
+  --web-grid: var(--border, #dcdcdc);
+  --web-alt: var(--bg-alt, #f4f4f4);
+  --web-font: var(--font-ui, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif);
+  --web-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  --ink: var(--web-ink); --ink-2: var(--web-ink-2); --brand: var(--web-brand);
+  --doc-ink: var(--web-ink); --doc-muted: var(--web-ink-2);
+  --doc-rule: var(--web-rule); --doc-grid: var(--web-grid);
+  --doc-neutral: var(--web-alt); --doc-soft: var(--web-alt);
+  --doc-heading: var(--web-ink);
 }
-.recueil-acte .paper { width: auto; min-height: 0; margin: 0; padding: 0; background: none; box-shadow: none; }
-.recueil-acte .doc {
-  font-family: var(--font-ui);
-  font-size: 1.05rem; line-height: 1.75; color: var(--ink); letter-spacing: 0;
+
+/* ---- le corps du texte ---------------------------------------------------- */
+.doc-web .doc {
+  font-family: var(--web-font);
+  font-size: 1.05rem; line-height: 1.75; color: var(--web-ink); letter-spacing: 0;
 }
-.recueil-acte .doc-title, .recueil-acte .doc-sheet-header, .recueil-acte .doc-sheet-footer { display: none; }
-.recueil-acte .doc-authority { font-size: 1.02rem; font-weight: 600; margin: 0 0 1.1em; }
-.recueil-acte .doc-visas { margin: 0 0 1.1em; }
-.recueil-acte .doc-visas-label { font-weight: 600; }
-.recueil-acte .doc-enact { letter-spacing: .12em; margin: 1.4em 0; }
-.recueil-acte .doc-article { margin: 0 0 1.7em; }
-.recueil-acte .doc-article-head {
-  font-family: var(--font-ui); font-size: .95rem; font-weight: 700;
-  color: var(--brand); margin: 0 0 .45em; letter-spacing: .01em;
+/* L'intitulé de l'acte et l'en-tête/pied d'une charte : le recueil les porte
+   lui-même (le titre de la page, son propre en-tête), la charte n'a pas à les
+   redoubler ici. */
+.doc-web .doc-title,
+.doc-web .doc-sheet-header,
+.doc-web .doc-sheet-footer { display: none; }
+.doc-web .doc p { margin: 0 0 .75em; }
+.doc-web .doc-p { text-align: justify; margin: 0 0 .75em; }
+.doc-web .doc-authority { font-size: 1.02rem; font-weight: 600; margin: 0 0 1.1em; }
+
+/* ---- visas et considérants ------------------------------------------------ */
+.doc-web .doc-visas { list-style: none; margin: 0 0 1.1em; padding: 0; }
+.doc-web .doc-visas li { text-align: justify; margin: 0 0 .3em; }
+.doc-web .doc-visas-label { font-weight: 600; }
+.doc-web .doc-visas-link {
+  color: inherit; text-decoration: underline;
+  text-decoration-color: var(--web-rule); text-underline-offset: 2px;
 }
-.recueil-acte .doc-article-num { color: inherit; }
-.recueil-acte .doc-article-heading { font-weight: 400; color: var(--ink-2); }
-.recueil-acte .doc-table th, .recueil-acte .doc-table td { border: 1px solid var(--border-strong); padding: 6px 8px; }
-.recueil-acte .doc-table th { background: var(--bg-alt); }
-.recueil-acte .doc-quote { border-left-color: var(--border-strong); }
-.recueil-acte .doc-mention, .recueil-acte .doc-amend-mention { font-size: .92rem; color: var(--ink-2); }
+.doc-web .doc-visas-link:hover { text-decoration-color: currentColor; }
+.doc-web .doc-recitals { margin: 0 0 1.1em; }
+.doc-web .doc-recitals p { text-align: justify; margin: 0 0 .45em; }
+
+/* ---- formule d'édiction --------------------------------------------------- */
+.doc-web .doc-enact {
+  text-align: center; font-weight: 700; letter-spacing: .12em; margin: 1.4em 0;
+}
+
+/* ---- divisions (Livre, Titre, Chapitre…) ---------------------------------- */
+.doc-web .doc-division { margin: 1.6em 0 1em; }
+.doc-web .doc-division--n2 { margin-left: .6em; }
+.doc-web .doc-division--n3 { margin-left: 1.2em; }
+.doc-web .doc-division--n4,
+.doc-web .doc-division--n5,
+.doc-web .doc-division--n6 { margin-left: 1.8em; }
+.doc-web .doc-division-head { font-weight: 700; margin: 0 0 .5em; }
+.doc-web .doc-division--n1 > .doc-division-head { font-size: 1.08em; text-align: center; margin-top: 1.2em; }
+.doc-web .doc-division--n2 > .doc-division-head { font-size: 1.02em; }
+.doc-web .doc-division--n3 > .doc-division-head { font-size: 1em; }
+.doc-web .doc-division--n4 > .doc-division-head,
+.doc-web .doc-division--n5 > .doc-division-head { font-size: .98em; font-style: italic; }
+.doc-web .doc-division-num, .doc-web .doc-division-heading { font-weight: 700; }
+
+/* ---- articles ------------------------------------------------------------- */
+.doc-web .doc-article { margin: 0 0 1.7em; }
+.doc-web .doc-article-head {
+  font-family: var(--web-font); font-size: .95rem; font-weight: 700;
+  color: var(--web-brand); margin: 0 0 .45em; letter-spacing: .01em;
+}
+.doc-web .doc-article-num { color: inherit; font-weight: 700; }
+.doc-web .doc-article-heading { font-weight: 400; color: var(--web-ink-2); }
+.doc-web .doc-article--abroge .doc-article-head { color: var(--web-ink-2); }
+
+/* ---- paragraphes réglés bloc par bloc ------------------------------------- */
+.doc-web .doc-p--boxed { border: 1px solid var(--web-rule); padding: .5em .7em; }
+.doc-web .doc-p--indent-first { text-indent: 1.5em; }
+.doc-web .doc-p--indent-none { text-indent: 0; }
+.doc-web .doc-p--indent-all { margin-left: 1.5em; }
+.doc-web .doc-recitals--inline p { margin: 0; }
+
+/* ---- listes --------------------------------------------------------------- */
+.doc-web .doc-list { margin: 0 0 .9em; padding-left: 1.4em; }
+.doc-web .doc-list li { text-align: justify; margin-bottom: .3em; }
+
+/* ---- tableaux ------------------------------------------------------------- */
+.doc-web .doc-table-wrap { margin: 0 0 1em; overflow-x: auto; }
+.doc-web .doc-table-caption { font-size: .9em; margin: 0 0 .35em; font-style: italic; }
+.doc-web .doc-table { border-collapse: collapse; width: 100%; font-size: .92em; }
+.doc-web .doc-table th, .doc-web .doc-table td {
+  border: 1px solid var(--web-rule); padding: 6px 8px; text-align: left; vertical-align: top;
+}
+.doc-web .doc-table th { background: var(--web-alt); }
+.doc-web .doc-table--rows th, .doc-web .doc-table--rows td { border: 0; border-bottom: 1px solid var(--web-grid); }
+.doc-web .doc-table--rows th { background: transparent; border-bottom: 2px solid var(--web-rule); }
+.doc-web .doc-table--zebra tbody tr:nth-child(even) { background: var(--web-alt); }
+.doc-web .doc-table--center th, .doc-web .doc-table--center td { text-align: center; }
+.doc-web .doc-table--right th, .doc-web .doc-table--right td { text-align: right; }
+
+/* ---- citations et modifications apparentes -------------------------------- */
+.doc-web .doc-quote {
+  margin: .3em 0 .8em; padding: 0 0 0 14px; border-left: 2px solid var(--web-rule);
+}
+.doc-web .doc-quote::before { content: "\u00ab\u00a0"; }
+.doc-web .doc-quote::after { content: "\u00a0\u00bb"; }
+.doc-web .doc-ins { background: rgba(24, 117, 60, .10); box-shadow: inset 0 0 0 1px rgba(24, 117, 60, .35); }
+.doc-web .doc-del { background: rgba(206, 5, 0, .07); box-shadow: inset 0 0 0 1px rgba(206, 5, 0, .30); }
+.doc-web .doc-del .doc-p, .doc-web .doc-del p, .doc-web .doc-del li,
+.doc-web .doc-del .doc-article-head { text-decoration: line-through; color: var(--web-muted); }
+.doc-web .doc-mod { background: rgba(179, 64, 0, .05); }
+.doc-web .doc-amend-mention {
+  font-style: italic; font-size: .92em; color: var(--web-muted); margin: -.15em 0 .55em;
+}
+/* La bannière d'une version consolidée : le même avertissement que sur le
+   papier, aux couleurs de la page. */
+.doc-web .doc-consolidation {
+  border: 1px solid var(--web-rule); background: var(--web-alt);
+  padding: 10px 12px; margin: 0 0 1.2em;
+  font-family: var(--web-font); font-size: .82rem; line-height: 1.45;
+}
+.doc-web .doc-consolidation__title { margin: 0 0 4px; font-weight: 700; }
+.doc-web .doc-consolidation__notice,
+.doc-web .doc-consolidation__meta,
+.doc-web .doc-consolidation__hint { margin: 0 0 4px; }
+.doc-web .doc-consolidation__legend { margin: 6px 0 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.doc-web .doc-consolidation__legend span { padding: 1px 6px; font-size: .72rem; }
+
+/* ---- signature ------------------------------------------------------------ */
+.doc-web .doc-signature {
+  margin-top: 2em; display: flex; justify-content: space-between;
+  align-items: flex-end; gap: 1em; flex-wrap: wrap;
+}
+.doc-web .doc-signature-place { margin: 0; }
+.doc-web .doc-signature-block { text-align: center; min-width: 40%; }
+.doc-web .doc-signature-role, .doc-web .doc-signature-name { margin: 0; }
+.doc-web .doc-signature-role { white-space: pre-line; font-style: italic; }
+.doc-web .doc-signature-name { font-weight: 700; }
+
+/* ---- mentions (recours, publication, notification) ------------------------ */
+.doc-web .doc-mention {
+  text-align: justify; font-size: .92rem; margin: 1.1em 0 0; color: var(--web-ink-2);
+}
+
+/* ---- annexes -------------------------------------------------------------- */
+.doc-web .doc-annexes { margin: 1.4em 0 .8em; }
+.doc-web .doc-annexes-title { font-size: 1em; font-weight: 700; margin: 0 0 .4em; }
+.doc-web .doc-annexes-list { margin: 0; padding-left: 1.4em; }
+.doc-web .doc-annexes-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* La partie annexée : le texte du document adopté, à la suite de l'acte. Dans
+   la page du recueil, elle ne commence pas sur une page neuve : un filet et son
+   intitulé la séparent de l'acte. */
+.doc-web .doc-annexe-part { break-before: auto; page-break-before: auto; margin-top: 2em; }
+.doc-web .doc-annexe-part__head { border-top: 1px solid var(--web-rule); padding-top: 10px; margin: 0 0 1em; }
+.doc-web .doc-annexe-part__label {
+  font-size: .74em; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--web-muted); margin: 0;
+}
+.doc-web .doc-annexe-part__title { font-weight: 700; margin: .12em 0 0; }
+
+/* ---- renvois -------------------------------------------------------------- */
+.doc-web .recueil-lien-eli { color: var(--web-brand); }
+.doc-web .recueil-lien-eli--hors {
+  color: inherit; text-decoration: none; cursor: help;
+  border-bottom: 1px dotted var(--web-rule);
+}
+
 /* Articles abrogés. Le recueil affiche l'acte dans sa rédaction en vigueur :
    l'article abrogé garde son intitulé et la mention de l'acte qui l'a abrogé,
    mais sa RÉDACTION — conservée dans la version en ligne — reste masquée. La
    case « Afficher les articles abrogés » (classe posée sur ce même bloc) la
    fait apparaître, barrée, comme une pièce d'archive. */
-.recueil-acte .doc-abroge-corps { display: none; }
-.recueil-acte.afficher-abroges .doc-abroge-corps {
+.doc-web .doc-abroge-corps { display: none; }
+.doc-web.afficher-abroges .doc-abroge-corps {
   display: block; margin: .5em 0 0; padding: 2px 0 2px 12px;
-  border-left: 3px solid var(--border-strong); color: var(--ink-2);
-  text-decoration: line-through; text-decoration-color: var(--ink-muted);
+  border-left: 3px solid var(--web-rule); color: var(--web-ink-2);
+  text-decoration: line-through; text-decoration-color: var(--web-muted);
 }
-.recueil-acte .doc-abroge-label {
+.doc-web .doc-abroge-label {
   font-size: .78rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
-  color: var(--ink-muted); text-decoration: none; margin: 0 0 .2em;
+  color: var(--web-muted); text-decoration: none; margin: 0 0 .2em;
 }
 .recueil-abroges {
   display: flex; align-items: center; gap: 8px; margin: 0 0 1.2em;
-  font-size: .88rem; color: var(--ink-2); cursor: pointer;
+  font-size: .88rem; color: var(--web-ink-2); cursor: pointer;
 }
-.recueil-abroges input { width: 16px; height: 16px; accent-color: var(--brand-public); }
-@media print { .recueil-acte .doc-abroge-corps { display: none !important; } .recueil-abroges { display: none !important; } }
-.recueil-acte .doc-signature { margin-top: 2em; }
-.recueil-acte .transmis {
-  margin-top: 1.7em; border-left: 3px solid var(--brand); background: var(--bg);
-  padding: 10px 12px; border-radius: 3px; font-family: var(--font-ui); font-size: .82rem; color: var(--ink);
+.recueil-abroges input { width: 16px; height: 16px; accent-color: var(--web-brand); }
+
+/* ---- le certificat de transmission ---------------------------------------- */
+.doc-web .transmis {
+  margin-top: 1.7em; border-left: 3px solid var(--web-brand); background: var(--web-alt);
+  padding: 10px 12px; border-radius: 3px;
+  font-family: var(--web-font); font-size: .82rem; color: var(--web-ink);
 }
-.recueil-acte .transmis strong { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
-.recueil-acte .transmis .ref { font-family: var(--font-mono); font-size: .76rem; color: var(--ink-muted); }
+.doc-web .transmis strong {
+  display: block; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--web-ink-2);
+}
+.doc-web .transmis .ref { font-family: var(--web-mono); font-size: .76rem; color: var(--web-muted); }
+
+/* ---- impression ----------------------------------------------------------- */
 @media print {
-  .recueil-acte .doc { font-size: 11pt; }
-}`;
+  .doc-web .doc { font-size: 11pt; }
+  .doc-web .doc-abroge-corps { display: none !important; }
+  .recueil-abroges { display: none !important; }
+}
+`;
 
 // --------------------------------------------------------------- recherche
 
@@ -485,6 +666,53 @@ export function mentionsPubliques(config) {
   return MENTIONS_PUBLIQUES.map((m) => mentionPublique(config, m.id)).filter(Boolean);
 }
 
+// -------------------------------------------------------- sous-pages du site
+// Un texte légal ne se lit pas dans un pied de page replié : il a sa propre
+// adresse (« ?page=legales »), son propre titre, et il se cite. Les sous-pages
+// reprennent les mentions du référentiel, plus la liste des informations
+// publiées — qui n'est pas une mention, mais qui se parcourt comme une page.
+//
+// Les libellés sont ceux du pied de page ; le texte, lui, vient du référentiel
+// (voir `mentionPublique`) ou de la collection `informations`.
+export const PAGES_PUBLIQUES = [
+  { id: "legales", label: "Mentions légales", mention: "legales" },
+  { id: "reutilisation", label: "Conditions de réutilisation", mention: "reutilisation" },
+  { id: "accessibilite", label: "Accessibilité", mention: "accessibilite" },
+  { id: "informations", label: "Informations", mention: "" },
+];
+
+export const estPagePublique = (id) => PAGES_PUBLIQUES.some((p) => p.id === id);
+export const pagePublique = (id) => PAGES_PUBLIQUES.find((p) => p.id === id) || null;
+export const pagePubliqueLabel = (id) => (pagePublique(id) || {}).label || "";
+
+// ----------------------------------------------------- personnalisation (CSS)
+// Une collectivité a une charte : deux couleurs, une police, un arrondi. On ne
+// lui demande pas de réécrire la feuille du recueil — on lui donne une variable
+// par chose que l'on veut bien laisser changer (voir VARIABLES_CSS,
+// src/lib/informations.js) et une feuille libre pour le reste.
+//
+// Le texte saisi est injecté tel quel dans un `<style>` (c'est du CSS, pas du
+// HTML : il ne peut pas exécuter de script). Il est ÉCRIT par un administrateur
+// dans l'atelier, jamais par un visiteur. Voir `renderRecueilPublic`
+// (src/ui/views/recueil-public.js), qui pose la feuille APRÈS celle de
+// l'application, pour qu'elle l'emporte.
+export function cssPersonnalisee(config) {
+  return String((config && config.publication && config.publication.css) || "").trim();
+}
+
+// Les réglages de la rubrique « Informations » du recueil : son activation, son
+// titre et son chapeau. Une collectivité peut la renommer (« Actualités »,
+// « Communications », « La vie de la commune »), ou l'éteindre — et le recueil
+// cesse alors de renvoyer vers elle.
+export function informationsReglages(config) {
+  const i = (config && config.publication && config.publication.informations) || {};
+  return {
+    actif: i.actif !== false,
+    titre: String(i.titre || "").trim() || "Informations",
+    intro: String(i.intro || "").trim(),
+  };
+}
+
 // ---------------------------------------------------- licence de réutilisation
 // La licence sous laquelle les informations du recueil sont réutilisables. Elle
 // se règle dans le référentiel (`config.publication.licence`), et elle est
@@ -534,6 +762,18 @@ export function blocsMention(texte) {
 // adresse ses actes par des paramètres de requête.
 export const autoHeberge = () => !!globalThis.__SCRIBA_SELF_HOSTED__;
 
+// Les deux portes de la même adresse (1.5.3) :
+//   • l'ESPACE PUBLIC est à la RACINE — l'adresse que l'on communique, celle
+//     qu'un visiteur ouvre sans rien savoir de l'outil ;
+//   • l'ATELIER est sous « /atelier » (installation auto-hébergée, où le chemin
+//     existe vraiment) ou derrière « ?atelier » (page statique, où il n'y a pas
+//     de serveur pour réécrire les chemins).
+//
+// « ?recueil=1 » reste reconnu : c'est l'adresse historique de l'espace public,
+// et les liens déjà partagés doivent continuer de fonctionner.
+export const CHEMIN_ATELIER = "/atelier";
+export const PARAM_ATELIER = "atelier";
+
 export function basePublique() {
   if (autoHeberge()) return location.origin;
   // La page, jamais le sous-domaine interne : c'est l'adresse que le lecteur
@@ -546,11 +786,25 @@ export function basePublique() {
 // L'adresse du recueil entier, puis celle d'un acte. C'est l'adresse de
 // RÉFÉRENCE d'un acte publié : celle qu'on cite, qu'on partage, et que
 // recopient les moteurs.
-export const adresseRecueil = () => (autoHeberge() ? basePublique() + "/recueil" : basePublique() + "?recueil=1");
+export const adresseRecueil = () => basePublique();
 
 export const adresseActe = (cle) => (autoHeberge()
   ? basePublique() + "/recueil/" + encodeURIComponent(cle)
   : basePublique() + "?acte=" + encodeURIComponent(cle));
+
+// L'adresse de l'ATELIER : celle que l'on donne à un agent. Un visiteur qui
+// l'ouvre arrive sur la connexion, puis dans l'application — jamais sur le
+// recueil.
+export const adresseAtelier = () => (autoHeberge() ? basePublique() + CHEMIN_ATELIER : basePublique() + "?" + PARAM_ATELIER);
+
+// Les sous-pages de l'espace public : mentions légales, accessibilité, liste
+// des informations. Elles ont leur propre adresse — un long texte ne se cherche
+// pas dans un pied de page replié.
+export const adressePage = (id) => basePublique() + "?page=" + encodeURIComponent(id);
+
+// Une information (billet) publiée au recueil : son adresse est son libellé
+// court (`slug`), stable tant que le billet garde son titre.
+export const adresseInfo = (slug) => basePublique() + "?info=" + encodeURIComponent(slug);
 
 // Le lien d'un acte du recueil (sans clé : le recueil lui-même).
 export const lienRecueil = (cle) => (cle ? adresseActe(cle) : adresseRecueil());
@@ -565,7 +819,15 @@ export const adresseFichier = (nom) => basePublique() + "/" + String(nom).replac
 // publique dans la page). C'est celle des liens ; `adresseActe` est celle qu'on
 // copie — et les deux se répondent : `?acte=<clé>` dans la page, `/recueil/<clé>`
 // sur un déploiement serveur.
-export const hrefRecueil = () => (autoHeberge() ? "/recueil" : location.pathname + "?recueil=1");
+//
+// À la racine (1.5.3), le recueil n'a plus besoin de paramètre : `location.pathname`
+// suffit, et l'adresse se lit d'autant mieux.
+export const hrefRecueil = () => (autoHeberge() ? "/" : location.pathname);
+
+// L'atelier, vu de la page : c'est ici que mène « Se connecter ».
+export const hrefAtelier = () => (autoHeberge() ? CHEMIN_ATELIER : location.pathname + "?" + PARAM_ATELIER);
+export const hrefPage = (id) => location.pathname + "?page=" + encodeURIComponent(id);
+export const hrefInfo = (slug) => location.pathname + "?info=" + encodeURIComponent(slug);
 
 // --------------------------------------------------- recueil ouvert : les robots
 // Un acte publié est une DONNÉE publique : c'est elle que consultent les moteurs

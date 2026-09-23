@@ -12,6 +12,7 @@ Il expose **deux familles de ressources** :
 | **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/actes/{id}/dossier-signature`, `/v1/publications…`, `/v1/eli/…`, `POST /v1/admin/purge`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
 | **Courriel** | `GET /v1/courriel`, `POST /v1/courriel/envoi`, `POST /v1/courriel/test` | `sb_courriel` (+ `SMTP_*` du `.env`) |
 | **Réglages** | `GET /v1/config` (réglages de référentiel posés par le `.env`, voir § 9) | — |
+| **Public** | `GET /v1/atelier/acces` (l'accès à l'atelier depuis cette adresse — voir § 10), `GET /v1/informations` (les billets publiés au recueil) | collection `informations` (`sb_record`) |
 
 Le contrat de la famille « données » est **le même** que celui du service de
 démonstration : l'application ne voit aucune différence et
@@ -36,7 +37,10 @@ navigateur (Scribae)              service                         base
 
 ## 1. Préparer la base
 
-Avec Docker, MariaDB exécute `schema.sql` à sa création (voir `../docker-compose.yml`).
+Avec Docker, c'est **le service** qui prépare la base (voir `../docker-compose.yml`) : le service
+`db-init` **aligne le compte applicatif sur le `.env`** puis applique `schema.sql`, et le service
+`api` l'applique de nouveau à son démarrage (`AUTO_MIGRATE`). La base de la pile n'a donc besoin
+d'aucun fichier préparé à l'avance.
 À la main :
 
 ```sql
@@ -64,7 +68,8 @@ Le service peut aussi créer les tables lui-même (`--migrate`). Les objets cré
 cd src/server/mysql
 cp env.example .env        # puis renseignez la base et les jetons
 npm install
-node server.mjs --migrate  # crée ou met à jour le schéma
+node server.mjs --reconcilier  # remet le compte applicatif au mot de passe du .env, puis applique le schéma (DB_ROOT_PASSWORD requis)
+node server.mjs --migrate  # schéma seul (compte déjà en règle)
 node server.mjs            # (ou: npm start)
 npm test                   # tests du domaine signature/publication (aucune base requise)
 ```
@@ -100,12 +105,26 @@ que dans l'en-tête `Authorization: Bearer …`, et n'est jamais conservé côt�
 Le **même** jeton sert pour les deux familles de ressources (données et actes) : c'est la
 même autorisation d'écriture.
 
-> **Mode « comptes locaux » (`AUTH_MODE=password`).** Les jetons d'API ne sont alors **plus
-> acceptés** : la porte est la session de l'agent (identifiant + mot de passe, vérifiés par le
-> service), et une écriture sans session est refusée (401). `API_TOKENS` peut rester vide. Le
-> compte d'administration se configure dans le `.env` (`ADMIN_LOGIN`, `ADMIN_PASSWORD`) ; il est
-> créé au premier démarrage, puis gère les autres comptes depuis *Comptes et rôles*. Les tables
-> `sb_motdepasse` et `sb_session` (voir `schema.sql`) portent les dérivés `scrypt` et les
+**Les clés d'API de l'application.** Un administrateur peut aussi créer, depuis *Administration ›
+Base de données* → « Créer une clé d'API », des **clés à rôles** : ce sont des **comptes de
+service**, invisibles dans « Comptes et rôles » et dans l'annuaire, remis à un script, un poste ou
+un outil tiers. Le service n'en conserve que l'empreinte SHA-256 (l'application la tire et la
+montre une seule fois) ; le rôle (`lecteur`, `redacteur`, `editeur`, `administrateur`,
+`prestataire`) commande les routes que la clé ouvre. Elles sont rangées dans l'état du service
+(table `sb_etat`, avec les actes déposés et les publications) et s'administrent par
+`GET|POST /v1/auth/cles`, `POST /v1/auth/cles/{id}/revoquer` et `GET /v1/auth/etat` — la révocation
+de la **dernière** clé d'administration est refusée (`409 derniere_cle_admin`). Le service tient un
+**journal d'audit scellé** (`GET /v1/journal` : chaque ligne scelle la précédente par son
+empreinte, les 2 000 dernières sont conservées).
+
+> **Mode « comptes locaux » (`AUTH_MODE=password`).** La porte est la **session** de l'agent
+> (identifiant + mot de passe, vérifiés par le service) : une écriture sans session est refusée
+> (401). Les **clés d'API** (celles créées dans l'application, et les jetons de déploiement
+> `API_TOKENS`) restent néanmoins **acceptées en `Authorization: Bearer`** pour les appels sans
+> cookie — c'est ainsi qu'un script ou un outil tiers écrit sans session. `API_TOKENS` peut rester
+> vide. Le compte d'administration se configure dans le `.env` (`ADMIN_LOGIN`, `ADMIN_PASSWORD`) ;
+> il est créé au premier démarrage, puis gère les autres comptes depuis *Comptes et rôles*. Les
+> tables `sb_motdepasse` et `sb_session` (voir `schema.sql`) portent les dérivés `scrypt` et les
 > sessions, et font partie de la sauvegarde. Détail : `../../docs/ADMINISTRATION.md` § 4.3 bis.
 
 ## 4. Brancher l'application
@@ -258,4 +277,32 @@ node scripts/generer-variables.mjs     # depuis la racine du dépôt (src/)
 Pour **ajouter** une variable : un descripteur dans `variables.mjs`, une ligne dans
 `env.example`, puis régénérer le wiki. Rien d'autre — la validation, le transport au
 navigateur et la documentation en découlent.
+
+## 10. Restreindre l'atelier à un réseau
+
+L'**espace public** du recueil est ouvert à tout le monde ; l'**atelier** peut, lui, n'être
+ouvert qu'à certains réseaux — l'intranet d'une collectivité, par exemple. La règle vit dans
+[atelier.mjs](atelier.mjs) et repose sur [ips.mjs](ips.mjs) (analyse des adresses).
+
+- La **liste** vient de `SCRIBA_ATELIER_IPS` si la variable est posée, sinon du réglage
+  `publication.atelier.ips` du référentiel : le `.env` **l'emporte**, comme pour les autres
+  réglages déclaratifs (§ 9).
+- Elle accepte une adresse (`10.0.0.24`), un préfixe CIDR (`10.0.0.0/8`, `2001:db8::/32`), un
+  champ (`10.0.0.0-10.0.0.255`) ou une plage abrégée (`10.0.0.*`) ; un `#` ouvre un commentaire.
+- **Vide, elle ouvre l'atelier à toutes les adresses.** Renseignée, seules les adresses qu'elle
+  contient entrent — et les **publications réservées aux agents** ne sont plus servies qu'à une
+  personne **connectée et venue d'une adresse autorisée**.
+- Une liste **entièrement illisible** n'ouvre pas l'atelier : elle le **ferme** (*fail-closed*).
+  Mieux vaut fermer devant une liste fautive que l'ouvrir à tout le monde. Une entrée incomprise,
+  elle, est **signalée** (et non ignorée en silence) par `GET /v1/atelier/acces`.
+- Le refus est un **`403 atelier_hors_reseau`**, sur **toutes** les routes de l'atelier
+  (`/v1/db/…`, `/v1/actes/…`, `/v1/signatures/…`, `/v1/auth/…`).
+
+`GET /v1/atelier/acces` — route **publique** et sans secret — dit si l'accès est restreint
+(`actif`), si l'adresse de l'appelant est autorisée (`autorise`), d'où vient cette adresse
+(`ip`, `interne`) et quelle liste s'applique (`source` : `deploiement` ou `referentiel`). Le
+paramètre `ip` permet de **simuler** une adresse (« et si j'arrivais de là ? ») : c'est le
+simulateur de l'écran d'administration. Le chemin `/atelier` peut en outre être fermé au niveau
+de nginx (`location /atelier`, directives `allow`/`deny` livrées en commentaire dans
+`../nginx.conf`) : le service applique déjà la règle, cette seconde barrière est facultative.
 

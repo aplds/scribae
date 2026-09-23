@@ -1,4 +1,4 @@
-import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, initStorage } from "../lib/store.js";
+import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, saveInformations, initStorage } from "../lib/store.js";
 import * as db from "../lib/db/index.js";
 import { seedConfigVierge } from "../lib/seed.js";
 import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
@@ -29,6 +29,10 @@ export const state = {
   trames: [],
   actes: [],
   users: [],
+  // Les INFORMATIONS publiées au recueil public (les billets de
+  // l'administration) : elles vivent hors du registre des actes (voir
+  // src/lib/informations.js).
+  informations: [],
   user: null,
   // La PAGE D'ACCUEIL du site est le RECUEIL PUBLIC, et non l'atelier : c'est la
   // route par défaut, celle qu'on obtient sans ancre et sans paramètre. Un
@@ -76,11 +80,13 @@ export function redrawView() {
 const persistConfig = debounce(() => saveConfig(state.config), 400);
 const persistTrames = debounce(() => saveTrames(state.trames), 400);
 const persistActes = debounce(() => saveActes(state.actes), 400);
+const persistInformations = debounce(() => saveInformations(state.informations), 400);
 
 export function touch(what = "config", { rerender = true } = {}) {
   if (what === "config") persistConfig();
   if (what === "trames") persistTrames();
   if (what === "actes") persistActes();
+  if (what === "informations") persistInformations();
   if (rerender) emit();
 }
 
@@ -142,11 +148,12 @@ function appliquerMarqueDeploiement(config) {
 
 // Charge les données du registre et rouvre la session enregistrée sur ce poste.
 async function chargeDonnees() {
-  const { config, trames, actes, users, session, firstRun } = await bootstrap();
+  const { config, trames, actes, users, session, informations, firstRun } = await bootstrap();
   state.config = config;
   state.trames = trames;
   state.actes = actes;
   state.users = users;
+  state.informations = informations || [];
   const fromSession = session?.userId ? users.find((u) => u.id === session.userId) : null;
   // Un compte désactivé — ou un compte de démonstration alors que l'annuaire est
   // branché — ne rouvre pas de session : on repart de l'écran de connexion.
@@ -736,21 +743,63 @@ const ROUTE_WITH_ID = ["trame", "rediger", "acte", "aide", "modifier", "publicat
 // L'identifiant ELI est lui-même une adresse de l'instance (voir
 // src/lib/recueil.js, `adresseEli`) : elle désigne l'acte — et sa version en
 // vigueur — sans rien dire des adresses internes du recueil.
-const CLES_PUBLIQUES = ["acte", "format", "recueil", "eli"];
+//
+// « page » et « info » (1.5.3) portent les SOUS-PAGES de l'espace public :
+// mentions légales, accessibilité, et les informations publiées par
+// l'administration — chacune avec son adresse, à la manière de `?acte=`.
+//
+// « bulletin » (1.6.0) porte un NUMÉRO du Bulletin des actes, et « bulletins »
+// son FLUX (« ?bulletins=rss »). Les deux sont des adresses que l'on cite : le
+// bulletin se partage comme un acte, et le flux se donne à un lecteur de flux.
+const CLES_PUBLIQUES = ["acte", "format", "recueil", "eli", "page", "info", "bulletin", "bulletins"];
+
+// Le drapeau de l'atelier (« ?atelier »). L'espace public est à la RACINE ;
+// l'atelier, lui, se demande : c'est ce qui permet de le restreindre (à un
+// réseau, à des adresses) sans fermer le recueil. Voir src/lib/recueil.js.
+const CLE_ATELIER = "atelier";
+
+// L'adresse demande-t-elle l'ATELIER ? Deux écritures, la même intention :
+// « ?atelier » sur une page statique (où rien ne peut réécrire les chemins), et
+// le chemin « /atelier » sur une installation auto-hébergée, où nginx le sert
+// vraiment. `src/ui/app.js` s'en sert aussi pour savoir sur quoi retomber quand
+// l'adresse est illisible.
+export const demandeAtelier = () =>
+  new URLSearchParams(location.search || "").has(CLE_ATELIER) || /\/atelier\/?$/.test(location.pathname || "");
 
 // L'URL suit la page du recueil — jamais l'inverse : c'est ce qui donne à un
 // acte publié une adresse que l'on partage. Les paramètres de la plateforme
 // (`__generatorLastEditTime`…) et le fragment de l'environnement d'édition sont
 // conservés : on ne touche qu'aux nôtres, et l'échec est sans conséquence
 // (l'écran, lui, est déjà rendu).
-export function majUrlRecherche(params = {}) {
+//
+// `atelier` : `true` pose le drapeau (on entre dans l'atelier), `false` le
+// retire (on revient à l'espace public), `null` (défaut) n'y touche pas.
+export function majUrlRecherche(params = {}, { atelier = null } = {}) {
   try {
     const qs = new URLSearchParams(location.search || "");
     for (const k of CLES_PUBLIQUES) qs.delete(k);
     for (const [k, v] of Object.entries(params)) if (v) qs.set(k, String(v));
-    const s = qs.toString();
+    if (atelier === true) qs.set(CLE_ATELIER, "1");
+    else if (atelier === false) qs.delete(CLE_ATELIER);
+    // « ?atelier » plutôt que « ?atelier=1 » : le drapeau se lit tel quel.
+    const s = qs.toString().replace(/(^|&)atelier=1(?=&|$)/, "$1atelier");
     history.replaceState(history.state, "", location.pathname + (s ? "?" + s : "") + location.hash);
   } catch (e) { /* l'adresse est un confort, pas une condition */ }
+}
+
+// L'adresse de l'espace public, remise d'aplomb quand le recueil s'affiche : la
+// RACINE, plus la clé de la page ouverte (« ?acte=… », « ?eli=… », « ?page=… »,
+// « ?info=… »). Le drapeau d'atelier et l'ancien « ?recueil=1 » — l'adresse
+// historique, encore reconnue à la lecture — n'ont rien à y faire.
+export function majUrlPublique() {
+  const p = (state.route && state.route.params) || {};
+  majUrlRecherche(p.id ? { acte: decoder(p.id), format: p.format }
+    : p.eli ? { eli: p.eli }
+      : p.page ? { page: p.page }
+        : p.info ? { info: p.info }
+          : p.bulletin ? { bulletin: p.bulletin, format: p.format }
+            : p.bulletins ? { bulletins: p.bulletins }
+              : {}, { atelier: false });
 }
 
 // Décode une part d'adresse sans jamais lever : une adresse mal formée ne doit
@@ -769,11 +818,22 @@ export function navigate(path, extra = {}) {
   // Sans destination nommée, on va là où mène le site : la page d'accueil, le
   // recueil public (voir `state.route`).
   state.route = { view: view || "recueil", params };
-  majUrlRecherche(view === "recueil"
-    ? (id ? { acte: decoder(id), format: params.format }
-      : params.eli ? { eli: params.eli }
-        : { recueil: "1" })
-    : {});
+  // L'adresse suit l'écran : le recueil porte ses clés (« ?acte=… », « ?eli=… »,
+  // « ?page=… »), et l'atelier son drapeau (« ?atelier »). Quitter l'un pour
+  // l'autre retire le drapeau — sans quoi un lien copié depuis l'atelier
+  // ramènerait un visiteur dans l'atelier plutôt qu'au recueil.
+  const estRecueil = (state.route.view || "recueil") === "recueil";
+  majUrlRecherche(estRecueil
+    ? Object.fromEntries(Object.entries({
+      acte: id ? decoder(id) : "",
+      format: params.format,
+      eli: params.eli,
+      page: params.page,
+      info: params.info,
+      bulletin: params.bulletin,
+      bulletins: params.bulletins,
+    }).filter(([, v]) => v))
+    : {}, { atelier: estRecueil ? false : true });
   emit();
 }
 
@@ -784,12 +844,33 @@ export function navigate(path, extra = {}) {
 // chargement, c'est la route PAR DÉFAUT : le recueil public, la page d'accueil
 // du site. On ne force donc rien ici : c'est `state.route` qui porte l'accueil,
 // et cette fonction ne fait que reconnaître les adresses que l'on connaît.
+//
+// DEUX PORTES (1.5.3). L'espace public est à la racine, sans paramètre : c'est
+// l'adresse que l'on communique. L'atelier se demande — « ?atelier » (page
+// statique) ou le chemin « /atelier » (installation auto-hébergée, où le
+// serveur le sert vraiment) —, et c'est ce qui permet de le restreindre à un
+// réseau sans fermer le recueil.
 export function parseRoute() {
-  // Le recueil public d'abord : c'est par la requête qu'un acte publié a son
-  // adresse (« ?acte=<clé> », « ?recueil=1 », « ?eli=<identifiant> »), et un
-  // visiteur qui suit ce lien ne doit voir ni l'écran de connexion, ni le
-  // recueil vide.
   const qs = new URLSearchParams(location.search || "");
+  // L'atelier passe AVANT le recueil : « ?atelier » est une demande explicite,
+  // quand le recueil est ce qui reste quand on ne demande rien.
+  const demandeAtelierIci = demandeAtelier();
+  const ancre = location.hash || "";
+  const ancreInterne = ancre.startsWith("#/") ? ancre.replace(/^#\/?/, "") : "";
+  if (demandeAtelierIci) {
+    const [v, ...reste] = ancreInterne.split("/");
+    // La vue profonde (« #/actes ») reste honorée : elle vient de l'atelier, et
+    // c'est la seule chose que le fragment porte chez nous. Une vue inconnue est
+    // rattrapée par `normaliserRoute` (src/ui/app.js), qui retombe ici sur
+    // l'atelier — et non sur le recueil.
+    const view = v || "trames";
+    state.route = { view, params: ROUTE_WITH_ID.includes(view) && reste[0] ? { id: reste[0] } : {} };
+    emit();
+    return;
+  }
+  // Le recueil public : c'est par la requête qu'un acte publié a son adresse
+  // (« ?acte=<clé> », « ?recueil=1 », « ?eli=<identifiant> »), et un visiteur qui
+  // suit ce lien ne doit voir ni l'écran de connexion, ni le recueil vide.
   const acte = qs.get("acte");
   if (acte) {
     // `params.id` suit la convention des vues (encodé) ; l'adresse, elle, n'en
@@ -806,21 +887,66 @@ export function parseRoute() {
     emit();
     return;
   }
+  // Les sous-pages de l'espace public (mentions, accessibilité, informations) :
+  // chacune a son adresse, et se suit comme un lien.
+  const page = qs.get("page");
+  if (page) {
+    state.route = { view: "recueil", params: { page } };
+    emit();
+    return;
+  }
+  const info = qs.get("info");
+  if (info) {
+    state.route = { view: "recueil", params: { info } };
+    emit();
+    return;
+  }
+  // UN NUMÉRO DU BULLETIN : son adresse, comme celle d'un acte (« ?bulletin=<id> »).
+  // La page des bulletins passe, elle, par « ?page=bulletins ». Son « &format= »
+  // en fait une représentation en données (JSON, Markdown, texte).
+  const bulletin = qs.get("bulletin");
+  if (bulletin) {
+    state.route = { view: "recueil", params: { bulletin, format: qs.get("format") || "" } };
+    emit();
+    return;
+  }
+  // LE FLUX DU BULLETIN (« ?bulletins=rss|atom ») : l'adresse se donne à un
+  // lecteur de flux, elle ne se consulte pas comme une page.
+  const bulletins = qs.get("bulletins");
+  if (bulletins) {
+    state.route = { view: "recueil", params: { bulletins } };
+    emit();
+    return;
+  }
   if (qs.has("recueil")) {
     state.route = { view: "recueil", params: {} };
     emit();
     return;
   }
-  const ancre = location.hash || "";
   // Ni ancre, ni ancre étrangère : rien à faire (voir le commentaire ci-dessus).
-  if (!ancre.startsWith("#/")) return;
-  const raw = ancre.replace(/^#\/?/, "");
-  const [view, ...rest] = raw.split("/");
+  if (!ancreInterne) return;
+  const [view, ...rest] = ancreInterne.split("/");
   const params = {};
   if (ROUTE_WITH_ID.includes(view) && rest[0]) params.id = rest[0];
   // Une ancre vide (« #/ ») est l'accueil du site : le recueil public.
   state.route = { view: view || "recueil", params };
   emit();
+}
+
+// ------------------------------------------------------- le bulletin (1.6.0)
+// Le recueil public garde en mémoire ce qu'il a lu de l'état du service (la
+// cadence, les numéros parus) et les numéros qu'il a ouverts. Un RÉGLAGE ou un
+// GESTE d'administration en change l'état : cette copie doit être oubliée, sans
+// quoi la page publique continuerait d'afficher ce qui n'est plus vrai — un
+// bulletin éteint qu'on vient d'allumer, une liste de numéros d'avant la
+// composition. Voir src/ui/views/recueil-public.js (`chargerBulletins`).
+export function oublierBulletinsRecueil() {
+  const st = state.recueil;
+  if (!st) return;
+  st.bulletins = undefined;
+  st.chargementBulletins = false;
+  st.bulletinsActes = {};
+  st.flux = undefined;
 }
 
 export const trameById = (id) => state.trames.find((t) => t.id === id);

@@ -15,11 +15,12 @@
 import {
   state, touch, navigate, redrawView, can, visibleTrames, visibleActes,
   journaliser, circuitDe, signalerRedaction, libererRedaction, quiRedige, parapheurActif,
-  revisionPour,
+  revisionPour, revisionRequisePour,
 } from "../state.js";
 import { fullName } from "../../lib/users.js";
 import { ajouterRevision } from "../../lib/historique-brouillons.js";
-import { demarrerValidation, etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
+import { circuitFor, etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
+import { soumettreCircuit } from "../parapheur-actions.js";
 import { etatRevision } from "../../lib/revision.js";
 import { h, clear, button, icon, toast, modal, fitPaper } from "../dom.js";
 import { cadreZoom } from "../zoom.js";
@@ -28,6 +29,7 @@ import { applyPaper, personSignatureName, renderDocument } from "../../lib/rende
 import { styleForDoc } from "../../lib/styles.js";
 import { lignesQualites, decisionsDeSignature } from "../../lib/delegations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
+import { boutonsPdfA } from "../pdfa.js";
 import { download, uid, debounce, formatDate, todayIso, normalizeSpace } from "../../lib/util.js";
 import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
@@ -398,9 +400,21 @@ export function renderRediger(root, params) {
       h("span", { id: "rediger-revision" }),
       button("Changer d'acte", { variant: "tertiary", icon: "doc", title: "Choisir une autre trame, ou reprendre un acte commencé", onClick: () => navigate("rediger") }),
       button("Enregistrer", { variant: "secondary", icon: "check", onClick: save }),
-      button("Exporter…", { variant: "primary", icon: "download", onClick: () => exportMenu() }),
+      // L'action mise en avant est le PROCHAIN PAS du parcours (soumettre au
+      // circuit, aller à la signature…), pas l'export : exporter est un geste
+      // de sortie, à faire en fin de course, et le mettre en avant laissait
+      // croire au rédacteur novice que son acte était terminé une fois exporté.
+      h("span", { id: "rediger-suite" }),
+      button("Exporter…", { variant: "tertiary", icon: "download", title: "Imprimer, transmettre ou archiver l'acte — ce n'est pas la fin du parcours : un acte se valide, se signe et se publie.", onClick: () => exportMenu() }),
     ),
   ));
+
+  // Le parcours de l'acte, en une ligne : où en est-on, et quelle est la suite.
+  // C'est ce qui répond à la question « et maintenant, je fais quoi ? » — le
+  // rédacteur novice ne devine pas que le circuit, puis la signature, puis la
+  // publication s'enchaînent après la rédaction.
+  const parcours = h("div", { class: "rx-parcours", id: "rediger-parcours" });
+  root.appendChild(parcours);
 
   // Un autre poste rédige le même acte : on le dit, plutôt que de laisser deux
   // personnes s'étonner d'un conflit à l'enregistrement.
@@ -567,6 +581,8 @@ export function renderRediger(root, params) {
     }
     paintParapheur();
     paintRevision();
+    paintParcours();
+    paintSuite();
   }
 
   // Où en est l'acte devant le réviseur : le rédacteur doit savoir que son
@@ -645,23 +661,107 @@ export function renderRediger(root, params) {
     if (note) el.appendChild(h("span", { class: "fr-small fr-muted", style: { marginLeft: "6px" }, text: note }));
   }
 
+  // ------------------------------------------------------------- parcours
+  // Où en est l'acte, et quelle est la suite. Un acte suit toujours le même
+  // chemin — on le rédige, on le soumet au circuit, un réviseur le contrôle
+  // quand la collectivité l'exige, on le signe, on le publie — mais ce chemin
+  // n'est pas visible dans l'écran de rédaction : le rédacteur devait le
+  // connaître par cœur. Cette ligne le lui montre, et met en avant le geste à
+  // faire maintenant (voir `paintSuite`, qui pose le bouton dans l'en-tête).
+  function parcoursDe(acte) {
+    const circuit = acte ? circuitDe(acte) : circuitFor(state.config, { trame });
+    const v = acte?.validation;
+    const valide = !!(v && validationAJour(acte) && v.statut === "valide");
+    const signe = !!(acte && (acte.original || ["signee", "publie", "en_attente"].includes(acte.statut || "")));
+    const publie = !!(acte && (acte.publication || acte.statut === "publie"));
+    const rev = acte ? revisionPour(acte) : { requise: false };
+    const etapes = [
+      { cle: "rediger", label: "Rédiger", fait: !!acte, hint: acte ? "" : "en cours d'écriture" },
+    ];
+    if (circuit) etapes.push({ cle: "circuit", label: "Soumettre au circuit", fait: valide, hint: circuit.label });
+    if (rev.requise) etapes.push({ cle: "revision", label: "Révision", fait: acte?.revision?.statut === "valide", hint: "contrôle avant signature" });
+    etapes.push({ cle: "signer", label: "Signer", fait: signe, hint: "" });
+    if (tramePublishable(trame)) etapes.push({ cle: "publier", label: "Publier", fait: publie, hint: "recueil des actes" });
+    // La première étape non faite est celle où l'on se trouve ; les suivantes
+    // sont à venir. Si tout est fait, il n'y a plus d'étape en cours.
+    let encours = false;
+    for (const e of etapes) {
+      if (e.fait) e.etat = "fait";
+      else if (!encours) { e.etat = "encours"; encours = true; }
+      else e.etat = "avenir";
+    }
+    return etapes;
+  }
+
+  function paintParcours() {
+    const el = root.querySelector("#rediger-parcours");
+    if (!el) return;
+    clear(el);
+    const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
+    const etapes = parcoursDe(acte);
+    const liste = h("ol", { class: "rx-parcours__liste" });
+    etapes.forEach((e, i) => {
+      liste.appendChild(h("li", {
+        class: "rx-parcours__etape rx-parcours__etape--" + e.etat,
+        title: e.hint || "",
+      },
+        h("span", { class: "rx-parcours__puce" }, h("span", { class: "rx-parcours__num", text: String(i + 1) })),
+        h("span", { class: "rx-parcours__label", text: e.label }),
+      ));
+    });
+    el.appendChild(liste);
+    // Ce que le rédacteur doit retenir, en une phrase : l'export n'est pas la
+    // fin du parcours.
+    const libelle = h("span", { class: "rx-parcours__note" });
+    const faites = etapes.filter((e) => e.etat === "fait").length;
+    if (faites === etapes.length) {
+      libelle.textContent = "Parcours terminé : l'acte est signé" + (tramePublishable(trame) ? " et publié au recueil." : " et conservé au registre.");
+    } else {
+      const courante = etapes.find((e) => e.etat === "encours");
+      libelle.textContent = "Étape en cours : " + (courante?.label || "") + ". Exporter sert à imprimer ou transmettre l'acte — ce n'est pas la fin du parcours.";
+    }
+    el.appendChild(libelle);
+  }
+
+  // Le bouton mis en avant dans l'en-tête : le prochain geste, et lui seul.
+  // Ailleurs, les gestes utiles sont déjà là (enregistrer, exporter) ; ici on
+  // répond à « je fais quoi maintenant ? ».
+  function paintSuite() {
+    const el = root.querySelector("#rediger-suite");
+    if (!el) return;
+    clear(el);
+    const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
+    if (!acte) return;
+    const circuit = circuitDe(acte);
+    const v = acte.validation;
+    if (!v && circuit) {
+      el.appendChild(button("Soumettre au circuit", {
+        variant: "primary", icon: "upload",
+        title: `Circuit « ${circuit.label} » : ${circuit.steps.length} étape(s)`,
+        onClick: () => soumettre(acte),
+      }));
+      return;
+    }
+    if (validationAJour(acte) && v?.statut === "valide" && can("actes.signer")) {
+      const signe = acte.original || ["signee", "publie", "en_attente"].includes(acte.statut || "");
+      el.appendChild(button(signe ? "Signature et publication" : "Aller à la signature", {
+        variant: "primary", icon: "lock",
+        title: signe ? "Signer puis publier l'acte" : "Le circuit est validé : l'acte passe à la signature",
+        onClick: () => { state.signature = { tab: "circuit", acteId: acte.id }; navigate("signature"); },
+      }));
+    }
+  }
+
   // Soumettre l'acte au circuit : on enregistre d'abord (le circuit porte sur le
   // texte enregistré, pas sur les frappes en cours), puis on ouvre le circuit.
+  // Le geste lui-même est partagé avec le parapheur et la fiche de l'acte
+  // (src/ui/parapheur-actions.js) : une seule façon de journaliser le dépôt et
+  // de prévenir l'étape ouverte, quel que soit l'écran d'où l'on part.
   async function soumettre(acte) {
     const circuit = circuitDe(acte);
     if (!circuit) { toast("Aucun circuit ne s'applique à cet acte.", "warning"); return; }
     save();
-    demarrerValidation(acte, circuit, state.user);
-    acte.updatedAt = new Date().toISOString();
-    const etape = etapeActive(acte.validation);
-    await journaliser({
-      action: "parapheur.depot", cible: "acte", cibleLabel: acte.numero || acte.id, acteId: acte.id,
-      detail: `soumis au circuit « ${circuit.label} »` + (etape ? " — étape « " + etape.label + " »" : ""),
-      to: [etape ? (etape.role === "administrateur" ? "role:administrateur" : "role:editeur") : ""].filter(Boolean),
-    });
-    touch("actes", { rerender: false });
-    toast("Acte enregistré et soumis au circuit de validation", "success");
-    redraw();
+    await soumettreCircuit(acte, circuit, { paint: redraw });
   }
 
   // ------------------------------------------------------ annexes & adoption
@@ -2139,6 +2239,12 @@ export function renderRediger(root, params) {
         ecarts: doc.ecarts.map((e) => ({ addr: e.addr, label: e.label, original: e.original, current: e.current })),
         meta: doc.meta, issues: doc.issues, notes: doc.notes,
       }, null, 2))),
+    ));
+    // Le PDF/A : la forme d'ARCHIVAGE, à côté du PDF d'impression. Les deux
+    // niveaux sont offerts — PDF/A-2b est le défaut, PDF/A-1b reste utile aux
+    // systèmes qui n'acceptent que la première version de la norme.
+    body.appendChild(h("div", { class: "fr-row" },
+      ...boutonsPdfA(doc, config, { base, disabled: !!blocking.length }),
     ));
     modal({ title: "Exporter l'acte", body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });
   }

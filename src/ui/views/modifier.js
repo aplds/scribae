@@ -46,6 +46,7 @@ import { compile, interpolate } from "../../lib/compile.js";
 import { reserverNumero, fixerSequence, prochainNumeroLibre } from "../../lib/numbering.js";
 import { renderDocument, applyPaper } from "../../lib/render.js";
 import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
+import { boutonPdfA, boutonsPdfA } from "../pdfa.js";
 import { parseDocumentFile } from "../../lib/akn.js";
 import { ecarts, locateAddr } from "../../lib/redaction.js";
 import { estAbroge } from "../../lib/abrogations.js";
@@ -744,6 +745,7 @@ function renderWorkspace(root) {
       button("Agrandir", { variant: "secondary", size: "sm", icon: "eye", onClick: () => previewModal(doc, tab) }),
       button("Exporter…", { variant: "secondary", size: "sm", icon: "download", onClick: () => exportMenu(tab, b) }),
       button("Imprimer / PDF", { variant: "secondary", size: "sm", onClick: () => printDocument(doc, config, null) }),
+      boutonPdfA(doc, config, { base: fileName(doc, tab), size: "sm" }),
       button("Word (.doc)", { variant: "secondary", size: "sm", onClick: () => download(fileName(doc, tab) + ".doc", exportWordDoc(doc, config, null), "application/msword") }),
     ));
     requestAnimationFrame(() => fitPaper(box, p));
@@ -764,6 +766,7 @@ function renderWorkspace(root) {
       wide: true,
       actions: (close) => [
         button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, config, null) }),
+        boutonPdfA(doc, config, { base: fileName(doc, tab) }),
         button("Fermer", { variant: "secondary", onClick: close }),
       ],
     });
@@ -807,6 +810,7 @@ function renderWorkspace(root) {
       button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, config, null) }),
       button("Word (.doc)", { variant: "secondary", onClick: () => download(name + ".doc", exportWordDoc(doc, config, null), "application/msword") }),
     ));
+    body.appendChild(h("div", { class: "fr-row" }, ...boutonsPdfA(doc, config, { base: name })));
     body.appendChild(h("p", { class: "fr-small fr-muted", text: "Référence ELI : " + (doc.meta?.eli || "—") + (consolide ? " — même « work » que l'acte d'origine : la consolidation en est une nouvelle version." : "") }));
     if (consolide) body.appendChild(h("p", { class: "fr-small fr-muted", text: doc.meta?.consolidated?.showChanges === true ? "Suivi des modifications affiché : ajouts et suppressions apparents, tableau en fin de document." : "Suivi des modifications masqué : texte en vigueur, mention sous chaque article modifié. Se règle depuis l'onglet « Version consolidée » de l'écran de modification." }));
     modal({ title: consolide ? "Exporter la version consolidée" : "Exporter l'acte modificatif", body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });
@@ -1637,6 +1641,7 @@ function exportDocMenu(doc, acte) {
       button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, state.config, null) }),
       button("Word (.doc)", { variant: "secondary", onClick: () => download(name + ".doc", exportWordDoc(doc, state.config, null), "application/msword") }),
     ),
+    h("div", { class: "fr-row" }, ...boutonsPdfA(doc, state.config, { base: name })),
     h("p", { class: "fr-small fr-muted", text: "Référence ELI : " + (doc.meta?.eli || "—") }),
   );
   modal({ title: "Exporter — " + (acte.numero || "acte"), body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });

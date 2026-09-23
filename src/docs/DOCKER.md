@@ -5,8 +5,8 @@ le service Node, la façade nginx et le code de l'application —, comment la **
 sur un registre (Docker Hub, GHCR, un registre privé…), et comment la **lancer**.
 
 > L'**autre** façon de déployer est le `docker-compose.yml` de `src/server/` : trois
-> services séparés (`db`, `api`, `web`), le code de l'application **monté** depuis le
-> dossier du dépôt. L'image autonome, elle, **embarque** ce code : elle se lance sans
+> services séparés (`db`, `api`, `web`), le code de l'application **embarqué dans l'image
+> de la façade**. L'image autonome, elle, **embarque** ce code : elle se lance sans
 > dépôt, et c'est elle qu'on publie sur un registre. Voir `src/server/README.md` pour la
 > pile Compose.
 
@@ -40,7 +40,7 @@ conserve à part. L'image se connecte à une base MariaDB / MySQL joignable
 Depuis la **racine du dépôt** (le dossier qui contient `src/`) :
 
 ```bash
-docker build -f src/server/Dockerfile -t scribae:1.5.0 .
+docker build -f src/server/Dockerfile -t scribae:1.5.3 .
 ```
 
 Le contexte est la racine du dépôt ; le Dockerfile ne copie que `src/`, donc la taille du
@@ -50,8 +50,8 @@ contexte n'entre pas dans l'image. Un fichier d'exclusion (`src/server/Dockerfil
 Vérifier ensuite :
 
 ```bash
-docker image ls scribae:1.5.0
-docker run --rm scribae:1.5.0 nginx -v
+docker image ls scribae:1.5.3
+docker run --rm scribae:1.5.3 nginx -v
 ```
 
 ## 4. Publier sur un registre
@@ -60,7 +60,7 @@ docker run --rm scribae:1.5.0 nginx -v
 
 ```bash
 REGISTRE=moncompte          # compte Docker Hub, ou ghcr.io/moncompte, ou un registre privé
-VERSION=1.5.0
+VERSION=1.5.3
 
 docker build -f src/server/Dockerfile -t "$REGISTRE/scribae:$VERSION" .
 docker tag "$REGISTRE/scribae:$VERSION" "$REGISTRE/scribae:latest"
@@ -83,7 +83,7 @@ docker buildx build \
 ```
 
 > Une étiquette `latest` mobile est commode, mais une installation de service gagne à
-> ÉPINGLER une version (`scribae:1.5.0`) : `docker pull` reproductible, et mise à jour
+> ÉPINGLER une version (`scribae:1.5.3`) : `docker pull` reproductible, et mise à jour
 > délibérée.
 
 ## 5. Lancer
@@ -109,6 +109,7 @@ docker run -d --name scribae --network scribae --restart unless-stopped \
   -e DB_USER=scriba \
   -e DB_PASSWORD='le-mot-de-passe-applicatif' \
   -e DB_NAME=scriba \
+  -e DB_ROOT_PASSWORD='un-mot-de-passe-root-long' \
   -e AUTO_MIGRATE=true \
   -e AUTH_MODE=password \
   -e ADMIN_LOGIN=admin \
@@ -119,8 +120,14 @@ docker run -d --name scribae --network scribae --restart unless-stopped \
   "$REGISTRE/scribae:$VERSION"
 ```
 
+- `DB_ROOT_PASSWORD` est le mot de passe root de la base ci-dessus : le conteneur s'en sert, **au
+  démarrage seulement**, pour remettre le compte applicatif au mot de passe de `DB_PASSWORD` et
+  appliquer le schéma — sinon, un dossier de données déjà initialisé garderait l'ancien mot de passe
+  et une base sans tables. Omettre la variable quand la base est administrée ailleurs (§ 5.2).
+
 - `AUTO_MIGRATE=true` applique le schéma au premier démarrage (tables créées si absentes).
-  C'est **idempotent** ; on peut le laisser, ou le retirer une fois la base en service.
+  C'est **idempotent** ; on peut le laisser, ou le retirer une fois la base en service. Depuis la
+  **1.5.3d**, le service l'applique aussi quand il se rétablit après une panne de base.
 - `COOKIE_SECURE=false` n'est là que pour l'essai **en clair** sur `http://`. En
   production (HTTPS), laissez la valeur par défaut (`true`).
 - `-p 8080:80` publie la façade ; `web` dans la pile Compose publiait `HTTP_PORT`.
@@ -142,6 +149,11 @@ docker run -d --name scribae --restart unless-stopped -p 8080:80 \
 Vérifiez que votre serveur MariaDB accepte les connexions distantes (`bind-address`,
 compte `'scriba'@'%'`, pare-feu), et que le trafic est chiffré ou confiné au réseau local.
 
+Ici, pas de `DB_ROOT_PASSWORD` : la base est administrée par son propre service. Si le compte
+applicatif doit être remis au mot de passe de ce conteneur (ou le schéma appliqué), faites-le à la
+main — `docker exec scribae node /srv/service/server.mjs --reconcilier` avec `DB_ROOT_PASSWORD`
+fourni le temps de la commande (§ 9).
+
 ### 5.3. Le même service, en Compose
 
 ```yaml
@@ -158,13 +170,14 @@ services:
     volumes: [donnees:/var/lib/mysql]
 
   scribae:
-    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.5.0}
+    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.5.3}
     restart: unless-stopped
     environment:
       DB_HOST: db
       DB_USER: ${DB_USER:-scriba}
       DB_PASSWORD: ${DB_PASSWORD:?}
       DB_NAME: ${DB_NAME:-scriba}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?}
       AUTO_MIGRATE: "true"
       AUTH_MODE: ${AUTH_MODE:-password}
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
@@ -188,8 +201,9 @@ de déploiement*). Les plus utiles au démarrage :
 
 | Variable | Rôle |
 |---|---|
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | la base de données |
-| `AUTO_MIGRATE=true` | appliquer le schéma au démarrage (premier lancement) |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | la base de données. Avec `DB_ROOT_PASSWORD`, le conteneur **remet lui-même le compte applicatif** au mot de passe de son environnement et **applique le schéma** à chaque démarrage (voir § 9) ; sans lui, ces deux gestes se font à la main (`node /srv/service/server.mjs --reconcilier`) |
+| `DB_ROOT_PASSWORD` | mot de passe administrateur de la base : il n'est lu que pour l'alignement du compte applicatif et le schéma, au démarrage. À omettre quand la base est administrée ailleurs — le conteneur ne touche alors à rien |
+| `AUTO_MIGRATE=true` | appliquer le schéma au démarrage (premier lancement, et à chaque reprise de la base) |
 | `AUTH_MODE` | `password` (défaut sûr) ou `demo` (essai, sans mot de passe) |
 | `ADMIN_LOGIN`, `ADMIN_PASSWORD` | le compte d'administration, créé au premier démarrage |
 | `DEMO=false` | référentiel **vierge** : aucune donnée fictive |
@@ -233,9 +247,14 @@ pas.
 
 ```bash
 docker logs -f scribae            # le service journalise au démarrage, dont les variables refusées
-docker exec scribae node /srv/service/server.mjs --migrate      # appliquer le schéma à la main
+docker exec scribae node /srv/service/server.mjs --reconcilier  # remettre le compte applicatif au mot de passe du conteneur, puis appliquer le schéma (DB_ROOT_PASSWORD requis)
+docker exec scribae node /srv/service/server.mjs --migrate      # appliquer le schéma seul (compte déjà en règle)
 docker exec -it scribae sh        # dans le conteneur
 ```
+
+Le conteneur fait **déjà** ces deux gestes au démarrage lorsque `DB_ROOT_PASSWORD` lui est fourni
+(§ 6) ; depuis la **1.5.3d**, le service rééprouve en outre la base à la demande : une panne
+réparée pendant qu'il tourne n'exige pas de le recréer.
 
 - **Mise à jour** : `docker pull "$REGISTRE/scribae:$VERSION"`, puis arrêtez et relancez le
   conteneur avec la nouvelle étiquette (ou `docker compose up -d` si vous utilisez le
@@ -247,6 +266,33 @@ docker exec -it scribae sh        # dans le conteneur
 - **Registre privé** : l'image ne contient **aucun secret** (les mots de passe viennent de
   l'environnement au lancement), mais elle embarque votre code — un registre privé reste
   préférable pour une collectivité.
+
+## 9 bis. Si la façade refuse de démarrer : « Permission denied »
+
+Sur certaines machines, un conteneur n'a pas le droit de **lire** les fichiers montés depuis
+l'hôte — étiquette de sécurité (SELinux, AppArmor), système de fichiers réseau (NFS, SMB), partage
+de machine virtuelle, espace de noms d'utilisateurs. nginx le dit alors ainsi, et refuse de
+démarrer :
+
+```
+/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+find: /docker-entrypoint.d/40-scriba-web.sh: Permission denied
+10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf is not a file or does not exist
+2026/09/23 12:19:05 [emerg] 1#1: open() "/etc/nginx/conf.d/default.conf" failed (13: Permission denied)
+nginx: [emerg] open() "/etc/nginx/conf.d/default.conf" failed (13: Permission denied)
+```
+
+Ce n'est pas un droit du fichier qu'on corrigerait quelque part : **`stat` lui-même est refusé**
+(le script `10-listen-on-ipv6…` ne voit même pas que le fichier existe), et `root` dans le
+conteneur n'y peut rien — le refus vient du montage, pas du fichier. D'où la règle des deux voies
+de déploiement :
+
+- **l'image autonome** (ce document) et la **pile Compose de `src/server/`** ne montent AUCUN
+  fichier de l'hôte : le code, la façade et le schéma entrent dans les images. C'est la voie à
+  suivre sur une machine de ce genre — rien à régler, rien à étiqueter ;
+- si vous devez conserver un montage de votre côté, donnez-lui l'option **`:z`** (par exemple
+  `- ./mon-dossier:/srv/app:ro,z`) : Docker réétiquette alors le fichier pour le conteneur. C'est
+  la cause la plus fréquente, et la seule correction qui ne demande pas de reconstruire.
 
 ## 10. Reconstruire après une modification du code
 
@@ -262,6 +308,7 @@ distingue pas d'une autre.
 
 ## 11. Voir aussi
 
-- `src/server/README.md` — la pile Docker Compose (trois services, code monté) ;
+- `src/server/README.md` — la pile Docker Compose (trois services, tous construits : aucun
+  fichier de l'hôte n'est monté) ;
 - `src/docs/VARIABLES.md` — la référence des variables d'environnement ;
 - `src/docs/ADMINISTRATION.md` — l'exploitation : rôles, sauvegardes, supervision, migration.

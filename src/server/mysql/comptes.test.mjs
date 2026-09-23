@@ -138,36 +138,50 @@ async function connecter(banc, login, motDePasse) {
 }
 
 const poserMdp = async (banc, userId, motDePasse, mustChange = false) => {
-  await banc.store.ecrireMdp(userId, { hash: scellerMotDePasse(crypto, motDePasse, SCRYPT_TEST), mustChange });
+  await banc.store.ecrireMdp(userId, { hash: await scellerMotDePasse(crypto, motDePasse, SCRYPT_TEST), mustChange });
 };
 
 // ------------------------------------------------------------ le mot de passe
-test("un mot de passe est scellé, jamais conservé en clair", () => {
-  const scelle = scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
+test("un mot de passe est scellé, jamais conservé en clair", async () => {
+  const scelle = await scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
   assert.match(scelle, /^scrypt\$1024\$8\$1\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
   assert.ok(!scelle.includes(MDP_ADMIN));
 });
 
-test("deux scellements du même mot de passe diffèrent (sel tiré au hasard)", () => {
-  const a = scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
-  const b = scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
+test("deux scellements du même mot de passe diffèrent (sel tiré au hasard)", async () => {
+  const a = await scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
+  const b = await scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
   assert.notEqual(a, b);
-  assert.ok(verifierMotDePasse(crypto, MDP_ADMIN, a, SCRYPT_TEST).ok);
-  assert.ok(verifierMotDePasse(crypto, MDP_ADMIN, b, SCRYPT_TEST).ok);
+  assert.ok((await verifierMotDePasse(crypto, MDP_ADMIN, a, SCRYPT_TEST)).ok);
+  assert.ok((await verifierMotDePasse(crypto, MDP_ADMIN, b, SCRYPT_TEST)).ok);
 });
 
-test("la vérification refuse un mauvais mot de passe, un scellé illisible, un dérivé incohérent", () => {
-  const scelle = scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
-  assert.equal(verifierMotDePasse(crypto, MDP_ADMIN + "x", scelle, SCRYPT_TEST).ok, false);
-  assert.equal(verifierMotDePasse(crypto, MDP_ADMIN, "n'importe quoi", SCRYPT_TEST).ok, false);
+test("la vérification refuse un mauvais mot de passe, un scellé illisible, un dérivé incohérent", async () => {
+  const scelle = await scellerMotDePasse(crypto, MDP_ADMIN, SCRYPT_TEST);
+  assert.equal((await verifierMotDePasse(crypto, MDP_ADMIN + "x", scelle, SCRYPT_TEST)).ok, false);
+  assert.equal((await verifierMotDePasse(crypto, MDP_ADMIN, "n'importe quoi", SCRYPT_TEST)).ok, false);
   assert.equal(lireScelle(crypto, "scrypt$1024$8$1$pas-du-base64$xx"), null);
 });
 
-test("un dérivé scellé avec des paramètres plus faibles demande un recalcul", () => {
-  const faible = scellerMotDePasse(crypto, MDP_ADMIN, { N: 1024, r: 8, p: 1 });
-  const v = verifierMotDePasse(crypto, MDP_ADMIN, faible, { N: 65536, r: 8, p: 1 });
+test("un dérivé scellé avec des paramètres plus faibles demande un recalcul", async () => {
+  const faible = await scellerMotDePasse(crypto, MDP_ADMIN, { N: 1024, r: 8, p: 1 });
+  const v = await verifierMotDePasse(crypto, MDP_ADMIN, faible, { N: 65536, r: 8, p: 1 });
   assert.equal(v.ok, true);
   assert.equal(v.needsRehash, true);
+});
+
+// Le service ne dérive PAS sur le fil principal (voir le port de server.mjs et
+// l'étude de charge) : le port de crypto peut donc rendre une PROMESSE. Le
+// domaine doit l'attendre sans que cela change rien — c'est ce contrat que ce
+// test fixe, pour qu'un retour au dérivé synchrone ne passe pas inaperçu.
+test("le port de crypto peut rendre le dérivé par une promesse", async () => {
+  const cryptoTardif = {
+    ...crypto,
+    scrypt: (mdp, sel, o) => new Promise((r) => { const cle = crypto.scrypt(mdp, sel, o); r(cle); }),
+  };
+  const scelle = await scellerMotDePasse(cryptoTardif, MDP_ADMIN, SCRYPT_TEST);
+  assert.ok((await verifierMotDePasse(cryptoTardif, MDP_ADMIN, scelle, SCRYPT_TEST)).ok);
+  assert.equal((await verifierMotDePasse(cryptoTardif, MDP_ADMIN + "x", scelle, SCRYPT_TEST)).ok, false);
 });
 
 test("la politique de mot de passe écarte les cas les plus devinables", () => {

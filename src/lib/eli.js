@@ -16,11 +16,9 @@
 
 import { renderDocument } from "./render.js";
 import { formatDate } from "./util.js";
-import { styleForDoc } from "./styles.js";
-import { documentCss } from "./export.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
 import { cleService } from "./cle-service.js";
-import { LICENCE_DEFAUT } from "./recueil.js";
+import { LICENCE_DEFAUT, CSS_DOCUMENT_WEB } from "./recueil.js";
 
 const ELI_CODES = {
   decision: "dec",
@@ -171,8 +169,14 @@ export function buildWebVersion({ doc, config, record }) {
   const lienOrigine = versionOrigine
     ? `<a href="${esc(versionOrigine.eliUri)}">${esc([versionOrigine.numero ? "n° " + versionOrigine.numero : "l'acte d'origine", versionOrigine.dateDocument ? "du " + dlong(versionOrigine.dateDocument) : ""].filter(Boolean).join(" "))}</a>`
     : "l'acte d'origine";
-  const style = styleForDoc(config, doc);
-  const body = doc ? renderDocument(doc, config, { style, abrogations: true }).outerHTML : (r.bodyHtml || "");
+  // La version en ligne ne suit PAS la charte de l'entité : elle suit la
+  // FEUILLE DE STYLE WEB (voir `CSS_DOCUMENT_WEB`, lib/recueil.js). Deux
+  // entités aux chartes différentes — logo, police, filets, couleurs — doivent
+  // présenter leurs actes à l'identique sur l'interface publique. La charte
+  // habille le PAPIER (aperçu, PDF, Word, PDF/A) ; la page publiée suit la
+  // cohérence du recueil. D'où `sheet: false` : le document est rendu sans
+  // `data-sheet`, sans l'en-tête ni le pied de la charte.
+  const body = doc ? renderDocument(doc, config, { sheet: false, abrogations: true }).outerHTML : (r.bodyHtml || "");
   const formatLinks = [
     ["HTML", "text/html"],
     ["Akoma Ntoso", "application/akn+xml"],
@@ -203,6 +207,12 @@ a{color:var(--brand)}
 @media(min-width:1180px){.paper{min-height:${A4_HEIGHT}}}
 @media(max-width:820px){.paper{padding:20px 18px}}
 .badge{display:inline-block;background:#e7edf7;color:var(--brand);border-radius:4px;padding:2px 8px;font-size:.76rem;font-weight:600}
+/* Publication RÉSERVÉE AUX AGENTS (circulaire interne) : la page le dit à sa
+   place, pour qu'un lecteur connecté sache pourquoi elle n'est pas au recueil
+   public. Voir src/server/mysql/actes.mjs (le drapeau reserve). */
+.badge--reserve{background:#fdecea;color:#8a1c10}
+.reserve{border-left:4px solid #8a1c10;background:#fdf1f0;padding:10px 12px;border-radius:3px;margin:0 0 14px}
+.reserve strong{display:block;font-size:.95rem}
 .eli{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.78rem;word-break:break-all}
 .side{background:#fff;border:1px solid #d5dbe4;border-radius:4px;padding:14px 16px;font-size:.85rem;margin-bottom:14px}
 .side h3{margin:0 0 8px;font-size:.95rem}
@@ -220,10 +230,12 @@ a{color:var(--brand)}
 .oppo--doc{border-left-color:#5a6472;background:#f7f8fa}
 .formats{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .formats span{border:1px solid #c7cfdb;border-radius:3px;padding:2px 7px;font-size:.76rem;color:#3a3a3a}
-/* Le corps de l'acte est habillé par sa charte graphique (feuille de style) :
-   mêmes règles que le HTML autonome et le PDF — la version en ligne ne se
-   présente pas autrement que l'acte imprimé. */
-${documentCss(config, style)}
+/* Le corps de l'acte porte la FEUILLE DE STYLE WEB de la version en ligne : la
+   charte graphique de l'entité n'est PAS appliquée ici (voir CSS_DOCUMENT_WEB,
+   lib/recueil.js). Deux entités qui suivent deux chartes différentes
+   présentent leurs actes à l'identique sur l'interface publique ; la charte,
+   elle, habille le papier (aperçu, PDF, Word, PDF/A). */
+${CSS_DOCUMENT_WEB}
 /* Les marques de la version consolidée sont propres à la publication. */
 .doc ins{background:#e8f6ec;text-decoration:none;box-shadow:inset 0 0 0 1px #b8e0c4}
 .doc del{background:#fbeceb;box-shadow:inset 0 0 0 1px #f0c9c7;color:#7a7a7a}
@@ -257,10 +269,11 @@ ${A4_BREAK_CSS}
   <span class="hdr__mark">${esc(brand.name || "")}</span>
   <span class="hdr__rep">${esc(r.recueil || settings.recueil)}</span>
   <span class="badge">${esc(r.nature || "Acte")} ${esc(r.numero || "")}</span>
+  ${r.reserve ? `<span class="badge badge--reserve">Diffusion réservée aux agents</span>` : ""}
 </div></div>
 <div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : nonJuridique ? "Documents" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
-<div class="main"><div class="grid">
-  <div class="paper"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
+<div class="main">${r.reserve ? `<div class="reserve"><strong>Diffusion réservée aux agents</strong>Cet acte est publié au recueil, mais sa diffusion est restreinte : il n'est montré qu'aux personnes connectées. Il ne figure pas dans la liste publique des actes, ni dans les index ouverts (recueil.json, llms.txt, sitemap.xml).</div>` : ""}<div class="grid">
+  <div class="paper doc-web"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
   <div class="pub-aside">
     <div class="side">
       <h3>Publication</h3>

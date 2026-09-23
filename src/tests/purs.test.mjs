@@ -333,3 +333,30 @@ test("chrono : les lignes, les rangs libres et les filtres", async (t) => {
   assert.equal(titre.length, chrono.COLONNES_CHRONO.length, "l'export a les mêmes colonnes que le tableau");
   assert.equal(titre[0], "Numéro");
 });
+
+// ---------------------------------------------------- informations du recueil
+// L'ordre de l'ATELIER ne peut pas être celui du SITE : la liste de l'écran
+// « Informations » doit montrer les BROUILLONS — sinon le filtre « Brouillons »
+// n'a rien à filtrer, et un billet écrit mais non publié devient introuvable
+// dans l'écran qui sert à l'écrire. Le recueil public, lui, ne connaît que les
+// billets publiés et ne doit jamais en laisser sortir un seul. Deux publics,
+// deux ordres, deux fonctions : c'est ce que ce test fixe.
+test("informations : l'atelier voit les brouillons, le recueil public non", async (t) => {
+  const inf = await charger("../lib/informations.js");
+  if (!inf) return t.skip("module indisponible hors navigateur");
+  const liste = [
+    { id: "i1", slug: "publie-epingle", titre: "A", publie: true, epingle: true, date: "2026-03-01" },
+    { id: "i2", slug: "publie-recent", titre: "B", publie: true, epingle: false, date: "2026-05-01" },
+    { id: "i3", slug: "brouillon", titre: "C", publie: false, epingle: false, date: "2026-06-01" },
+  ];
+  // L'épinglé ouvre la liste, puis le plus récent — brouillon compris.
+  assert.deepEqual(inf.informationsDeLAtelier(liste).map((i) => i.id), ["i1", "i3", "i2"]);
+  assert.deepEqual(inf.informationsOrdonnees(liste).map((i) => i.id), ["i1", "i2"],
+    "le recueil public ne sert jamais un brouillon");
+  assert.equal(inf.informationParSlug(liste, "brouillon"), null,
+    "l'adresse d'un brouillon ne répond pas au public");
+
+  // Ce qu'il faut pour publier : un titre, un texte, une date.
+  assert.deepEqual(inf.manquePourPublier({ titre: "T", corps: "C", date: "2026-01-01" }), []);
+  assert.deepEqual(inf.manquePourPublier({ titre: "", corps: "", date: "" }), ["titre", "texte", "date"]);
+});

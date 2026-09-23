@@ -1,0 +1,30 @@
+# ============================================================================
+# Ce qui n'entre PAS dans le contexte de construction de la FAÇADE
+# (`src/server/web/Dockerfile`).
+#
+# Docker lit ce fichier quand on construit la façade par son Dockerfile —
+# convention `<Dockerfile>.dockerignore`, qui demande BuildKit :
+#
+#   cd src/server && docker compose build web
+#
+# Le contexte est la RACINE du dépôt (voir `build.context` du compose) : c'est ce
+# qui permet de copier `src/`. Ce fichier borne donc ce contexte, et écarte en
+# particulier `.env`, qui porte les secrets du déploiement : aucune règle du
+# Dockerfile ne le copie, mais mieux vaut qu'il ne soit même pas transmis.
+#
+# S'il n'est pas pris en compte par votre version de Docker, l'effet est
+# seulement un contexte plus gros : la construction reste correcte, car le
+# Dockerfile ne copie que `src/` et `src/server/`.
+# ============================================================================
+.git
+.github
+.gitignore
+.env
+.env.*
+node_modules
+**/node_modules
+scratch
+imports
+**/*.test.mjs
+**/*.md.bak
+*.log

@@ -19,22 +19,30 @@ import {
   verdictDe, actionDe, etiquetteEtape,
 } from "../lib/validation.js";
 
-// Le rôle d'une étape, sous la forme que le journal et les notifications
-// attendent : « role:reviseur », « role:editeur »… Un seul vocabulaire, donc
-// une étape de vérification s'annonce au réviseur sans que rien ici ne le sache.
-const destinataireRole = (etape) => (etape && etape.role ? "role:" + etape.role : "");
+// Le destinataire d'une étape, sous la forme que le journal et les
+// notifications attendent : « role:reviseur », « personne:p-x » (le compte
+// rattaché à cette personne sera prévenu), « service:svc-x ». Un seul
+// vocabulaire, donc une étape confiée à un service s'annonce à ses agents sans
+// que rien ici ne le sache.
+const destinataireEtape = (etape) => {
+  if (!etape) return "";
+  const type = etape.targetType || "role";
+  if (type === "personne") return etape.personId ? "personne:" + etape.personId : "";
+  if (type === "service") return etape.serviceId ? "service:" + etape.serviceId : "";
+  return etape.role ? "role:" + etape.role : "";
+};
 
 // Ouvrir le circuit sur un acte. Le circuit porte sur le texte ENREGISTRÉ : les
 // appelants enregistrent d'abord, puis soumettent.
 export async function soumettreCircuit(a, circuit, { paint = redrawView } = {}) {
   if (!circuit) { toast("Aucun circuit ne s'applique à cet acte.", "warning"); return; }
-  demarrerValidation(a, circuit, state.user);
+  demarrerValidation(a, circuit, state.user, state.config);
   a.updatedAt = new Date().toISOString();
   const etape = etapeActive(a.validation);
   await journaliser({
     action: "parapheur.depot", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
     detail: `soumis au circuit « ${circuit.label} »` + (etape ? ` — étape « ${etape.label} »` : ""),
-    to: [destinataireRole(etape), etape && etape.kind !== "verification" ? "role:reviseur" : ""].filter(Boolean),
+    to: [destinataireEtape(etape), etape && etape.kind !== "verification" ? "role:reviseur" : ""].filter(Boolean),
   });
   touch("actes", { rerender: false });
   toast("Acte soumis au circuit de validation", "success");
@@ -49,7 +57,7 @@ export async function reprendreCircuit(a, circuit, { paint = redrawView } = {}) 
   const motif = await promptDialog("Reprendre le circuit", "Motif de la reprise (il sera conservé au journal) :", "");
   if (motif === null) return;
   const avant = a.validation?.statut;
-  redemarrerValidation(a, circuit, state.user);
+  redemarrerValidation(a, circuit, state.user, state.config);
   a.updatedAt = new Date().toISOString();
   await journaliser({
     action: "parapheur.reprise", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
@@ -79,7 +87,7 @@ export async function deciderEtape(a, etape, decision, commentaire, { paint = re
   const suivante = etapeActive(v);
   const destinataires = [];
   if (decision === "valide" || decision === "passe") {
-    if (suivante) destinataires.push(destinataireRole(suivante));
+    if (suivante) destinataires.push(destinataireEtape(suivante));
     // L'étape de vérification intéresse le réviseur, même quand elle n'est pas
     // la première : c'est lui qui contrôle, et le circuit le lui annonce.
     if (suivante && suivante.kind === "verification") destinataires.push("role:reviseur");

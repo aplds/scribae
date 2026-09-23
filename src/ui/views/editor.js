@@ -1453,7 +1453,7 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
   if (node.type === "visas") {
     root.appendChild(sec([
       sectionHeader("Visas", button("Ajouter", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { node.items = node.items || []; node.items.push({ id: "it-" + Math.random().toString(36).slice(2, 7), refId: "", text: "", when: "" }); touch("trames", { rerender: false }); redraw(); } })),
-      ...(node.items || []).map((it, i) => visaItemEditor(it, i, node, trame, redraw, softSave)),
+      ...(node.items || []).map((it, i) => visaItemEditor(it, i, node, trame, ed, redraw, softSave, ctxSample)),
     ]));
   }
 
@@ -1678,7 +1678,7 @@ function condInput(holder, softSave, redraw) {
   return h("div", { class: "fr-field" }, input, status);
 }
 
-function visaItemEditor(it, i, node, trame, redraw, softSave) {
+function visaItemEditor(it, i, node, trame, ed, redraw, softSave, ctxSample) {
   const mode = it.chaine ? "chaine" : it.refKind ? "kind" : it.refId ? "ref" : it.text ? "text" : "empty";
   return h("div", { class: "note-card", style: { borderLeftColor: "var(--brand)" } },
     h("div", { class: "fr-row" },
@@ -1716,7 +1716,11 @@ function visaItemEditor(it, i, node, trame, redraw, softSave) {
       onChange: (v) => { it.refKind = v; softSave(); redraw(); },
       help: "La référence de cette nature rattachée à l'entité signataire est retenue automatiquement.",
     }) : null,
-    mode === "text" ? textField({ label: "Texte", value: it.text, onChange: (v) => { it.text = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); } }) : null,
+    // Le champ « Texte » répond aussi au mode VIDE : un visa neuf, ou celui dont on
+    // vient de choisir « Je tape le texte moi-même », n'a encore aucun de ses
+    // champs renseignés — sans cette ligne, le choix resterait sans effet et il n'y
+    // aurait rien à remplir. La saisie du premier caractère fixe le mode.
+    mode === "text" || mode === "empty" ? textField({ label: "Texte", value: it.text, onChange: (v) => { it.text = v; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); } }) : null,
     h("div", { style: { marginTop: "6px" } }, condInput(it, softSave, redraw)),
   );
 }
@@ -2033,6 +2037,16 @@ function renderTrameInspector(root, trame, redraw, softSave) {
         ? "Les actes issus de cette trame sont signés puis publiés : le service leur attribue un identifiant ELI et ils deviennent opposables à leur entrée en vigueur."
         : `Ce document non juridique (${natureDocs(natureDe(trame)).label.toLowerCase()}) se publie au recueil comme un acte — il y reçoit son identifiant ELI et s'y consulte —, mais sa publication ne le rend NI opposable NI exécutoire : le recueil le présente comme un document, sans entrée en vigueur, et les délais d'exécution ne s'y appliquent pas.`)
       : "Trame non publiable : les actes issus de cette trame (actes individuels — revalorisation d'un traitement, sanction, etc.) sont rédigés, signés et conservés au registre, mais jamais déposés au recueil." }),
+    tramePublishable(trame)
+      ? h("label", { class: "fr-check", style: { marginTop: "6px" } }, (() => {
+        const c = h("input", { type: "checkbox", checked: trame.reserve === true });
+        c.addEventListener("change", () => { trame.reserve = c.checked; softSave(); redraw(); });
+        return c;
+      })(), "Réserver la diffusion aux agents connectés")
+      : null,
+    tramePublishable(trame) && trame.reserve === true
+      ? h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Les actes de cette trame sont publiés au recueil comme les autres — identifiant ELI, original signé, versions —, mais le recueil public ne les montre qu'aux personnes CONNECTÉES : un visiteur anonyme ne les voit ni dans la liste, ni dans la recherche, ni dans recueil.json / llms.txt / sitemap.xml, et leur adresse ne lui répond pas. C'est la diffusion d'une circulaire interne, ou d'une consigne aux agents. La case est reprise à chaque publication, où elle reste modifiable." })
+      : null,
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Signature" }),
     selectField({
       label: "Circuit de signature", value: trame.signature || "",

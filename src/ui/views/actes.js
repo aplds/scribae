@@ -13,6 +13,7 @@ import { targetLabel } from "../../lib/scope.js";
 import { openActe, redigerAbrogation } from "./rediger.js";
 import { docOfActe, modifierFromActe, natureOf, ecartsOfActe } from "./modifier.js";
 import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
+import { boutonsPdfA } from "../pdfa.js";
 import { demarrerValidation, etapeActive, validationAJour, etatParapheur } from "../../lib/validation.js";
 import { resumeExecution } from "../../lib/execution.js";
 import { designationDe, avecArticle } from "../../lib/abrogations.js";
@@ -293,6 +294,7 @@ function quickExport(a) {
       button("Imprimer / PDF", { variant: "secondary", onClick: () => printDocument(doc, state.config, null) }),
       button("Word (.doc)", { variant: "secondary", onClick: () => download(base + ".doc", exportWordDoc(doc, state.config, null), "application/msword") }),
     ),
+    h("div", { class: "fr-row" }, ...boutonsPdfA(doc, state.config, { base })),
     h("p", { class: "fr-small fr-muted", text: "Référence ELI : " + (doc.meta.eli || "—") }),
   );
   modal({ title: "Export — " + (a.numero || a.id), body, actions: (close) => [button("Fermer", { variant: "secondary", onClick: close })] });

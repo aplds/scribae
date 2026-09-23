@@ -28,6 +28,678 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
+
+## [1.6.1b] — 2026-09-23 — La démonstration a son adresse, et l'éditeur sa mention
+
+Deux choses au même moment : la démonstration publiée passe sous son **propre nom de domaine**, et
+le logiciel dit **d'où il vient**.
+
+**demo.scribae.eu.** La démonstration servie en statique par GitHub Pages répond désormais à
+**<https://demo.scribae.eu>**, et le dépôt **fixe cette adresse** : un fichier `CNAME` à la racine
+(livré avec l'export) porte le nom. C'est le seul réglage que la persistance de la démonstration
+demande — et il tient à une règle du navigateur, pas du logiciel : **le stockage est attaché à
+l'adresse du site**. Une démonstration servie sous deux adresses (le domaine et l'adresse
+`*.github.io`) constitue donc **deux installations distinctes** — deux référentiels, deux recueils,
+et un visiteur qui change d'adresse ne retrouve pas son travail. Une seule adresse publiée, donc, et
+c'est celle-là qu'on communique ; la démonstration garde ensuite ce qu'on y fait d'une visite à
+l'autre, tant que l'on revient par la même. Un fork, lui, doit remplacer ce `CNAME` ou le supprimer.
+
+**« Propulsé par Scribae — GPLv3 ».** Les **trois pieds de page** de l'application — le recueil
+public, l'atelier et l'écran de connexion — portent la mention de l'éditeur du logiciel, le nom
+renvoyant à sa **documentation**. Scribae est un logiciel libre, publié sous licence GPL-3.0 : la
+mention dit d'où vient l'outil. Elle se règle, et s'éteint : une collectivité a sa charte, et le
+recueil peut être intégré dans un portail qui porte déjà sa propre signature.
+
+### Ajouté
+
+- **La mention de l'éditeur du logiciel, dans les trois pieds de page.** Elle est écrite **une seule
+  fois** (`src/ui/mention.js`) et lue par le recueil public (`pied`, `src/ui/views/recueil-public.js`),
+  l'atelier (la coquille, `src/ui/app.js`) et l'écran de connexion (`src/ui/views/connexion.js`) :
+  les trois ne peuvent donc pas diverger. Elle est **discrète** — petit texte, ton effacé, lien
+  souligné vers <https://doc.scribae.eu> —, et s'efface quand l'écran occupe toute la hauteur
+  (l'éditeur de trame, `.app--plein`) : la feuille ne partage pas sa place.
+- **Le réglage, dans le référentiel** — Administration › Identité, carte « Mention de l'éditeur du
+  logiciel » : **afficher** ou **masquer**, la mention étant affichée tant qu'on n'y a pas touché
+  (`config.brand.mentionScribae`). Le geste se voit **sur-le-champ**, sans recharger : le pied de
+  l'atelier appartient à la coquille, que le redessin d'une vue ne reconstruit pas.
+- **Le `CNAME` de la démonstration** — `demo.scribae.eu`, une ligne, à la racine du dépôt. Sa
+  recette est écrite dans `src/README.md` (« Exporter le dépôt GitHub »), avec ce qu'il implique :
+  une adresse publiée, et une seule.
+
+### Modifié
+
+- **L'adresse de la démonstration, partout où elle est écrite** — `src/README.md`,
+  `src/docs/GITHUB.md` (le `README.md` du dépôt) et `src/docs/ADMINISTRATION.md` (§ 7.6) passent de
+  l'adresse `*.github.io` du dépôt à **<https://demo.scribae.eu>**.
+- **Ce que la démonstration conserve, et sous quelle adresse** — c'est dit là où un visiteur le lit
+  (l'encart de `docs/GITHUB.md`), et là où l'exploitant le cherche (`docs/ADMINISTRATION.md` § 7.6,
+  « L'adresse décide du stockage ») : le stockage d'un navigateur est attaché à l'**origine** du
+  site, donc à son adresse.
+- **L'installation par pages, chez un tiers** (`docs/GITHUB.md`) : le pas à pas des pages GitHub
+  gagne le **nom de domaine** (enregistrement DNS, *Enforce HTTPS* — l'application signe dans le
+  navigateur, ce qui l'exige) et l'avertissement sur le `CNAME` du dépôt, qu'un fork doit changer.
+- **Le guide, côté recueil public** (`src/wiki.js`, chapitre « Publier l'acte ») : une note explique
+  la mention et son réglage, à la suite de celle des mentions du bas de page.
+
+## [1.6.1a] — 2026-09-23 — Le service démarre : le courriel ne l'arrête plus
+
+La 1.6.0 ne **démarrait pas** en auto-hébergement. Le service appliquait bien le schéma, joignait bien
+la base, annonçait son état — puis **s'arrêtait aussitôt** :
+
+```
+ReferenceError: etatCourriel is not defined
+    at main (file:///app/server.mjs:1857:15)
+```
+
+`docker compose` le relançait, et la boucle recommençait (« api-1 exited with code 1 (restarting) »).
+La faute était à la **dernière ligne du démarrage** : l'affichage de l'état du **courriel** — ajouté
+avec le bulletin, dont les numéros partent par courriel — lisait `etatCourriel` alors que l'état
+n'était jamais demandé au module. Il l'est maintenant, exactement comme celui du prestataire de
+signature imprimé juste en dessous. La ligne s'affiche, et le service reste debout.
+
+### Corrigé
+
+- **Le service auto-hébergé démarre de nouveau** (`src/server/mysql/server.mjs`) : l'état du courriel
+  est lu une fois (`courriel.etat()`) avant d'être imprimé — « notifications actives », avec l'hôte,
+  le port, le chiffrement et l'expéditeur, ou le **motif** de l'inactivité (SMTP absent, adresse
+  d'expédition absente, envoi éteint). Aucune variable d'environnement ne change, aucun réglage n'est
+  à reprendre : la 1.6.0 se répare par la seule mise à jour de l'image.
+- **Trois défauts du même genre, dans l'interface.** Le champ **Texte** d'un visa (inspecteur du bloc
+  « Visas », mode « Je tape le texte moi-même ») appelait le rafraîchissement du papier sans lui
+  transmettre le contexte de l'éditeur : la saisie échouait. Ce choix de mode restait par ailleurs
+  **sans effet** sur un visa neuf — aucun champ ne s'ouvrait, faute d'un champ renseigné pour dire le
+  mode : le champ « Texte » s'affiche maintenant dès qu'aucun autre mode n'est renseigné. Enfin, le
+  panneau **« Recueil ouvert »** d'un acte publié, sur un déploiement auto-hébergé, citait
+  `hrefFichier` sans l'avoir importé : la liste des fichiers n'apparaissait pas. Les trois sont
+  réparés.
+
+## [1.6.0] — 2026-09-22 — Le bulletin des actes : le recueil devient un Journal officiel
+
+Le recueil publie **au fil de l'eau** : un acte paraît, il a son adresse, il est là. C'est ce qu'il
+faut pour retrouver un acte précis — mais ce n'est pas ainsi qu'une collectivité **communique**. Un
+arrêté qui entre en vigueur « à la parution » se cite par le **numéro** qui l'a porté, un conseil
+municipal a sa **séance**, un marché son **mois**. Bref : à côté du fil, il manquait le
+**rendez-vous**.
+
+Scribae tient maintenant ce rendez-vous. La collectivité **ouvre un bulletin** (ou un Journal
+officiel, ou un bulletin officiel — le nom est le sien), lui donne une **cadence** et un **jour de
+parution**, et le service fait le reste : il clôt chaque période échue, **rassemble les actes
+publiés** sur cette période, les classe **par entité puis par thématique**, leur donne un **numéro**,
+et le diffuse — une **sous-page du recueil** par numéro, un **flux RSS et Atom**, et un **courriel
+aux abonnés**.
+
+Deux principes ont commandé la conception. **Une période sans acte ne donne aucun bulletin** : il n'y
+a pas de numéro vide, et la numérotation suit les numéros **parus** — une collectivité silencieuse
+en août ne laisse pas un trou dans sa collection. Et **rien ne se fait à la main** : la passe du
+service clôt, compose et expédie toute seule, au démarrage puis toutes les dix minutes, de sorte
+qu'un service arrêté une semaine rattrape son retard sans que personne ne clique.
+
+### Ajouté
+
+- **Le bulletin (ou Journal) des actes.** *Administration › Bulletin* (permission `bulletin.gerer`,
+  rôles administrateur et éditeur) : ouverture du bulletin, **cadence** — quotidienne,
+  hebdomadaire, **bimensuelle** (1er→15 puis 16→fin de mois), mensuelle, bimestrielle,
+  trimestrielle, semestrielle, annuelle, ou **personnalisée** (« toutes les N unités », ancrée sur
+  une date) —, **jour de parution**, titre, titre des numéros, sous-titre, en-tête et pied des
+  courriels, expéditeur et adresse de réponse. Une cadence **illisible retombe sur « mensuelle »**
+  plutôt que d'arrêter le service.
+- **Le moteur du bulletin, au service** — `src/server/mysql/bulletins.mjs` (écrit sans dépendance à
+  Node : `sha256` et l'horloge lui sont injectés) : périodes et cadences, composition des numéros
+  (classement **par entité puis par thématique** , avec « (sans entité) » en dernier), consolidation
+  (un acte publié deux fois n'y figure qu'une fois), mise en service **bornée** (la plus ancienne
+  publication détenue, mais pas au-delà de soixante périodes, pour qu'un recueil de dix ans ne fasse
+  pas paraître cent numéros d'un coup), élagage, abonnés, file d'envoi. **44 épreuves** le couvrent
+  (`bulletins.test.mjs`, `actes-bulletins.test.mjs`).
+- **Les pages publiques du bulletin, sans JavaScript** — `/recueil/bulletins` (les numéros parus, et
+  l'abonnement), `/recueil/bulletins/<période>` (un numéro, dans son classement), ses représentations
+  **`.json`**, **`.md`** et **`.txt`** — le même jeu de formats que les actes —, et les **flux**
+  `/recueil/bulletins.rss` et `/recueil/bulletins.atom`. Le **sommaire** du recueil annonce la
+  cadence et la **prochaine parution** ; l'accueil affiche les derniers numéros ; le pied de page y
+  renvoie.
+- **L'abonnement par courriel, à double consentement.** L'inscription demande l'adresse, puis le
+  lien d'un **courriel de confirmation** : sans ce second geste, aucune inscription n'a lieu. Chaque
+  numéro porte un lien de **désabonnement** en un clic, que l'administration peut aussi faire à la
+  place de l'intéressé. L'**en-tête et le pied** des messages viennent du référentiel, et le service
+  **tient la file d'envoi** : par petits paquets (quarante par passe par défaut), avec trois
+  tentatives étalées pour une livraison refusée, et le motif au journal quand elle échoue.
+- **Le flux RSS 2.0 et Atom 1.0** des numéros parus, XML **échappé** (un objet contenant « & » ou
+  « < » ne casse pas le fil), borné à vingt entrées, chacune portant le numéro, sa période, son
+  résumé et son contenu.
+- **Les variables du déploiement** — `SCRIBA_BULLETIN_ACTIF`, `_TITRE`, `_TITRE_BULLETIN`,
+  `_SOUS_TITRE`, `_CADENCE`, `_PARUTION_JOURS` (référentiel) et `SCRIBA_PUBLIQUE_URL`,
+  `SCRIBA_BULLETIN_MAX`, `_MAX_ABONNES`, `_ENVOIS_PASSE`, `_INTERVALLE_MIN` (service) : une
+  installation peut ouvrir et régler son bulletin **sans passer par l'interface**. `VARIABLES.md`
+  (113 variables) et `env.example` les documentent.
+- **Les adresses du service dans la référence d'API** (`docs/API.md`) : le groupe **Bulletin des
+  actes** (état public, un numéro, abonnement, confirmation, désabonnement) et ses codes d'erreur.
+
+### Modifié
+
+- **La démonstration ouvre son bulletin.** La fiction de Valmont-sur-Loire paraît un numéro par mois
+  (le 5), et la démonstration **compose ses numéros échus au démarrage**, par le même geste que
+  l'écran d'administration : une fonction qui se découvre doit se **voir**. Le service de
+  démonstration n'ayant pas de serveur SMTP, l'abonnement y reste **fermé** — et la page publique
+  dit **pourquoi**, au lieu de laisser un formulaire échouer.
+- **La copie de l'état public est oubliée dès qu'un réglage la périme.** Un réglage du bulletin ou
+  un geste d'administration invalide l'état que le recueil garde en mémoire (cadence, numéros
+  parus, flux), et le **flux** — adresse machine — relit l'état frais avant de se composer : une
+  page publique ouverte pendant qu'on ouvre le bulletin ne continue plus d'afficher un recueil sans
+  bulletin.
+- **`docs/ADMINISTRATION.md`** porte un § « Le bulletin (ou Journal) des actes » : les cadences et
+  leurs périodes, le jour de parution, ce que voit le public, l'abonnement et les **données
+  personnelles** qu'il suppose, ce qu'il faut au service pour envoyer (SMTP **et** adresse publique),
+  et comment l'éprouver en quatre vérifications.
+
+### Corrigé
+
+- **Le flux RSS n'était pas refermé.** Le `<channel>` du flux du service s'ouvrait sans que
+  `</channel>` le ferme : le document n'était pas du XML valide, et un lecteur de flux le rejetait en
+  bloc — sans que rien ne le dise ici, puisque toutes les balises ouvrantes s'y trouvaient. Les
+  épreuves du flux vérifient désormais la **fermeture** du document (RSS et Atom), pas seulement son
+  ouverture.
+- **L'écran du bulletin interrogeait le service sans jeton.** La lecture du tableau de bord et les
+  gestes d'administration partaient sans clé d'écriture : le service répondait `401`, et l'écran
+  restait vide alors que tout fonctionnait. Le jeton est joint dès que le poste en détient un (et
+  omis quand une **session** ouvre le droit, cette identité voyageant dans le cookie).
+- **Le lien de la page publique, dans le flux Atom**, porte son rôle (`rel="alternate"`, type
+  `text/html`) au lieu de le laisser deviner.
+
+### Sécurité
+
+- **Rien du bulletin n'expose les abonnés.** Les adresses publiques ne disent jamais **qui** est
+  inscrit : elles ne rendent ni la liste, ni le nombre, et une adresse **déjà confirmée** reçoit
+  simplement un nouveau courriel de confirmation — jamais un « vous êtes déjà inscrit ». Les jetons
+  de confirmation et de désabonnement sont **dérivés d'un secret tiré au hasard** (SHA-256) et ne
+  portent aucune donnée ; un jeton inconnu ne répond que « invalide ».
+- **Le désabonnement demande deux gestes.** Un courriel ne se désabonne pas du seul fait d'être
+  **ouvert** ou scanné : le lien montre une page, et c'est un second clic qui retire l'inscription.
+- **Le service ne conserve que le nécessaire** : l'adresse, le nom **facultatif**, les dates et
+  l'état (en attente, confirmé, retiré). Les fiches retirées sont élaguées les premières, et le
+  retrait d'un abonné est réservé à l'administrateur.
+
+## [1.5.4a] — 2026-09-22 — Le service ne gèle plus quand les agents arrivent ensemble
+
+Une collectivité qui compte une vingtaine d'agents remarque la même chose chaque matin : à l'heure
+où tout le monde se connecte, **l'application entière se fige quelques secondes**. Pas seulement
+les connexions — les fiches déjà ouvertes, la recherche, et jusqu'au **recueil public**, consulté
+par des visiteurs qui n'ont aucun mot de passe à faire vérifier. Un visiteur sur cent attendait
+deux secondes et demie, et le maximum mesuré atteignait **2 628 ms** pour tout le monde.
+
+La cause n'était ni la base, ni le volume des actes, ni le réseau : le service vérifiait les mots de
+passe avec **`scryptSync`**, un calcul qui s'exécute **sur le fil principal** — celui qui sert toutes
+les requêtes. Chaque dérivation immobilisait donc le service entier pendant environ 130 ms
+(`SCRYPT_N=65536`), et vingt et un agents se connectant dans la même seconde additionnaient leurs
+calculs en série : 21 × 130 ms ≈ 2,7 s de gel **global**.
+
+La vérification des mots de passe n'a pas changé de nature : seul son **exécution** ne bloque plus
+personne.
+
+### Corrigé
+
+- **Le dérivé de mot de passe ne bloque plus le service.** `src/server/mysql/server.mjs` emploie
+  `scrypt` **asynchrone** (pool de fils de Node) à la place de `scryptSync`. Le format des dérivés
+  est inchangé : **aucun mot de passe n'a été réécrit, aucune base n'a besoin d'être touchée**. Mesuré
+  sur la même charge (60 postes, 21 connexions simultanées, 60 s) : le p99 du recueil public passe de
+  **2 616 ms à 15 ms**, et le temps de connexion du pire agent de 2 619 ms à 665 ms.
+- **Le domaine des comptes attend le dérivé sans présumer de sa forme.**
+  `scellerMotDePasse` / `verifierMotDePasse` (`src/server/mysql/comptes.mjs`) deviennent asynchrones
+  et attendent le résultat : un port de cryptographie synchrone continue de fonctionner, un port
+  asynchrone aussi. Le **dérivé factice** (celui qui donne à une tentative sur un identifiant inconnu
+  le même coût qu'une tentative réelle) est désormais **engagé au démarrage** du service — le calcul
+  se fait pendant l'installation, et le coût d'une vérification à vide reste identique.
+
+### Ajouté
+
+- **Un outil d'étude de charge** — `src/server/charge/` (`node src/server/charge/charge.mjs`) : des
+  postes simulés à **tous les rôles** plus le public du recueil, des sessions réelles, l'anti-CSRF,
+  une cible semée par l'API (actes, trames, informations, publications ELI), et un rapport qui classe
+  les gestes du pire au meilleur (p50, p95, p99, max), avec le **nombre d'ordres SQL** adressés à la
+  base. Il sait éprouver un déploiement existant (`--url`) comme lancer le service sur place avec une
+  base en mémoire (`--sans-base`), et simuler une base distante (`--latence`).
+- **Le compte rendu des mesures** — `src/docs/PERFORMANCE.md` : dix scénarios (affluence, matinée
+  étalée, saturation, écriture, base distante), les chiffres avant et après, et ce qui reste ouvert.
+
+### Modifié
+
+- **`UV_THREADPOOL_SIZE` rejoint le `.env` et le `docker-compose.yml`.** C'est le réglage qui décide
+  combien de dérivés avancent en même temps ; les 4 fils par défaut de Node suffisent à une arrivée
+  étalée, mais une collectivité où beaucoup d'agents se connectent à la même minute gagnera à le
+  porter à 8 ou 16. Il est lu au lancement du processus — voir `src/docs/ADMINISTRATION.md` § 7.5 bis.
+
+### Sécurité
+
+- **Rien n'a été affaibli.** Le coût du dérivé (`SCRYPT_N`), le sel par compte, la comparaison à
+  temps constant, le même message pour un identifiant inconnu et le blocage après échecs sont
+  inchangés — le dérivé factice continue d'être vérifié pour chaque tentative sur un compte
+  inexistant, au même coût.
+
+## [1.5.3d] — 2026-09-22 — Le schéma suit le compte, et le service se rétablit
+
+Réparer le compte de la base ne suffisait pas. Le service continuait d'afficher
+
+```
+Base de données indisponible
+Access denied for user 'scriba'@'172.19.0.3' (using password: YES)
+```
+
+et, au premier essai de connexion, il répondait
+
+```
+Table 'scriba.sb_record' doesn't exist
+```
+
+Ce sont **deux** pannes, et il fallait les deux gestes pour en sortir. Le service `db-init` alignait
+le **compte** mais n'appliquait jamais le **schéma** : une base dont le compte vient d'être réparé
+reste sans tables, puisque la migration ne court qu'au démarrage du service — et celle de ce
+démarrage-là avait échoué avant la réparation. L'état du déploiement, lui, était un **verdict de
+démarrage** : le bandeau « base indisponible » ne se rejouait jamais, ni pour confirmer une
+réparation, ni pour signaler le schéma manquant. Le geste que ce bandeau conseillait (« `docker
+compose run --rm db-init` ») réparait donc le compte en laissant la base inutilisable — et le
+bandeau à l'écran.
+
+### Ajouté
+
+- **`db-init` applique le schéma après avoir aligné le compte.** `node server.mjs --reconcilier`
+  remet le compte applicatif au mot de passe du `.env`, **puis** applique `schema.sql` avec ce compte
+  tout neuf. Les deux pannes vont en effet de pair — une réparation qui s'arrête au compte laisse
+  `Table 'scriba.sb_record' doesn't exist` au premier écran — et `schema.sql` ne contient que des
+  `CREATE TABLE IF NOT EXISTS` et des vues : le geste ne **détruit** rien, même sur une base en
+  service. Un seul `docker compose run --rm db-init` suffit désormais à remettre une base d'aplomb.
+- **Le service rééprouve la base à la demande, et se rétablit sans être recréé.** Quand l'état dit
+  que la base est en panne, `GET /v1/auth/config` — le seul appel que fait l'écran de connexion —
+  déclenche, au plus une fois toutes les cinq secondes : l'application du schéma si `AUTO_MIGRATE`,
+  une épreuve de santé, le réamorçage du compte d'administration s'il avait échoué **faute de base**,
+  et le rechargement de l'état. Une panne réparée pendant que le service tourne n'exige donc plus de
+  le recréer. L'écran de connexion, de son côté, redemande cet état après un essai refusé : le bandeau
+  se corrige sans recharger la page.
+- **`standalone-entrypoint.sh` fait les deux mêmes gestes au démarrage** de l'image autonome, quand
+  `DB_ROOT_PASSWORD` lui est fourni (le mot de passe root n'est lu que là, et le conteneur ne touche à
+  rien sans lui). C'est le pendant de `db-init` pour qui n'utilise pas Compose.
+
+### Corrigé
+
+- **L'état de signature et de publication ne peut plus être effacé par accident.** Un service qui a
+  démarré sans pouvoir lire son état garde, en mémoire, un état **vide** : l'écrire aurait remplacé
+  celui de la base — la pire perte possible, parce que silencieuse. Ces écritures répondent désormais
+  `503 etat_degrade` jusqu'à ce que la base revienne, instant où le service recharge son état
+  lui-même.
+- **Une requête qui échoue sur la base est notée comme un changement d'état du déploiement** (table
+  absente, identifiants refusés) : le bandeau de l'écran de connexion porte alors le remède juste, et
+  la réépreuve décrite plus haut a lieu au chargement suivant.
+- **Le remède affiché pour des tables absentes** dit le geste unique — `docker compose run --rm
+  db-init`, qui répare compte **et** schéma — au lieu d'une migration suivie d'une recréation du
+  conteneur. `README.md` (pile et service), `ADMINISTRATION.md`, `DOCKER.md`, `env.example` et le
+  wiki des variables disent la même chose : le compte **et** le schéma suivent le `.env`, le service
+  se rétablit seul, et seul le mot de passe **root** reste figé à la création du dossier de données.
+
+## [1.5.3c] — 2026-09-22 — Le compte de la base suit le `.env`
+
+Toute installation dont le mot de passe de base avait changé depuis le premier démarrage se heurtait
+à une porte fermée, sans que rien ne dise pourquoi :
+
+```
+Access denied for user 'scriba'@'172.19.0.3' (using password: YES)
+```
+
+Ce n'était ni le compte d'administration, ni le `.env` : MariaDB ne crée le compte applicatif qu'au
+**premier** démarrage d'un dossier de données **vierge**, et jamais ensuite. Changer `DB_PASSWORD`
+ne changeait donc rien en base, et le service — qui, lui, lisait bien le `.env` — se voyait refuser
+l'accès. La pile **repose** désormais ce mot de passe à chaque démarrage : c'est le `.env` qui fait
+foi, comme pour les réglages déclaratifs.
+
+### Ajouté
+
+- **Le compte applicatif est aligné sur le `.env` à chaque démarrage** (service `db-init`, avant le
+  service). Il ne touche à **aucune** donnée : ni table, ni contenu — il crée la base et le compte
+  s'ils manquent, leur donne le mot de passe et les droits du `.env`, et s'arrête. C'est le seul
+  moment où le service parle à la base en **root** (`DB_ROOT_PASSWORD`) ; s'il n'y parvient pas
+  (mot de passe root périmé, base externe), il le **dit** dans son journal et ne bloque rien.
+  À la main : `docker compose run --rm db-init`, ou `node server.mjs --reconcilier`.
+- **`server/mysql/compte-base.mjs`** : les ordres SQL qui font cet alignement, à part et **purs** —
+  donc éprouvés sans base (`compte-base.test.mjs`), apostrophes, barres obliques inverses et
+  identifiants compris : un mot de passe contenant « `'; DROP DATABASE …` » reste une valeur, jamais
+  une commande.
+
+### Modifié
+
+- **Le remède affiché par l'application** (et le journal du service) pour un refus de la base dit
+  désormais le geste juste : aligner le compte sur le `.env` — et non chercher l'ancien mot de passe
+  dans l'environnement du conteneur. `docker compose down -v` reste le **dernier** recours, pour le
+  seul cas où le mot de passe root lui-même est perdu.
+- **`DB_HOST` et `DB_PORT` du `.env` sont honorés par la pile** : brancher une base hors du compose
+  (README § 5) fonctionne maintenant comme le document le décrit — le service du compose les
+  imposait auparavant, et la variable du `.env` restait sans effet.
+- Le tableau « Dépannage » (README de la pile, ADMINISTRATION, DOCKER), `env.example` et le wiki des
+  variables disent ce que fait `db-init`, et que `DB_PASSWORD` se change **dans le `.env`**.
+
+## [1.5.3b] — 2026-09-22 — La façade se construit, au lieu de se monter
+
+La pile `docker compose` refusait de démarrer sur certaines machines : le conteneur `web` restait
+en boucle sur
+
+```
+find: /docker-entrypoint.d/40-scriba-web.sh: Permission denied
+[emerg] open() "/etc/nginx/conf.d/default.conf" failed (13: Permission denied)
+```
+
+Ce n'est pas un droit du fichier qu'on corrigerait quelque part : **`stat` lui-même est refusé**
+(le script d'amorçage de l'image ne voit même pas que le fichier existe), et `root` dans le
+conteneur n'y peut rien — la machine (étiquette SELinux ou AppArmor, système de fichiers réseau,
+partage de machine virtuelle, espace de noms d'utilisateurs) **interdit au conteneur de lire ce que
+l'hôte lui monte**. La pile ne monte donc plus aucun fichier de l'hôte : la façade et le code
+entrent dans une image **construite**, comme le service.
+
+### Modifié
+
+- **La façade est une image construite** (`server/web/Dockerfile`, sur `nginx:alpine`) : les
+  réglages d'nginx, le script d'amorçage, la coquille et le **code de l'application** y entrent,
+  avec leurs droits. Rien du dossier de l'hôte n'est monté : le démarrage ne dépend plus ni des
+  droits des fichiers, ni du système de fichiers, ni de l'étiquette de sécurité de la machine qui
+  héberge. Après une mise à jour du code, `docker compose up -d --build` reconstruit la façade
+  (`src/server/README.md` § 8) ; son § 9 bis dit comment remonter le code le temps d'un correctif.
+- **Le schéma n'est plus monté dans MariaDB : c'est le service qui l'applique** (`AUTO_MIGRATE=true`
+  par défaut dans la pile). MariaDB ne rejoue ses scripts d'amorçage que sur un dossier de données
+  **vierge** : un dossier déjà initialisé gardait une base sans tables, et rien ne le disait.
+  `schema.sql` ne contient que des `CREATE TABLE IF NOT EXISTS` et des vues — l'appliquer à chaque
+  démarrage ne touche pas aux données. Une base externe reçoit le schéma de la même façon.
+- **Les droits sont rétablis dans l'image** (`chmod a+rX` sur le code et les modèles, dans les deux
+  façons de déployer) : une arborescence arrivée en 0700 — une archive décompressée, un dépôt cloné
+  sous un umask sévère — ne peut plus donner des 403 dans le navigateur, le processus de travail de
+  nginx n'étant pas root.
+- `APP_DIR` n'est plus nécessaire à la pile : le dépôt sert de **contexte de construction**. La
+  variable reste documentée pour qui veut monter le code à la main.
+
+### Corrigé
+
+- **Le conteneur `web` démarre là où les montages sont refusés**, et les deux façons de déployer
+  (pile Compose et image autonome) suivent désormais la même règle : le conteneur ne lit rien de
+  l'hôte. `src/docs/DOCKER.md` § 9 bis explique la panne, sa cause et le remède (`:z`) pour qui
+  tient à un montage.
+
+## [1.5.3a] — 2026-09-22 — Le recueil de démonstration se remplit tout seul
+
+Une démonstration neuve montrait un recueil public **vide** — « Aucun acte publié pour
+l'instant », et pas un seul billet — alors que sa fiction déclare dix-sept actes publiés et quatre
+informations. Ce n'était pas une question de données, mais de geste : le recueil public ne lit que
+le **service de publication**, et une démonstration ne provisionnait jamais le sien (un service
+sans clé est en lecture seule), ni ne lui déposait ses billets. Le premier visiteur voyait donc un
+site vide, ce qui est le contraire de ce qu'une démonstration doit montrer.
+
+### Ajouté
+
+- **La démonstration provisionne elle-même son service.** Au premier démarrage, en silence, la clé
+  d'administration du service est tirée par le poste (elle ne vit qu'au poste, comme toute clé
+  d'écriture), rangée dans les réglages locaux, et les actes peuvent être publiés. Le geste est
+  celui de l'administrateur (Administration › Base de données), fait ici pour la démonstration —
+  une installation **réelle** n'est jamais concernée.
+- **Le recueil public relit le registre du poste quand le service se tait.** Les publications
+  rendues à la publication sont gardées sur leurs actes (`src/lib/publications-locales.js`), et le
+  recueil s'en sert à défaut : un service remis à zéro, un aperçu qui reconstruit son état ou une
+  page hors ligne ne font plus disparaître des actes réellement publiés. Le service reste la
+  source ; c'est le même enregistrement, relu.
+- **« Le recueil se prépare »** au premier lancement d'une démonstration : plutôt que d'annoncer
+  « aucun acte publié » pendant les quelques secondes que prend le dépôt, la page dit ce qu'elle
+  fait — et se redessine d'elle-même quand c'est fini.
+
+### Corrigé
+
+- **Les billets de l'atelier atteignent le recueil public.** En régime local — celui de la
+  démonstration —, ils ne quittaient pas le poste : la rubrique *Informations* restait vide, et sa
+  page absente du pied de page. La démonstration les dépose au service, comme elle dépose ses
+  actes, et le recueil les montre à tous.
+- **L'échec d'un dépôt après un provisionnement réussi** ne condamne plus toute la session : la
+  clé du service n'est plus tenue pour acquise une fois pour toutes. Un service provisionné puis
+  remis à zéro (l'aperçu de l'éditeur reconstruit son état) voyait ses dépôts refusés
+  `403 service_non_provisionne` jusqu'au rechargement de la page.
+- **L'amorçage n'attend plus pour rien** là où le service n'a pas de budget de calcul à ménager
+  (édition statique, auto-hébergement) : le recueil public se remplit en quelques secondes au lieu
+  d'une trentaine.
+
+## [1.5.3] — 2026-09-22 — L'accès public passe à la racine, l'atelier se restreint à un réseau
+
+Quatre demandes reçues ensemble, livrées ensemble. L'espace public et l'atelier cessent de
+partager une adresse : le recueil s'installe à la **racine** du site, l'atelier se **demande** —
+et peut ne s'ouvrir qu'à certains réseaux.
+
+### Ajouté
+
+- **L'atelier se restreint à une liste d'adresses.** `SCRIBA_ATELIER_IPS` (fichier `.env` du
+  service) ou *Administration › Publication › Accès à l'atelier* : une adresse (`10.0.0.24`), un
+  préfixe (`192.168.0.0/16`), un champ (`10.0.0.0-10.0.0.255`) ou une plage abrégée (`10.0.0.*`),
+  une entrée par ligne ou séparées par des virgules, `#` pour un commentaire. **La décision
+  appartient au SERVICE**, jamais au navigateur : hors de la liste, toutes les routes de
+  l'atelier répondent **403 `atelier_hors_reseau`** — le recueil public, lui, reste ouvert à tout
+  le monde. Une liste **vide** ouvre l'atelier ; une liste **illisible** le ferme (fail-closed) et
+  se signale — jamais d'ouverture silencieuse par faute de frappe. Le message de refus se règle
+  (`SCRIBA_ATELIER_MESSAGE`), et l'écran porte un **simulateur** (« et si j'arrivais de là ? »).
+- **Les actes RÉSERVÉS AUX AGENTS s'affichent sur le recueil public** pour une personne
+  **authentifiée** venant d'une **adresse autorisée** — l'intranet, par exemple. Le service les
+  sert, la page les signale (« Réservé aux agents ») et dit à l'agent qu'il les voit à ce titre ;
+  un agent en télétravail reste un lecteur du recueil public.
+- **Une feuille de style de collectivité** pour le site public (Administration › Publication ›
+  Apparence) : du CSS libre, porté sur `.recueil`, appliqué **avant** le premier rendu (pas de
+  clignotement de la charte par défaut) et **après** les feuilles de l'application — il l'emporte
+  donc, y compris sur `--recueil-largeur`. La table des variables honorées est donnée à l'écran.
+- **Les sous-pages de l'espace public** : mentions légales, conditions de réutilisation,
+  accessibilité — chacune à son adresse (`?page=legales`, `?page=reutilisation`,
+  `?page=accessibilite`), avec titre, description, adresse canonique et fil d'Ariane. Chaque
+  mention se règle en texte, en **lien** vers celle du site principal de la collectivité, ou
+  s'éteint.
+- **Les « Informations » du recueil** : des billets publiés par l'administration — actualités,
+  avis, communications —, comme un blog : titre, date, auteur, résumé, texte en Markdown, drapeau
+  **épinglé**, aperçu, publication/dépublication. Ils forment une rubrique de la page d'accueil
+  (les trois derniers) et une page complète (`?page=informations`), chaque billet ayant son
+  adresse (`?info=<slug>`). Le service les sert par une route publique dédiée
+  (`GET /v1/informations`) : un brouillon ne sort jamais. La rubrique se renomme (« Actualités »)
+  ou s'éteint. Permission `informations.gerer` (éditeur, administrateur).
+
+### Modifié
+
+- **L'espace public est à la RACINE** — `https://recueil.exemple.fr/`, et non plus « `?recueil` ».
+  C'est l'adresse que l'on communique ; les adresses des actes, des sous-pages et des billets
+  restent portées par la requête (`?acte=`, `?eli=`, `?page=`, `?info=`), donc **rien à ajouter au
+  serveur web**.
+- **L'atelier se demande** : « `?atelier` » sur une page statique (GitHub Pages), « `/atelier` » sur
+  une installation auto-hébergée — nginx sert alors le même `index.html`. C'est ce qui permet de
+  restreindre l'atelier à un réseau sans fermer le recueil au public.
+- **L'interface publique du recueil est reprise** : en-tête collant, entrée avec recherche et
+  chiffres du recueil, bande « Informations », carrousel des derniers actes, thèmes, registre
+  complet, et un pied de page qui porte ses pages, sa licence et la **porte de l'application** —
+  « Se connecter » pour un visiteur, « Retour à l'application » pour un agent.
+
+### Corrigé
+
+- **La liste des informations de l'atelier montre les brouillons** : l'ordre du recueil public ne
+  connaît que les billets publiés, et le réutiliser faisait disparaître tout brouillon — le filtre
+  « Brouillons » n'avait alors rien à filtrer, et un billet écrit mais non publié devenait
+  introuvable dans l'écran qui sert à l'écrire.
+- **Une mention en mode « lien » s'affiche** (le paragraphe était vide : l'élément passé en second
+  argument de `h()` était pris pour les attributs).
+- **La feuille de style de la collectivité l'emporte vraiment** : posée dans l'en-tête, elle
+  passait avant le `<link>` de `index.html` et perdait contre lui.
+
+### Sécurité
+
+- **Une liste d'adresses illisible FERME l'atelier** au lieu de l'ouvrir : une faute de frappe dans
+  `SCRIBA_ATELIER_IPS` ne doit pas laisser la porte que l'on croyait gardée. Une liste venue du
+  `.env` n'est jamais remplacée en silence par le réglage de l'interface — elle apparaît, refusée,
+  et se voit (`erreurs`), et le journal de démarrage le dit.
+- La liste s'applique aussi aux actes **réservés aux agents** : être connecté ne suffit pas, il
+  faut venir d'une adresse autorisée.
+
+## [1.5.2g] — 2026-09-22 — L'acte publié suit une feuille de style web, et l'export produit un PDF/A
+
+### Ajouté
+
+- **L'export PDF/A** — la forme normalisée pour la **conservation** de longue durée. Les écrans
+  d'export (*Exporter…*, la fiche d'un acte, la modification, la version consolidée, l'original
+  signé) proposent **PDF/A-2b** (le défaut, bâti sur PDF 1.7) et **PDF/A-1b** (bâti sur PDF 1.4,
+  pour les systèmes qui n'acceptent que la première version de la norme). Le fichier est une
+  **mise en page réelle**, faite par l'application (`src/lib/pdfa.js`) : mêmes marges, même police,
+  mêmes filets, même bloc de signature que l'aperçu — il **embarque ses polices** (Source Serif 4 et
+  Source Sans 3, sous licence OFL, dans `src/pdfa/`), sa **règle de couleur** (profil sRGB), sa
+  **langue** (`fr-FR`), ses **métadonnées** et son identifiant ELI. Une table, une annexe, une
+  version consolidée s'y composent comme sur le papier, et la pagination est recalculée.
+
+### Modifié
+
+- **L'interface web publique des actes ne suit plus les feuilles de style.** L'acte publié au
+  recueil se présente selon une **feuille de style web**, la même pour tous
+  (`CSS_DOCUMENT_WEB`, `src/lib/recueil.js`) : deux entités qui suivent deux chartes différentes —
+  en-tête, logo, police, filets, couleurs, marges — voient désormais leurs actes **à l'identique**
+  sur le site public. La charte graphique habille le **papier** (aperçu, « Imprimer / PDF », Word,
+  page autonome, PDF/A), pas la page du recueil. Le document publié perd donc l'attribut
+  `data-sheet`, l'en-tête et le pied de sa charte ; les réglages de bloc (paragraphe encadré,
+  filets et bandes d'un tableau) suivent, eux, le **thème du recueil**.
+- **Le PDF/A succède à « Export PDF/A certifié »** dans la feuille de route : la chaîne est livrée,
+  sa conformité reste à valider sur un déploiement (`veraPDF`).
+
+## [1.5.2f] — 2026-09-22 — Des clés d'API à rôles, comptes de service
+
+### Ajouté
+
+- **Les clés d'API à rôles : des comptes de service pour l'API.** L'administrateur crée, depuis
+  *Administration › Base de données*, une clé d'API en choisissant son **rôle** (lecteur, rédacteur,
+  éditeur, administrateur, prestataire) et son **libellé**. La clé se présente ensuite en en-tête
+  `Authorization: Bearer …` et n'ouvre que les routes de son rôle : une clé de lecture ne peut pas
+  publier, une clé de rédaction ne peut pas gérer les clés. C'est un **compte de service** : le
+  référentiel l'ignore, et elle n'apparaît ni dans « Comptes et rôles », ni dans les personnes, ni
+  dans l'annuaire. Le service n'en conserve que l'empreinte **SHA-256** — la valeur est tirée par le
+  poste et ne s'affiche qu'**une fois**, au moment de sa création.
+- **Le journal d'audit du service** (`GET /v1/journal`) : chaque geste sensible — dépôt, signature,
+  publication, retrait, épinglage, provisionnement et gestion des clés — y laisse une ligne, et
+  chaque ligne **scelle la précédente par son empreinte** (le champ `scelle` révèle une chaîne
+  rompue). Les 2 000 dernières entrées sont conservées, et le journal s'exporte depuis son écran
+  pour être archivé hors du service.
+- **Les routes d'administration des clés** : `GET /v1/auth/etat` (publique — dit si le service est
+  administrable et par quel mode : `session` en mode « mot de passe » ou annuaire, `service` quand
+  il faut la première clé), `POST /v1/auth/bootstrap` (dépôt de la **première** clé),
+  `GET`/`POST /v1/auth/cles` et `POST /v1/auth/cles/{id}/revoquer`. Le service refuse de révoquer la
+  **dernière** clé d'administration (409 `derniere_cle_admin`), sans quoi il ne serait plus
+  administrable.
+
+### Modifié
+
+- **Les actes déposés ne se lisent plus anonymement.** `/v1/actes` et ses suites exigent désormais
+  un rôle au moins **lecteur** — une session, ou une clé de service : c'était une lecture anonyme,
+  et c'était un défaut. Le **recueil public**, lui, reste ouvert.
+
+## [1.5.2e] — 2026-09-22 — Le recueil sait réserver un acte aux agents
+
+### Ajouté
+
+- **Un acte publié peut être réservé aux agents connectés.** L'éditeur de trame porte la case
+  « Réserver la diffusion aux agents connectés » (onglet « Trame »), et le formulaire de publication
+  la reprend **acte par acte**. L'acte reste *publié* — identifiant ELI, version en ligne, pièces,
+  versions successives —, mais le **recueil public ne le sert qu'aux porteurs d'une session ou d'une
+  clé de service** : un visiteur anonyme ne le trouve ni dans la liste, ni à son adresse, ni dans
+  `recueil.json`, ni dans `llms.txt`, ni dans le `sitemap.xml`. Usage type : une circulaire interne,
+  une consigne aux agents de la collectivité.
+- **La mention au recueil public.** Le bloc « Vous ne trouvez pas ce que vous cherchez ? » paraît
+  désormais **toujours**, et rappelle que certains actes — circulaires, consignes — ne s'adressent
+  qu'aux **agents** : il faut se connecter pour les consulter. La version en ligne porte un bandeau
+  « Réservé aux agents », chaque élément de la liste en porte le badge, et le détail est journalisé.
+
+## [1.5.2d] — 2026-09-22 — L'export n'est plus le but, « Soumettre au circuit » est le geste
+
+### Modifié
+
+- **L'interface du rédacteur montre le chemin, et met en avant le bon geste.** Un **parcours** est
+  affiché en tête de l'atelier — Rédiger → Soumettre au circuit → Révision → Signer → Publier — avec
+  l'étape courante et les suivantes, pour qu'un novice ne prenne pas l'export pour l'aboutissement.
+  Le **geste du moment** est proposé à la suite du document dans un bouton **principal**
+  (« Soumettre au circuit », ou « Aller à la signature » quand l'acte est validé et que l'on peut
+  signer).
+- **L'export passe au troisième rang.** Il reste disponible — il sert à imprimer ou à transmettre
+  hors de l'application — mais sous une forme **discrète**, accompagnée d'une phrase qui dit ce
+  qu'il est : « ce n'est pas la fin du parcours ».
+
+## [1.5.2c] — 2026-09-22 — Le parapheur vise une personne ou un service, et les circuits se lisent un par un
+
+### Ajouté
+
+- **Une étape de circuit peut viser un rôle, une personne nommée ou un service.** L'administrateur
+  choisit, pour chaque marche, « qui porte l'étape » : le **rôle** habituel (le défaut du circuit),
+  une **personne** désignée, ou un **service** — qui n'a pas besoin de faire partie de la chaîne de
+  décision. Les champs correspondants n'apparaissent que selon le choix, pour ne pas encombrer.
+- **Une vue récapitulative des circuits.** *Administration › Circuits* liste désormais les circuits
+  sous forme de **récapitulatif**, et ouvre une **sous-vue par circuit** : les circuits ne s'empilent
+  plus à la suite sur la même page, ce qui rendait la lecture longue et la comparaison difficile.
+
+## [1.5.2b] — 2026-09-22 — L'organigramme s'édite dès le rôle d'éditeur
+
+### Modifié
+
+- **L'éditeur administre l'organigramme.** Une nouvelle permission `organigramme.gerer`
+  (administrateur **et** éditeur) ouvre l'ajout et le retrait des **services** et des **bureaux**,
+  ainsi que le réglage de leurs rattachements. L'ajout ou la suppression d'une **entité**, elle,
+  reste à l'**administrateur** — mais un éditeur peut régler les relations descendantes (les
+  services et bureaux qu'elle porte).
+- Les retraits opérés depuis le référentiel (détachement d'un service, rattachement d'un bureau)
+  sont **tracés au journal d'audit**, comme le reste des gestes d'administration.
+
+## [1.5.2a] — 2026-09-22 — Un service peut dépendre d'un autre service
+
+### Ajouté
+
+- **Un service peut dépendre d'un autre service, ou du bureau d'un autre service.** L'organigramme
+  ne connaissait que l'entité ; il accepte désormais un **rattachement** d'un service à un autre
+  service — ou au bureau d'un autre service —, et la hiérarchie ainsi formée est montrée dans
+  l'arbre des entités et services.
+- **Le périmètre suit la chaîne.** Les agents affectés à un service **en haut de chaîne** voient
+  tous les actes de la chaîne **en contrebas** : sur l'atelier, le périmètre d'un service couvre le
+  service lui-même **et ses descendants**. Le libellé de périmètre dit en clair ce qu'il couvre.
+
+## [1.5.2] — 2026-09-22 — L'organigramme s'édite, le recueil se réserve, et l'API a ses clés
+
+Six demandes reçues ensemble, livrées ensemble.
+
+### Ajouté
+
+- **Une publication peut être réservée aux agents** (drapeau `reserve`, posé sur la trame ou sur
+  l'acte au moment de publier) : l'acte reste publié — identifiant ELI, page, versions —, mais le
+  recueil public ne le sert qu'aux porteurs d'une **session** ou d'une **clé de service**. Le bloc
+  « Vous ne trouvez pas ce que vous cherchez ? » paraît en toutes circonstances et le rappelle.
+- **Un service peut dépendre d'un autre service** (ou du bureau d'un autre service) : le périmètre
+  suit la chaîne, si bien qu'un agent affecté en **haut de chaîne** voit les actes de tout ce qui
+  pend en dessous.
+- **Des clés d'API à rôles**, créées par l'administrateur : des **comptes de service** (invisibles
+  dans « Comptes et rôles », ni dans l'annuaire) qui n'ouvrent que les routes de leur rôle, et un
+  **journal d'audit scellé** tenu par le service (`GET /v1/journal`).
+- **Une étape de circuit peut viser une personne nommée ou un service**, et non plus seulement un
+  rôle ; les circuits se lisent désormais en **récapitulatif**, avec une sous-vue par circuit.
+
+### Modifié
+
+- **L'organigramme s'édite dès le rôle d'éditeur** (permission `organigramme.gerer` : services et
+  bureaux ; l'ajout ou la suppression d'une entité reste à l'administrateur).
+- **L'atelier du rédacteur affiche le parcours** (Rédiger → Soumettre au circuit → Révision →
+  Signer → Publier) et met en avant le **geste du moment** ; l'export, discret, n'est plus présenté
+  comme l'aboutissement.
+- **Les actes déposés ne se lisent plus anonymement** : `/v1/actes` exige au moins le rôle
+  `lecteur` (le recueil public, lui, reste ouvert).
+
+## [1.5.1] — 2026-09-22 — La barre de gauche suit la vie de l'acte
+
+### Modifié
+
+- **La barre de gauche est rangée en six rubriques, dans l'ordre de la vie de l'acte** :
+  **Produire** (trames, rédiger, modifier, registre des actes, corbeille), **Valider** (parapheur,
+  révision), **Publier** (signature et publication, exécution et délais, publications ELI, recueil
+  public), **Organisation** (organigramme, délégations, chrono de numérotation), **Configurer**
+  (administration, feuilles de style) et **Aide** (guide, API REST, documentation technique).
+  « Produire » mêlait jusqu'ici les gestes de production et les **référentiels** de la
+  collectivité : on y trouvait les délégations et l'organigramme, qui ne se fabriquent pas dans
+  l'atelier. Ces trois écrans — qui composent la collectivité, qui signe à la place de qui,
+  comment on numérote — sont désormais réunis sous **Organisation**, à côté des réglages et non
+  parmi les gestes du quotidien. La **corbeille**, elle, quitte « Configurer » : ce sont les
+  actes et les trames **retirés du registre**, que tout rédacteur peut consulter et rétablir —
+  elle appartient à l'atelier. Le **parapheur** et la **révision** forment leur propre rubrique
+  (« Valider ») plutôt que de s'aligner à la suite de la rédaction.
+- **Rien ne change d'adresse.** Les écrans gardent le même identifiant de route (`#/actes`,
+  `#/delegations`…) : les liens déjà partagés continuent d'aboutir, et la barre continue de se
+  filtrer par profil (une rubrique dont aucune entrée n'est permise disparaît).
+
 ## [1.5.0] — 2026-09-22 — Les documents qui ne font pas droit, et le parapheur achevé
 
 ### Ajouté

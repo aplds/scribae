@@ -292,6 +292,76 @@ export const VARIABLES = [
     exemple: "1",
   },
 
+  // --- Bulletin des actes ----------------------------------------------------
+  // Le BULLETIN (ou Journal) rassemble les actes publiés par PÉRIODE et les
+  // diffuse : une sous-page du recueil par numéro, un flux RSS/Atom, un courriel
+  // aux abonnés (voir src/server/mysql/bulletins.mjs et actes.mjs). Ces réglages
+  // disent QUOI publier et À QUELLE CADENCE ; les bornes du service (conservé,
+  // expédié, intervalle des passes) sont dans « Bulletin des actes (service) ».
+  {
+    env: "SCRIBA_BULLETIN_ACTIF", cle: "publication.bulletin.actif", portee: "referentiel",
+    type: "booleen", groupe: "Bulletin des actes",
+    libelle: "Bulletin allumé",
+    description: "Allumé, le recueil publie un numéro à chaque clôture de période et ouvre l'abonnement par courriel. Éteint, les adresses du bulletin n'existent pas.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_BULLETIN_TITRE", cle: "publication.bulletin.titre", portee: "referentiel",
+    type: "texte", groupe: "Bulletin des actes",
+    libelle: "Titre du bulletin",
+    description: "Titre porté par le bulletin : en-tête des pages, objet des courriels, titre du flux.",
+    exemple: "Bulletin officiel des actes",
+  },
+  {
+    env: "SCRIBA_BULLETIN_TITRE_BULLETIN", cle: "publication.bulletin.titreBulletin", portee: "referentiel",
+    type: "texte", groupe: "Bulletin des actes",
+    libelle: "Titre de chaque numéro",
+    description: "Titre de chaque numéro, précédant le rang et la période (« … n° 12 — septembre 2026 »). Vide : le titre du bulletin sert.",
+    exemple: "Bulletin des actes",
+  },
+  {
+    env: "SCRIBA_BULLETIN_SOUS_TITRE", cle: "publication.bulletin.sousTitre", portee: "referentiel",
+    type: "texte", groupe: "Bulletin des actes",
+    libelle: "Sous-titre",
+    description: "Phrase d'introduction du bulletin : sous les pages, en tête du courriel, dans la description du flux.",
+    exemple: "Les actes administratifs de la collectivité, rassemblés par période.",
+  },
+  {
+    env: "SCRIBA_BULLETIN_CADENCE", cle: "publication.bulletin.cadence", portee: "referentiel",
+    type: "choix", choix: ["quotidienne", "hebdomadaire", "bimensuelle", "mensuelle", "bimestrielle", "trimestrielle", "semestrielle", "annuelle", "personnalisee"], groupe: "Bulletin des actes",
+    libelle: "Cadence de parution",
+    description: "La périodicité du bulletin. « bimensuelle » paraît deux fois par mois (1er–15, puis 16–fin). « personnalisee » (toutes les N unités) se règle dans l'interface.",
+    exemple: "mensuelle",
+  },
+  {
+    env: "SCRIBA_BULLETIN_PARUTION_JOURS", cle: "publication.bulletin.parutionJours", portee: "referentiel",
+    type: "entier", min: 0, max: 31, groupe: "Bulletin des actes",
+    libelle: "Jour de parution",
+    description: "Jour du mois où paraît le bulletin, une fois sa période close (0 : dès le premier jour permis).",
+    exemple: "1",
+  },
+
+  // --- Accès à l'atelier -----------------------------------------------------
+  // Une commune peut n'ouvrir l'atelier qu'à son intranet. La liste est
+  // appliquée par le SERVICE (voir src/server/mysql/atelier.mjs et ips.mjs) : le
+  // navigateur ne décide jamais de son propre droit d'entrer. Elle vaut aussi
+  // pour les actes RÉSERVÉS AUX AGENTS, qui ne sont montrés au recueil public
+  // qu'aux personnes connectées venant d'une adresse autorisée.
+  {
+    env: "SCRIBA_ATELIER_IPS", cle: "publication.atelier.ips", portee: "referentiel",
+    type: "liste", groupe: "Accès à l'atelier",
+    libelle: "Adresses autorisées à entrer dans l'atelier",
+    description: "Liste blanche d'adresses ou de champs d'adresses, séparés par des virgules : adresse (« 192.168.1.24 »), préfixe CIDR (« 10.0.0.0/8 », « 2001:db8::/32 »), champ (« 10.0.0.0-10.0.0.255 ») ou plage abrégée (« 10.0.0.* »). Vide : l'atelier est ouvert à toutes les adresses. Renseignée, l'atelier n'est accessible que depuis ces adresses — et les actes réservés aux agents ne sont montrés qu'à elles.",
+    exemple: "10.0.0.0/8, 192.168.1.0/24",
+  },
+  {
+    env: "SCRIBA_ATELIER_MESSAGE", cle: "publication.atelier.message", portee: "referentiel",
+    type: "texte", groupe: "Accès à l'atelier",
+    libelle: "Message affiché hors du réseau autorisé",
+    description: "La phrase expliquée à qui tente d'entrer depuis une adresse non autorisée. Vide : le message livré avec l'application sert.",
+    exemple: "L'atelier est ouvert depuis le réseau de la collectivité. Depuis l'extérieur, consultez le recueil public.",
+  },
+
   // --- Signature ------------------------------------------------------------
   {
     env: "SCRIBA_SIGNATURE_MODE", cle: "signature.mode", portee: "referentiel",
@@ -423,7 +493,7 @@ export const VARIABLES = [
   {
     env: "DB_PASSWORD", portee: "service", type: "texte", secret: true, groupe: "Base de données",
     libelle: "Mot de passe de la base",
-    description: "Mot de passe du compte applicatif. SECRET : ne jamais le versionner.",
+    description: "Mot de passe du compte applicatif. La pile REMET le compte de la base à cette valeur à chaque démarrage (service `db-init`, qui a besoin de DB_ROOT_PASSWORD) et lui applique ensuite le schéma (`schema.sql`) : c'est ici, et nulle part ailleurs, qu'il se change. SECRET : ne jamais le versionner.",
   },
   {
     env: "DB_NAME", portee: "service", type: "texte", groupe: "Base de données",
@@ -443,7 +513,7 @@ export const VARIABLES = [
   {
     env: "DB_ROOT_PASSWORD", portee: "service", type: "texte", secret: true, groupe: "Base de données",
     libelle: "Mot de passe root MariaDB",
-    description: "Employé par le conteneur `db` à la CRÉATION du dossier de données. SECRET.",
+    description: "Employé par le conteneur `db` à la CRÉATION du dossier de données, et, à chaque démarrage, par l'ALIGNEMENT du compte applicatif sur DB_PASSWORD puis l'application du schéma (`docker compose run --rm db-init`, ou `node server.mjs --reconcilier`). SECRET.",
   },
 
   // --- Authentification -----------------------------------------------------
@@ -518,12 +588,12 @@ export const VARIABLES = [
   {
     env: "API_TOKENS", portee: "service", type: "texte", secret: true, groupe: "Jetons d'API",
     libelle: "Jetons acceptés en écriture",
-    description: "« libellé|rôle:empreinte_sha256 », séparés par des virgules. Obligatoire en mode demo ; sans objet en mode password. SECRET.",
+    description: "« libellé|rôle:empreinte_sha256 », séparés par des virgules. Les jetons de DÉPLOIEMENT du service : utiles en mode demo (où aucune session n'existe) ; facultatifs en mode password, où les clés d'API créées dans l'application les remplacent. SECRET.",
   },
   {
     env: "API_TOKEN", portee: "service", type: "texte", secret: true, groupe: "Jetons d'API",
     libelle: "Jeton remis à l'application",
-    description: "Le même jeton, en clair, remis au conteneur web. Doit correspondre à une empreinte de API_TOKENS. SECRET.",
+    description: "Le même jeton, en clair, remis au conteneur web. Doit correspondre à une empreinte de API_TOKENS (facultatif : laissez vide si les clés d'API de l'application suffisent). SECRET.",
   },
   {
     env: "SCRIBA_SIGNATURE_API_CLE", portee: "service", type: "texte", secret: true, groupe: "Signature — API",
@@ -550,7 +620,7 @@ export const VARIABLES = [
   {
     env: "APP_DIR", portee: "service", type: "texte", groupe: "Façade HTTP",
     libelle: "Dossier de l'application", defaut: "../../",
-    description: "Dossier qui contient « src/ » et index.html. Sans objet pour l'image autonome, qui les embarque.",
+    description: "Dossier qui contient « src/ » et index.html. Sans objet par défaut : la pile Compose et l'image autonome EMBARQUENT le code (le monter sert à travailler sur le code sans reconstruire, voir src/server/README.md § 9 bis).",
   },
   {
     env: "PORT", portee: "service", type: "entier", min: 1, max: 65535, groupe: "Service",
@@ -565,7 +635,7 @@ export const VARIABLES = [
   {
     env: "AUTO_MIGRATE", portee: "service", type: "booleen", groupe: "Service",
     libelle: "Migration au démarrage", defaut: "false",
-    description: "Applique le schéma au démarrage. À réserver aux installations maîtrisées : la migration se lance normalement à la main.",
+    description: "Applique le schéma au démarrage, et à chaque fois que le service se rétablit après une panne de base (il la rééprouve de lui-même). À réserver aux installations maîtrisées : la migration se lance normalement à la main.",
     exemple: "false",
   },
 
@@ -682,6 +752,41 @@ export const VARIABLES = [
     env: "SMTP_TIMEOUT_MS", portee: "service", type: "entier", min: 1000, groupe: "Courriel",
     libelle: "Délai d'attente SMTP (ms)", defaut: "20000",
     description: "Délai d'attente maximal d'une conversation SMTP.", exemple: "20000",
+  },
+
+  // --- Bulletin des actes (service) ------------------------------------------
+  // Ce que le SERVICE fait du Bulletin : où il est publié, ce qu'il en conserve
+  // et à quel rythme il expédie. Les réglages de FOND (allumé, titre, cadence)
+  // sont dans le groupe « Bulletin des actes » (portée référentiel).
+  {
+    env: "SCRIBA_PUBLIQUE_URL", portee: "service", type: "url", groupe: "Bulletin des actes (service)",
+    libelle: "Adresse publique du recueil",
+    description: "Adresse publique du recueil (par exemple « https://actes.exemple.fr »). C'est elle qui donne leurs liens aux bulletins adressés par courriel et au flux, puisque le service, quand il compose seul, ne voit pas l'adresse du lecteur. Sans elle, l'abonnement par courriel n'est pas ouvert.",
+    exemple: "https://actes.exemple.fr",
+  },
+  {
+    env: "SCRIBA_BULLETIN_MAX", portee: "service", type: "entier", min: 1, max: 600, defaut: "60", groupe: "Bulletin des actes (service)",
+    libelle: "Bulletins conservés",
+    description: "Nombre de bulletins conservés dans l'état du service : les plus anciens sont élagués au-delà. Il borne aussi la remontée initiale, pour qu'un recueil de dix ans ne fasse pas paraître cent numéros d'un coup.",
+    exemple: "60",
+  },
+  {
+    env: "SCRIBA_BULLETIN_MAX_ABONNES", portee: "service", type: "entier", min: 1, max: 200000, defaut: "2000", groupe: "Bulletin des actes (service)",
+    libelle: "Abonnés au bulletin",
+    description: "Nombre maximal d'abonnés au bulletin sur ce service. Au-delà, une nouvelle demande est refusée — sans dire qui est déjà inscrit.",
+    exemple: "2000",
+  },
+  {
+    env: "SCRIBA_BULLETIN_ENVOIS_PASSE", portee: "service", type: "entier", min: 1, max: 2000, defaut: "40", groupe: "Bulletin des actes (service)",
+    libelle: "Livraisons par passe",
+    description: "Nombre de courriels de bulletin expédiés à chaque passe : borne le temps passé en envoi d'un seul coup. Une livraison refusée est réessayée à la passe suivante, trois fois au total.",
+    exemple: "40",
+  },
+  {
+    env: "SCRIBA_BULLETIN_INTERVALLE_MIN", portee: "service", type: "entier", min: 1, max: 1440, defaut: "10", groupe: "Bulletin des actes (service)",
+    libelle: "Intervalle des passes (minutes)",
+    description: "Fréquence de la passe qui clôt les périodes échues, compose les numéros et vide la file d'envoi. Une passe a lieu aussi à chaque démarrage du service, qui rattrape ainsi son retard seul.",
+    exemple: "10",
   },
 ];
 

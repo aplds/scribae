@@ -11,9 +11,11 @@
 // ============================================================================
 
 import { seedConfig, seedConfigVierge, seedTrames } from "./seed.js";
+import { LOGO_CCAS_SVG, svgDataUrl } from "./styles.js";
 import { emptyConfig } from "./schema.js";
 import { mentionsParDefaut } from "./recueil.js";
 import { seedActes } from "./demo-actes.js";
+import { seedInformations } from "./demo-informations.js";
 import { seedUsers, isDemoUsers, isDemoUser, hasRole, rolesOf, setRoles, syncDemoAccounts, DEMO_USER_IDS } from "./users.js";
 import { ROLE_SIGNATAIRE, situationDeSignature } from "./signataires.js";
 import { emptyAuth, demoAccountsDisabled } from "./auth.js";
@@ -262,6 +264,21 @@ function migrateDemoStyles(config) {
   if (!config || !demoActif(config)) return false;
   if (Array.isArray(config.styles) && config.styles.length) return false;
   config.styles = seedConfig().styles;
+  return true;
+}
+
+// L'emblème du CCAS a d'abord été encodé avec `btoa` sur du texte Latin-1 : le
+// navigateur refusait de le décoder (image muette, dans l'application comme
+// dans les exports). On remet la version UTF-8 sur une feuille de démonstration
+// qui porte encore l'ancienne — un emblème choisi par l'administrateur, ou un
+// référentiel réel, n'est jamais touché.
+function migrateDemoCcasLogo(config) {
+  if (!config || !demoActif(config) || !Array.isArray(config.styles)) return false;
+  const style = config.styles.find((s) => s.id === "sty-ccas");
+  if (!style || !style.logoUrl) return false;
+  const ancien = "data:image/svg+xml;base64," + btoa(LOGO_CCAS_SVG.trim());
+  if (style.logoUrl !== ancien) return false;
+  style.logoUrl = svgDataUrl(LOGO_CCAS_SVG);
   return true;
 }
 
@@ -619,6 +636,13 @@ export const loadTrames = () => db.read("trames");
 export const saveTrames = (t) => db.write("trames", t);
 export const loadActes = () => db.read("actes");
 export const saveActes = (a) => db.write("actes", a);
+// Les INFORMATIONS publiées au recueil : des billets (actualités, avis,
+// communications) que l'administration écrit et publie, à côté des actes. Elles
+// vivent dans leur propre collection — elles ne sont ni des actes ni des trames,
+// et elles se publient sans passer par la signature ni par l'ELI (voir
+// src/server/mysql/informations.mjs et src/ui/views/informations.js).
+export const loadInformations = () => db.read("informations");
+export const saveInformations = (l) => db.write("informations", l);
 export const loadUsers = () => db.read("users");
 export const saveUsers = (u) => db.write("users", u);
 export const loadSession = () => db.read("session");
@@ -628,6 +652,7 @@ export async function bootstrap() {
   let config = await loadConfig();
   let trames = await loadTrames();
   let actes = await loadActes();
+  let informations = await loadInformations();
   let users = await loadUsers();
   const session = await loadSession();
   const meta = (await db.read("meta")) || {};
@@ -659,6 +684,25 @@ export async function bootstrap() {
     }
   }
   if (!actes) { actes = []; await saveActes(actes); }
+
+  // Les INFORMATIONS du recueil public — les billets de l'administration. Comme
+  // les trames et les actes, elles suivent le jeu de démonstration : semées à
+  // l'installation d'une démonstration, et remises à niveau avec lui TANT QUE la
+  // liste ne contient que des billets livrés. Une information écrite à la main
+  // (un identifiant qui n'est pas de démonstration) protège toute la liste : on
+  // n'écrase jamais un billet réel.
+  //
+  // Deux cas mènent au semis : la liste ABSENTE (stockage local d'un poste qui
+  // n'en a jamais reçu), et — en démonstration seulement — la liste VIDE ou
+  // périmée. Le service partagé, lui, rend toujours une liste, vide au premier
+  // démarrage : sans cette règle, une démonstration neuve n'aurait aucun billet
+  // à montrer, et le recueil public serait sans nouvelles.
+  const demoInfosAVoir = demo && (!Array.isArray(informations) || !informations.length
+    || (meta.seedVersion !== SEED_VERSION && informations.every((i) => String(i.id).startsWith("info-demo-"))));
+  if (!informations || demoInfosAVoir) {
+    informations = demo ? seedInformations() : [];
+    await saveInformations(informations);
+  }
 
   // MIROIR du commutateur : `brand.demo` recopie ce que dit le déploiement, pour
   // que le réglage voyage avec les données exportées et importées. Il ne décide
@@ -710,6 +754,7 @@ export async function bootstrap() {
   // tenter — chacune est idempotente.
   const migrated = migrateAmendmentVocab(config) | migrateDemoNonPublishable(config) | migrateDemoStyles(config)
     | migrateDemoLogoDark(config)
+    | migrateDemoCcasLogo(config)
     | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
     | migrateCircuitsNatures(config)
     | migrateDemoServiceRevision(config) | migrateDemoOrganigramme(config)
@@ -794,7 +839,7 @@ export async function bootstrap() {
   // donc persisté ici : retirer une variable du `.env` la fait disparaître au
   // démarrage suivant.
   appliquerOptions(config);
-  return { config, trames, actes, users, session, firstRun };
+  return { config, trames, actes, users, session, informations, firstRun };
 }
 
 // Remise à zéro de toutes les collections. `garderComptes` épargne la collection

@@ -91,19 +91,115 @@ export function signatairePrincipal(config, entityId) {
   return personne ? { personne, roleId: e.signerRoleId || "" } : null;
 }
 
+// ============================================================================
+// LES SERVICES SE RATTACHENT ENTRE EUX.
+//
+// Un service appartient à une entité — cela ne change pas. Mais il peut aussi
+// DÉPENDRE d'un autre service, ou du BUREAU d'un autre service : `parentId`
+// désigne l'un ou l'autre, et un identifiant ne désigne jamais qu'une chose, si
+// bien qu'il n'y a pas de type à déclarer.
+//
+// Ce rattachement sert deux choses :
+//
+//   • l'ORDRE de l'organigramme — un service rattaché s'affiche sous son parent,
+//     non à la racine de son entité ;
+//   • le PÉRIMÈTRE — un agent affecté à un service de tête voit les actes de
+//     toute la chaîne en contrebas (voir src/lib/scope.js, `inScope`). C'est ce
+//     qu'une direction attend : affectée à la direction générale, elle suit les
+//     actes de ses directions rattachées.
+// ============================================================================
+
+// Le bureau d'un identifiant, avec le service qui le porte.
+function bureauParId(services, id) {
+  for (const s of services) {
+    const b = (s.bureaux || []).find((x) => x.id === id);
+    if (b) return { service: s, bureau: b };
+  }
+  return null;
+}
+
+// Le parent d'un service : un service, un bureau, ou rien (il tient alors
+// directement à son entité). Un parent inconnu — un service supprimé — est
+// ignoré : le service remonte à la racine, plutôt que de disparaître.
+export function parentDeService(config, service) {
+  const services = config?.services || [];
+  const id = service?.parentId;
+  if (!id || id === service?.id) return null;
+  const s = services.find((x) => x.id === id);
+  if (s) return { type: "service", service: s };
+  const b = bureauParId(services, id);
+  if (b) return { type: "bureau", service: b.service, bureau: b.bureau };
+  return null;
+}
+
+// Les services qui dépendent directement de `parentId` (un service, ou un
+// bureau). L'ordre du référentiel est conservé.
+export const enfantsServices = (config, parentId) =>
+  (config?.services || []).filter((s) => s.parentId === parentId && s.id !== parentId);
+
+// Les services qui tiennent directement à une entité (sans parent connu).
+export const servicesRacines = (config, entityId) =>
+  (config?.services || []).filter((s) => (s.entityId || "") === entityId && !parentDeService(config, s));
+
+// La CHAÎNE d'un service jusqu'à son entité, du plus proche au plus lointain :
+// une suite d'étapes, chacune un service ou le bureau d'un service. C'est elle
+// qui porte le périmètre (savoir sous quel bureau un service pend) et la fiche
+// d'un service (« dépend de … »).
+export function chaineDeService(config, serviceId) {
+  const services = config?.services || [];
+  const etapes = [];
+  const vus = new Set();
+  let id = serviceId;
+  while (id && !vus.has(id)) {
+    vus.add(id);
+    const s = services.find((x) => x.id === id);
+    if (s) { etapes.push({ type: "service", service: s }); id = s.parentId || ""; continue; }
+    const b = bureauParId(services, id);
+    if (!b) break;
+    etapes.push({ type: "bureau", service: b.service, bureau: b.bureau });
+    // Un bureau ne se rattache pas : on remonte par le service qui le porte.
+    id = b.service.id;
+    if (vus.has(id)) break;
+  }
+  return etapes;
+}
+
+// Les services SOUS celui-ci — lui compris — en descendant : ses services
+// rattachés, ceux qui pendent sous ses bureaux, et ainsi de suite. Sert au
+// périmètre : un agent du service de tête voit toute la chaîne.
+export function servicesSous(config, serviceId, vus = new Set()) {
+  if (!serviceId || vus.has(serviceId)) return vus;
+  vus.add(serviceId);
+  const s = (config?.services || []).find((x) => x.id === serviceId);
+  if (!s) return vus;
+  for (const b of (s.bureaux || [])) for (const enfant of enfantsServices(config, b.id)) servicesSous(config, enfant.id, vus);
+  for (const enfant of enfantsServices(config, serviceId)) servicesSous(config, enfant.id, vus);
+  return vus;
+}
+
 // L'arbre de l'organisation, tel qu'on l'affiche : chaque entité racine (sans
 // rattachement, ou rattachée à une entité inconnue ou formant un cycle) porte
-// ses services, ses bureaux et ses entités rattachées. La profondeur n'est pas
-// limitée, mais un cycle ne boucle jamais : on s'arrête dès qu'une entité se
-// rencontre elle-même.
+// ses services — eux-mêmes rattachés les uns aux autres —, leurs bureaux et les
+// entités rattachées. La profondeur n'est pas limitée, mais un cycle ne boucle
+// jamais : on s'arrête dès qu'une entité ou un service se rencontre lui-même.
 export function organigramme(config) {
   const entites = entitesOf(config);
   const parId = new Map(entites.map((e) => [e.id, e]));
-  const services = (config?.services || []);
-  const servicesDe = (entityId) =>
-    services.filter((s) => (s.entityId || "") === entityId)
-      .map((s) => ({ service: s, bureaux: s.bureaux || [] }));
 
+  const brancherService = (service, vus) => {
+    if (vus.has(service.id)) return null;
+    const suite = new Set([...vus, service.id]);
+    return {
+      service,
+      parent: parentDeService(config, service),
+      bureaux: (service.bureaux || []).map((b) => ({
+        bureau: b,
+        // Un service peut pendre sous un bureau : il s'affiche alors sous elle.
+        enfants: enfantsServices(config, b.id).map((s) => brancherService(s, suite)).filter(Boolean),
+      })),
+      enfants: enfantsServices(config, service.id).map((s) => brancherService(s, suite)).filter(Boolean),
+    };
+  };
   const racines = entites.filter((e) => {
     if (!e.parentId) return true;
     const p = parId.get(e.parentId);
@@ -116,7 +212,7 @@ export function organigramme(config) {
     entiteParente: entiteParente(config, entite),
     autonome: estAutonome(entite),
     signataire: signatairePrincipal(config, entite.id),
-    services: servicesDe(entite.id),
+    services: servicesRacines(config, entite.id).map((s) => brancherService(s, new Set())).filter(Boolean),
     enfants: enfantsDe(config, entite.id)
       .filter((e) => !vus.has(e.id))
       .map((e) => brancher(e, niveau + 1, new Set([...vus, e.id]))),
@@ -149,6 +245,9 @@ export function statsOrganigramme(config) {
     autonomes: entites.filter(estAutonome).length,
     rattachees: entites.filter((e) => !estAutonome(e)).length,
     services: services.length,
+    // Combien de services dépendent d'un autre service (ou d'un bureau) :
+    // l'écran le dit, parce que c'est ce rattachement qui élargit le périmètre.
+    servicesRattaches: services.filter((s) => parentDeService(config, s)).length,
     bureaux,
     sansSignataire: entites.filter((e) => !e.signerPersonId).length,
   };

@@ -19,6 +19,7 @@
 import { state, login, navigate } from "../state.js";
 import { h, icon } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
+import { mentionAffichee, contenuMention } from "../mention.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
 import { isOidc, isPassword, demoAccountsDisabled, accesLocal } from "../../lib/auth.js";
@@ -98,6 +99,11 @@ export function renderConnexion(root) {
             : "Démonstration : les comptes sont fictifs et l'authentification est simulée (aucun mot de passe n'est demandé). Pour brancher l'annuaire de la collectivité, voir Administration › Annuaire : les comptes de démonstration sont alors désactivés automatiquement." }),
       ),
     ),
+    // Le pied de l'écran de connexion — la mention de l'éditeur du logiciel,
+    // comme dans l'atelier et sur le recueil public (voir src/ui/mention.js).
+    mentionAffichee()
+      ? h("footer", { class: "app-pied app-pied--connexion" }, h("p", { class: "app-pied__mention" }, ...contenuMention()))
+      : null,
   );
   root.appendChild(box);
 }

@@ -62,9 +62,22 @@ testable sans navigateur.
   normalisation de chemin ;
 - `src/lib/version.js` — numéro sémantique et libellés.
 
+`src/tests/publications-locales.test.mjs` éprouve le **repli local du recueil
+public** (`src/lib/publications-locales.js`) : seuls les actes réellement publiés
+entrent au recueil, les versions d'un même identifiant ELI sont rangées (la plus
+récente porte `latest`), un acte réservé aux agents reste caché, et les pièces
+d'un acte se lisent aussi bien dans `formats` (fiche complète du service) qu'à
+plat (réponse de dépôt — dont le champ `formats` est, lui, la liste des types
+MIME).
+
 `src/server/mysql/comptes.test.mjs` et `src/server/mysql/actes.test.mjs`
 éprouvent le domaine du service (mots de passe scrypt, sessions, anti-CSRF ;
 signature et publication) **sans base ni réseau**.
+
+`src/server/charge/charge.test.mjs` éprouve l'**outil d'étude de charge** lui-même
+(profils et pondérations, agrégat et centiles, moteur, base en mémoire) : un outil de
+mesure qui se trompe donne des chiffres faux avec l'assurance de chiffres vrais.
+L'étude qu'il a servie est dans [`PERFORMANCE.md`](PERFORMANCE.md).
 
 > **Un module qui exigerait un navigateur** (`DOMParser`, `localStorage`) ne fait
 > pas tomber la suite : l'import échoue et les tests correspondants sont

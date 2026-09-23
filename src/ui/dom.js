@@ -87,6 +87,9 @@ const ICONS = {
   partage: "M4 12v7h16v-7M12 3v11M8 6l4-4 4 4",
   // Enveloppe : les notifications par courriel (voir src/lib/courriel.js).
   mail: "M3 6h18v12H3zM3 7.5l9 6 9-6",
+  // Boîte d'archive : l'export PDF/A, la forme normalisée pour la conservation
+  // (voir ui/pdfa.js).
+  archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
 };
 
 export function icon(name, size = 16) {

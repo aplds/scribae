@@ -1,5 +1,5 @@
 import { emptyConfig, newNode, newField, newRule, newNote, newTrame } from "./schema.js";
-import { seedStyles } from "./styles.js";
+import { seedStyles, svgDataUrl } from "./styles.js";
 import { EXTERNE_DEFAUT } from "./numbering.js";
 import { RENVOIS_RECOMMANDES, mentionsParDefaut } from "./recueil.js";
 
@@ -53,7 +53,7 @@ export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64
   <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="none" stroke="#12335c" stroke-width="3.4" stroke-linejoin="round"/>
 </svg>`;
 
-const LOGO_DATA_URL = "data:image/svg+xml;base64," + btoa(LOGO_SVG.trim());
+const LOGO_DATA_URL = svgDataUrl(LOGO_SVG);
 
 // La variante du thème sombre : MÊME écu, mais le galon s'éclaircit. Un trait
 // bleu nuit posé sur le fond sombre de l'application disparaîtrait, et l'écu
@@ -62,7 +62,7 @@ const LOGO_DATA_URL = "data:image/svg+xml;base64," + btoa(LOGO_SVG.trim());
 // remplacement de la seule chaîne concernée : redessiner l'écu en double ferait
 // diverger les deux emblèmes à la première retouche du dessin.
 const LOGO_SVG_SOMBRE = LOGO_SVG.replace('stroke="#12335c" stroke-width="3.4"', 'stroke="#cfe0f5" stroke-width="3.4"');
-const LOGO_DATA_URL_SOMBRE = "data:image/svg+xml;base64," + btoa(LOGO_SVG_SOMBRE.trim());
+const LOGO_DATA_URL_SOMBRE = svgDataUrl(LOGO_SVG_SOMBRE);
 
 export function seedConfig() {
   const c = emptyConfig();
@@ -888,6 +888,25 @@ export function seedConfig() {
   c.publication.mentions.accessibilite.mode = "lien";
   c.publication.mentions.accessibilite.lien = "https://www.valmont-sur-loire.fr/accessibilite";
   c.publication.mentions.accessibilite.lienLabel = "Accessibilité — la déclaration d'accessibilité du site de la Ville";
+
+  // LE BULLETIN DES ACTES (1.6.0). La démonstration OUVRE son bulletin : c'est
+  // une fonction du recueil, et qui la découvre doit la VOIR — éteint, il ne
+  // montrerait ni sous-page, ni flux, ni abonnement, et l'écran d'administration
+  // se lirait comme une coquille. La fiction paraît donc un numéro par mois, le
+  // 5, et le service compose les périodes échues au démarrage (voir
+  // src/ui/demo-publications.js, `amorcerBulletin`).
+  //
+  // Sur une installation RÉELLE, le bulletin reste ÉTEINT par défaut
+  // (`src/lib/schema.js`) : ouvrir un bulletin des actes est un acte
+  // d'administration, et publier un numéro se fait sous la responsabilité de la
+  // collectivité — jamais par inadvertance.
+  c.publication.bulletin = {
+    ...c.publication.bulletin,
+    actif: true,
+    sousTitre: "Les actes publiés par la Ville, rassemblés par période.",
+    cadence: { ...c.publication.bulletin.cadence, id: "mensuelle" },
+    parutionJours: 5,
+  };
   return c;
 }
 

@@ -105,9 +105,15 @@ export function renderDocument(doc, config, opts = {}) {
   // document — en-tête, pied, polices, filets — sans toucher à son contenu.
   const style = opts.style || styleForDoc(config, doc);
   const root = el("article", "doc" + (opts.compact ? " doc--compact" : ""));
-  if (style?.id) root.dataset.sheet = style.id;
+  // `opts.sheet === false` : rendre le document SANS sa charte — ni l'attribut
+  // qui la désigne (`data-sheet`), ni son en-tête ni son pied. C'est ce
+  // qu'emploie la version EN LIGNE publiée : l'acte publié suit la feuille de
+  // style web du recueil, jamais la charte de son entité (voir lib/recueil.js,
+  // `CSS_DOCUMENT_WEB`, et lib/eli.js, `buildWebVersion`).
+  const habillage = opts.sheet !== false;
+  if (habillage && style?.id) root.dataset.sheet = style.id;
   if (opts.arial) root.style.fontFamily = style?.fontFamily || config.brand.documentFont || "";
-  if (style?.showHeader) root.appendChild(documentSheetHeader(style, doc, config));
+  if (habillage && style?.showHeader) root.appendChild(documentSheetHeader(style, doc, config));
   if (doc?.kind === "consolide" && opts.consolidation !== false) root.appendChild(consolidationBanner(doc, o));
   o.mentions = tracking ? null : amendmentMentions(doc, config);
   for (const node of doc?.nodes || []) {
@@ -127,7 +133,7 @@ export function renderDocument(doc, config, opts = {}) {
   if (opts.annexes !== false) {
     for (const joint of doc?.annexeDocs || []) root.appendChild(annexePart(joint, config, o, style));
   }
-  if (style?.showFooter) root.appendChild(documentSheetFooter(style, doc, config));
+  if (habillage && style?.showFooter) root.appendChild(documentSheetFooter(style, doc, config));
   return root;
 }
 
@@ -158,6 +164,7 @@ function annexePart(joint, config, opts = {}, style = null) {
       showNotes: false, showTrail: false, annexes: false,
       sansSignature: true,
       style,
+      sheet: opts.sheet,
       showPaths: opts.showPaths,
       abrogations: opts.abrogations,
       compact: opts.compact,

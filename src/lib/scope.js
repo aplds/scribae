@@ -16,14 +16,23 @@
 // « transverse » : il voit tout (c'est ainsi qu'un administrateur donne accès à
 // tout à un directeur, sans changer son rôle).
 //
+// LES SERVICES SE RATTACHENT ENTRE EUX (voir src/lib/organigramme.js) : un
+// service peut dépendre d'un autre service, ou du bureau d'un autre service. Le
+// périmètre suit la chaîne : un agent affecté à un service de tête couvre tout
+// ce qui pend sous lui, jusqu'au bout. La restriction de bureaux, elle, ne
+// descend pas par les services rattachés — elle borne ce que voit l'agent DANS
+// son service, et couvre seulement ce qui pend sous les bureaux autorisés.
+//
 // Règle de visibilité d'une trame ou d'un acte :
-//   - administrateur, ou compte rattaché à tous les services   → tout ;
-//   - cible sans service (donnée héritée ou trame générale)     → tout le monde ;
-//   - sinon → le service doit être dans le périmètre, et si le périmètre est
-//     restreint à certains bureaux, la cible doit viser un bureau autorisé (une
-//     cible qui vaut pour tout le service reste visible).
+//   - administrateur, ou compte couvrant tous les services            → tout ;
+//   - cible sans service (donnée héritée ou trame générale)           → tout le monde ;
+//   - sinon → le service doit être couvert par le périmètre (le sien, ou l'un
+//     de ceux qui pendent sous le sien), et si le périmètre est restreint à
+//     certains bureaux, la cible doit viser un bureau autorisé (une cible qui
+//     vaut pour tout le service reste visible).
 // ============================================================================
 import { ROLES, hasRole, primaryRoleId } from "./users.js";
+import { chaineDeService, servicesSous } from "./organigramme.js";
 
 export const servicesOf = (config) => config?.services || [];
 export const serviceById = (config, id) => servicesOf(config).find((s) => s.id === id) || null;
@@ -54,15 +63,19 @@ export const restrictedBureaux = (user, serviceId) => {
 };
 
 // Le périmètre couvre-t-il tous les services, sans restriction de bureau ?
+// Un service rattaché à un autre compte : un compte qui tient tous les services
+// DE TÊTE voit, par la chaîne, tout ce qui pend dessous.
 export function coversAllServices(config, user) {
   if (!user || user.active === false) return false;
   if (hasRole(user, "administrateur")) return true;
   const all = servicesOf(config);
   if (!all.length) return false;
-  return all.every((s) => {
-    const m = membershipFor(user, s.id);
-    return !!m && !Array.isArray(m.bureaux);
-  });
+  const couverts = new Set();
+  for (const m of membershipsOf(user)) {
+    if (Array.isArray(m.bureaux)) continue;   // restriction : ne couvre pas la chaîne
+    for (const id of servicesSous(config, m.serviceId)) couverts.add(id);
+  }
+  return all.every((s) => couverts.has(s.id));
 }
 
 // L'appartenance à *chaque* service, tous bureaux (utilisé par la case
@@ -71,23 +84,40 @@ export const allServicesMemberships = (config) =>
   servicesOf(config).map((s) => ({ serviceId: s.id, bureaux: null }));
 
 // ----------------------------------------------------------------- périmètre
+// Une appartenance couvre-t-elle ce service (et ce bureau, s'il est visé) ?
+// C'est le cœur du périmètre, et le seul endroit où la chaîne des services est
+// lue : le service visé, ou l'un de ceux qui pendent sous l'appartenance ; et
+// pour une appartenance restreinte à des bureaux, ce qui pend sous ces bureaux.
+function couvreCible(config, m, serviceId, bureauId) {
+  const restreint = Array.isArray(m.bureaux) ? m.bureaux : null;
+  if (!restreint) {
+    return m.serviceId === serviceId || servicesSous(config, m.serviceId).has(serviceId);
+  }
+  if (m.serviceId === serviceId) {
+    if (!bureauId) return true;             // cible valable pour tout le service
+    return restreint.includes(bureauId);
+  }
+  // Un service en contrebas : il n'est couvert que s'il pend sous un bureau
+  // autorisé de mon service.
+  return chaineDeService(config, serviceId)
+    .some((e) => e.type === "bureau" && e.service.id === m.serviceId && restreint.includes(e.bureau.id));
+}
+
 export function inScope(config, user, target) {
   if (!user || user.active === false) return false;
   if (coversAllServices(config, user)) return true;
   const serviceId = target?.serviceId;
   if (!serviceId) return true;            // cible transverse (donnée héritée)
-  const m = membershipFor(user, serviceId);
-  if (!m) return false;                   // hors périmètre
-  if (!Array.isArray(m.bureaux)) return true;   // tout le service
-  if (!target.bureauId) return true;      // cible valable pour tout le service
-  return m.bureaux.includes(target.bureauId);
+  const bureauId = target?.bureauId || "";
+  return membershipsOf(user).some((m) => couvreCible(config, m, serviceId, bureauId));
 }
 
-// Les services qu'un compte peut viser (pour peupler un sélecteur de service).
+// Les services qu'un compte peut viser (pour peupler un sélecteur de service) :
+// les siens, et ceux qui pendent sous les siens.
 export function servicesInScope(config, user) {
   if (!user) return [];
   if (coversAllServices(config, user)) return servicesOf(config);
-  return servicesOf(config).filter((s) => isMemberOf(user, s.id));
+  return servicesOf(config).filter((s) => inScope(config, user, { serviceId: s.id }));
 }
 
 export function bureauxInScope(config, user, serviceId) {
@@ -97,14 +127,24 @@ export function bureauxInScope(config, user, serviceId) {
   return rest ? bureauxOf(s).filter((b) => rest.includes(b.id)) : bureauxOf(s);
 }
 
-// Bureaux autorisés dans un service (null = tous).
+// Bureaux autorisés dans un service (null = tous). La restriction de bureaux ne
+// joue que sur le service de l'appartenance : un service rattaché plus bas est
+// couvert en entier (c'est la chaîne, non la restriction, qui l'ouvre).
 export function coveredBureaux(config, user, serviceId) {
   if (!user) return [];
   if (coversAllServices(config, user) || hasRole(user, "administrateur")) return null;
   const m = membershipFor(user, serviceId);
-  if (!m) return [];
-  return Array.isArray(m.bureaux) ? m.bureaux : null;
+  if (m) return Array.isArray(m.bureaux) ? m.bureaux : null;
+  return inScope(config, user, { serviceId }) ? null : [];
 }
+
+// Les services rattachés SOUS un service, pour la fiche d'un service et le
+// libellé du périmètre (« + 3 services rattachés »).
+export const servicesRattachesA = (config, serviceId) => {
+  const tous = servicesSous(config, serviceId);
+  tous.delete(serviceId);
+  return servicesOf(config).filter((s) => tous.has(s.id));
+};
 
 // ---------------------------------------------------------------- libellés
 export function scopeLabel(config, user) {
@@ -117,7 +157,12 @@ export function scopeLabel(config, user) {
     const s = serviceById(config, m.serviceId);
     if (!s) return "(service supprimé)";
     const total = bureauxOf(s).length;
-    if (!Array.isArray(m.bureaux) || !total) return serviceCode(s);
+    if (!Array.isArray(m.bureaux) || !total) {
+      // Le périmètre descend : on le dit, parce que c'est ce qui explique que
+      // l'agent voie des actes d'un autre service.
+      const sous = servicesSous(config, m.serviceId).size - 1;
+      return serviceCode(s) + (sous > 0 ? ` + ${sous} service(s) rattaché(s)` : "");
+    }
     return `${serviceCode(s)} (${m.bureaux.length}/${total} bureaux)`;
   }).join(" · ");
 }
@@ -138,7 +183,7 @@ export const authorLabel = (config, user) => {
 };
 
 export function newService(over = {}) {
-  return { id: "svc-" + Math.random().toString(36).slice(2, 9), code: "SRV", name: "Nouveau service", entityId: "", bureaux: [], ...over };
+  return { id: "svc-" + Math.random().toString(36).slice(2, 9), code: "SRV", name: "Nouveau service", entityId: "", parentId: "", bureaux: [], ...over };
 }
 
 export function newBureau(over = {}) {

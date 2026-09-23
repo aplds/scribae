@@ -1,9 +1,10 @@
 import {
   state, init, parseRoute, navigate, onChange, applyBrand, setViewRenderer, can, logout,
-  currentUser, emit, signalerEcranCollab, libererRedaction,
+  currentUser, emit, signalerEcranCollab, libererRedaction, demandeAtelier,
 } from "./state.js";
 import { h, clear, icon, button, badge, toast } from "./dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "./brand.js";
+import { mentionAffichee, contenuMention } from "./mention.js";
 import { versionBadge, releasedLabel } from "../lib/version.js";
 import { fullName, roleLabel, badgesOf, initialsOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
@@ -17,6 +18,8 @@ import { demoNotice, viergeNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
 import { ouvrirChangementMotDePasse } from "./mot-de-passe.js";
 import { renderSansAcces } from "./views/sans-acces.js";
+import { renderHorsReseau } from "./views/hors-reseau.js";
+import { chargerAcces, horsReseau, surAcces } from "../lib/atelier-acces.js";
 import { handleAuthReturn } from "./oidc.js";
 import { renderComptes } from "./views/comptes.js";
 import { renderTrames } from "./views/trames.js";
@@ -32,6 +35,8 @@ import { renderAide } from "./views/aide.js";
 import { renderModifier, renderActeDetail } from "./views/modifier.js";
 import { renderSignature } from "./views/signature.js";
 import { renderPublications } from "./views/publications.js";
+import { renderInformations } from "./views/informations.js";
+import { renderBulletin } from "./views/bulletin.js";
 import { renderRecueilPublic, retirerMetaRecueil } from "./views/recueil-public.js";
 import { amorcerRecueil } from "./demo-publications.js";
 import { appliquerAbrogations } from "./abrogations-apply.js";
@@ -46,22 +51,27 @@ import { avecCurseur } from "./focus.js";
 import { monterAssistants, assistantsChooser } from "./assistant.js";
 import { installerRaccourcis, ouvrirRecherche } from "./global-search.js";
 
+// La barre de gauche suit la VIE DE L'ACTE plutôt que la liste des écrans : on
+// écrit (Produire), on valide (Valider), on rend l'acte opposable et public
+// (Publier). Les référentiels qui décrivent la collectivité — qui la compose,
+// qui signe à la place de qui, comment on numérote — sont rangés à part
+// (Organisation) : ce ne sont pas des gestes de production, mais une donnée
+// qu'on consulte. La corbeille range les actes et les trames retirés : elle
+// appartient à l'atelier, pas aux réglages.
 const NAV = [
   { group: "Produire", items: [
     { id: "trames", label: "Trames", icon: "doc", perm: "trames.voir" },
     { id: "rediger", label: "Rédiger un acte", icon: "plus", perm: "actes.rediger" },
     { id: "modifier", label: "Modifier un acte", icon: "refresh", perm: "actes.gerer" },
     { id: "actes", label: "Actes", icon: "list", perm: "actes.rediger" },
-    // Le chrono de numérotation : le registre des numéros tirés. Il se lit comme
-    // les actes — tout rédacteur a le droit de savoir quel numéro porte quoi —
-    // mais ses deux gestes d'écriture (passer à l'année suivante, annuler un
-    // rang) sont réservés à l'administration, dans la vue.
-    { id: "chrono", label: "Chrono de numérotation", icon: "list", perm: "actes.rediger" },
-    { id: "delegations", label: "Délégations", icon: "org" },
-    // L'organigramme des entités, services et bureaux : ouvert à tous les
-    // comptes, comme les délégations — savoir qui compose la collectivité n'est
-    // pas une donnée réservée.
-    { id: "organigramme", label: "Organigramme", icon: "org" },
+    // La corbeille appartient à l'atelier : ce sont les actes et les trames
+    // retirés du registre, que tout rédacteur peut consulter et rétablir.
+    { id: "corbeille", label: "Corbeille", icon: "trash", perm: "actes.rediger" },
+  ] },
+  // Le circuit d'avant-signature : le parapheur (vérification, visa, signature)
+  // et la révision du texte. Un moment et un métier à part de la rédaction, donc
+  // une rubrique à part.
+  { group: "Valider", items: [
     { id: "parapheur", label: "Parapheur", icon: "check", perm: "actes.valider" },
     { id: "revision", label: "Révision", icon: "eye", perm: "actes.reviser" },
   ] },
@@ -69,14 +79,36 @@ const NAV = [
     { id: "signature", label: "Signature & publication", icon: "lock", perm: "actes.signer" },
     { id: "execution", label: "Exécution & délais", icon: "list", perm: "actes.rediger" },
     { id: "publications", label: "Publications (ELI)", icon: "eye", perm: "signature.gerer" },
+    // Les INFORMATIONS du recueil public : les billets que la collectivité
+    // publie (actualités, avis, communications). Ils ne se signent pas et ne
+    // reçoivent pas d'identifiant ELI — c'est un geste de communication, pas de
+    // publication d'acte, et il a sa propre permission.
+    { id: "informations", label: "Informations", icon: "bulle", perm: "informations.gerer" },
+    // LE BULLETIN (ou Journal) des actes : le recueil rassemblé par période,
+    // adressé aux abonnés et suivi par un flux. Il ne se signe pas et ne se
+    // numérote pas acte par acte — c'est une forme de la publication, d'où sa
+    // place ici, à côté des informations.
+    { id: "bulletin", label: "Bulletin", icon: "bulle", perm: "bulletin.gerer" },
     // Le recueil public est ouvert à tous, y compris hors de l'atelier : sa
     // place dans le menu est une commodité, non un droit.
     { id: "recueil", label: "Recueil public", icon: "globe" },
   ] },
+  // Les référentiels de la collectivité : sa structure (l'organigramme), les
+  // délégations de signature, et le chrono qui dit comment les numéros sont
+  // tirés. Ouverts à tous les comptes — savoir qui existe et qui signe n'est pas
+  // une donnée réservée ; seules leurs modifications sont gardées.
+  { group: "Organisation", items: [
+    { id: "organigramme", label: "Organigramme", icon: "org" },
+    { id: "delegations", label: "Délégations", icon: "org" },
+    // Le chrono : le registre des numéros tirés. Il se lit comme les actes —
+    // tout rédacteur a le droit de savoir quel numéro porte quoi — mais ses deux
+    // gestes d'écriture (passer à l'année suivante, annuler un rang) sont
+    // réservés à l'administration, dans la vue.
+    { id: "chrono", label: "Chrono de numérotation", icon: "list", perm: "actes.rediger" },
+  ] },
   { group: "Configurer", items: [
     { id: "referentiel", label: "Administration", icon: "grid", perm: "referentiel.gerer" },
     { id: "styles", label: "Feuilles de style", icon: "palette", perm: "trames.styles" },
-    { id: "corbeille", label: "Corbeille", icon: "trash", perm: "actes.rediger" },
   ] },
   { group: "Aide", items: [
     { id: "aide", label: "Guide", icon: "info" },
@@ -109,6 +141,8 @@ const VIEW_PERMS = {
   signature: "actes.signer",
   publications: "signature.gerer",
   publication: "signature.gerer",
+  informations: "informations.gerer",
+  bulletin: "bulletin.gerer",
   referentiel: "referentiel.gerer",
   styles: "trames.styles",
   comptes: "comptes.gerer",
@@ -142,6 +176,8 @@ const VIEWS = {
   signature: renderSignature,
   publications: renderPublications,
   publication: renderConsultationRoute,
+  informations: renderInformations,
+  bulletin: renderBulletin,
   comptes: renderComptes,
   parapheur: renderParapheur,
   revision: renderRevision,
@@ -358,7 +394,14 @@ function shell() {
 
   mainEl = h("main", { class: "app-main" });
   const body = h("div", { class: "app-body" }, nav, mainEl);
-  const app = h("div", { class: "app" }, notice, vierge, header, body);
+  // LE PIED DE L'ATELIER : la mention de l'éditeur du logiciel, en bas de page —
+  // discrète, et éteignable depuis Administration › Identité (voir
+  // src/ui/mention.js). L'éditeur de trame occupe toute la hauteur (`.app--plein`) :
+  // le pied s'y efface, la feuille ne se dispute pas la place avec lui.
+  const pied = mentionAffichee()
+    ? h("footer", { class: "app-pied" }, h("p", { class: "app-pied__mention" }, ...contenuMention()))
+    : null;
+  const app = h("div", { class: "app" }, notice, vierge, header, body, pied);
   appEl = app;
   return app;
 }
@@ -439,7 +482,16 @@ async function inlineStylesheets() {
       console.warn("Feuille de style non inlinée :", l.href, e);
     }
   }
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // Deux images d'attente : le temps que la feuille recopiée s'applique. Sur un
+  // onglet que le navigateur ne peint pas — arrière-plan, aperçu réduit, iframe
+  // hors de l'écran —, aucune image n'arrive : on ne reste donc pas suspendu à
+  // l'écran « Chargement… ». Un délai bref fait office de repli.
+  await new Promise((r) => {
+    let fini = false;
+    const terminer = () => { if (!fini) { fini = true; r(); } };
+    requestAnimationFrame(() => requestAnimationFrame(terminer));
+    setTimeout(terminer, 250);
+  });
 }
 
 async function boot() {
@@ -496,6 +548,13 @@ async function boot() {
   renderRoot(root);
   proposerMotDePasse(root);
   parseRoute();
+  // L'accès à l'atelier : la question se pose au service, qui seul voit d'où
+  // l'on vient. On ne l'attend pas — un service lent ne doit pas retarder
+  // l'écran —, et son verdict (publié par `surAcces`) redessine la page s'il
+  // change quelque chose : l'écran « hors réseau », notamment.
+  // Voir src/lib/atelier-acces.js.
+  chargerAcces().catch(() => {});
+  surAcces(() => renderRoot(root));
   // Vérifie la santé de la persistance en tâche de fond (sans bloquer l'affichage).
   db.health().catch(() => {});
   // Et represente, doucement, les écritures mises de côté : la file n'était
@@ -548,10 +607,16 @@ function proposerMotDePasse(root) {
 // qu'on ne sait pas lire — une ancre mal recopiée, un écran qui n'existe plus —
 // ne doit donc pas ouvrir l'atelier, et encore moins l'écran de connexion. Elle
 // ramène à la page d'accueil, c'est-à-dire au recueil.
+//
+// L'exception est l'ATELIER DEMANDÉ (« ?atelier », « /atelier ») : là, l'adresse
+// mal lue ne ramène pas au recueil — ce serait répondre à côté —, elle ramène au
+// premier écran que l'agent a le droit d'ouvrir (voir `demandeAtelier`).
 function normaliserRoute() {
   const v = state.route && state.route.view;
   if (!v || VIEWS[v] || EST_PUBLIQUE(v)) return;
-  state.route = { view: "recueil", params: {} };
+  state.route = demandeAtelier()
+    ? { view: firstAllowedView(), params: {} }
+    : { view: "recueil", params: {} };
 }
 
 function renderRoot(root) {
@@ -570,6 +635,11 @@ function renderRootMaintenant(root) {
   // On quitte le recueil : ses métadonnées (titre, canonique, JSON-LD) n'ont
   // plus lieu d'être dans la page de l'atelier.
   retirerMetaRecueil();
+  // L'accès à l'atelier peut être restreint à certaines adresses (intranet d'une
+  // commune) : le service l'a dit, et c'est lui qui le fait respecter. Ici, on
+  // l'annonce AVANT la connexion — découvrir un refus au premier clic, sans
+  // explication, serait le pire des accueils.
+  if (horsReseau()) { renderHorsReseau(root); return; }
   if (!state.user) { renderConnexion(root); return; }
   if (estVisiteur(state.user)) { renderSansAcces(root); return; }
   renderApp(root);
