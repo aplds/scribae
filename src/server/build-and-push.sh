@@ -28,7 +28,8 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"  # Racine du dépôt
+# Le script vit dans src/server/, donc la racine = 2 niveaux au-dessus
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"  # Racine du dépôt
 
 # Valeurs par défaut (peuvent être écrasées par les arguments)
 REGISTRY="${DOCKER_REGISTRY:-}"          # Ex: ghcr.io/, docker.io/, ou vide pour local
@@ -65,7 +66,9 @@ check_prerequisites() {
   
   if [ ! -d "$CONTEXT_DIR/src" ]; then
     echo "❌ ERREUR : Contexte Docker incomplet (src/ manquant)"
-    echo "   Positionnez-vous à la racine du dépôt : cd /chemin/vers/scribae"
+    echo "   REPO_ROOT calculé : $REPO_ROOT"
+    echo "   CONTEXT_DIR : $CONTEXT_DIR"
+    echo "   Vérifiez que src/ existe bien à cet endroit."
     exit 1
   fi
 }
