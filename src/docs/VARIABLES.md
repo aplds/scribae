@@ -1,7 +1,7 @@
 # Variables de déploiement
 
 Ce document est ENGENDRÉ à partir du registre des variables
-(`src/server/mysql/variables.mjs`) par `node src/scripts/generer-variables.mjs` :
+(`src/server/mysql/variables.mjs`) par `node scripts/generer-variables.mjs` :
 il ne se modifie pas à la main. Pour ajouter une variable, on ajoute un descripteur au
 registre, puis on régénère ce fichier.
 
@@ -119,6 +119,33 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | référentiel | **Chemin — suivi du circuit** — Point de terminaison interrogé pour relire le statut d'un circuit. Jeton {document}. | texte |  | /documents/{document} |
 | `SCRIBA_SIGNATURE_API_CLE` | service | **Clé d'API du prestataire de signature** — La clé que le service présente au prestataire (en-tête Authorization). Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, le service n'appelle pas le prestataire en production. SECRET. | texte |  | (secret) |
 
+## Annuaire (OIDC)
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_ANNUAIRE_SECONDE_PORTE` | référentiel | **Proposer l'annuaire en seconde porte** — Allumé, l'écran de connexion propose l'annuaire de la collectivité EN PLUS de la porte ordinaire (comptes locaux, ou comptes de l'application) : les deux façons d'entrer coexistent. Éteint (le défaut), la porte ordinaire reste seule — c'est le mode « oidc » qui fait de l'annuaire la porte ordinaire, et il ne se règle pas ici (AUTH_MODE, portée service). La porte n'est ouverte que si l'émetteur ET l'identifiant du client sont renseignés. | booleen |  | true |
+| `SCRIBA_ANNUAIRE_ESSAI` | référentiel | **Annuaire d'essai intégré** — Allumé, la connexion passe par l'annuaire d'essai INTÉGRÉ (des identités fictives, des jetons non signés) au lieu du fournisseur : aucun appel réseau, et le mécanisme des rôles s'exerce quand même. Ce n'est PAS une authentification : à ne garder que le temps d'un branchement ou d'une démonstration. | booleen |  | false |
+| `SCRIBA_ANNUAIRE_ISSUER` | référentiel | **Adresse de l'émetteur (iss)** — L'adresse du fournisseur d'identité, telle qu'elle figure dans ses jetons (revendication `iss`), sans le `/.well-known/openid-configuration`. Elle sert à la découverte des points de terminaison ET à la vérification du jeton. | texte |  | https://annuaire.collectivite.fr/realms/agents |
+| `SCRIBA_ANNUAIRE_CLIENT_ID` | référentiel | **Identifiant du client (client_id)** — L'application déclarée chez le fournisseur, en CLIENT PUBLIC (sans secret), avec le flux code d'autorisation et PKCE (S256). Il doit être déclaré chez le fournisseur avec l'adresse de retour à l'identique. | texte |  | scribae-application |
+| `SCRIBA_ANNUAIRE_SCOPES` | référentiel | **Portées demandées (scope)** — Les portées de la demande d'autorisation, séparées par des espaces. « openid » est indispensable ; « profile » et « email » fournissent le nom et l'adresse de l'agent. | texte |  | openid profile email |
+| `SCRIBA_ANNUAIRE_REDIRECT_URI` | référentiel | **Adresse de retour (redirect_uri)** — L'adresse à laquelle le fournisseur renvoie l'agent après l'authentification. Elle doit être déclarée À L'IDENTIQUE chez le fournisseur. Vide : l'adresse de la page courante, ce qui convient à la plupart des installations. | texte |  | https://actes.collectivite.fr/ |
+| `SCRIBA_ANNUAIRE_PROMPT` | référentiel | **Invite (prompt)** — Le paramètre `prompt` de la demande d'autorisation. Vide en général ; « select_account » force le choix du compte à chaque connexion (utile sur un poste partagé ou un fournisseur qui garde la session ouverte). | texte |  | select_account |
+| `SCRIBA_ANNUAIRE_ROLE_CLAIM` | référentiel | **Revendication des groupes** — Le chemin, en notation pointée, de la revendication qui porte les groupes de l'agent : « groups », « roles », « realm_access.roles »… Le PREMIER groupe reconnu par la correspondance ci-dessous décide du rôle. | texte |  | groups |
+| `SCRIBA_ANNUAIRE_ROLES` | référentiel | **Correspondance des groupes → rôles** — Les couples « groupe=rôle » séparés par des virgules. Les rôles sont ceux de l'application : visiteur, redacteur, reviseur, signataire, editeur, administrateur. C'est le PREMIER groupe reconnu, dans l'ordre annoncé par le fournisseur, qui décide. | correspondance (« groupe=rôle », séparés par des virgules) |  | scribae-administrateurs=administrateur, scribae-editeurs=editeur, scribae-redacteurs=redacteur |
+| `SCRIBA_ANNUAIRE_SANS_GROUPE` | référentiel | **Agent sans groupe reconnu** — « deny » (le défaut, recommandé) : l'agent est bien authentifié par l'annuaire, mais aucun de ses groupes ne correspond — il prend le rôle Visiteur, et l'application ne lui ouvre rien. « default » : il reçoit le rôle de repli ci-dessous (utile pendant une mise en service). | choix : deny ou default |  | deny |
+| `SCRIBA_ANNUAIRE_ROLE_DEFAUT` | référentiel | **Rôle de repli** — Le rôle attribué à un agent dont aucun groupe n'est reconnu, quand la politique ci-dessus vaut « default ». Le rôle le plus étroit est le bon : « redacteur » pour un agent qui n'a rien demandé, « visiteur » pour ne lui ouvrir aucun accès. | choix : visiteur ou redacteur ou reviseur ou signataire ou editeur ou administrateur |  | redacteur |
+| `SCRIBA_ANNUAIRE_SERVICE_CLAIM` | référentiel | **Revendication des services** — Le chemin de la revendication qui porte le ou les codes de service de l'agent (ex. DSI, SG, CCAS). Ces codes sont rapprochés de ceux du référentiel : ils décident du périmètre, c'est-à-dire des actes que l'agent voit. | texte |  | services |
+| `SCRIBA_ANNUAIRE_ENTITE_CLAIM` | référentiel | **Revendication de l'entité** — Le chemin de la revendication qui porte le code de l'entité de rattachement de l'agent (ex. VSL, CCAS), rapproché des entités du référentiel. | texte |  | entity |
+| `SCRIBA_ANNUAIRE_AUTORITAIRE` | référentiel | **Les groupes de l'annuaire font foi** — Allumé (le défaut), le rôle et le périmètre sont REPRIS de l'annuaire à chaque connexion : c'est l'annuaire qui administre les droits, et un changement de groupe s'applique dès la connexion suivante. Éteint, l'annuaire authentifie seulement, et les rôles réglés dans « Comptes et rôles » sont conservés. | booleen |  | true |
+| `SCRIBA_ANNUAIRE_PROVISION` | référentiel | **Créer les comptes inconnus** — Allumé (le défaut), un agent de l'annuaire qui n'a pas encore de compte en reçoit un à sa première connexion. Éteint, il faut pré-enregistrer son adresse (ou son identifiant d'annuaire) dans « Comptes et rôles » — c'est le réglage d'une collectivité qui veut maîtriser qui entre. | booleen |  | true |
+| `SCRIBA_ANNUAIRE_USERINFO` | référentiel | **Compléter par /userinfo** — Allumé (le défaut), les revendications du jeton sont complétées par l'appel à `userinfo` — utile quand les groupes n'y figurent pas. Éteint, seul le jeton d'identité est lu. | booleen |  | true |
+| `SCRIBA_ANNUAIRE_SIGNATURE` | référentiel | **Exiger la vérification de la signature** — Allumé (le défaut), un jeton d'identité dont la signature n'a pas pu être vérifiée contre les clés publiées (`jwks_uri`) est REFUSÉ. À n'éteindre qu'en connaissance de cause, et jamais en service. | booleen |  | true |
+| `SCRIBA_ANNUAIRE_AUTORISATION_URL` | référentiel | **Point de terminaison — autorisation** — À renseigner SEULEMENT si le fournisseur n'expose pas `/.well-known/openid-configuration`, ou si le service ne le joint pas (adresse interne, certificat, pare-feu) : recopiez l'adresse depuis sa documentation. | texte |  | https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/auth |
+| `SCRIBA_ANNUAIRE_JETON_URL` | référentiel | **Point de terminaison — jeton** — Le point de terminaison qui échange le code d'autorisation contre les jetons (c'est le SERVICE qui l'appelle). À renseigner seulement si la découverte n'aboutit pas. | texte |  | https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/token |
+| `SCRIBA_ANNUAIRE_JWKS_URL` | référentiel | **Point de terminaison — clés de signature (jwks)** — Les clés publiques qui servent à vérifier la signature des jetons. Sans elles (et sans découverte), la signature ne peut pas être vérifiée : le jeton est alors refusé si `SCRIBA_ANNUAIRE_SIGNATURE` est allumé. | texte |  | https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/certs |
+| `SCRIBA_ANNUAIRE_USERINFO_URL` | référentiel | **Point de terminaison — informations utilisateur (userinfo)** — Le point de terminaison qui rend les revendications complémentaires (groupes, services, entité). À renseigner seulement si la découverte n'aboutit pas. | texte |  | https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/userinfo |
+| `SCRIBA_ANNUAIRE_SECOURS` | référentiel | **Porte de secours de l'écran de connexion** — Allumée (le défaut), l'écran de connexion offre un repli « L'annuaire est injoignable ? » qui ramène l'installation sur les comptes de l'application. À retirer une fois l'annuaire éprouvé — sans elle, une panne du fournisseur ferme la porte à tout le monde. Rappel : depuis 1.6.1p c'est le SERVICE qui mène la connexion à l'annuaire ; ce repli demeure un contrôle d'INTERFACE, et la barrière réelle est la session que le service exige à chaque appel. | booleen |  | false |
+
 ## Fonctions
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
@@ -126,6 +153,13 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SCRIBA_CONTROLE_LEGALITE` | référentiel | **Contrôle de légalité** — Active la transmission de l'acte signé au représentant de l'État par API. Éteint par défaut. | booleen |  | false |
 | `SCRIBA_ASSISTANT_ATELIER` | référentiel | **Assistant de l'atelier (« Plume »)** — Allumé, l'assistant d'aide à l'atelier est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
 | `SCRIBA_ASSISTANT_PUBLIC` | référentiel | **Assistant du recueil (« Publia »)** — Allumé, l'assistant du recueil public est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
+
+## Rangement des données
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `STOCKAGE` | service | **Rangement des données** — « mysql » (le défaut) : tout dans MariaDB — une base partagée, sauvegardée et répliquée comme le reste. « fichier » : tout dans un dossier (DATA_DIR), EN CLAIR, sans aucune base de données à administrer — pour un poste, une petite collectivité, ou une sauvegarde par simple copie de dossier. Le rangement par fichiers suppose UN service sur UNE machine (voir docs/ADMINISTRATION.md). | choix : mysql ou fichier | mysql | fichier |
+| `DATA_DIR` | service | **Dossier de données (rangement par fichiers)** — Le dossier qui porte TOUT le rangement quand STOCKAGE=fichier : état, collections, journal, courriels, sessions. Il est créé au démarrage s'il manque, et doit être accessible en écriture par le compte du service. SAUVEGARDER = copier ce dossier (voir le LISEZ-MOI qu'il contient). Sans objet quand STOCKAGE=mysql. | texte | ./data | /var/lib/scribae |
 
 ## Base de données
 
@@ -239,4 +273,5 @@ lecteurs de `.env`.
     SCRIBA_DELAI_RECOURS_MOIS=2
     SCRIBA_RECUEIL_OPPOSABILITE=jours
     SCRIBA_NUMERO_REMPLISSAGE=3
+    SCRIBA_ANNUAIRE_ROLES=scribae-administrateurs=administrateur, scribae-editeurs=editeur
 

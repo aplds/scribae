@@ -22,6 +22,19 @@ try {
 // coupure des mots en fin de ligne (hyphens:auto) et une lecture correcte par
 // les synthèses vocales.
 if (!document.documentElement.lang) document.documentElement.lang = "fr";
+// LA DÉMONSTRATION DU PROJET n'a pas à être indexée. Son jeu de données est
+// entièrement fictif (une commune imaginaire, des arrêtés qui se
+// réinitialisent) : une fiche d'arrêté fictive lue dans un moteur de recherche
+// se prendrait pour un acte réel. Ce n'est PAS vrai du logiciel auto-hébergé,
+// dont le recueil public est fait pour être trouvé — la règle ne vaut donc que
+// pour l'adresse de la démonstration, qui est celle du fichier `CNAME` du
+// dépôt. Voir docs/GITHUB.md (« Démonstration statique ») et l'audit, NC-III-008.
+if (location.hostname === "demo.scribae.eu") {
+  var robots = document.createElement("meta");
+  robots.name = "robots";
+  robots.content = "noindex, nofollow";
+  (document.head || document.documentElement).appendChild(robots);
+}
 </script>
 <script type="text/x-server-plugin">
 // ============================================================================
@@ -664,7 +677,7 @@ function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
 }
 
 // Les publications RÉSERVÉES AUX AGENTS : publiées (ELI, original, versions),

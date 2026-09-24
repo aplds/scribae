@@ -72,7 +72,7 @@ export const API_REFERENCE = [
   {
     id: "config", groupe: "service", methode: "GET", chemin: "/v1/config", auth: "public",
     resume: "Réglages de référentiel et état du prestataire",
-    description: "Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.",
+    description: "Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.",
     service: "auto-heberge",
     reponses: [{ code: 200, description: "Réglages, erreurs, état du prestataire" }],
     champs: [
@@ -138,11 +138,13 @@ export const API_REFERENCE = [
     id: "auth-config", groupe: "comptes", methode: "GET", chemin: "/v1/auth/config", auth: "public",
     resume: "Mode d'authentification du service",
     service: "auto-heberge",
-    description: "Le mode du déploiement (`AUTH_MODE` : demo, password, oidc), si les comptes locaux sont ouverts (`comptesLocaux`), si les données se lisent par une session (`session`), le commutateur de démonstration, et l'état du déploiement (base joignable, compte d'administration amorcé). En mode « demo » seulement, la liste des comptes de démonstration. Aucun secret.",
-    reponses: [{ code: 200, description: "Mode, état, comptes de démonstration éventuels" }],
+    description: "Le mode du déploiement (`AUTH_MODE` : demo, password, oidc), si les comptes locaux sont ouverts (`comptesLocaux`), si les données se lisent par une session (`session`), le commutateur de démonstration, et l'état du déploiement (base joignable, compte d'administration amorcé). Porte aussi les RÉGLAGES DE L'ANNUAIRE de la collectivité (`annuaire` : fournisseur, portées, correspondance des groupes, seconde porte, points de terminaison) : le service les relit du référentiel et applique par-dessus les variables `SCRIBA_ANNUAIRE_*` du `.env`. C'est nécessaire parce qu'en mode « comptes locaux » le référentiel n'est lisible qu'avec une session, et l'écran de connexion vient avant. En mode « demo » seulement, la liste des comptes de démonstration. Aucun secret.",
+    reponses: [{ code: 200, description: "Mode, état, réglages de l'annuaire, comptes de démonstration éventuels" }],
     champs: [
       { cle: "auth", type: "string", description: "demo | password | oidc" },
       { cle: "comptesLocaux", type: "booléen", description: "La connexion identifiant + mot de passe est-elle ouverte ?" },
+      { cle: "annuaire", type: "objet|null", description: "Réglages publics de l'annuaire (liste blanche, jamais de secret)" },
+      { cle: "annuaireService", type: "booléen|null", description: "Le service sait-il ouvrir une session d'annuaire ? (vrai = c'est lui le client OIDC : la seconde porte est proposée même quand les données se lisent par une session)" },
       { cle: "adminAmorce", type: "booléen|null", description: "Le compte d'administration du .env peut-il se connecter ?" },
     ],
   },
@@ -153,6 +155,39 @@ export const API_REFERENCE = [
     description: "Vérifie l'identifiant et le mot de passe, puis pose deux cookies : la session (HttpOnly) et le jeton anti-CSRF. Le message est identique pour un identifiant inconnu et un mot de passe faux ; le compte se bloque progressivement après plusieurs échecs.",
     corps: { login: "j.mercier", motDePasse: "••••••••••" },
     reponses: [{ code: 200, description: "Session ouverte" }, { code: 401, description: "Identifiants invalides" }, { code: 429, description: "Compte bloqué quelques instants" }],
+  },
+  {
+    id: "auth-annuaire", groupe: "comptes", methode: "POST", chemin: "/v1/auth/annuaire", auth: "public",
+    resume: "Ouvrir une session par l'annuaire de la collectivité",
+    service: "auto-heberge",
+    description: "C'est le SERVICE qui est le client OIDC : il découvre le fournisseur, échange le code d'autorisation (avec le vérificateur PKCE que le navigateur a gardé), vérifie le jeton d'identité (signature par le JWKS du fournisseur, émetteur, audience, validité, nonce), en tire le compte (groupes → rôle, services et entité), l'écrit au référentiel, puis ouvre SA session — les mêmes cookies que la connexion par mot de passe. Aucun appel ne part du navigateur vers le fournisseur : le fournisseur n'a donc pas besoin d'autoriser le CORS (c'est ce qui fait fonctionner un annuaire qui ne l'ouvre pas), et l'agent lit les actes comme tout le monde.",
+    corps: { code: "…", verifier: "…", redirectUri: "https://actes.maville.fr/", nonce: "…" },
+    champs: [
+      { cle: "code", type: "string", description: "Le code d'autorisation reçu du fournisseur" },
+      { cle: "verifier", type: "string", description: "Le vérificateur PKCE (code_verifier), détenu par le navigateur" },
+      { cle: "redirectUri", type: "string", description: "La même adresse de retour que celle de la demande d'autorisation" },
+      { cle: "nonce", type: "string", description: "Le nonce de la demande, que le jeton doit porter" },
+    ],
+    reponses: [
+      { code: 200, description: "Session ouverte ; `checks` dit ce qui a été vérifié, `created`/`linked` si le compte a été créé ou repris" },
+      { code: 401, description: "Code invalide, échange refusé, ou fournisseur injoignable" },
+      { code: 403, description: "Jeton refusé, ou compte inconnu et création automatique éteinte" },
+      { code: 404, description: "Aucun annuaire branché sur ce service" },
+      { code: 503, description: "Le service n'a pas le moyen d'appeler un fournisseur" },
+    ],
+  },
+  {
+    id: "auth-annuaire-decouverte", groupe: "comptes", methode: "POST", chemin: "/v1/auth/annuaire/decouverte", auth: "public",
+    resume: "Éprouver l'annuaire (bouton « Découverte »)",
+    service: "auto-heberge",
+    description: "Le SERVICE lit `/.well-known/openid-configuration` chez le fournisseur et rend les points de terminaison. C'est le bouton « Vérifier la découverte du fournisseur » de l'administration : l'appel partant du service et non du navigateur, un annuaire sans en-têtes CORS se branche comme les autres. Un administrateur (session) peut faire éprouver l'adresse qu'il vient de saisir (`issuer`) et des points de terminaison à la main (`endpoints`) ; tout autre appelant n'obtient que ce que le service a déjà enregistré.",
+    corps: { issuer: "https://annuaire.maville.fr/realms/agents", endpoints: { authorization: "https://…/auth", token: "https://…/token" } },
+    reponses: [
+      { code: 200, description: "Les points de terminaison retenus, et leur source (découverte ou manuel)" },
+      { code: 404, description: "Aucun annuaire branché sur ce service" },
+      { code: 502, description: "Découverte impossible (fournisseur injoignable, document incomplet)" },
+      { code: 503, description: "Le service n'a pas le moyen d'appeler un fournisseur" },
+    ],
   },
   {
     id: "auth-session", groupe: "comptes", methode: "GET", chemin: "/v1/auth/session", auth: "public",
@@ -650,7 +685,7 @@ export function tableauDesRoutes() {
 
 // ---------------------------------------------------------------------------
 // LE DOCUMENT — `src/docs/API.md` est ENGENDRÉ depuis ce module par
-// `node src/scripts/generer-api.mjs`. On ne l'écrit donc jamais à la main : on
+// `node scripts/generer-api.mjs`. On ne l'écrit donc jamais à la main : on
 // corrige une opération ici, et on régénère. Le fichier livré, l'écran
 // « API REST » et le panneau de commande lisent ainsi tous la même description,
 // et ne peuvent pas diverger.
@@ -680,7 +715,7 @@ export function markdownApi({ base = "https://api.exemple.fr" } = {}) {
     + "interroger à leur tour, et c'est elle qu'il faut connaître pour brancher un "
     + "prestataire de signature électronique.");
   p("Cette référence est **engendrée depuis le code** (`src/lib/api-reference.js`, "
-    + "par `node src/scripts/generer-api.mjs`) : elle décrit exactement la surface "
+    + "par `node scripts/generer-api.mjs`) : elle décrit exactement la surface "
     + "que le service répond, ni plus ni moins. Le même document alimente l'écran "
     + "« API REST » de l'application, où un panneau de commande permet d'envoyer "
     + "une requête et de lire la réponse sans quitter la page.");
@@ -778,7 +813,7 @@ export function markdownApi({ base = "https://api.exemple.fr" } = {}) {
   p("## Tableau des routes");
   p(tableauDesRoutes());
   p("---");
-  p("Document engendré par `node src/scripts/generer-api.mjs` depuis "
+  p("Document engendré par `node scripts/generer-api.mjs` depuis "
     + "`src/lib/api-reference.js`. Ne pas modifier à la main : corriger la "
     + "description, puis régénérer.");
 

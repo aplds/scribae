@@ -14,9 +14,9 @@
 // identifiant ELI que l'acte d'origine et le supplante, sans jamais le faire
 // disparaître : l'acte d'origine reste accessible dans l'historique des versions.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, circuitSignatureDe, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
 import { h, clear, button, toast, modal, fitPaper, icon } from "../dom.js";
-import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase } from "../components.js";
+import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase, annexesRestantesPhrase } from "../components.js";
 import { openActe } from "./rediger.js";
 import { fullName } from "../../lib/users.js";
 import {
@@ -51,6 +51,8 @@ import { parseDocumentFile } from "../../lib/akn.js";
 import { ecarts, locateAddr } from "../../lib/redaction.js";
 import { estAbroge } from "../../lib/abrogations.js";
 import { natureOfActe, identification, visaAdoption, annexesVocab, libelleAnnexe, appellationAnnexe, appellationAnnexeDefinie, refDecision, numeroAffiche, avecDe } from "../../lib/annexes.js";
+import { parcoursDeActe } from "../../lib/parcours.js";
+import { bandeauParcours } from "../parcours.js";
 import { annexesJointes, libellePartAnnexe } from "../../lib/annexe-docs.js";
 import { download, uid, pickFile, formatDate, todayIso, debounce } from "../../lib/util.js";
 
@@ -1096,12 +1098,31 @@ export function renderActeDetail(root, params) {
     ));
   }
 
+  // Ce que l'abrogation LAISSE : un texte publié à part (un règlement) survit à
+  // l'abrogation de sa décision d'adoption, et demande un acte autonome pour
+  // être retiré ou modifié. Sans cette phrase, il resterait en vigueur sans que
+  // personne ne le sache (voir src/lib/abrogation-annexes.js).
+  if (annexesRestantesPhrase(a)) {
+    root.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginBottom: "12px" } },
+      h("p", { class: "fr-alert__title", text: "Texte publié à part à traiter" }),
+      h("p", { class: "fr-small", text: annexesRestantesPhrase(a) }),
+    ));
+  }
+
   // D'où vient le numéro : un numéro attribué par un service externe est
   // rattaché à la ligne créée chez ce service (voir src/lib/numbering.js).
   if (a.numeroSource) {
     root.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "-6px" },
       text: `Numéro attribué par le service de numérotation${a.numeroSource.ref ? ` — référence ${a.numeroSource.ref}` : ""}${a.numeroSource.at ? `, le ${formatDate(String(a.numeroSource.at).slice(0, 10))}` : ""}.` }));
   }
+
+  // Le PARCOURS de l'acte : où il en est, qui tient chaque porte, et dans quel
+  // ordre — parapheur, puis révision, puis signature (voir src/lib/parcours.js).
+  // La fiche rassemble déjà toutes les cartes du dossier ; ce fil les résume et
+  // les situe, pour lire l'état de l'acte d'un seul regard.
+  root.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h2", { class: "fr-card__title", text: "Le parcours de l'acte" }),
+    bandeauParcours(parcoursDeActe(a, { config: state.config, trames: state.trames, users: state.users, trame: trameById(a.trameId) }), { nu: true })));
 
   // Les annexes : le lien entre un acte et les documents qu'il adopte. C'est un
   // fait du dossier, comme l'abrogation — il se lit en tête de fiche, parce
@@ -1335,21 +1356,31 @@ function revisionCard(a) {
   const etat = etatRevision(a) || {};
   const doc = docOfActe(a);
   const rapport = doc ? rapportConformite(doc, { config: state.config, trame: trameById(a.trameId), acte: a, publiable: actePubliable(a) }) : null;
+  // Une porte PASSÉE SANS ÊTRE FRANCHIE : l'acte est déjà signé (ou publié) et ne
+  // porte aucune trace de révision — donnée antérieure à la fonction, ou
+  // contrôle non requis ce jour-là. La carte ne doit alors NI annoncer une
+  // révision « hors » de l'acte, NI inviter à le soumettre : l'acte est plus
+  // loin que ce contrôle (même lecture que le fil de parcours et les marches du
+  // circuit de signature — voir marquerEtats, src/lib/parcours.js).
+  const dejaSigne = !!(a.original || versionSigneeDeActe(a) || a.statut === "signee" || a.statut === "publie");
+  const passee = !r && !!rev.requise && dejaSigne;
   const box = h("div", { class: "fr-stack" });
 
   box.appendChild(h("div", { class: "fr-card" },
     h("div", { class: "fr-row" },
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Révision" }),
-      h("span", { class: "fr-badge fr-badge--" + (etat.caduque ? "warning" : etat.color || "info"), text: etat.caduque ? "révision caduque" : etat.label || "hors révision" }),
+      h("span", { class: "fr-badge fr-badge--" + (passee ? "info" : etat.caduque ? "warning" : etat.color || "info"), text: passee ? "non franchie" : etat.caduque ? "révision caduque" : etat.label || "hors révision" }),
       h("div", { class: "fr-spacer" }),
       can("actes.reviser")
         ? button("Ouvrir la révision", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => { state.revision = { tab: r?.statut === "en_attente" ? "aReviser" : "rejets", acteId: a.id }; navigate("revision"); } })
         : null,
     ),
-    h("p", { class: "fr-small fr-muted", text: rev.requise
-      ? "Un réviseur est compétent pour cet acte : il le contrôle avant sa signature — le texte révisé est celui qui part en signature."
-      : "Aucun réviseur n'est compétent pour cet acte : il part en signature sans contrôle préalable." }),
-    !r && rev.requise ? h("p", { class: "fr-small", text: "Soumettez-le à la révision depuis « Signature & publication » : l'envoi en signature le transmet d'abord au réviseur." }) : null,
+    h("p", { class: "fr-small fr-muted", text: passee
+      ? "Un réviseur est compétent pour cet acte, mais sa révision n'a pas été franchie : l'acte est allé jusqu'à la signature sans ce contrôle (aucune révision au dossier)."
+      : rev.requise
+        ? "Un réviseur est compétent pour cet acte : il le contrôle avant sa signature — le texte révisé est celui qui part en signature."
+        : "Aucun réviseur n'est compétent pour cet acte : il part en signature sans contrôle préalable." }),
+    !r && rev.requise && !passee ? h("p", { class: "fr-small", text: "Soumettez-le à la révision depuis « Signature & publication » : l'envoi en signature le transmet d'abord au réviseur." }) : null,
   ));
 
   if (r) box.appendChild(carteDossierRevision(a, etat));

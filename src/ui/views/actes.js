@@ -14,7 +14,7 @@ import { openActe, redigerAbrogation } from "./rediger.js";
 import { docOfActe, modifierFromActe, natureOf, ecartsOfActe } from "./modifier.js";
 import { exportAkn, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
 import { boutonsPdfA } from "../pdfa.js";
-import { demarrerValidation, etapeActive, validationAJour, etatParapheur } from "../../lib/validation.js";
+import { demarrerValidation, etapeActive, etatParapheur } from "../../lib/validation.js";
 import { resumeExecution } from "../../lib/execution.js";
 import { designationDe, avecArticle } from "../../lib/abrogations.js";
 import { natureOfActe, numeroAffiche } from "../../lib/annexes.js";

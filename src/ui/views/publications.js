@@ -21,7 +21,6 @@ import { printHtml } from "../../lib/export.js";
 import { lienRecueil } from "../../lib/recueil.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { corpsDeLActe, setListePublications, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
-import { ouvrirPage } from "./signature.js";
 
 export function renderPublications(root, params) {
   if (params && params.id) { renderConsultation(root, params); return; }

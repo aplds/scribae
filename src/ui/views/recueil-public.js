@@ -17,6 +17,7 @@ import { h, clear, button, icon } from "../dom.js";
 import { estVisiteur } from "../../lib/users.js";
 import { brandLogoUrl } from "../../lib/theme.js";
 import { demoNotice } from "../notice.js";
+import { chatErreurEl } from "../chats-erreur.js";
 import { mentionAffichee, contenuMention } from "../mention.js";
 import { renderMarkdown } from "../markdown.js";
 import { agentsAvecActesReserves } from "../../lib/atelier-acces.js";
@@ -30,7 +31,7 @@ import { get, post, bodyOf, errorMessage } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { formatDate } from "../../lib/util.js";
 import * as bs from "../../lib/bulletins-service.js";
-import { adresseBulletins, adresseBulletin, adresseBulletinFichier, adresseFluxBulletin, hrefBulletins, hrefBulletin, hrefBulletinFichier, hrefFluxBulletin } from "../../lib/bulletins.js";
+import { adresseBulletins, adresseBulletin, adresseBulletinFichier, adresseFluxBulletin, hrefBulletinFichier, hrefFluxBulletin } from "../../lib/bulletins.js";
 import { texteDeBulletin, markdownDeBulletin, jsonDeBulletin, fluxDeBulletins } from "../../lib/bulletins-formats.js";
 import { filtrerPublications, facettes, parAnnee, parTheme, dernieresPublications, publicationsEnVigueur, publicationsEpinglees,
   SANS_THEME, themeLabel, themeDescription,
@@ -85,11 +86,50 @@ function etat() {
   return st;
 }
 
+// Le recueil se redessine pour lui-même à trois occasions : une lecture qui
+// aboutit, une invalidation venue de l'ATELIER (un dépôt de démonstration, un
+// réglage du bulletin), et les gestes du lecteur (un filtre, une recherche).
+// Les trois passent par ici.
+//
+// DEUX RÈGLES, et l'une comme l'autre vient d'un défaut constaté en
+// démonstration.
+//
+//  • Le recueil ne se redessine que s'il est l'ÉCRAN AFFICHÉ. Une lecture lancée
+//    au montage peut aboutir après que le lecteur a quitté la page publique —
+//    pour l'atelier, par exemple. Le recueil se réécrivait alors PAR-DESSUS
+//    l'écran où l'on était : l'atelier disparaissait sans qu'on ait rien
+//    demandé, et l'on retombait sur le recueil. La route dit ce qui est
+//    affiché : on n'écrit que si elle porte encore le recueil.
+//
+//  • Le redessin RÉARME les lectures. Invalider l'état (« les informations sont
+//    à relire ») ne suffisait pas : rien ne relançait la lecture, et la rubrique
+//    des informations — invalidée après un dépôt — ne revenait plus jamais, ni
+//    sur la page d'accueil, ni dans le pied de page. Les trois lectures sont
+//    idempotentes : chacune sort d'elle-même quand la donnée est là ou qu'une
+//    lecture est en vol. Les réarmer ici rend le recueil capable de se réparer,
+//    quel que soit l'ordre des événements.
 function rafraichir() {
   if (!monte) return;
+  if (!ecranPublic()) return;
+  const st = etat();
+  charger(st);
+  chargerInformations(st);
+  chargerBulletins(st);
   clear(monte.root);
-  monte.root.appendChild(vue(etat(), monte.params));
+  monte.root.appendChild(vue(st, monte.params));
 }
+
+// Le recueil est-il l'écran affiché ? La route par défaut EST le recueil
+// (1.5.3), et une route illisible y ramène aussi (voir `normaliserRoute`,
+// src/ui/app.js) : c'est le même critère que celui qui commande l'affichage.
+const ecranPublic = () => String((state.route && state.route.view) || "recueil") === "recueil";
+
+// Redessiner le recueil depuis l'EXTÉRIEUR : l'atelier l'invalide après un dépôt
+// ou un réglage. `redrawView` est le redessin de l'atelier — il ne fait rien
+// quand l'écran public est affiché —, si bien que l'application enregistre
+// celui-ci comme redessin de l'écran public (voir `renderRootMaintenant`,
+// src/ui/app.js).
+export const redessinerRecueilPublic = () => rafraichir();
 
 // Le recueil montre TOUT ce qui est publié : ce que le service rend, et, à
 // défaut, ce que le poste détient. Le service reste la source ; mais un service
@@ -141,13 +181,21 @@ function fusionnerPublications(duService) {
 // service muet ou une version qui ne les sert pas encore laisse la liste VIDE
 // plutôt qu'en erreur : le recueil ne s'arrête pas parce qu'il n'a pas de
 // nouvelles à donner (voir la note 1.5.3).
+// Une lecture peut en remplacer une autre : l'état est invalidé (les
+// informations sont à relire) alors qu'une lecture est encore en vol, et la
+// réponse de l'ancienne arriverait APRÈS celle de la nouvelle — en écrasant la
+// bonne. Chaque lecture reçoit donc son rang, et seule la plus récente écrit.
+let rangInfos = 0;
+
 function chargerInformations(st) {
   if (st.infos !== null || st.chargementInfos) return;
   st.chargementInfos = true;
+  const rang = (rangInfos += 1);
+  const poser = (duService) => { if (rang === rangInfos) st.infos = fusionnerInformations(duService); };
   get("/v1/informations", { label: "Informations publiées", source: "lecture" })
-    .then((r) => { st.infos = fusionnerInformations(r.ok ? (bodyOf(r).informations || []) : []); })
-    .catch(() => { st.infos = fusionnerInformations([]); })
-    .finally(() => { st.chargementInfos = false; rafraichir(); });
+    .then((r) => poser(r.ok ? (bodyOf(r).informations || []) : []))
+    .catch(() => poser([]))
+    .finally(() => { if (rang === rangInfos) { st.chargementInfos = false; rafraichir(); } });
 }
 
 // Les billets publiés : ceux du service, et — en régime LOCAL — ceux de
@@ -232,7 +280,8 @@ function pageBulletinsVue(st) {
       h("div", { class: "recueil-vide" },
         h("h1", { text: "Le bulletin n'est pas publié ici" }),
         h("p", { text: "Cette collectivité n'a pas ouvert de bulletin des actes. Le recueil, lui, reste consultable." }),
-        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
+        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"),
+        chatErreurEl(404, { legende: "Bulletin introuvable" })));
   }
   const etatB = st.bulletins;
   const nums = numerosParus(st);
@@ -326,7 +375,8 @@ function bulletinVue(st, id) {
       h("div", { class: "recueil-vide" },
         h("h1", { text: "Ce bulletin n'est pas disponible" }),
         h("p", { text: cur.erreur }),
-        h("a", { class: "recueil-lien", href: hrefPage("bulletins") }, "Tous les bulletins")));
+        h("a", { class: "recueil-lien", href: hrefPage("bulletins") }, "Tous les bulletins"),
+        chatErreurEl(404, { legende: "Bulletin introuvable" })));
   }
   const b = cur.rec;
   // Un numéro PROVISOIRE (la période en cours) n'a pas d'adresse publique : il ne
@@ -461,7 +511,8 @@ function fluxVue(st, mode) {
       h("div", { class: "recueil-vide" },
         h("h1", { text: "Ce recueil n'a pas de bulletin" }),
         h("p", { text: "Cette collectivité n'a pas ouvert de bulletin des actes : il n'y a donc pas de flux à suivre. Le recueil, lui, reste consultable." }),
-        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
+        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"),
+        chatErreurEl(404, { legende: "Flux introuvable" })));
   }
   if (!f || f.chargement) return pageMachine(titre, adresseFluxBulletin(mode), "Composition du flux…", "");
   if (f.erreur) return pageMachine(titre, adresseFluxBulletin(mode), "Le flux n'a pas pu être composé :\n\n" + f.erreur, "");
@@ -873,7 +924,8 @@ function pagePubliqueVue(st, id) {
       h("div", { class: "recueil-vide" },
         h("h1", { text: "Cette page n'existe pas" }),
         h("p", { text: "L'adresse ne correspond à aucune page de ce recueil." }),
-        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
+        h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"),
+        chatErreurEl(404, { legende: "Page introuvable" })));
   }
   if (def.id === "informations") return pageInformations(st);
   const m = mentionPublique(state.config, def.mention);
@@ -920,7 +972,8 @@ function informationVue(st, slug) {
       h("div", { class: "recueil-vide" },
         h("h1", { text: "Cette information n'existe pas" }),
         h("p", { text: "Le billet a peut-être été retiré, ou son adresse a changé : les billets publiés sont accessibles depuis la page des informations." }),
-        h("a", { class: "recueil-lien", href: hrefPage("informations") }, "Toutes les informations")));
+        h("a", { class: "recueil-lien", href: hrefPage("informations") }, "Toutes les informations"),
+        chatErreurEl(404, { legende: "Information introuvable" })));
   }
   const reglages = reglagesInformations(state.config);
   const resume = resumeInfo(info, 300);
@@ -1432,7 +1485,10 @@ function acte(st, cle) {
         ? h("div", { class: "recueil-vide__actions" },
           button("Réessayer", { variant: "primary", onClick: () => relireActe(st, cle) }),
           h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"))
-        : h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil")));
+        : h("a", { class: "recueil-lien", href: hrefRecueil() }, "Retour au recueil"),
+      // Le code suit la cause : une panne passagère du service (503) n'est pas un
+      // acte introuvable (404). Voir src/ui/chats-erreur.js.
+      chatErreurEl(rec.transitoire ? 503 : 404)));
     return main;
   }
 

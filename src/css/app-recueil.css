@@ -1,0 +1,606 @@
+/* ============================================================================
+   Scribae — Le recueil public : l'espace public à la racine, la page d'un acte publié, les mentions et les informations.
+
+   Partie 9/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Recueil public (l'ESPACE PUBLIC est à la RACINE ; « ?acte=<clé> »,
+   « ?page=… » et « ?info=<clé> » dans la page, « /recueil/<clé> » sur un
+   déploiement serveur ; l'ancien « ?recueil=1 » reste reconnu).
+
+   Un site à part, servi par la même page : l'identité de la structure, le
+   titre du recueil, une recherche, la liste des actes — et, pour chacun, son
+   texte rendu DANS la page. Aucune brique de l'atelier n'y paraît. La décision
+   n'est pas enfermée dans une feuille : la notice, le texte et les pièces
+   s'enchaînent comme sur un recueil officiel en ligne. Le document n'est pas
+   rendu avec sa charte de publication — celle-ci vaut pour le papier (PDF,
+   Word, page autonome) — mais avec les styles de lecture du site, dans
+   l'apparence thémée du recueil (voir lib/recueil.js).
+   ========================================================================== */
+.recueil {
+  min-height: 100vh; display: flex; flex-direction: column; background: var(--bg-alt);
+  /* La largeur du contenu est une variable : une collectivité peut la réduire
+     (une colonne de lecture) ou l'élargir (un registre large) depuis sa feuille
+     de personnalisation — Administration › Publication › Apparence. */
+  --recueil-largeur: 1180px;
+}
+/* Le bandeau de démonstration marque aussi le recueil public : il s'aligne sur
+   l'en-tête du site (même retrait latéral). */
+.recueil > .app-demo { padding-left: 20px; padding-right: 20px; }
+.recueil--acte > .app-demo { padding-left: clamp(20px, 3.5vw, 64px); padding-right: clamp(20px, 3.5vw, 64px); }
+
+/* L'en-tête reste sous les yeux : sur un recueil long, on remonte d'un clic au
+   recueil, au sommaire ou à la connexion sans remonter la page. Le fond est
+   translucide et flouté — le contenu passe dessous sans le parasiter. */
+.recueil-header {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  backdrop-filter: saturate(180%) blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.recueil-header__in { max-width: var(--recueil-largeur); margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+.recueil-ident { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; min-width: 0; }
+.recueil-ident__logo { height: 44px; width: auto; max-width: 120px; object-fit: contain; flex: none; }
+.recueil-ident__logo--mark {
+  display: grid; place-items: center; width: 44px; height: 44px;
+  background: var(--brand); color: #fff; font-weight: 700; font-size: .8rem; letter-spacing: .04em;
+}
+.recueil-ident__text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.recueil-ident__org { font-size: .8rem; color: var(--ink-muted); }
+.recueil-ident__title { font-size: 1.05rem; font-weight: 700; }
+.recueil-header__out { margin-left: auto; flex: none; }
+.recueil-out { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--ink-muted); text-decoration: none; }
+.recueil-out:hover { color: var(--brand); }
+/* « Se connecter » est la porte de l'application depuis l'espace public : elle
+   mérite plus qu'un lien gris, sans pour autant crier au milieu du recueil. */
+.recueil-out--entree {
+  padding: 5px 12px; border: 1px solid var(--border-strong); border-radius: 999px;
+  color: var(--ink); font-weight: 600;
+}
+.recueil-out--entree:hover { border-color: var(--brand); color: var(--brand); background: var(--bg-alt); }
+
+.recueil-main { flex: 1 1 auto; width: 100%; max-width: var(--recueil-largeur); margin: 0 auto; padding: 18px 20px 48px; display: flex; flex-direction: column; gap: 14px; }
+
+/* La page d'un acte : le texte publié occupe TOUTE la largeur disponible (la
+   liste, elle, garde une largeur de lecture confortable). */
+.recueil--acte .recueil-header__in { max-width: none; padding-left: clamp(20px, 3.5vw, 64px); padding-right: clamp(20px, 3.5vw, 64px); }
+.recueil--acte .recueil-main { max-width: none; padding-left: clamp(20px, 3.5vw, 64px); padding-right: clamp(20px, 3.5vw, 64px); }
+
+/* --- l'accueil : l'entrée, le carrousel, les thèmes ------------------------
+   Le recueil n'est pas un registre : c'est un site. On y entre par une phrase et
+   une recherche, on y voit ce qui vient d'être publié, et on y circule par
+   matière — les thèmes — avant de descendre dans la liste complète. */
+
+.recueil-hero { padding: 26px 0 24px; border-bottom: 1px solid var(--border); }
+.recueil-hero__eyebrow {
+  margin: 0 0 7px; font-size: .76rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--brand);
+}
+.recueil-hero__title { margin: 0; font-size: clamp(1.7rem, 1.1rem + 2vw, 2.35rem); line-height: 1.18; letter-spacing: -.01em; }
+.recueil-hero__lead { margin: 11px 0 0; max-width: 66ch; color: var(--ink-2); }
+.recueil-hero__stats { margin: 13px 0 0; font-size: .84rem; color: var(--ink-muted); }
+.recueil-hero .recueil-recherche { margin-top: 17px; max-width: 640px; }
+
+.recueil-recherche--hero { padding: 1px 13px; }
+.recueil-recherche--hero .recueil-input { padding: 12px 0; font-size: 1rem; }
+
+.recueil-section { margin-top: 30px; }
+.recueil-section__tete { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.recueil-section__titres { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.recueil-section__title { margin: 0; font-size: 1.16rem; }
+.recueil-section__sous { margin: 3px 0 0; color: var(--ink-muted); font-size: .86rem; }
+
+/* --- les derniers actes : un carrousel ------------------------------------ */
+.recueil-carrousel__nav { display: flex; align-items: center; gap: 8px; }
+.recueil-carrousel__fleche {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 32px; height: 32px; background: var(--bg); color: var(--ink-2);
+  border: 1px solid var(--border-strong); border-radius: 50%; cursor: pointer;
+}
+.recueil-carrousel__fleche:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.recueil-carrousel__fleche:disabled { opacity: .35; cursor: default; }
+.recueil-carrousel__points { display: flex; align-items: center; gap: 6px; }
+/* Le point du carrousel : la cible TACTILE fait 24 px (RGAA/WCAG 2.5.8), la
+   pastille visible en fait 8 — le rembourrage est transparent, la pastille est
+   dessinée par ::after. Une cible de 8 px était hors d'atteinte au doigt. */
+.recueil-carrousel__point { position: relative; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; }
+.recueil-carrousel__point::after { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: var(--border-strong); }
+.recueil-carrousel__point.is-on::after { background: var(--brand); transform: scale(1.25); }
+
+.recueil-carrousel__piste {
+  list-style: none; margin: 0; padding: 2px 2px 12px;
+  display: flex; gap: 12px;
+  overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin;
+}
+.recueil-carrousel__piste:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.recueil-carte {
+  flex: 0 0 min(84vw, 300px); scroll-snap-align: start;
+  background: var(--bg); border: 1px solid var(--border);
+  border-top: 4px solid hsl(var(--h, 220) 52% 46%); border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04);
+  transition: box-shadow .15s ease, transform .15s ease;
+}
+.recueil-carte:hover { box-shadow: 0 8px 20px rgb(0 0 0 / .10); transform: translateY(-2px); }
+.recueil-carte__lien { display: flex; flex-direction: column; gap: 5px; padding: 14px 15px; min-height: 152px; text-decoration: none; color: inherit; }
+.recueil-carte__lien:hover { background: var(--bg-alt); }
+.recueil-carte__theme { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: hsl(var(--h, 220) 52% 36%); }
+.recueil-carte__theme.is-sans { color: var(--ink-muted); }
+.recueil-carte__objet { font-size: 1.02rem; font-weight: 600; line-height: 1.35; }
+.recueil-carte__lien:hover .recueil-carte__objet { color: var(--brand); }
+.recueil-carte__meta, .recueil-carte__date { font-size: .8rem; color: var(--ink-muted); }
+.recueil-carte__date { margin-top: auto; }
+
+/* --- la mise en avant : la bande « À la une » ------------------------------ */
+/* Les actes ÉPINGLÉS depuis l'onglet « Actes » (voir views/actes.js) — le
+   règlement intérieur, la charte, le document qu'on vient chercher. Ils ont
+   leur propre bande, avant les derniers actes publiés : le filet de tête prend
+   la couleur de la marque, et un repère écrit dit pourquoi ils sont là. */
+.recueil-une { margin-top: 22px; }
+.recueil-carte--une { border-top-color: var(--brand); background: var(--brand-soft); }
+.recueil-carte__epingle, .recueil-item__epingle {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--brand);
+}
+.recueil-item__epingle { font-size: .66rem; }
+/* La marque d'un acte à DIFFUSION RESTREINTE (réservé aux agents connectés) :
+   visible seulement par les agents, puisque le public ne le voit pas. */
+.recueil-item__reserve {
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--error);
+}
+
+/* --- les thèmes : une grille de tuiles ------------------------------------ */
+.recueil-themes__grille {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
+}
+.recueil-theme {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; height: 100%;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+}
+.recueil-theme:hover { border-color: var(--border-strong); background: var(--bg-alt); }
+.recueil-theme.is-on { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.recueil-theme__puce { flex: none; width: 12px; height: 12px; margin-top: 5px; border-radius: 3px; background: hsl(var(--h, 220) 52% 46%); }
+.recueil-theme.is-sans .recueil-theme__puce { background: var(--border-strong); }
+.recueil-theme__corps { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.recueil-theme__nom { font-weight: 600; line-height: 1.3; }
+.recueil-theme__desc { font-size: .8rem; line-height: 1.4; color: var(--ink-muted); }
+.recueil-theme__n { flex: none; padding-top: 2px; font-size: .76rem; color: var(--ink-muted); white-space: nowrap; }
+.recueil-recherche {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 300px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); padding: 0 10px; color: var(--ink-muted);
+}
+.recueil-recherche:focus-within { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
+.recueil-input { flex: 1 1 auto; border: 0; background: transparent; font: inherit; color: var(--ink); padding: 9px 0; outline: none; min-width: 0; }
+/* Cible tactile de la croix de recherche : 24 x 24 px au minimum. */
+.recueil-recherche__x { border: 0; background: none; font-size: 1.15rem; line-height: 1; color: var(--ink-muted); cursor: pointer; padding: 0 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
+.recueil-select { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); color: var(--ink); font: inherit; font-size: .84rem; padding: 8px 10px; max-width: 230px; }
+
+.recueil-lien { border: 0; background: none; color: var(--brand); font: inherit; font-size: .84rem; cursor: pointer; text-decoration: underline; padding: 0; }
+
+.recueil-resultats { scroll-margin-top: 14px; }
+.recueil-filtres { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.recueil-filtres__label { font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+/* « Afficher les versions antérieures » : un filtre du recueil, discret, à côté
+   des sélecteurs — il ne paraît que si des versions antérieures existent. */
+.recueil-anciennes {
+  display: inline-flex; align-items: center; gap: 7px; margin-left: 4px;
+  font-size: .82rem; color: var(--ink-2); cursor: pointer;
+}
+.recueil-anciennes input { width: 15px; height: 15px; accent-color: var(--brand); }
+
+.recueil-listes { display: flex; flex-direction: column; gap: 18px; }
+.recueil-annee__title {
+  margin: 0 0 6px; padding-bottom: 5px; font-size: .78rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--ink-muted);
+  border-bottom: 2px solid var(--border);
+}
+.recueil-actes { list-style: none; margin: 0; padding: 0; }
+.recueil-item { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--brand-soft); border-radius: calc(var(--radius) + 2px); transition: box-shadow .15s ease, border-color .15s ease; }
+.recueil-item:hover { border-left-color: var(--brand); box-shadow: 0 4px 14px rgb(0 0 0 / .08); }
+.recueil-item + .recueil-item { margin-top: 8px; }
+.recueil-item__lien { display: block; padding: 12px 15px; text-decoration: none; color: inherit; border-radius: var(--radius); }
+.recueil-item__lien:hover { background: var(--bg-alt); }
+.recueil-item__lien:hover .recueil-item__objet { color: var(--brand); }
+.recueil-item__haut { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.recueil-item__theme {
+  font-size: .73rem; font-weight: 700; letter-spacing: .01em;
+  color: var(--brand); background: var(--brand-soft, var(--bg-alt)); border-radius: 3px; padding: 1px 7px;
+}
+.recueil-item__nature { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.recueil-item__num { font-family: var(--font-mono); font-size: .82rem; color: var(--ink-2); }
+.recueil-item__marque { font-size: .7rem; color: var(--warning); }
+.recueil-item__objet { display: block; margin: 3px 0 0; font-size: .96rem; color: var(--ink); }
+.recueil-item__bas { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 3px; font-size: .78rem; color: var(--ink-muted); }
+
+.recueil-fil { display: flex; gap: 8px; flex-wrap: wrap; font-size: .8rem; color: var(--ink-muted); }
+.recueil-fil a { color: var(--brand); }
+
+/* Marques d'un acte : sa nature, sa version. */
+.recueil-badge {
+  display: inline-block; border: 1px solid var(--border-strong); border-radius: 3px;
+  padding: 2px 8px; font-size: .72rem; font-weight: 600; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--ink-2); background: var(--bg);
+}
+.recueil-badge--nature { border-color: var(--brand); color: var(--brand); }
+.recueil-badge--theme { background: var(--brand-soft, var(--bg-alt)); border-color: transparent; color: var(--brand); text-transform: none; letter-spacing: 0; font-weight: 700; }
+.recueil-badge--version { background: var(--brand-soft); border-color: transparent; color: var(--brand); text-transform: none; letter-spacing: 0; }
+.recueil-badge--info { background: var(--bg-alt); border-color: var(--border-strong); color: var(--ink-2); text-transform: none; letter-spacing: 0; }
+.recueil-badge--ok { border-color: var(--success); color: var(--success); background: var(--success-bg); text-transform: none; letter-spacing: 0; }
+.recueil-badge--note { color: var(--ink-muted); text-transform: none; letter-spacing: 0; }
+
+/* --- la page d'un acte ----------------------------------------------------
+   La notice (titre, marques, métadonnées) puis le texte (toute la largeur
+   disponible, dans la police de l'interface), puis les blocs (pièces,
+   signature, versions) : la décision est INTÉGRÉE à la page, comme sur un
+   recueil officiel en ligne. */
+.recueil-notice { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.recueil-notice__marques { display: flex; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; }
+.recueil-notice__titre {
+  margin: 0; font-family: var(--font-ui);
+  font-size: 1.75rem; line-height: 1.28; font-weight: 700; color: var(--ink); letter-spacing: -.01em;
+}
+.recueil-notice__sous { margin: 8px 0 0; font-size: .88rem; color: var(--ink-muted); }
+/* L'avertissement d'un texte publié A TITRE INFORMATIF (un règlement) : il ne
+   doit pas se confondre avec un acte opposable — la phrase le dit, et le style
+   la met en avant sans crier. */
+.recueil-notice__info {
+  margin: 12px 0 0; padding: 10px 12px; font-size: .86rem; line-height: 1.5;
+  color: var(--ink-2); background: var(--bg-alt); border-left: 3px solid var(--border-strong); border-radius: 3px;
+}
+
+/* Le bloc de métadonnées : la touche d'un recueil officiel. */
+.recueil-meta {
+  display: flex; flex-wrap: wrap; gap: 8px 30px; margin: 16px 0 0;
+  padding: 12px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.recueil-meta__item { display: flex; gap: 6px; align-items: baseline; font-size: .84rem; }
+.recueil-meta dt { color: var(--ink-muted); }
+.recueil-meta dd { margin: 0; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.recueil-meta__eli dd { font-weight: 400; }
+.recueil-meta__eli code { font-family: var(--font-mono); font-size: .78rem; word-break: break-all; }
+
+.recueil-lecture { margin-top: 26px; }
+
+/* --- les blocs sous le texte ---------------------------------------------- */
+.recueil-bloc { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border); }
+.recueil-bloc__title {
+  margin: 0 0 12px; font-size: .78rem; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-muted); font-weight: 700;
+}
+.recueil-pieces { display: flex; flex-wrap: wrap; gap: 8px; }
+.recueil-versions { display: flex; flex-direction: column; }
+.recueil-version {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.recueil-version:first-child { border-top: 0; }
+.recueil-version.is-on { font-weight: 600; }
+.recueil-version__texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.recueil-version__fin { display: flex; align-items: center; gap: 8px; }
+.recueil-dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 16px; margin: 0 0 12px; font-size: .85rem; }
+.recueil-dl dt { color: var(--ink-muted); }
+.recueil-dl dd { margin: 0; overflow-wrap: anywhere; }
+/* Sur un téléphone, la colonne des libellés mange celle des valeurs : une
+   empreinte SHA-256 (64 caractères) devient illisible. On empile. */
+@media (max-width: 640px) {
+  .recueil-dl { grid-template-columns: 1fr; gap: 0; }
+  .recueil-dl dt { margin-top: 9px; font-size: .78rem; }
+  .recueil-dl dd { font-size: .84rem; }
+}
+.recueil-side__note { color: var(--ink-muted); font-size: .8rem; }
+.recueil-verif-box { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.recueil-verif { margin: 0; font-size: .84rem; }
+.recueil-verif.is-ok { color: var(--success); }
+.recueil-verif.is-ko { color: var(--error); }
+
+/* --- l'original d'un acte du CIRCUIT EXTERNE : la version signée (PDF) -----
+   Le recueil la montre TELLE QU'ELLE A ÉTÉ MISE EN LIGNE : un cadre de lecture,
+   et le lien pour l'ouvrir ou la télécharger quand l'affichage intégré n'est
+   pas disponible (mobile, visionneuse absente). */
+.recueil-pdf { margin: 0 0 12px; }
+.recueil-pdf__frame {
+  width: 100%; height: 70vh; min-height: 380px; display: block;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: #fff;
+}
+@media (max-width: 820px) { .recueil-pdf__frame { height: 58vh; min-height: 320px; } }
+@media print { .recueil-pdf { display: none !important; } }
+.recueil-certif {
+  border-left: 4px solid var(--brand-public, var(--brand)); background: var(--bg);
+  padding: 12px 14px; border-radius: 3px; margin: 0 0 12px;
+}
+.recueil-certif__titre { margin: 0 0 6px; font-size: .95rem; }
+.recueil-certif__statut { font-weight: 600; }
+.recueil-certif__points { margin: 8px 0 0; padding-left: 18px; font-size: .82rem; color: var(--ink-2); }
+
+.recueil-vide { background: var(--bg); border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 26px 22px; text-align: center; color: var(--ink-2); }
+.recueil-vide h2 { margin-top: 0; }
+/* Les actions d'un écran vide (réessayer, revenir) : centrées comme lui, un
+   intervalle entre elles — voir la panne passagère du recueil public. */
+.recueil-vide__actions { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+/* Le pied du recueil : le texte suit l'alignement du contenu (à gauche). Un
+   pied centré sous un contenu aligné à gauche se lit mal et désoriente. */
+.recueil-pied { border-top: 1px solid var(--border); background: var(--bg); padding: 16px 20px; text-align: left; }
+/* Lien d'évitement du recueil : hors écran jusqu'à ce qu'il ait le focus. Au
+   clavier, la première tabulation l'atteint et mène droit au contenu (RGAA
+   12.7 — « aller au contenu principal »). */
+.recueil-evitement { position: absolute; left: -9999px; top: 0; z-index: 100; }
+.recueil-evitement:focus { position: fixed; left: 12px; top: 12px; z-index: 100; background: var(--bg); color: var(--ink); padding: 10px 14px; border: 2px solid var(--focus); border-radius: var(--radius); text-decoration: none; }
+.recueil-pied__ligne { margin: 0 0 3px; font-size: .84rem; color: var(--ink-2); }
+.recueil-pied__note { margin: 0; font-size: .76rem; color: var(--ink-muted); }
+.recueil-pied__ouvert { margin: 6px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.recueil-pied__sep { color: var(--border-strong); }
+
+/* --- Les mentions du pied de page ----------------------------------------
+   Les mentions légales et les mentions d'accessibilité de l'espace public
+   (voir src/lib/recueil.js, `mentionsPubliques`). Un texte se replie sous son
+   titre — présent dans la page, mais sans noyer le pied de page ; un lien
+   s'affiche tel quel. Le tout reste aligné à gauche dans un pied centré. */
+.recueil-pied__mentions { max-width: 780px; margin: 14px 0 0; text-align: left; }
+.recueil-mention { border-top: 1px solid var(--border); padding: 9px 0 2px; }
+.recueil-mention[open] { padding-bottom: 8px; }
+.recueil-mention__titre { cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--ink-2); }
+.recueil-mention__titre:hover { color: var(--ink); }
+.recueil-mention__titre::marker { color: var(--border-strong); }
+.recueil-mention__texte { font-size: .8rem; line-height: 1.55; color: var(--ink-2); }
+.recueil-mention__texte p { margin: 7px 0 0; }
+.recueil-mention__liste { margin: 7px 0 0; padding-left: 18px; }
+.recueil-pied__mention-lien { margin: 9px 0 0; font-size: .82rem; }
+
+/* --- « Vous ne trouvez pas ce que vous recherchez ? » ----------------------
+   Le renvoi du recueil vers les recueils qu'il ne gère pas (recueil « bis »,
+   recueils inactifs avec leur période) et vers les sites de référence. Il vit
+   en bas de page de l'espace public, et au bout des résultats de recherche
+   (`.recueil-ailleurs--resultats`) — jamais deux fois sur la même page. */
+.recueil-ailleurs {
+  max-width: 780px; margin: 0 auto 18px; padding: 0 0 16px; text-align: left;
+}
+.recueil-ailleurs__titre { margin: 0 0 5px; font-size: 1.05rem; }
+.recueil-ailleurs__lead { margin: 0 0 12px; font-size: .86rem; color: var(--ink-2); }
+/* La mention des actes à diffusion restreinte (réservés aux agents connectés) :
+   elle se distingue du renvoi vers d'autres recueils, sans crier. */
+.recueil-ailleurs__lead--agents { font-size: .82rem; color: var(--ink-muted); border-left: 3px solid var(--border-strong); padding-left: 10px; }
+.recueil-ailleurs__groupe { margin-top: 12px; }
+.recueil-ailleurs__groupe-titre {
+  margin: 0 0 6px; font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-muted);
+}
+.recueil-ailleurs__liste { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.recueil-ailleurs__item {
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 13px;
+}
+.recueil-ailleurs__item.is-inactif { border-style: dashed; }
+.recueil-ailleurs__lien {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  font-weight: 600; color: var(--brand); text-decoration: none; line-height: 1.35;
+}
+.recueil-ailleurs__lien:hover { text-decoration: underline; }
+.recueil-ailleurs__lien svg { flex: 0 0 auto; opacity: .75; }
+.recueil-ailleurs__tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.recueil-ailleurs__type {
+  border: 1px solid var(--border-strong); border-radius: 3px; padding: 1px 7px;
+  font-size: .71rem; font-weight: 700; letter-spacing: .02em; color: var(--ink-2);
+}
+.recueil-ailleurs__type--bis { color: var(--brand); border-color: var(--brand); }
+.recueil-ailleurs__type--inactif { color: var(--warning); border-color: var(--warning); }
+.recueil-ailleurs__type--ressource { color: var(--ink-2); }
+.recueil-ailleurs__periode { font-size: .78rem; color: var(--ink-muted); }
+.recueil-ailleurs__note { font-size: .82rem; color: var(--ink-2); }
+.recueil-ailleurs--resultats { max-width: none; margin: 22px 0 0; padding: 16px 0 0; border-top: 1px solid var(--border); }
+
+/* --- les sous-pages du site (1.5.3) ---------------------------------------
+   Mentions légales, accessibilité, conditions de réutilisation et informations
+   publiées : chacune a son adresse (« ?page=… », « ?info=… ») et se lit comme
+   une page — un titre, un fil d'Ariane, une largeur de lecture confortable. */
+.recueil-souspage { max-width: min(var(--recueil-largeur), 900px); }
+.recueil-souspage__tete { margin: 6px 0 18px; }
+.recueil-souspage__titre { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem); line-height: 1.2; letter-spacing: -.01em; }
+.recueil-souspage__chapo { margin: 10px 0 0; max-width: 68ch; font-size: 1rem; color: var(--ink-2); }
+.recueil-souspage__texte > p { margin: 0 0 1em; max-width: 78ch; line-height: 1.65; }
+.recueil-souspage__texte .recueil-mention__liste { max-width: 78ch; line-height: 1.65; }
+
+/* --- les informations (les billets de l'administration) --------------------
+   Côté public, une information se présente comme un billet : une date, un
+   titre, un résumé, et le renvoi vers la page complète. Sur l'accueil, trois
+   cartes ; sur la page des informations, la liste entière. */
+.recueil-reserve-note {
+  display: flex; align-items: center; gap: 9px; margin: 0;
+  padding: 9px 13px; border: 1px solid var(--border-strong); border-left: 3px solid var(--error);
+  border-radius: calc(var(--radius) + 2px); background: var(--bg); color: var(--ink-2); font-size: .84rem;
+}
+.recueil-reserve-note svg { flex: none; color: var(--error); }
+
+.recueil-infos__liste { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.recueil-infos__liste--accueil { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.recueil-info-carte {
+  background: var(--bg); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04); transition: box-shadow .15s ease, transform .15s ease;
+}
+.recueil-info-carte:hover { box-shadow: 0 8px 20px rgb(0 0 0 / .10); transform: translateY(-2px); }
+.recueil-info-carte.is-epinglee { border-top: 3px solid var(--brand); }
+.recueil-info-carte__lien { display: flex; flex-direction: column; gap: 6px; padding: 15px 16px; height: 100%; text-decoration: none; color: inherit; }
+.recueil-info-carte__epingle {
+  align-self: flex-start; font-size: .66rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--brand);
+}
+.recueil-info-carte__date { font-size: .78rem; color: var(--ink-muted); }
+.recueil-info-carte__titre { font-size: 1.05rem; font-weight: 650; line-height: 1.32; }
+.recueil-info-carte__lien:hover .recueil-info-carte__titre { color: var(--brand); }
+.recueil-info-carte__resume { font-size: .88rem; line-height: 1.5; color: var(--ink-2); }
+.recueil-info-carte__pied {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-top: auto; padding-top: 4px;
+  font-size: .76rem; color: var(--ink-muted);
+}
+
+.recueil-info { max-width: 78ch; }
+.recueil-info__meta { margin: 6px 0 8px; font-size: .82rem; color: var(--ink-muted); }
+.recueil-info__titre { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem); line-height: 1.2; letter-spacing: -.01em; }
+.recueil-info__chapo { margin: 12px 0 4px; font-size: 1.02rem; line-height: 1.6; color: var(--ink-2); }
+.recueil-info__corps { margin-top: 18px; line-height: 1.65; }
+.recueil-info__corps .md-h2 { font-size: 1.2rem; }
+.recueil-info__retour { margin: 26px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: .86rem; }
+.recueil-info-carte__resume, .recueil-info__chapo { text-wrap: pretty; }
+
+/* --- LE BULLETIN : la page des numéros, la page d'un numéro, l'abonnement --
+   Le bulletin est le recueil rassemblé par période : mêmes cartes, mêmes
+   listes, un cran plus sobre — un sommaire de numéros, puis dans un numéro les
+   entités, leurs thématiques et leurs actes. */
+.recueil-bulletins-zone { margin: 26px 0 0; }
+.recueil-bulletins-zone__chapo { margin: 6px 0 0; max-width: 70ch; font-size: .92rem; color: var(--ink-2); }
+.recueil-bulletins__cadence { margin: 8px 0 0; font-size: .88rem; color: var(--ink-2); }
+.recueil-bulletins__liens { margin: 8px 0 0; font-size: .86rem; }
+.recueil-bulletins__liste { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.recueil-bulletins__item {
+  display: flex; flex-direction: column; gap: 3px; padding: 13px 15px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.recueil-bulletins__titre { font-weight: 650; line-height: 1.3; text-decoration: none; color: var(--ink); }
+.recueil-bulletins__titre:hover { color: var(--brand); }
+.recueil-bulletins__meta { font-size: .84rem; color: var(--ink-muted); }
+.recueil-bulletins__formats { font-size: .8rem; }
+.recueil-bulletin { margin-top: 10px; }
+.recueil-bulletin__entite { margin: 24px 0 0; }
+.recueil-bulletin__nom {
+  margin: 0 0 6px; padding-bottom: 5px; border-bottom: 2px solid var(--brand);
+  font-size: .84rem; text-transform: uppercase; letter-spacing: .07em; color: var(--brand);
+}
+.recueil-bulletin__theme > h3 { margin: 16px 0 6px; font-size: 1rem; }
+.recueil-bulletin__actes { list-style: none; margin: 0; padding: 0; }
+.recueil-bulletin__acte { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.recueil-bulletin__meta { font-size: .82rem; color: var(--ink-muted); }
+/* L'abonnement : un formulaire simple, dans une carte, avec sa phrase de double
+   consentement — on ne s'étonne pas de ne rien recevoir tout de suite. */
+.recueil-abon {
+  margin: 20px 0 8px; padding: 16px 18px; max-width: 560px;
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.recueil-abon__titre { margin: 0 0 6px; font-size: 1.05rem; }
+.recueil-abon__aide { margin: 0 0 12px; font-size: .9rem; color: var(--ink-2); }
+.recueil-abon__form { display: flex; flex-direction: column; gap: 6px; }
+.recueil-abon__label { font-size: .82rem; color: var(--ink-muted); }
+.recueil-abon__message { margin: 6px 0 0; }
+.recueil-pied__bulletin { margin: 8px 0 0; font-size: .82rem; }
+
+/* --- l'écran d'administration du Bulletin ---------------------------------
+   Des chiffres d'abord (cadence, prochaine parution, abonnés), puis des
+   tableaux : les numéros, les abonnés, les envois. */
+.bul-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 14px 0 6px; }
+.bul-stat { display: flex; flex-direction: column; gap: 2px; padding: 11px 13px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.bul-stat__l { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); }
+.bul-stat__v { font-size: 1.02rem; }
+.bul-stat__d { font-size: .78rem; color: var(--ink-muted); }
+.bul-liens { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 0; font-size: .84rem; }
+.bul-lien { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bul-lien .fr-link { word-break: break-all; }
+.bul-table { width: 100%; }
+.bul-table__actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.bul-apercu { border-left: 4px solid var(--brand); }
+.bul-apercu__tete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bul-apercu__actions { margin-top: 12px; }
+.bul-corps { margin-top: 12px; }
+.bul-ent { margin: 16px 0 0; }
+.bul-ent__nom { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-strong); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--brand); }
+.bul-ent__theme { margin: 12px 0 2px; font-size: .88rem; font-weight: 600; }
+.bul-ent__actes { list-style: none; margin: 0; padding: 0 0 0 14px; }
+.bul-ent__actes li { padding: 3px 0; }
+
+/* --- le pied de page : le sommaire du site et la porte de l'application ---- */
+.recueil-pied__pages { margin: 12px 0 0; font-size: .82rem; }
+.recueil-pied__acces { margin: 14px 0 0; }
+.recueil-pied__connexion {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--bg); color: var(--ink); font-weight: 600; font-size: .86rem; text-decoration: none;
+}
+.recueil-pied__connexion:hover { border-color: var(--brand); color: var(--brand); background: var(--bg-alt); }
+.recueil-pied__licence { margin: 4px 0 0; font-size: .76rem; color: var(--ink-muted); }
+/* La mention de l'éditeur du logiciel ferme le pied de page du recueil (voir
+   src/ui/mention.js) : « Propulsé par Scribae — GPLv3 ». Elle se règle dans
+   Administration › Identité, et vaut « affichée » par défaut. */
+.recueil-pied__propulse { margin: 10px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.mention-editeur__lien { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.mention-editeur__lien:hover { color: var(--brand); }
+
+/* --- le recueil ouvert : les représentations lisibles par machine ---------
+   Un acte publié est une donnée publique : sous une adresse propre
+   (`?acte=<clé>&format=md` sur la page, `/recueil/<clé>.md` sur un déploiement
+   serveur), il se sert sans aucun habillage de site — le document seul, tel
+   qu'un moteur ou un agent le lit. */
+.recueil-machine { background: var(--bg); min-height: 100vh; padding: 20px clamp(16px, 4vw, 48px) 40px; }
+.recueil-machine__contenu {
+  margin: 0; font-family: var(--font-mono); font-size: .82rem; line-height: 1.6;
+  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.recueil-machine__note {
+  margin: 22px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: .8rem; color: var(--ink-muted);
+}
+
+/* --- les adresses du recueil ouvert, sous le texte de l'acte -------------- */
+.recueil-donnees__resume { cursor: pointer; font-size: .85rem; font-weight: 600; color: var(--brand); }
+.recueil-donnees > p { margin: 12px 0; }
+.recueil-donnees__titre { margin: 18px 0 4px; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.recueil-adresse { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
+.recueil-adresse + .recueil-adresse { border-top: 1px solid var(--border); }
+.recueil-adresse__url { font-family: var(--font-mono); font-size: .78rem; color: var(--brand); overflow-wrap: anywhere; text-decoration: none; }
+.recueil-adresse__url:hover { text-decoration: underline; }
+.recueil-adresse__label { flex: 1 1 200px; font-size: .78rem; color: var(--ink-muted); }
+
+@media (max-width: 980px) {
+  .recueil-notice__titre { font-size: 1.45rem; }
+  .recueil-lecture { max-width: none; }
+}
+@media (max-width: 620px) {
+  .recueil-header__in, .recueil-main { padding-left: 12px; padding-right: 12px; }
+  .recueil--acte .recueil-header__in, .recueil--acte .recueil-main { padding-left: 12px; padding-right: 12px; }
+  .recueil > .app-demo, .recueil--acte > .app-demo { padding-left: 12px; padding-right: 12px; }
+  .recueil-ident__logo, .recueil-ident__logo--mark { height: 34px; width: 34px; }
+  .recueil-item__lien { padding: 10px 4px; }
+  .recueil-select { max-width: none; flex: 1 1 140px; }
+  .recueil-notice__titre { font-size: 1.25rem; }
+  .recueil-badge { padding: 2px 7px; font-size: .68rem; }
+  .recueil-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 10px 12px; }
+  .recueil-meta__item { display: contents; }
+  /* L'accueil sur un téléphone : l'entrée se resserre, les tuiles s'empilent
+     (une colonne), et le carrousel garde une carte et un peu de la suivante —
+     c'est ce qui montre qu'il y a de la suite. */
+  .recueil-hero { padding-top: 18px; }
+  .recueil-hero__lead { font-size: .95rem; }
+  .recueil-themes__grille { grid-template-columns: 1fr; }
+  .recueil-carte { flex-basis: min(86vw, 280px); }
+  .recueil-carte__lien { min-height: 0; }
+  .recueil-section { margin-top: 22px; }
+  .recueil-section__tete { align-items: flex-start; }
+}
+/* En sombre, les teintes de thème s'éclaircissent : une même couleur ne se lit
+   pas de la même façon sur fond clair et sur fond sombre. */
+[data-theme="dark"] .recueil-carte { border-top-color: hsl(var(--h, 220) 58% 58%); }
+/* La mise en avant garde la couleur de la marque, quelle que soit la teinte du
+   thème : c'est elle qui la distingue des cartes ordinaires. */
+[data-theme="dark"] .recueil-carte--une { border-top-color: var(--brand); }
+[data-theme="dark"] .recueil-carte__theme { color: hsl(var(--h, 220) 70% 74%); }
+[data-theme="dark"] .recueil-theme__puce { background: hsl(var(--h, 220) 58% 58%); }
+@media print {
+  .recueil-header, .recueil-bar, .recueil-pied, .recueil-fil, .recueil-pieces, .recueil-verif-box, .recueil-donnees { display: none !important; }
+  /* Le carrousel et les thèmes sont la porte d'entrée : sur le papier, seule la
+     liste compte. */
+  .recueil-hero, .recueil-carrousel, .recueil-une, .recueil-themes, .recueil-filtres { display: none !important; }
+  .recueil { background: #fff; }
+  .recueil-main { max-width: none; padding: 0; gap: 0; }
+  .recueil-lecture { max-width: none; margin-top: 0; }
+  .recueil-bloc { break-inside: avoid; }
+}
+
+[data-theme="dark"] .recueil-ident__logo--mark { color: #101219; }

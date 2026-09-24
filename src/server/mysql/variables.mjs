@@ -28,7 +28,9 @@
 //   choix    l'une des valeurs de `choix` ;
 //   couleur  une couleur hexadécimale (#abc ou #aabbcc) ;
 //   url      une adresse http(s) — la barre oblique finale est retirée ;
-//   liste    des valeurs séparées par des virgules, rangées en tableau.
+//   liste    des valeurs séparées par des virgules, rangées en tableau ;
+//   correspondance  des couples « groupe=rôle » séparés par des virgules,
+//            rangés en [{ claim, role }] — la forme de `auth.roleMap`.
 //
 // `portee` :
 //   referentiel  réglage d'application — validé PUIS transmis au navigateur par
@@ -41,6 +43,12 @@
 //
 // `cle` : chemin, en notation pointée, dans l'objet `config` de l'application.
 //          Il n'est requis que pour la portée « referentiel ».
+//
+// Les rôles de l'application, pour la validation d'une correspondance de
+// groupes (`auth.roleMap`) : la liste est celle de src/lib/users.js (ROLE_ORDER).
+// Ce module reste PUR et sans dépendance — d'où cette copie, tenue par le test
+// « les rôles de la correspondance sont ceux de l'application ».
+export const ROLES_CONNUS = ["visiteur", "redacteur", "reviseur", "signataire", "editeur", "administrateur"];
 
 export const VARIABLES = [
   // ========================================================== RÉFÉRENTIEL
@@ -446,6 +454,176 @@ export const VARIABLES = [
     exemple: "/documents/{document}",
   },
 
+  // --- Annuaire de la collectivité (OIDC) -----------------------------------
+  // L'annuaire se règle AUSSI depuis l'interface (Administration › Annuaire,
+  // référentiel `config.auth`). Ces variables le rendent DÉCLARATIF, pour deux
+  // raisons :
+  //   • en mode « comptes locaux », le référentiel n'est PAS lisible avant la
+  //     session : l'écran de connexion ne peut donc pas y apprendre que
+  //     l'annuaire est branché. Ces variables-là, elles, voyagent par
+  //     `GET /v1/config` (route publique) et le service les republie dans
+  //     `GET /v1/auth/config` — la porte que lit l'écran de connexion ;
+  //   • un parc entier se pose en une fois, sans cliquer dans chaque interface.
+  // AUCUNE de ces variables n'est un secret : c'est un client OIDC PUBLIC (flux
+  // code + PKCE, sans secret), et c'est le SERVICE qui mène la connexion depuis
+  // la 1.6.1p — le fournisseur n'a donc aucune origine à autoriser. Un
+  // `client_secret` n'a rien à faire ici, et n'y est pas accepté.
+  {
+    env: "SCRIBA_ANNUAIRE_SECONDE_PORTE", cle: "auth.annuaire", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Proposer l'annuaire en seconde porte",
+    description: "Allumé, l'écran de connexion propose l'annuaire de la collectivité EN PLUS de la porte ordinaire (comptes locaux, ou comptes de l'application) : les deux façons d'entrer coexistent. Éteint (le défaut), la porte ordinaire reste seule — c'est le mode « oidc » qui fait de l'annuaire la porte ordinaire, et il ne se règle pas ici (AUTH_MODE, portée service). La porte n'est ouverte que si l'émetteur ET l'identifiant du client sont renseignés.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ESSAI", cle: "auth.test", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Annuaire d'essai intégré",
+    description: "Allumé, la connexion passe par l'annuaire d'essai INTÉGRÉ (des identités fictives, des jetons non signés) au lieu du fournisseur : aucun appel réseau, et le mécanisme des rôles s'exerce quand même. Ce n'est PAS une authentification : à ne garder que le temps d'un branchement ou d'une démonstration.",
+    exemple: "false",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ISSUER", cle: "auth.issuer", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Adresse de l'émetteur (iss)",
+    description: "L'adresse du fournisseur d'identité, telle qu'elle figure dans ses jetons (revendication `iss`), sans le `/.well-known/openid-configuration`. Elle sert à la découverte des points de terminaison ET à la vérification du jeton.",
+    exemple: "https://annuaire.collectivite.fr/realms/agents",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_CLIENT_ID", cle: "auth.clientId", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Identifiant du client (client_id)",
+    description: "L'application déclarée chez le fournisseur, en CLIENT PUBLIC (sans secret), avec le flux code d'autorisation et PKCE (S256). Il doit être déclaré chez le fournisseur avec l'adresse de retour à l'identique.",
+    exemple: "scribae-application",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_SCOPES", cle: "auth.scopes", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Portées demandées (scope)",
+    description: "Les portées de la demande d'autorisation, séparées par des espaces. « openid » est indispensable ; « profile » et « email » fournissent le nom et l'adresse de l'agent.",
+    exemple: "openid profile email",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_REDIRECT_URI", cle: "auth.redirectUri", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Adresse de retour (redirect_uri)",
+    description: "L'adresse à laquelle le fournisseur renvoie l'agent après l'authentification. Elle doit être déclarée À L'IDENTIQUE chez le fournisseur. Vide : l'adresse de la page courante, ce qui convient à la plupart des installations.",
+    exemple: "https://actes.collectivite.fr/",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_PROMPT", cle: "auth.prompt", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Invite (prompt)",
+    description: "Le paramètre `prompt` de la demande d'autorisation. Vide en général ; « select_account » force le choix du compte à chaque connexion (utile sur un poste partagé ou un fournisseur qui garde la session ouverte).",
+    exemple: "select_account",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ROLE_CLAIM", cle: "auth.roleClaim", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Revendication des groupes",
+    description: "Le chemin, en notation pointée, de la revendication qui porte les groupes de l'agent : « groups », « roles », « realm_access.roles »… Le PREMIER groupe reconnu par la correspondance ci-dessous décide du rôle.",
+    exemple: "groups",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ROLES", cle: "auth.roleMap", portee: "referentiel",
+    type: "correspondance", groupe: "Annuaire (OIDC)",
+    libelle: "Correspondance des groupes → rôles",
+    description: "Les couples « groupe=rôle » séparés par des virgules. Les rôles sont ceux de l'application : visiteur, redacteur, reviseur, signataire, editeur, administrateur. C'est le PREMIER groupe reconnu, dans l'ordre annoncé par le fournisseur, qui décide.",
+    exemple: "scribae-administrateurs=administrateur, scribae-editeurs=editeur, scribae-redacteurs=redacteur",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_SANS_GROUPE", cle: "auth.unknownPolicy", portee: "referentiel",
+    type: "choix", choix: ["deny", "default"], groupe: "Annuaire (OIDC)",
+    libelle: "Agent sans groupe reconnu",
+    description: "« deny » (le défaut, recommandé) : l'agent est bien authentifié par l'annuaire, mais aucun de ses groupes ne correspond — il prend le rôle Visiteur, et l'application ne lui ouvre rien. « default » : il reçoit le rôle de repli ci-dessous (utile pendant une mise en service).",
+    exemple: "deny",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ROLE_DEFAUT", cle: "auth.defaultRole", portee: "referentiel",
+    type: "choix", choix: ["visiteur", "redacteur", "reviseur", "signataire", "editeur", "administrateur"],
+    groupe: "Annuaire (OIDC)",
+    libelle: "Rôle de repli",
+    description: "Le rôle attribué à un agent dont aucun groupe n'est reconnu, quand la politique ci-dessus vaut « default ». Le rôle le plus étroit est le bon : « redacteur » pour un agent qui n'a rien demandé, « visiteur » pour ne lui ouvrir aucun accès.",
+    exemple: "redacteur",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_SERVICE_CLAIM", cle: "auth.serviceClaim", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Revendication des services",
+    description: "Le chemin de la revendication qui porte le ou les codes de service de l'agent (ex. DSI, SG, CCAS). Ces codes sont rapprochés de ceux du référentiel : ils décident du périmètre, c'est-à-dire des actes que l'agent voit.",
+    exemple: "services",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_ENTITE_CLAIM", cle: "auth.entityClaim", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Revendication de l'entité",
+    description: "Le chemin de la revendication qui porte le code de l'entité de rattachement de l'agent (ex. VSL, CCAS), rapproché des entités du référentiel.",
+    exemple: "entity",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_AUTORITAIRE", cle: "auth.authoritative", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Les groupes de l'annuaire font foi",
+    description: "Allumé (le défaut), le rôle et le périmètre sont REPRIS de l'annuaire à chaque connexion : c'est l'annuaire qui administre les droits, et un changement de groupe s'applique dès la connexion suivante. Éteint, l'annuaire authentifie seulement, et les rôles réglés dans « Comptes et rôles » sont conservés.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_PROVISION", cle: "auth.autoProvision", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Créer les comptes inconnus",
+    description: "Allumé (le défaut), un agent de l'annuaire qui n'a pas encore de compte en reçoit un à sa première connexion. Éteint, il faut pré-enregistrer son adresse (ou son identifiant d'annuaire) dans « Comptes et rôles » — c'est le réglage d'une collectivité qui veut maîtriser qui entre.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_USERINFO", cle: "auth.useUserinfo", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Compléter par /userinfo",
+    description: "Allumé (le défaut), les revendications du jeton sont complétées par l'appel à `userinfo` — utile quand les groupes n'y figurent pas. Éteint, seul le jeton d'identité est lu.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_SIGNATURE", cle: "auth.requireSignature", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Exiger la vérification de la signature",
+    description: "Allumé (le défaut), un jeton d'identité dont la signature n'a pas pu être vérifiée contre les clés publiées (`jwks_uri`) est REFUSÉ. À n'éteindre qu'en connaissance de cause, et jamais en service.",
+    exemple: "true",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_AUTORISATION_URL", cle: "auth.endpoints.authorization", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Point de terminaison — autorisation",
+    description: "À renseigner SEULEMENT si le fournisseur n'expose pas `/.well-known/openid-configuration`, ou si le service ne le joint pas (adresse interne, certificat, pare-feu) : recopiez l'adresse depuis sa documentation.",
+    exemple: "https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/auth",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_JETON_URL", cle: "auth.endpoints.token", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Point de terminaison — jeton",
+    description: "Le point de terminaison qui échange le code d'autorisation contre les jetons (c'est le SERVICE qui l'appelle). À renseigner seulement si la découverte n'aboutit pas.",
+    exemple: "https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/token",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_JWKS_URL", cle: "auth.endpoints.jwks", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Point de terminaison — clés de signature (jwks)",
+    description: "Les clés publiques qui servent à vérifier la signature des jetons. Sans elles (et sans découverte), la signature ne peut pas être vérifiée : le jeton est alors refusé si `SCRIBA_ANNUAIRE_SIGNATURE` est allumé.",
+    exemple: "https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/certs",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_USERINFO_URL", cle: "auth.endpoints.userinfo", portee: "referentiel",
+    type: "texte", groupe: "Annuaire (OIDC)",
+    libelle: "Point de terminaison — informations utilisateur (userinfo)",
+    description: "Le point de terminaison qui rend les revendications complémentaires (groupes, services, entité). À renseigner seulement si la découverte n'aboutit pas.",
+    exemple: "https://annuaire.collectivite.fr/realms/agents/protocol/openid-connect/userinfo",
+  },
+  {
+    env: "SCRIBA_ANNUAIRE_SECOURS", cle: "auth.allowRecovery", portee: "referentiel",
+    type: "booleen", groupe: "Annuaire (OIDC)",
+    libelle: "Porte de secours de l'écran de connexion",
+    description: "Allumée (le défaut), l'écran de connexion offre un repli « L'annuaire est injoignable ? » qui ramène l'installation sur les comptes de l'application. À retirer une fois l'annuaire éprouvé — sans elle, une panne du fournisseur ferme la porte à tout le monde. Rappel : depuis 1.6.1p c'est le SERVICE qui mène la connexion à l'annuaire ; ce repli demeure un contrôle d'INTERFACE, et la barrière réelle est la session que le service exige à chaque appel.",
+    exemple: "false",
+  },
+
   // --- Fonctions et assistants ---------------------------------------------
   // Le parapheur n'est plus un interrupteur (1.5.0) : il vit dans l'onglet
   // « Circuits de validation », et ce sont les circuits enregistrés qui
@@ -473,6 +651,25 @@ export const VARIABLES = [
   },
 
   // ============================================================== SERVICE
+  // --- Rangement des données -----------------------------------------------
+  // OÙ le service range-t-il ses données ? MariaDB (le défaut, une base
+  // partagée), ou un simple DOSSIER de fichiers pour une installation sans
+  // serveur de base de données. Le contrat des deux rangements est le même
+  // (voir src/server/mysql/magasin.mjs) : changer ce réglage ne change rien
+  // d'autre que l'endroit où les octets sont écrits.
+  {
+    env: "STOCKAGE", portee: "service", type: "choix", choix: ["mysql", "fichier"], groupe: "Rangement des données",
+    libelle: "Rangement des données", defaut: "mysql",
+    description: "« mysql » (le défaut) : tout dans MariaDB — une base partagée, sauvegardée et répliquée comme le reste. « fichier » : tout dans un dossier (DATA_DIR), EN CLAIR, sans aucune base de données à administrer — pour un poste, une petite collectivité, ou une sauvegarde par simple copie de dossier. Le rangement par fichiers suppose UN service sur UNE machine (voir docs/ADMINISTRATION.md).",
+    exemple: "fichier",
+  },
+  {
+    env: "DATA_DIR", portee: "service", type: "texte", groupe: "Rangement des données",
+    libelle: "Dossier de données (rangement par fichiers)", defaut: "./data",
+    description: "Le dossier qui porte TOUT le rangement quand STOCKAGE=fichier : état, collections, journal, courriels, sessions. Il est créé au démarrage s'il manque, et doit être accessible en écriture par le compte du service. SAUVEGARDER = copier ce dossier (voir le LISEZ-MOI qu'il contient). Sans objet quand STOCKAGE=mysql.",
+    exemple: "/var/lib/scribae",
+  },
+
   // --- Base de données ------------------------------------------------------
   {
     env: "DB_HOST", portee: "service", type: "texte", groupe: "Base de données",
@@ -837,6 +1034,27 @@ function convertir(v, brut) {
     }
     case "liste":
       return { valeur: brut.split(",").map((s) => s.trim()).filter(Boolean) };
+    // « correspondance » : des couples « groupe=rôle » séparés par des virgules,
+    // rangés en [{claim, role}] — la forme que le référentiel attend pour
+    // `auth.roleMap`, et celle que l'interface édite ligne à ligne. Un couple
+    // mal formé, un groupe vide ou un rôle inconnu REFUSE la variable entière :
+    // une correspondance à moitié lue donnerait des rôles faux, ce qui est pire
+    // que pas de correspondance du tout.
+    case "correspondance": {
+      const paires = brut.split(",").map((s) => s.trim()).filter(Boolean);
+      if (!paires.length) return { erreur: "au moins un couple « groupe=rôle » attendu" };
+      const roleMap = [];
+      for (const paire of paires) {
+        const i = paire.indexOf("=");
+        if (i <= 0 || i === paire.length - 1) return { erreur: `couple « groupe=rôle » attendu (reçu : « ${paire} »)` };
+        const claim = paire.slice(0, i).trim();
+        const role = paire.slice(i + 1).trim();
+        if (!claim) return { erreur: "groupe vide dans un couple" };
+        if (!ROLES_CONNUS.includes(role)) return { erreur: `rôle inconnu : « ${role} » (attendu : ${ROLES_CONNUS.join(", ")})` };
+        roleMap.push({ claim, role });
+      }
+      return { valeur: roleMap };
+    }
     default:
       return { erreur: `type inconnu : ${v.type}` };
   }
@@ -904,7 +1122,7 @@ export function wikiMarkdown() {
   lignes.push("# Variables de déploiement");
   lignes.push("");
   lignes.push("Ce document est ENGENDRÉ à partir du registre des variables");
-  lignes.push("(`src/server/mysql/variables.mjs`) par `node src/scripts/generer-variables.mjs` :");
+  lignes.push("(`src/server/mysql/variables.mjs`) par `node scripts/generer-variables.mjs` :");
   lignes.push("il ne se modifie pas à la main. Pour ajouter une variable, on ajoute un descripteur au");
   lignes.push("registre, puis on régénère ce fichier.");
   lignes.push("");
@@ -932,6 +1150,7 @@ export function wikiMarkdown() {
       const portee = v.portee === "service" ? "service" : "référentiel";
       let type = v.type;
       if (v.type === "choix" && v.choix) type += " : " + v.choix.join(" ou ");
+      if (v.type === "correspondance") type += " (« groupe=rôle », séparés par des virgules)";
       if (v.type === "entier" && (v.min !== undefined || v.max !== undefined)) {
         type += ` (${v.min !== undefined ? "min " + v.min : ""}${v.min !== undefined && v.max !== undefined ? ", " : ""}${v.max !== undefined ? "max " + v.max : ""})`;
       }
@@ -952,6 +1171,7 @@ export function wikiMarkdown() {
   lignes.push("    SCRIBA_DELAI_RECOURS_MOIS=2");
   lignes.push("    SCRIBA_RECUEIL_OPPOSABILITE=jours");
   lignes.push("    SCRIBA_NUMERO_REMPLISSAGE=3");
+  lignes.push("    SCRIBA_ANNUAIRE_ROLES=scribae-administrateurs=administrateur, scribae-editeurs=editeur");
   lignes.push("");
   return lignes.join("\n");
 }

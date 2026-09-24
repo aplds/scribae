@@ -17,6 +17,11 @@ import { enteteCsrf } from "./motdepasse.js";
 const MAX_PAYLOAD = 900000;   // marge sous la limite de 1 Mio d'un message (transport socket)
 const MAX_HTTP_PAYLOAD = 8000000; // corps accepté par le service HTTP (MAX_BODY du serveur)
 
+// Délai d'un appel HTTP au service (voir `httpRequest`). Le même que celui du
+// pilote de données (src/lib/db/service.js) : un service muet doit se déclarer
+// absent dans le même temps, quel que soit le chemin d'appel.
+const DELAI_HTTP = 12000;
+
 // Deux transports mènent au même contrat REST :
 //   • le canal temps réel de l'environnement d'édition, quand il est fourni ;
 //   • de simples appels `fetch` vers un service auto-hébergé (voir src/server/),
@@ -166,16 +171,34 @@ async function httpRequest(request) {
   // (`credentials: "include"`), et joindre le jeton anti-CSRF que le service a
   // posé dans un cookie lisible (double envoi). Voir src/lib/motdepasse.js.
   const parSession = sessionDeService();
-  const res = await fetch(apiBase() + request.path, {
-    method: request.method,
-    credentials: parSession ? "include" : "same-origin",
-    headers: {
-      ...(request.body === undefined ? {} : { "content-type": "application/json" }),
-      ...request.headers,
-      ...(parSession && request.method !== "GET" ? enteteCsrf() : {}),
-    },
-    body: request.body === undefined ? undefined : JSON.stringify(request.body),
-  });
+  // Délai : une adresse de service qui ne répond pas (DNS en attente, port
+  // filtré) suspendait l'application sur son écran de chargement. Au-delà de
+  // `DELAI_HTTP`, on rend une réponse « 0 » — la même chose qu'un échec réseau —
+  // pour que l'appelant bascule en « hors ligne » au lieu d'attendre sans fin.
+  const controleur = typeof AbortController === "function" ? new AbortController() : null;
+  const minuteur = controleur ? setTimeout(() => controleur.abort(), DELAI_HTTP) : null;
+  let res;
+  try {
+    res = await fetch(apiBase() + request.path, {
+      method: request.method,
+      credentials: parSession ? "include" : "same-origin",
+      headers: {
+        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+        ...request.headers,
+        ...(parSession && request.method !== "GET" ? enteteCsrf() : {}),
+      },
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+      signal: controleur ? controleur.signal : undefined,
+    });
+  } catch (e) {
+    const abattu = e && (e.name === "AbortError" || (controleur && controleur.signal.aborted));
+    const detail = abattu
+      ? `pas de réponse après ${Math.round(DELAI_HTTP / 1000)} secondes`
+      : String((e && e.message) || e);
+    return { status: 0, headers: {}, body: { erreur: `Service injoignable (${apiBase() + request.path}) : ${detail}.`, code: "service_injoignable" } };
+  } finally {
+    if (minuteur) clearTimeout(minuteur);
+  }
   let body = null;
   try { body = await res.json(); } catch (e) { body = null; }
   const headers = {};

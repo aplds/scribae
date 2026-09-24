@@ -18,7 +18,7 @@ import { signerPicker } from "../signer-picker.js";
 import { champFonction } from "../../lib/fonctions.js";
 import { annexesVocab } from "../../lib/annexes.js";
 import { glissable, deposable, moitie, rangeDans, insererAuRange } from "../dnd.js";
-import { deplacerVers, rangDe, ordreConteneur, rangerCommeLaTrame, aOrdre } from "../../lib/ordre.js";
+import { deplacerVers, rangDe, ordreConteneur } from "../../lib/ordre.js";
 import { annotationStrip, notesByPath } from "../annotations.js";
 import { ajoutPour } from "../../lib/structure.js";
 

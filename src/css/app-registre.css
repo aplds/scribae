@@ -1,0 +1,256 @@
+/* ============================================================================
+   Scribae — Parapheur, caractère exécutoire et délais, journal d'audit, relances et cartes de la fiche d'acte.
+
+   Partie 8/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Parapheur, exécution et délais.
+
+   Deux écrans jumeaux : une file à gauche, le dossier de l'acte à droite. Ils
+   reprennent les briques de l'écran de signature (`.sig-list`, `.sig-item`,
+   `.sig-steps`) pour que les mêmes objets se lisent partout de la même façon.
+   ========================================================================== */
+.parapheur-resume { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.parapheur-resume__item {
+  display: flex; align-items: baseline; gap: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); padding: 8px 12px; min-width: 150px;
+}
+.parapheur-resume__item strong { font-size: 1.25rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.parapheur-resume__item span { font-size: .8rem; color: var(--ink-muted); }
+.parapheur-resume__item.is-hot { border-color: var(--brand); background: var(--brand-soft); }
+.parapheur-resume__item.is-hot strong { color: var(--brand); }
+
+.parapheur-grid { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+.sig-item.is-todo { border-left: 3px solid var(--brand); }
+.sig-step.is-open .sig-step__dot { background: var(--brand); color: #fff; }
+.sig-step.is-open .sig-step__title { color: var(--brand); }
+.parapheur-comment { font-style: italic; color: var(--ink-2); }
+.parapheur-decision { border-left: 3px solid var(--brand); }
+.parapheur-decision .fr-textarea { width: 100%; }
+
+.exec-formalites { display: flex; flex-direction: column; gap: 8px; }
+.exec-formalite {
+  border: 1px solid var(--border); border-left: 3px solid var(--warning);
+  border-radius: var(--radius); padding: 9px 11px; background: var(--bg);
+}
+.exec-formalite.is-done { border-left-color: var(--success); }
+.exec-formalite__head { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+.exec-formalite p { margin: 3px 0 0; }
+.exec-formalite .fr-row { margin-top: 6px; }
+.exec-alerte--error { color: var(--error); }
+.exec-alerte--warning { color: var(--warning); }
+.exec-alerte--info { color: var(--ink-2); }
+/* Certificat de transmission au contrôle de légalité, déposé sur le document. */
+.exec-certificat {
+  border-left: 3px solid var(--success);
+  padding: 6px 9px; border-radius: 3px;
+}
+.exec-certificat strong { display: block; }
+/* Observation portée sur un recours : la note de l'agent, entre guillemets. */
+.exec-observation {
+  border-left: 3px solid var(--border-strong);
+  padding: 4px 9px; border-radius: 3px; font-style: italic; color: var(--ink-2);
+}
+
+/* ------------------------------------------------------ recherche (en-tête) */
+.app-search {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--bg); color: var(--ink-muted);
+  font: inherit; font-size: .82rem; padding: 5px 10px; cursor: pointer;
+}
+.app-search:hover { background: var(--bg-alt); color: var(--ink); }
+.app-search kbd {
+  font-family: var(--font-mono); font-size: .68rem; border: 1px solid var(--border);
+  border-radius: 3px; padding: 0 4px; color: var(--ink-muted); background: var(--bg-alt);
+}
+
+/* ------------------------------------------- présence et notifications (en-tête) */
+.app-collab { display: flex; align-items: center; gap: 6px; }
+.collab-presence { position: relative; }
+.collab-presence__btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg);
+  padding: 3px 8px 3px 4px; cursor: pointer; font: inherit;
+}
+.collab-presence__btn:hover { background: var(--bg-alt); }
+.collab-presence__dots { display: flex; }
+.collab-presence__dot {
+  width: 22px; height: 22px; border-radius: 999px; flex: none;
+  background: var(--brand); color: #fff; font-size: .62rem; font-weight: 700;
+  display: grid; place-items: center; border: 2px solid var(--bg); margin-left: -6px;
+}
+.collab-presence__dots .collab-presence__dot:first-child { margin-left: 0; }
+.collab-presence__n { font-size: .72rem; color: var(--ink-muted); }
+.collab-cloche { position: relative; }
+.collab-cloche__btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--ink); cursor: pointer;
+}
+.collab-cloche__btn:hover { background: var(--bg-alt); }
+.collab-cloche__btn.is-on { border-color: var(--brand); color: var(--brand); }
+.collab-cloche__n {
+  position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 999px; background: var(--error); color: #fff;
+  font-size: .64rem; font-weight: 700; display: grid; place-items: center;
+}
+.collab-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 340px; max-width: 84vw;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 18px 40px rgba(16, 20, 30, .18); z-index: 40; overflow: hidden;
+}
+.collab-panel__head { padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--bg-alt); font-size: .82rem; }
+.collab-panel__body { max-height: 52vh; overflow: auto; }
+.collab-panel__row {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 8px 12px; border: 0; border-bottom: 1px solid var(--border);
+  background: var(--bg); color: inherit; font: inherit; cursor: pointer;
+}
+.collab-panel__row:hover { background: var(--bg-alt); }
+.collab-panel__row.is-me { background: var(--bg-alt); }
+.collab-panel__row--notif.is-new { border-left: 3px solid var(--brand); }
+.collab-panel__row--notif .collab-panel__text { padding-left: 6px; }
+.collab-panel__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.collab-panel__text strong { font-size: .82rem; }
+.collab-panel__text span { overflow-wrap: anywhere; }
+.collab-panel__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; background: var(--bg-alt); }
+
+/* ---------------------------------------------------- recherche globale (superposition) */
+.gs {
+  position: fixed; inset: 0; z-index: 60; background: rgba(14, 18, 26, .42);
+  display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px;
+}
+.gs__box {
+  width: min(620px, 100%); background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 24px 60px rgba(10, 14, 22, .35); overflow: hidden;
+}
+.gs__bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--ink-muted); }
+.gs__input { flex: 1 1 auto; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 1rem; }
+.gs__kbd { font-family: var(--font-mono); font-size: .68rem; border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
+.gs__results { max-height: 58vh; overflow: auto; }
+.gs__group { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); padding: 9px 12px 4px; background: var(--bg-alt); }
+.gs__item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 8px 12px; border: 0; background: var(--bg); color: inherit; font: inherit; cursor: pointer;
+}
+.gs__item.is-on { background: var(--brand-soft); }
+.gs__item-icon { color: var(--ink-muted); display: inline-flex; flex: none; }
+.gs__item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.gs__item-title { font-size: .88rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs__item-sub { font-size: .74rem; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs__empty { padding: 18px 14px; margin: 0; font-size: .84rem; color: var(--ink-muted); }
+.gs__help { margin: 0; padding: 7px 12px; border-top: 1px solid var(--border); background: var(--bg-alt); font-size: .72rem; color: var(--ink-muted); }
+
+@media (max-width: 1100px) {
+  .parapheur-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .app-search span { display: none; }
+  .app-search kbd { display: none; }
+}
+@media (max-width: 700px) {
+  .parapheur-resume__item { min-width: 0; flex: 1 1 45%; }
+  .collab-panel { position: fixed; right: 8px; left: 8px; width: auto; }
+}
+@media print {
+  .app-search, .app-collab, .gs { display: none !important; }
+}
+
+[data-theme="dark"] .collab-panel { box-shadow: 0 18px 44px rgba(0, 0, 0, .6); }
+[data-theme="dark"] .gs__box { box-shadow: 0 24px 60px rgba(0, 0, 0, .6); }
+[data-theme="dark"] .collab-presence__dot,
+[data-theme="dark"] .collab-cloche__n { color: #101219; }
+[data-theme="dark"] .parapheur-resume__item.is-hot .parapheur-resume__item strong { color: var(--brand); }
+[data-theme="dark"] .collab-panel__row--notif.is-new { border-left-color: var(--brand); }
+
+/* ==========================================================================
+   Journal d'audit, relances du registre, et cartes ajoutées à la fiche d'acte
+   (parapheur, caractère exécutoire, historique des brouillons). Ces styles
+   prolongent les blocs « parapheur » et « exécution » : mêmes objets, mêmes
+   repères visuels.
+   ========================================================================== */
+
+/* Bandeau de relances du registre des actes : ce qui attend un geste, résumé
+   sur une ligne, avec un lien direct vers l'écran concerné. */
+.actes-relances {
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--ink-muted);
+}
+
+/* Journal d'audit : une ligne par fait, la date à gauche (colonne fixe, pour
+   que les faits s'alignent et se lisent comme un registre), le fait à droite. */
+.journal-liste {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.journal-line {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.journal-line__when {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 96px;
+  line-height: 1.25;
+}
+
+.journal-line__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.journal-line__body .fr-row {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.journal-line__body p {
+  margin: 4px 0 0;
+}
+
+@media (max-width: 640px) {
+  .journal-line {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .journal-line__when {
+    flex-direction: row;
+    gap: 8px;
+    flex-basis: auto;
+  }
+}
+
+/* Sur un téléphone, les compteurs de synthèse (parapheur, échéancier) passent
+   à la ligne : deux par ligne, le texte devient illisible. */
+@media (max-width: 460px) {
+  .parapheur-resume__item { flex: 1 1 100%; }
+}
+
+/* Les formalités rappelées sur la fiche d'un acte sont plus compactes que sur
+   l'échéancier : la fiche informe, l'échéancier pilote. */
+.fr-card .exec-formalites .exec-formalite {
+  padding: 8px 10px;
+}
+
+[data-theme="dark"] .journal-line__when strong { color: var(--ink); }

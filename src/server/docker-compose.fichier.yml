@@ -1,0 +1,81 @@
+# ============================================================================
+# Scribae — déploiement auto-hébergé SANS MariaDB (rangement par fichiers).
+#
+#   api   le service de la collectivité (Node) — API /v1/… — DONNÉES EN
+#         FICHIERS, dans le dossier monté sur /data.
+#   web   nginx : sert l'application et fait proxy vers api sur /v1/.
+#
+# Démarrage :
+#
+#   cp env.example .env       # renseignez surtout ADMIN_PASSWORD (le reste —
+#                             # DB_*, MARIADB_* — NE SERT PAS ici)
+#   docker compose -f docker-compose.fichier.yml up -d --build
+#   docker compose -f docker-compose.fichier.yml logs -f api
+#
+# POURQUOI UN FICHIER À PART, et non un `-f` posé par-dessus l'autre ? Parce que
+# `docker-compose.yml` décrit la pile MariaDB, et que ses variables de base y sont
+# OBLIGATOIRES (`DB_PASSWORD`, `DB_ROOT_PASSWORD`) : les interpoler suffit à
+# réclamer un mot de passe de base de données à une installation qui n'en a pas.
+# Ici, aucun service de base n'existe — il n'y a donc rien à renseigner de ce
+# côté-là, et `docker compose up` démarre la pile entière.
+#
+# LES IMAGES SONT LES MÊMES que celles de `docker-compose.yml` (`build: ./mysql`,
+# et la façade construite depuis `src/server/web/Dockerfile`) : ce qui change est
+# l'ORCHESTRATION, pas le logiciel. `docker-compose.yml` reste la référence pour
+# le détail des deux services et pour la pile MariaDB.
+#
+# TOUT LE `.env` ENTRE dans le service (`env_file`), comme dans l'autre pile : il
+# porte les réglages déclaratifs `SCRIBA_*` (identité, vocabulaire, recueil…)
+# sans qu'il y ait à les recopier ici. Les variables posées en clair ci-dessous
+# sont celles qui DIFFÈRENT de la pile MariaDB.
+#
+# LE DOSSIER DE DONNÉES (`./data`, à côté de ce fichier) est monté sur `/data` :
+# c'est là que TOUT est rangé — référentiel, trames, actes, comptes, sessions,
+# état de signature, journaux. SAUVEGARDER = copier ce dossier. Il est ignoré par
+# git (voir src/github/gitignore), et n'a rien à faire dans un dépôt.
+# ============================================================================
+
+services:
+  api:
+    build: ./mysql
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      # LE RANGEMENT : des fichiers, dans /data. Sans ces deux lignes, le service
+      # chercherait MariaDB (qui n'existe pas ici) au lieu de créer son dossier.
+      STOCKAGE: fichier
+      DATA_DIR: /data
+    volumes:
+      # LE SEUL MONTAGE DE FICHIERS DE CETTE PILE, et il est volontaire : les
+      # données doivent survivre à la recréation du conteneur, et rester
+      # lisibles par l'exploitant. (La pile MariaDB, elle, ne monte aucun
+      # fichier de l'hôte — voir la note en tête de docker-compose.yml.)
+      - ./data:/data
+    networks: [interne]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: src/server/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      API_BASE: ${API_BASE:-}
+      API_TOKEN: ${API_TOKEN:-}
+      AUTH_MODE: ${AUTH_MODE:-password}
+      DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-}
+      DEMO: ${DEMO:-}
+    volumes:
+      - webroot:/srv/www
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on: [api]
+    networks: [interne]
+
+volumes:
+  webroot:
+
+networks:
+  interne:
+    driver: bridge

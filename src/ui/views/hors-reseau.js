@@ -17,6 +17,7 @@ import { h, icon, button } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
+import { chatErreurEl } from "../chats-erreur.js";
 import { acces } from "../../lib/atelier-acces.js";
 
 export function renderHorsReseau(root) {
@@ -68,6 +69,10 @@ export function renderHorsReseau(root) {
     ),
 
     h("p", { class: "connexion__note", text: "Le recueil des actes publiés est public : il se consulte sans compte, et depuis n'importe quel réseau." }),
+
+    // Un atelier fermé à cette adresse est un refus d'accès : le code 403 dit
+    // exactement cela. Voir src/ui/chats-erreur.js.
+    chatErreurEl(403, { legende: "Accès refusé — l'atelier reste fermé depuis cette adresse" }),
   );
 
   root.appendChild(h("div", { class: "connexion sans-acces" },

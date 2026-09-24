@@ -30,12 +30,27 @@ navigateur (Scribae)              service                         base
 > est donc la seule pièce qui connaît la base ; il n'accepte que des appels HTTP authentifiés
 > par jeton. Il n'ouvre **aucune connexion sortante**.
 
+> **Sans base de données ?** Le rangement est un **magasin** à deux implémentations
+> (`magasin-mysql.mjs`, `magasin-fichier.mjs`), derrière un **contrat unique**
+> (`magasin.mjs`). `STOCKAGE=fichier` range tout dans un **dossier** (`DATA_DIR`, `./data`
+> par défaut), en clair, sans aucune base à administrer — c'est le déploiement d'un poste ou
+> d'une petite collectivité, et la sauvegarde y est une copie de dossier. Le contrat est le
+> même : les routes, l'application et les données ne changent pas. Voir
+> **`../../docs/ADMINISTRATION.md`** § 2.4. Le réseau ci-dessous vaut pour le rangement
+> MariaDB ; en rangement par fichiers, le service écrit simplement dans son dossier.
+
 > **Déploiement complet.** Ce fichier décrit le service et sa base. Pour installer
 > l'ensemble (nginx + service + MariaDB) avec Docker, y compris le réseau interne et TLS,
-> voir **`../README.md`**. L'exploitation courante est décrite dans
+> voir **`../README.md`**. Pour la variante **sans MariaDB**, voir
+> **`../docker-compose.fichier.yml`**. L'exploitation courante est décrite dans
 > **`../../docs/ADMINISTRATION.md`**.
 
 ## 1. Préparer la base
+
+**En rangement par fichiers (`STOCKAGE=fichier`), il n'y a RIEN à préparer** : le service crée
+son dossier au démarrage (`DATA_DIR`), y dépose `STOCKAGE.json` et un `LISEZ-MOI.txt`, et il n'y
+a ni compte de base à aligner, ni schéma à appliquer. `--reconcilier` y répond « sans objet ».
+Tout ce qui suit décrit le rangement MariaDB, qui reste le défaut.
 
 Avec Docker, c'est **le service** qui prépare la base (voir `../docker-compose.yml`) : le service
 `db-init` **aligne le compte applicatif sur le `.env`** puis applique `schema.sql`, et le service
@@ -67,7 +82,7 @@ Le service peut aussi créer les tables lui-même (`--migrate`). Les objets cré
 ```bash
 cd src/server/mysql
 cp env.example .env        # puis renseignez la base et les jetons
-npm install
+npm ci                     # installe l'arbre verrouillé (package-lock.json)
 node server.mjs --reconcilier  # remet le compte applicatif au mot de passe du .env, puis applique le schéma (DB_ROOT_PASSWORD requis)
 node server.mjs --migrate  # schéma seul (compte déjà en règle)
 node server.mjs            # (ou: npm start)
@@ -151,9 +166,18 @@ vise la même base. La **session** de connexion, elle, reste locale.
 
 ## 5. Liste de contrôle avant mise en service
 
-- **Mode d'authentification** : `AUTH_MODE=demo` (démonstration, jetons d'API) ou
-  `AUTH_MODE=password` (comptes locaux). En mode `demo`, **ne pas exposer** l'installation :
-  placer l'application derrière un VPN ou un portail, car le jeton d'écriture est public.
+- **Mode d'authentification** : `AUTH_MODE=demo` (démonstration, jetons d'API),
+  `AUTH_MODE=password` (comptes locaux, le défaut) ou `AUTH_MODE=oidc` (l'annuaire de la
+  collectivité est la porte ordinaire ; les comptes locaux restent ouverts comme porte de service).
+  En mode `demo`, **ne pas exposer** l'installation : placer l'application derrière un VPN ou un
+  portail, car le jeton d'écriture est public.
+- **Annuaire de la collectivité** : il se règle dans l'application (Administration › Annuaire) ou
+  par les variables `SCRIBA_ANNUAIRE_*` du `.env` (émetteur, `client_id`, correspondance des
+  groupes, seconde porte…), que le service **publie** dans `GET /v1/auth/config` — c'est ainsi que
+  l'écran de connexion les connaît en mode `password`, où le référentiel n'est lisible qu'avec une
+  session (`annuaire.mjs`). Aucun secret : client **public** (PKCE). Attention : une session
+  d'annuaire est une session de l'application ; un service à session (`password`) n'accepte que
+  les siennes — la seconde porte n'est alors pas proposée (voir `../../docs/ADMINISTRATION.md` § 4.3).
 - **Commutateur de démonstration** : `DEMO=false` pour une installation réelle — l'outil part
   d'un **référentiel vierge**, sans aucune donnée fictive. À `true` (ou vide en mode `demo`), le
   jeu fictif livré est installé et le bandeau « Démonstration » s'affiche. Une installation déjà
@@ -271,7 +295,7 @@ La référence complète des variables — les deux portées, avec rôle, type, 
 est engendrée depuis ce registre dans **`../../docs/VARIABLES.md`** :
 
 ```bash
-node scripts/generer-variables.mjs     # depuis la racine du dépôt (src/)
+node scripts/generer-variables.mjs     # depuis la racine du dépôt
 ```
 
 Pour **ajouter** une variable : un descripteur dans `variables.mjs`, une ligne dans
@@ -305,4 +329,3 @@ paramètre `ip` permet de **simuler** une adresse (« et si j'arrivais de là ? 
 simulateur de l'écran d'administration. Le chemin `/atelier` peut en outre être fermé au niveau
 de nginx (`location /atelier`, directives `allow`/`deny` livrées en commentaire dans
 `../nginx.conf`) : le service applique déjà la règle, cette seconde barrière est facultative.
-

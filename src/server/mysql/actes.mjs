@@ -18,11 +18,21 @@
 //
 // Il expose `route(req, ctx)` où `req` est `{ method, path, headers, body }` et
 // `ctx` fournit l'autorisation (`authorize`) et la limitation de débit (`rate`).
+//
+// ATTENTION — `route` rend la réponse d'un gestionnaire ordinaire, et la
+// PROMESSE d'une réponse quand le gestionnaire est ASYNCHRONE : c'est le cas de
+// l'ouverture d'un circuit de signature, qui interroge le prestataire
+// (`signature.mjs`). Tout appelant doit donc l'attendre (`await`), comme le fait
+// le serveur HTTP ; une épreuve qui lit `.body` sur une promesse voit
+// `undefined` et accuse le code à tort (voir l'audit, NC-I-008).
+//
 // Le serveur HTTP (`server.mjs`) n'a plus qu'à traduire : c'est ce qui garantit
 // que le service auto-hébergé et celui de la plateforme se comportent pareil.
 // ============================================================================
 
 import { etatBulletinsVide, intervalleTexte } from "./bulletins.mjs";
+import { sansInterne } from "./original-signe.mjs";
+import { chatPour } from "./chats-erreur.mjs";
 
 const SERVICE = "Service de signature et de publication";
 const SERVICE_VERSION = "1.0.0";
@@ -30,6 +40,20 @@ const SERVICE_VERSION = "1.0.0";
 export function emptyState() {
   return { v: 1, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, cles: {}, journal: [], bulletins: etatBulletinsVide() };
 }
+
+// LA FEUILLE DES CHATS D'ERREUR, tenue à part : les pages d'erreur du recueil la
+// reprennent, et deux d'entre elles (l'acte introuvable, l'ELI inconnu) n'ont
+// pas la feuille du recueil — elles se contentent de ces quelques règles. Voir
+// `figureChat` et src/server/mysql/chats-erreur.mjs.
+const CSS_CHAT_ERREUR = `/* Les pages d'ERREUR du recueil (acte introuvable, ELI inconnu, bulletin
+   introuvable) peuvent être illustrées d'une photographie de chat — l'option
+   chatsErreur du référentiel, portée par les publications et éteinte par
+   défaut (voir src/server/mysql/chats-erreur.mjs). L'ornement reste discret :
+   la page dit d'abord ce qu'elle a à dire. */
+.chat-erreur{margin:22px 0 0;text-align:center}
+.chat-erreur img{display:block;margin:0 auto;max-width:min(320px,100%);height:auto;border:1px solid var(--line);border-radius:4px}
+.chat-erreur figcaption{margin-top:8px;font-size:.86rem;color:var(--muted)}
+.chat-erreur .src{margin:2px 0 0;font-size:.72rem}`;
 
 // LA FEUILLE DU RECUEIL OUVERT. Une seule copie : l'accueil du recueil, la page
 // d'un bulletin et les pages d'abonnement s'y réfèrent (voir `pageBulletins`).
@@ -96,6 +120,26 @@ ul{list-style:none;padding:0;margin:0}
 .abon button{align-self:flex-start;margin-top:4px;padding:9px 16px;border:0;border-radius:4px;background:var(--brand);color:#fff;font:inherit;font-weight:600;cursor:pointer}
 .abon .ok{border-left:4px solid var(--brand);padding-left:12px;color:var(--ink)}
 .abon .ko{border-left:4px solid #b3261e;padding-left:12px;color:var(--ink)}
+/* Le bloc des RENVOIS (« Vous ne trouvez pas ce que vous recherchez ? ») et le
+   pied de page des mentions : les réglages du référentiel, portés par les
+   publications, se rendent ici sans JavaScript (voir blocRenvois et
+   blocMentions). */
+.ailleurs{margin-top:34px;padding-top:16px;border-top:1px solid var(--line)}
+.ailleurs__titre{font-size:1.05rem;margin:0 0 6px;text-transform:none;letter-spacing:0;color:var(--ink)}
+.ailleurs__lead{margin:0 0 8px;color:var(--muted);font-size:.9rem;max-width:70ch}
+.ailleurs__groupe{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 0 6px}
+.ailleurs__liste{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:7px}
+.ailleurs__item{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:.92rem}
+.ailleurs__type{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--brand);border:1px solid var(--line);border-radius:3px;padding:0 5px}
+.ailleurs__periode,.ailleurs__note{font-size:.82rem;color:var(--muted)}
+.pied{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:.86rem;color:var(--muted)}
+.pied__note{margin:0 0 8px}
+.pied__mentions{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:12px}
+.pied__mention{margin:0}
+.pied__mention summary{cursor:pointer;color:var(--brand)}
+.pied__texte{margin-top:6px;max-width:80ch;color:var(--ink);font-size:.88rem}
+.pied__texte p{margin:0 0 6px}
+${CSS_CHAT_ERREUR}
 `;
 
 export function createActesApi({
@@ -218,30 +262,12 @@ export function createActesApi({
   const err = (status, message, extra, headers) => ({ status, headers: headers || {}, body: { erreur: message, ...(extra || {}) } });
 
   // ------------------------------------------------- la part publique d'un original
-  // Un original signé a DEUX parts : sa part publique (le document, ses
-  // signatures, son horodatage) et son dossier INTERNE — les données
-  // personnelles du signataire (adresse électronique, compte, moyen
-  // d'authentification) et la trace des courriels qui lui ont été adressés. La
-  // signature « simple », donnée dans l'application, se signale ainsi sans
-  // diffuser les coordonnées de l'agent.
-  //
-  // `sansInterne` retire la part interne et, dans l'identité du signataire, tout
-  // ce qui n'a pas à être publié. C'est cette fonction qui est appliquée à
-  // CHAQUE lecture publique — la seule garantie que rien ne fuit par une route
-  // qu'on aurait oublié de fermer.
-  function sansInterne(v) {
-    if (!v || typeof v !== "object") return v;
-    const { interne, ...reste } = v;
-    if (!Array.isArray(v.signatures)) return reste;
-    return {
-      ...reste,
-      signatures: v.signatures.map((s) => {
-        const sig = { ...((s && s.signataire) || {}) };
-        delete sig.courriel; delete sig.personId; delete sig.compteId; delete sig.compteOutil; delete sig.rapproche;
-        return { ...s, signataire: sig };
-      }),
-    };
-  }
+  // La règle vit désormais dans UN SEUL module, `./original-signe.mjs`, que le
+  // navigateur importe aussi (`src/lib/signature.js`) : `sansInterne` retire la
+  // part interne de l'original et, dans l'identité du signataire, tout ce qui
+  // n'a pas à être publié. C'est cette fonction qui est appliquée à CHAQUE
+  // lecture publique — la seule garantie que rien ne fuit par une route qu'on
+  // aurait oublié de fermer. Voir l'audit, NC-I-004.
 
   // -------------------------------------------------------------- projections
   function resumeActe(a) {
@@ -251,7 +277,12 @@ export function createActesApi({
     return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
   }
   function resumePublication(p, latest) {
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
+    // `signature` (nom et fonction du signataire, niveau, date) voyage avec la
+    // NOTICE : c'est lui qui permet au recueil de qualifier la signature (« simple,
+    // non qualifiée » / « qualifiée ») sans relire l'acte — voir
+    // src/lib/qualification-signature.js. Rien de nominatif de plus que l'auteur,
+    // déjà public ; la part interne de l'original reste, elle, au registre.
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
   }
 
   // ------------------------------------------- publications réservées aux agents
@@ -356,7 +387,7 @@ export function createActesApi({
             operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
             description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé — sa part PUBLIQUE (document, signatures, horodatage). Le dossier interne en est retiré avant conservation." }, originalInterne: { type: "object", description: "La part INTERNE de l'original : coordonnées du signataire, compte, authentification, courriels. Conservée au registre, jamais servie par une route publique (voir /v1/actes/{id}/dossier-signature)." } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, recueilsExternes: { type: "array", description: "Les renvois du bas de page public (« Autres recueils », sites de référence), portés par la publication : le service auto-hébergé, qui rend lui-même l'espace public, ne connaît pas le référentiel. Chaque entrée : `{ type: \"bis\"|\"inactif\"|\"ressource\", label, url, du, au, note }`.", items: { type: "object" } }, mentions: { type: "array", description: "Les mentions du pied de page de l'espace public (légales, conditions de réutilisation, accessibilité), telles que `mentionsPubliques` les rend : `{ id, mode: \"texte\"|\"lien\", titre, texte, url, lienLabel }`.", items: { type: "object" } }, chatsErreur: { type: "boolean", description: "Illustrer les pages d'erreur du recueil d'une photographie de http.cat (éteint par défaut). Le service le lit sur la PLUS RÉCENTE publication qui le porte, comme les renvois et les mentions." }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé — sa part PUBLIQUE (document, signatures, horodatage). Le dossier interne en est retiré avant conservation." }, originalInterne: { type: "object", description: "La part INTERNE de l'original : coordonnées du signataire, compte, authentification, courriels. Conservée au registre, jamais servie par une route publique (voir /v1/actes/{id}/dossier-signature)." } } } } } },
             responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé" }, 422: { description: "Version en ligne manquante" } },
           },
         },
@@ -365,6 +396,7 @@ export function createActesApi({
         "/v1/informations": { get: { operationId: "listerInformations", summary: "Informations publiées au recueil", description: "Les billets publiés par la collectivité (actualités, avis, communications), du plus récent au plus ancien. Route PUBLIQUE : seuls les billets publiés (`publie: true`) sont rendus ; un brouillon ne sort que vers une identité de rôle `editeur` au moins.", tags: ["Publication"], responses: { 200: { description: "Les informations publiées" } } } },
         "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", description: "Renvoie 404 pour une publication réservée quand l'appelant est anonyme — une publication réservée n'existe pas hors session.", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
         "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" } } } },
+        "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace, dans le registre comme au journal d'audit. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
         "/v1/eli/{code}/{annee}/{numero}/{entite}": { get: { operationId: "resoudreEli", summary: "Résoudre un identifiant ELI", tags: ["Publication"], description: "Renvoie la version en vigueur et l'historique des versions publiées sous le même ELI.", parameters: [{ name: "code", in: "path", required: true, schema: { type: "string" } }, { name: "annee", in: "path", required: true, schema: { type: "string" } }, { name: "numero", in: "path", required: true, schema: { type: "string" } }, { name: "entite", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La version en vigueur et ses versions" }, 404: { description: "ELI inconnu" } } } },
       },
       components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } } },
@@ -633,6 +665,9 @@ export function createActesApi({
 
     const rec = {
       cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
+      // L'acte déposé dont cette publication est la version en ligne : c'est lui
+      // qu'un retrait doit rendre de nouveau publiable (voir hRetirerPublication).
+      acteId: acte.id,
       numero: b.numero || (informative ? "" : acte.numero), nature: b.nature || acte.nature, objet: b.objet || acte.objet,
       themeId: b.themeId || acte.themeId || "", themeLabel: b.themeLabel || acte.themeLabel || "",
       entityId: acte.entityId, entityName: acte.entityName, entityCode: b.entityCode || "",
@@ -662,6 +697,19 @@ export function createActesApi({
       // client qui le demande — d'après la trame (Administration › Trames) ou la
       // case cochée au moment de publier ; le service le range tel quel.
       reserve: b.reserve === true || undefined,
+      // LES RÉGLAGES DE DIFFUSION DU RECUEIL PUBLIC voyagent avec la publication,
+      // comme le titre du recueil et le nom de la collectivité : les renvois
+      // (« Autres recueils », sites de référence) et les mentions du pied de page
+      // (légales, réutilisation, accessibilité). Le service auto-hébergé rend
+      // lui-même l'espace public (voir `/recueil`, `/recueil.json`, `llms.txt`) et
+      // ne connaît pas le référentiel : sans cela, le bas de page y perdrait ses
+      // renvois et ses mentions. Voir `reglagesDiffusion`.
+      recueilsExternes: Array.isArray(b.recueilsExternes) ? b.recueilsExternes : undefined,
+      mentions: Array.isArray(b.mentions) ? b.mentions : undefined,
+      // Les chats des pages d'erreur du recueil (voir `reglagesDiffusion`) : un
+      // booléen, rangé tel quel. Une publication antérieure à l'option ne le
+      // porte pas — le réglage se lit alors sur la plus récente qui le porte.
+      chatsErreur: typeof b.chatsErreur === "boolean" ? b.chatsErreur : undefined,
       sha256: sha256(b.akn), formats: { html: b.html, akn: b.akn, jsonld: b.jsonld || "", md: b.md || "", texte: b.texte || "" },
       // La part PUBLIQUE de l'original : ce que le recueil montre et vérifie. On
       // lui applique `sansInterne` — un client qui aurait laissé le dossier
@@ -733,6 +781,52 @@ export function createActesApi({
       original: rec.original ? { format: rec.original.format, sha256: rec.original.sha256, signatures: (rec.signature && rec.signature.signataires || []).length, href: rec.original.signaturesUrl } : null,
       formats: ["text/html", "application/akn+xml", "application/ld+json"].concat(rec.original ? [rec.original.format] : []),
     }, { location: "/v1/publications/" + encodeURIComponent(cle) });
+  }
+
+  // Le RETRAIT d'une publication. Geste EXCEPTIONNEL : un acte administratif
+  // publié ne se retire pas. Seul un motif technique le justifie — dépôt en
+  // double, erreur de dépôt, acte publié avant d'être signé, identifiant attribué
+  // à tort. Un acte dont le retrait se justifierait autrement (illégalité,
+  // annulation) se modifie ou s'abroge : il reste au recueil, avec son
+  // historique. Le service exige donc un motif écrit et le conserve sur l'acte :
+  // le retrait laisse une trace, même une fois la publication ôtée.
+  //
+  // L'acte redevient « signé » (donc publiable de nouveau), et la publication
+  // disparaît du registre et du recueil. Les versions antérieures éventuelles
+  // d'un même ELI, elles, ne sont pas touchées : on ne retire que la version
+  // désignée. Même contrat que le service de la plateforme (voir index.html).
+  function hRetirerPublication(ctx) {
+    const cle = decodeURIComponent(ctx.params.cle);
+    const p = lirePublication(cle);
+    if (!p) return err(404, "Publication inconnue : " + cle, { code: "publication_inconnue" });
+    const motif = String((ctx.body && ctx.body.motif) || "").trim();
+    if (motif.length < 8) {
+      return err(422, "Un retrait de publication exige un motif technique explicite.", { code: "motif_absent" });
+    }
+    const auteur = String((ctx.body && ctx.body.auteur) || "").slice(0, 120);
+    const acte = Object.keys(db.actes).map((k) => db.actes[k])
+      .find((a) => a.publication === cle || (p.acteId && a.id === p.acteId)) || null;
+    const avant = acte ? { statut: acte.statut, publication: acte.publication, retraits: acte.retraits } : null;
+    delete db.publies[cle];
+    if (acte) {
+      acte.retraits = (acte.retraits || []).concat([{ cle, motif: motif.slice(0, 400), auteur, le: nowIso() }]);
+      acte.publication = null;
+      if (acte.statut === "publie") acte.statut = "signee";
+    }
+    journaliser("publication_retiree", cle + " — motif : " + motif.slice(0, 200));
+    if (!persist()) {
+      // Rien n'a été écrit : on remet la mémoire dans l'état d'avant.
+      db.publies[cle] = p;
+      if (acte && avant) { acte.statut = avant.statut; acte.publication = avant.publication; acte.retraits = avant.retraits; }
+      return err(507, "Le service n'a plus de place disponible.");
+    }
+    return ok(200, {
+      cle, numero: p.numero, eliUri: p.eliUri, motif,
+      acteId: acte ? acte.id : null, statut: acte ? acte.statut : null,
+      retraits: acte ? acte.retraits.length : 0,
+      ressource: "/v1/actes/" + (acte ? acte.id : ""),
+      journal: "Retrait de la publication du recueil — motif technique : " + motif.slice(0, 200),
+    });
   }
 
   // ÉPINGLER un acte au recueil : le mettre en avant sur sa page d'accueil (la
@@ -911,12 +1005,19 @@ export function createActesApi({
 
   function indexRecueil(base, agent) {
     const liste = publicationsTriees(agent);
-    const premier = liste[0] || {};
+    const reglages = reglagesDiffusion();
     return {
-      recueil: { titre: premier.recueil || "", collectivite: premier.brandName || "", langue: "fr" },
+      recueil: { titre: reglages.titre || "", collectivite: reglages.collectivite, langue: "fr" },
       genereLe: nowIso(),
       nombre: liste.length,
       themes: themesDe(liste, base),
+      // Les renvois et les mentions du bas de page de l'espace public : ils font
+      // partie de ce que le recueil DIT, et un agent qui lit `recueil.json` ne
+      // peut pas les deviner. Voir `reglagesDiffusion`.
+      renvois: (reglages.recueilsExternes || []).filter((r) => r && String(r.url || "").trim()).map((r) => ({
+        type: r.type || "bis", label: r.label || "", url: urlAvecSchema(r.url), du: r.du || "", au: r.au || "", note: r.note || "",
+      })),
+      mentions: (reglages.mentions || []).map((m) => ({ id: m.id, titre: m.titre, mode: m.mode, texte: m.texte || "", url: m.url || "" })),
       note: "Les actes administratifs publiés sont publics. Les conditions de réutilisation relèvent de la collectivité.",
       actes: liste.map((p) => ficheActe(p, base)),
     };
@@ -1071,6 +1172,65 @@ export function createActesApi({
     });
   }
 
+  // Une adresse écrite par l'administration, complétée d'un schéma si elle a
+  // saisi « www.exemple.fr » : sans schéma, le lien serait relatif et mènerait à
+  // une page du recueil qui n'existe pas.
+  const urlAvecSchema = (url) => {
+    const u = String(url || "").trim();
+    if (!u) return "";
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? u : "https://" + u;
+  };
+
+  // Les renvois vers les autres recueils et les sites de référence : la même
+  // information que le bas de page de l'application (voir
+  // src/ui/views/recueil-public.js, `blocAilleurs`), rendue ici sans JavaScript.
+  // Elle est portée par les publications (`reglagesDiffusion`).
+  function blocRenvois() {
+    const liste = (reglagesDiffusion().recueilsExternes || []).filter((r) => r && String(r.url || "").trim());
+    if (!liste.length) return "";
+    const recueils = liste.filter((r) => r.type !== "ressource");
+    const ressources = liste.filter((r) => r.type === "ressource");
+    const periode = (r) => {
+      const du = r.du ? dateLongue(r.du) : "";
+      const au = r.au ? dateLongue(r.au) : "";
+      if (du && au) return "actes publiés du " + du + " au " + au;
+      if (du) return "actes publiés depuis le " + du;
+      if (au) return "actes publiés jusqu'au " + au;
+      return "";
+    };
+    const item = (r) => `<li class="ailleurs__item"><a href="${htmlEsc(urlAvecSchema(r.url))}" target="_blank" rel="noopener noreferrer">${htmlEsc(r.label || r.url)}</a>`
+      + `<span class="ailleurs__type">${htmlEsc({ bis: "Recueil « bis »", inactif: "Recueil inactif", ressource: "Site de référence" }[r.type] || "Recueil")}</span>`
+      + (periode(r) ? `<span class="ailleurs__periode">${htmlEsc(periode(r))}</span>` : "")
+      + (r.note ? `<span class="ailleurs__note">${htmlEsc(r.note)}</span>` : "") + "</li>";
+    const groupe = (titre, l) => (l.length ? `<h3 class="ailleurs__groupe">${htmlEsc(titre)}</h3><ul class="ailleurs__liste">${l.map(item).join("")}</ul>` : "");
+    return `<section class="ailleurs">
+<h2 class="ailleurs__titre">Vous ne trouvez pas ce que vous recherchez ?</h2>
+<p class="ailleurs__lead">Les actes que vous cherchez figurent peut-être dans un autre recueil, ou sur un site de référence.</p>
+<p class="ailleurs__lead">Certains actes sont réservés aux agents de la collectivité — circulaires internes, consignes de service : leur diffusion est restreinte, et ils ne figurent pas dans ce recueil public.</p>
+${groupe("Autres recueils", recueils)}
+${groupe("Sites de référence", ressources)}
+</section>`;
+  }
+
+  // Les mentions du pied de page — légales, conditions de réutilisation,
+  // accessibilité : chacune s'affiche comme un texte dépliable, se remplace par
+  // un simple lien, ou s'éteint (réglage du référentiel porté par la publication,
+  // voir `reglagesDiffusion`). La page se lit sans JavaScript : le texte se donne
+  // donc dans un `<details>`.
+  function blocMentions() {
+    const liste = reglagesDiffusion().mentions || [];
+    const items = liste.map((m) => {
+      if (!m || !m.titre) return "";
+      if (m.mode === "lien" && m.url) return `<li class="pied__mention"><a href="${htmlEsc(urlAvecSchema(m.url))}" target="_blank" rel="noopener noreferrer">${htmlEsc(m.lienLabel || m.titre)}</a></li>`;
+      return `<li class="pied__mention"><details><summary>${htmlEsc(m.titre)}</summary><div class="pied__texte">${htmlEsc(m.texte || "").split("\n").filter((l) => l.trim()).map((l) => `<p>${l}</p>`).join("")}</div></details></li>`;
+    }).filter(Boolean);
+    if (!items.length) return "";
+    return `<footer class="pied">
+<p class="pied__note">Seul l'original signé fait foi ; le texte diffusé ici est donné à titre informatif.</p>
+<nav aria-label="Mentions du site"><ul class="pied__mentions">${items.join("")}</ul></nav>
+</footer>`;
+  }
+
   // La page publiée d'un acte, complétée pour les moteurs : description, adresse
   // de référence, formats jumeaux et données structurées (JSON-LD). On n'ajoute
   // que ce qui manque — le titre de la page déposée est conservé, jamais doublé.
@@ -1203,6 +1363,8 @@ ${sections}` : vide}
 <a href="${htmlEsc(base + "/llms.txt")}">llms.txt</a>
 <a href="${htmlEsc(base + "/sitemap.xml")}">sitemap.xml</a>
 ${derniersBulletins.length ? `<a href="${htmlEsc(adresseBulletins(base))}">bulletins</a>\n<a href="${htmlEsc(adresseFlux(base, "rss"))}">bulletins.rss</a>\n` : ""}Chaque acte est aussi disponible en <code>.json</code>, <code>.md</code>, <code>.txt</code> et <code>.akn</code>.</p>
+${blocRenvois()}
+${blocMentions()}
 </main></body></html>`;
   }
 
@@ -1228,8 +1390,9 @@ ${derniersBulletins.length ? `<a href="${htmlEsc(adresseBulletins(base))}">bulle
   // Markdown, une ligne par acte, avec ses métadonnées et son adresse.
   function llmsTxt(base, agent) {
     const liste = publicationsTriees(agent);
-    const premier = liste[0] || {};
-    const titre = premier.recueil || "Recueil des actes administratifs";
+    const reglages = reglagesDiffusion();
+    const titre = reglages.titre;
+    const collectivite = reglages.collectivite;
     const annees = new Map();
     for (const p of liste) {
       const annee = (String(p.datePublication || p.dateDocument || "").slice(0, 4)) || "Sans date";
@@ -1237,9 +1400,9 @@ ${derniersBulletins.length ? `<a href="${htmlEsc(adresseBulletins(base))}">bulle
       annees.get(annee).push(p);
     }
     const lignes = [
-      `# ${titre}${premier.brandName ? " — " + premier.brandName : ""}`,
+      `# ${titre}${collectivite ? " — " + collectivite : ""}`,
       "",
-      `> ${liste.length} acte${liste.length > 1 ? "s" : ""} administratif${liste.length > 1 ? "s" : ""} publié${liste.length > 1 ? "s" : ""}${premier.brandName ? " par " + premier.brandName : ""}, avec leur identifiant ELI, leurs dates et leur texte intégral. Chaque acte est une donnée publique : il est ici en HTML, JSON, Markdown, texte brut et Akoma Ntoso.`,
+      `> ${liste.length} acte${liste.length > 1 ? "s" : ""} administratif${liste.length > 1 ? "s" : ""} publié${liste.length > 1 ? "s" : ""}${collectivite ? " par " + collectivite : ""}, avec leur identifiant ELI, leurs dates et leur texte intégral. Chaque acte est une donnée publique : il est ici en HTML, JSON, Markdown, texte brut et Akoma Ntoso.`,
       "",
       "Les actes sont rangés par année de publication, du plus récent au plus ancien. Une même décision peut avoir plusieurs versions publiées sous le même identifiant ELI : seule la plus récente est en vigueur.",
       "",
@@ -1278,6 +1441,27 @@ ${derniersBulletins.length ? `<a href="${htmlEsc(adresseBulletins(base))}">bulle
       const nums = bul.liste().filter((b) => !b.provisoire);
       for (const b of nums.slice(0, 20)) lignes.push(`- [${b.titre}](${adresseBulletin(base, b.id)}) : ${intervalleTexte(b.debut, b.fin)}, ${b.nombre} acte${b.nombre > 1 ? "s" : ""}. Formats : [JSON](${adresseBulletin(base, b.id)}.json), [Markdown](${adresseBulletin(base, b.id)}.md), [texte](${adresseBulletin(base, b.id)}.txt).`);
       if (nums.length > 20) lignes.push(`- … et ${nums.length - 20} autre(s) numéro(s), à l'adresse des bulletins.`);
+      lignes.push("");
+    }
+    // LES RENVOIS et les MENTIONS du bas de page public : un agent qui lit
+    // `llms.txt` ne peut pas deviner qu'un autre recueil existe, ni à quelles
+    // conditions les actes sont opposables. Ils viennent des publications (voir
+    // `reglagesDiffusion`), comme le titre du recueil.
+    const renvois = (reglages.recueilsExternes || []).filter((r) => r && String(r.url || "").trim());
+    if (renvois.length) {
+      lignes.push("## Autres recueils et sites de référence", "");
+      for (const r of renvois) {
+        lignes.push(`- [${r.label || r.url}](${urlAvecSchema(r.url)}) : ${[{ bis: "recueil « bis »", inactif: "recueil inactif", ressource: "site de référence" }[r.type] || "recueil", r.du && r.au ? "actes publiés du " + dateLongue(r.du) + " au " + dateLongue(r.au) : "", r.note || ""].filter(Boolean).join(" — ")}.`);
+      }
+      lignes.push("");
+    }
+    const mentions = (reglages.mentions || []).filter((m) => m && m.titre);
+    if (mentions.length) {
+      lignes.push("## Mentions du site", "");
+      for (const m of mentions) {
+        if (m.mode === "lien" && m.url) lignes.push(`- ${m.titre} : [${m.lienLabel || m.url}](${urlAvecSchema(m.url)}).`);
+        else if (m.texte) lignes.push(`- ${m.titre} : ${String(m.texte).replace(/\s*\n\s*/g, " ").trim()}`);
+      }
       lignes.push("");
     }
     lignes.push("Toute réutilisation est libre sous réserve du droit applicable aux documents administratifs.", "");
@@ -1326,7 +1510,7 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
     const p = dernierVisible(eliUri, ctx.agent);
     if (!p) {
       const message = "Le recueil ne connaît pas l'identifiant ELI " + eliUri + ".";
-      return ok(404, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Identifiant ELI inconnu</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}"></head><body><h1>Identifiant ELI inconnu</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p></body></html>`, HTML_PUBLIC);
+      return ok(404, pageErreurNue(base, "Identifiant ELI inconnu", message, 404), HTML_PUBLIC);
     }
     return ok(302, "", { location: adresseActe(base, p.cle) });
   }
@@ -1353,11 +1537,63 @@ ${urls.map((u) => `  <url><loc>${htmlEsc(u.loc)}</loc>${u.lastmod ? `<lastmod>${
   // sur l'API) : il fonctionne donc sans JavaScript, et la réponse est une page.
   const BULLETIN_ABSENT = "Le bulletin des actes n'est pas ouvert sur ce recueil.";
 
+  // LES RÉGLAGES DE DIFFUSION DU RECUEIL, portés par les publications : le titre
+  // du recueil et le nom de la collectivité (comme avant), mais aussi les renvois
+  // extérieurs et les mentions du pied de page, que le service ne saurait pas
+  // inventer. Ils viennent de la PLUS RÉCENTE publication qui les porte : un
+  // réglage changé dans l'administration est donc repris dès la publication
+  // suivante, sans redéploiement ni référentiel côté service.
+  function reglagesDiffusion() {
+    const liste = publicationsTriees(false);
+    const premier = liste[0] || {};
+    const avecRenvois = liste.find((p) => Array.isArray(p.recueilsExternes));
+    const avecMentions = liste.find((p) => Array.isArray(p.mentions));
+    const avecChats = liste.find((p) => typeof p.chatsErreur === "boolean");
+    return {
+      titre: premier.recueil || "Recueil des actes administratifs",
+      collectivite: premier.brandName || "",
+      recueilsExternes: (avecRenvois && avecRenvois.recueilsExternes) || [],
+      mentions: (avecMentions && avecMentions.mentions) || [],
+      // Les chats des pages d'erreur : un réglage du RÉFÉRENTIEL, que le service
+      // ne connaît pas — il voyage donc avec les publications, comme les renvois
+      // et les mentions. La plus récente qui le porte décide ; aucune ne le
+      // porte (installation neuve, ou option jamais touchée), c'est éteint.
+      chatsErreur: (avecChats && avecChats.chatsErreur) === true,
+    };
+  }
+
+  // LA FIGURE D'UN CHAT D'ERREUR, ou une chaîne vide quand l'option est éteinte.
+  // Le service public ne se rend que là où il n'a pas de JavaScript : l'image
+  // est donc posée en HTML pur, avec son texte de remplacement et sa légende.
+  // `chatPour` borne et replie le code (voir chats-erreur.mjs) : la page annonce
+  // son code, l'image illustre celui que http.cat publie vraiment.
+  function figureChat(code) {
+    if (!reglagesDiffusion().chatsErreur) return "";
+    const chat = chatPour(code);
+    if (!chat) return "";
+    return `<figure class="chat-erreur"><img src="${htmlEsc(chat.url)}" alt="${htmlEsc(chat.alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+      + `<figcaption>${htmlEsc(chat.legende)}</figcaption>`
+      + `<p class="src"><a href="${htmlEsc(chat.source)}" target="_blank" rel="noopener noreferrer">http.cat</a></p></figure>`;
+  }
+
+  // LA PAGE D'ERREUR NUE — « acte introuvable », « identifiant ELI inconnu ».
+  // Ces deux pages ne portent que leur titre, leur message et le retour au
+  // recueil ; elles n'ont pas la feuille du recueil, et n'incluent donc que
+  // celle des chats. Une seule fonction pour les deux : elles disaient la même
+  // chose à deux endroits, et la seule différence était le titre.
+  function pageErreurNue(base, titre, message, code) {
+    // La feuille n'est posée QUE si une figure l'accompagne : une page d'erreur
+    // qui ne montre pas de chat n'a rien à dire de plus, et le lecteur n'a pas à
+    // recevoir les règles d'un ornement qu'il ne verra pas.
+    const figure = figureChat(code);
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${htmlEsc(titre)}</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}">${figure ? `<style>${CSS_CHAT_ERREUR}</style>` : ""}</head><body><h1>${htmlEsc(titre)}</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p>${figure}</body></html>`;
+  }
+
   // Le titre du recueil et le nom de la collectivité, comme en tête de l'accueil :
   // ils viennent des publications, qui les portent.
   function enteteRecueil() {
-    const premier = publicationsTriees(false)[0] || {};
-    return { titre: premier.recueil || "Recueil des actes administratifs", collectivite: premier.brandName || "" };
+    const r = reglagesDiffusion();
+    return { titre: r.titre, collectivite: r.collectivite };
   }
 
   // L'ossature d'une page du Bulletin : la même que le recueil, à ceci près
@@ -1386,7 +1622,7 @@ ${corps}
 <style>${CSS_RECUEIL}</style></head><body>
 <header class="hdr"><div class="hdr__in"><span class="hdr__titre">Bulletin introuvable</span></div></header>
 <main><section class="hero"><h1>Bulletin introuvable</h1><p>${htmlEsc(message)}</p>
-<p class="sommaire"><a href="${htmlEsc(adresseRecueil(base))}">Le recueil des actes</a></p></section></main></body></html>`;
+<p class="sommaire"><a href="${htmlEsc(adresseRecueil(base))}">Le recueil des actes</a></p>${figureChat(404)}</section></main></body></html>`;
   }
 
   // Les réglages EFFECTIFS du bulletin, ou null s'il est éteint (ou absent). On
@@ -1587,7 +1823,7 @@ ${liste}
     if (!p || !visiblePour(p, ctx.agent)) {
       const message = "Acte publié inconnu : " + cle;
       return ext === "html"
-        ? ok(404, `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Acte introuvable</title><meta name="robots" content="noindex"><link rel="canonical" href="${htmlEsc(adresseRecueil(base))}"></head><body><h1>Acte introuvable</h1><p>${htmlEsc(message)}</p><p><a href="${htmlEsc(adresseRecueil(base))}">Retour au recueil des actes</a></p></body></html>`, HTML_PUBLIC)
+        ? ok(404, pageErreurNue(base, "Acte introuvable", message, 404), HTML_PUBLIC)
         : err(404, message, { code: "publication_inconnue" });
     }
     const [entetes, corps] = REPRESENTATIONS[ext](p, base);
@@ -1805,6 +2041,7 @@ ${liste}
         const latestKeys = new Set(all.map((p) => dernierVisible(p.eliUri, ctx.agent)).filter(Boolean).map((p) => p.cle));
         return ok(200, { publications: all.map((p) => resumePublication(p, latestKeys.has(p.cle))).sort((a, b) => String(b.publieeLe).localeCompare(String(a.publieeLe))) });
       } },
+    { m: "POST", p: /^\/v1\/publications\/([^/]+)\/retrait$/, role: { min: "administrateur" }, ecrit: true, f: hRetirerPublication },
     { m: "POST", p: /^\/v1\/publications\/([^/]+)\/epingle$/, role: { min: "editeur" }, ecrit: true, f: hEpinglerPublication },
     { m: "GET", p: /^\/v1\/publications\/([^/]+)$/, f: (ctx) => {
         const cle = decodeURIComponent(ctx.params.cle);

@@ -1,0 +1,191 @@
+/* ============================================================================
+   Scribae — L'atelier de rédaction : édition en place (WYSIWYG), écarts, blocs désignés.
+
+   Partie 4/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Rédaction en place (WYSIWYG).
+
+   Le document EST le formulaire : les zones de texte sont éditables et les
+   champs sont des pastilles cliquables. Ce qui a été réécrit par rapport à la
+   trame est marqué (`.rw-region--ecart`) — c'est le même signal que celui vu
+   par les administrateurs dans le registre et la fiche de l'acte.
+   ========================================================================== */
+.redaction-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
+.redaction-hint { padding: 10px 12px; }
+.redaction-entity .fr-select { width: auto; max-width: 280px; }
+.paper--edit { padding: var(--paper-pad, 1.7cm 1.5cm); }
+
+/* Sur un écran étroit, l'atelier ne peut pas garder les marges de la page A4 :
+   à elles seules, elles mangeraient la moitié de la largeur et ne laisseraient
+   qu'une colonne illisible. La mise en page de la page (les marges réglées
+   dans la charte) reste celle de l'impression et de l'export ; l'atelier, lui,
+   s'adapte à l'écran. */
+@media (max-width: 1100px) {
+  .paper--edit { padding: 18px; }
+}
+
+/* zone de texte éditable */
+.rw-region { outline: none; border-radius: 2px; min-height: 1.1em; }
+.rw-inline { display: inline; }
+.rw-region:hover { background: rgba(10, 118, 246, .05); box-shadow: inset 0 -1px 0 rgba(10, 118, 246, .35); }
+.rw-region:focus { background: rgba(10, 118, 246, .07); box-shadow: 0 0 0 2px var(--focus); }
+.rw-region--ecart { background: rgba(179, 64, 0, .06); box-shadow: inset 3px 0 0 var(--warning); }
+.rw-region--ecart:hover { background: rgba(179, 64, 0, .10); }
+.rw-region--ecart:focus { box-shadow: inset 3px 0 0 var(--warning), 0 0 0 2px var(--focus); }
+
+/* pastille de champ */
+.rw-tok {
+  display: inline; padding: 0 3px; border-radius: 3px; cursor: pointer;
+  background: var(--brand-soft); color: var(--brand);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 145, .35);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.rw-tok:hover { background: #dfe3fa; }
+.rw-tok--ref { background: #eef1f8; color: #3a4463; box-shadow: inset 0 -1px 0 rgba(58, 68, 99, .35); }
+.rw-tok--empty { background: #fff4d6; color: #7a5000; box-shadow: inset 0 0 0 1px #e0a800; }
+.rw-tok--empty::before { content: "✎ "; font-family: var(--font-ui); }
+.rw-tok__hint { font-family: var(--font-ui); font-size: .72em; letter-spacing: .01em; }
+.rw-tok--flash { animation: rwflash 1.4s ease-out; }
+@keyframes rwflash { 0%, 100% { box-shadow: inset 0 -1px 0 rgba(0, 0, 145, .35); } 25% { box-shadow: 0 0 0 4px rgba(224, 168, 0, .55); } }
+.rw-hint-inline { font-family: var(--font-ui); font-size: .78em; color: var(--ink-muted); font-style: italic; }
+.rw-tagmini { display: inline-block; background: #fff4d6; border: 1px solid #e0a800; border-radius: 3px; padding: 0 4px; font-size: .74rem; }
+
+/* bulle d'édition d'un champ */
+.rw-pop {
+  position: fixed; z-index: 300; width: min(340px, 92vw);
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18); font-family: var(--font-ui);
+}
+.rw-pop__head { padding: 10px 12px 7px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.rw-pop__title { font-weight: 700; font-size: .9rem; }
+.rw-pop__body { padding: 12px; }
+.rw-pop__value { background: var(--bg-alt); border-radius: var(--radius); padding: 6px 8px; font-size: .85rem; margin: 0 0 8px; }
+.rw-pop__foot { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+
+/* panneau de droite */
+.rx-group { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 12px 0 6px; }
+.rx-field { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
+.rx-field--empty { border-left: 3px solid var(--warning); }
+.rx-field__head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.rx-field__label { font-size: .85rem; font-weight: 600; }
+.rx-jump { border: 1px solid var(--border-strong); background: var(--bg); border-radius: var(--radius); padding: 2px 6px; cursor: pointer; color: var(--brand); display: inline-flex; align-items: center; }
+.rx-jump:hover { background: var(--brand-soft); }
+.rx-out { font-size: .66rem; color: var(--ink-muted); border: 1px dashed var(--border-strong); border-radius: 999px; padding: 0 6px; }
+.rx-opt { font-size: .66rem; color: var(--ink-muted); font-style: italic; }
+.rx-hidden { margin-top: 10px; font-size: .82rem; }
+.rx-hidden summary { cursor: pointer; color: var(--brand); }
+.rx-h3 { font-size: .92rem; margin: 0 0 8px; }
+.rx-ecart { border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
+.rx-ecart__head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.rx-ecart__where { font-size: .78rem; font-weight: 600; }
+.rx-ecart__line { margin: 0 0 3px; font-size: .76rem; display: flex; gap: 6px; }
+.rx-ecart__k { flex: none; width: 46px; color: var(--ink-muted); text-transform: uppercase; font-size: .64rem; padding-top: 2px; }
+.rx-ecart__was { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: rgba(206, 5, 0, .5); }
+.rx-ecart__now { color: var(--ink); background: rgba(24, 117, 60, .10); }
+.rx-signature { margin-top: 8px; border-top: 1px dashed var(--border-strong); padding-top: 7px; }
+.rx-signature__label { margin: 0 0 4px; font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.rx-signature .doc-signature-role { font-size: .8rem; line-height: 1.4; color: var(--ink-2); }
+.rx-signature .doc-signature-name { margin-top: 3px; font-size: .85rem; font-weight: 600; letter-spacing: .02em; }
+.rx-signature__note { margin: 5px 0 0; font-size: .72rem; color: var(--ink-muted); }
+
+/* --- le bloc désigné, et les outils de structure ---------------------------
+   Cliquer un bloc, c'est le désigner : il se marque dans la page et ses
+   options s'ouvrent dans le panneau (onglet « Bloc »). Les outils posés sur le
+   bloc (ajouter après, retirer, options) appartiennent à `.mv__tools`, qui
+   n'apparaît qu'au survol — sauf le repère de désignation. */
+.mv--sel { background: rgba(10, 118, 246, .07); box-shadow: inset 2px 0 0 var(--brand); }
+.mv__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 22px; padding: 2px 4px; border: 0; border-radius: var(--radius);
+  background: none; color: var(--ink-2); cursor: pointer; line-height: 1;
+}
+.mv__btn:hover { color: var(--brand); background: var(--brand-soft); }
+.mv__btn--danger:hover { color: var(--error); background: rgba(206, 5, 0, .08); }
+
+/* Les outils d'un élément de liste (un visa, un considérant) : ils ne
+   s'affichent qu'au survol de la ligne, et jamais à l'impression. */
+.piece__tools {
+  display: inline-flex; align-items: center; gap: 1px; margin-left: 4px;
+  opacity: 0; transition: opacity .12s; vertical-align: middle;
+}
+li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { opacity: 1; }
+.piece__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border: 1px solid transparent; border-radius: var(--radius);
+  background: none; color: var(--ink-muted); cursor: pointer; font-family: var(--font-ui);
+}
+.piece__btn:hover { color: var(--brand); background: var(--brand-soft); border-color: var(--border); }
+.piece__btn--danger:hover { color: var(--error); background: rgba(206, 5, 0, .08); }
+/* « Ajouter un visa », à la fin d'une liste : toujours visible (c'est le geste
+   qu'on cherche), discret (ce n'est pas du texte de l'acte). */
+.piece--ajout { list-style: none; margin: .1em 0 0; }
+.piece__add {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+  border: 1px dashed var(--border-strong); border-radius: 999px; background: none;
+  color: var(--brand); font: inherit; font-size: .72rem; font-family: var(--font-ui);
+  cursor: pointer; opacity: .55; transition: opacity .12s, background .12s;
+}
+.piece--ajout:hover .piece__add, .piece__add:focus-visible { opacity: 1; background: var(--brand-soft); }
+
+/* --- la bibliothèque de variables (panneau de droite) --------------------
+   Elle reste ouverte au-dessus des onglets : les variables du document ne se
+   cherchent pas, elles se glissent. */
+.var-lib { padding: 0; }
+.var-lib__head {
+  display: flex; align-items: center; gap: 6px; padding: 9px 12px; cursor: pointer;
+  font-family: var(--font-ui); list-style: none;
+}
+.var-lib__head::-webkit-details-marker { display: none; }
+.var-lib__title { font-weight: 700; font-size: .84rem; }
+.var-lib__aide { font-size: .7rem; color: var(--ink-muted); }
+.var-lib__search { margin: 0 12px 8px; width: auto; }
+.var-lib__chips { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 9px; max-height: 176px; overflow: auto; }
+/* Dans la bibliothèque, une variable se lit EN ENTIER : « Nom de la
+   collectivité » doit s'afficher en toutes lettres, quitte à passer à la ligne.
+   (Ailleurs, les puces sont des raccourcis qu'un libellé tronqué suffit à
+   reconnaître.) */
+.var-lib .puce__label { max-width: none; white-space: normal; overflow: visible; }
+/* Le panneau est étroit : un libellé d'onglet ne se coupe pas au milieu d'un
+   mot, la barre passe à la ligne. */
+.redaction-col--side .fr-tabs .fr-tab { padding: 7px 10px; font-size: .82rem; white-space: nowrap; }
+.var-lib__groupe { display: flex; flex-direction: column; gap: 5px; }
+.var-lib__titre { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.puce.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+
+/* Choix du signataire : la fonction d'abord, la personne ensuite (voir
+   src/ui/signer-picker.js). Les deux listes tiennent sur une ligne quand la
+   place le permet (la fenêtre de modification d'acte, large), et s'empilent
+   dans le panneau de rédaction, étroit — les qualités et les noms y sont longs
+   et ne doivent pas être tronqués. */
+.signer__corps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.signer .fr-field { margin-bottom: 0; }
+.signer__info { margin: 6px 0 0; grid-column: 1 / -1; }
+.signer__info--warn { border-left: 3px solid var(--warning, #b34000); padding-left: 8px; }
+
+@media (max-width: 1100px) {
+  .redaction-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Écran étroit : la liste des champs passe au-dessus du document, sinon il
+     faudrait faire défiler tout l'acte pour atteindre le premier champ. */
+  .redaction-col--side { order: -1; }
+}
+@media (max-width: 760px) {
+  .redaction-hint { display: none; }
+  .rw-pop { width: min(320px, 94vw); }
+}
+@media print {
+  .rw-tok { background: none !important; box-shadow: none !important; color: #000 !important; }
+  .rw-tok--empty::before { content: ""; }
+  .rw-region--ecart { background: none !important; box-shadow: none !important; }
+  .rw-pop, .redaction-hint { display: none !important; }
+  /* Les outils de l'atelier ne sont pas de l'acte : ni les barres de bloc, ni
+     les boutons « ajouter » des listes, ni le marquage du bloc désigné. */
+  .mv__tools, .piece__tools, .piece--ajout, .mv--sel { display: none !important; }
+}

@@ -13,8 +13,12 @@
 //     SHA-256 (`sb_session`). Dérobé, le contenu de la table ne permet pas de
 //     se connecter ;
 //   • la PORTE D'ENTRÉE (`route`) — le contrat REST de `/v1/auth/…`, appelé par
-//     `server.mjs` : connexion, déconnexion, session courante, changement de
-//     mot de passe, administration des comptes.
+//     `server.mjs` : connexion LOCALE (identifiant et mot de passe), connexion
+//     par l'ANNUAIRE de la collectivité (le service est alors le client OIDC :
+//     la découverte, l'échange du code et la vérification du jeton se font
+//     ici — voir annuaire-service.mjs — et c'est bien une session de CE
+//     service qui s'ouvre), déconnexion, session courante, changement de mot
+//     de passe, administration des comptes.
 //
 // Le module est PUR : il ne connaît ni HTTP, ni MySQL, ni `node:crypto`. On lui
 // injecte sa persistance (`store`), sa cryptographie (`crypto`) et son horloge
@@ -29,6 +33,8 @@
 //   sha256(texte)                → empreinte hexadécimale
 //   b64(octets) / deb64(texte)   → base64 standard
 //   meme(a, b)                   → comparaison à TEMPS CONSTANT
+//   verifierJws({alg, cle, donnees, signature}) → la signature d'un jeton
+//     d'identité est-elle la bonne ? (`cle` est une JWK du fournisseur)
 //
 // `scrypt` PEUT rendre une promesse, et c'est ce que fait le service : `await`
 // devant un dérivé synchrone ne coûte rien, un dérivé lent rend la main. Ce
@@ -53,6 +59,11 @@
 // protection contre un poste de travail compromis. Pour cela, brancher l'annuaire
 // de la collectivité (voir src/lib/oidc.js).
 // ============================================================================
+
+import {
+  annuaireAccepte, annuaireEffectif, estObjet, partieLocale, revendicationsVersCompte,
+  compteApplique, verifierConnexionAnnuaire, decouvrir,
+} from "./annuaire-service.mjs";
 
 export const MDP_MIN_LONGUEUR = 12;
 export const MDP_MAX_LONGUEUR = 1024;
@@ -215,6 +226,29 @@ export function createStoreMysql(pool) {
       try { return JSON.parse(rows[0].payload); } catch (e) { return null; }
     },
 
+    // Le compte déjà rattaché à une identité d'annuaire, dans l'ordre où le
+    // navigateur le cherche (voir `applyOidcUser`, src/lib/oidc.js) : par
+    // l'identifiant du fournisseur (`oidcSub`, la clé stable — un agent qui
+    // change de nom d'usage garde son compte, et ses actes), puis par l'adresse
+    // électronique, puis par l'identifiant de connexion. Un compte DÉSACTIVÉ est
+    // rendu comme les autres : l'annuaire a reconnu la personne, et la reprise
+    // le réactive (voir `compteApplique`).
+    async lireCompteParOidc({ sub = "", email = "", login = "" } = {}) {
+      const essais = [];
+      if (String(sub).trim()) essais.push(["JSON_UNQUOTE(JSON_EXTRACT(payload, '$.oidcSub')) = ?", String(sub).trim()]);
+      if (String(email).trim()) essais.push(["LOWER(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.email'))) = LOWER(?)", String(email).trim()]);
+      if (String(login).trim()) essais.push(["LOWER(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.login'))) = LOWER(?)", String(login).trim()]);
+      for (const [condition, valeur] of essais) {
+        const [rows] = await pool.query(
+          `SELECT payload FROM sb_record WHERE collection = 'users' AND ${condition} LIMIT 1`,
+          [valeur],
+        );
+        if (!rows.length) continue;
+        try { const compte = JSON.parse(rows[0].payload); if (compte) return compte; } catch (e) { /* ligne illisible : on essaie la suivante */ }
+      }
+      return null;
+    },
+
     // Création du compte lui-même (amorçage depuis `.env`, ou première remise
     // d'un mot de passe à un compte qui n'existe pas encore au référentiel).
     // La révision suit celle de la collection, comme le fait `sync` : le client
@@ -324,6 +358,26 @@ export function createComptes({
   // Le service exige-t-il une session ? (sinon, il est en mode démonstration à
   // jeton : la porte des comptes reste ouverte pour préparer la bascule.)
   sessionRequise = true,
+  // --- l'annuaire de la collectivité (voir annuaire-service.mjs) -------------
+  // Ce que le service a PUBLIÉ de l'annuaire (référentiel relu par lui, puis
+  // `SCRIBA_ANNUAIRE_*` du `.env` par-dessus), ou `null`. C'est le même
+  // document que celui de `GET /v1/auth/config` : un seul chemin pour un seul
+  // réglage. Les défauts du navigateur sont appliqués par-dessus ici
+  // (`annuaireEffectif`), pour que les deux côtés lisent la même chose.
+  lireAnnuaire = async () => null,
+  // Le référentiel (`config`), pour le PÉRIMÈTRE : les services et les entités
+  // auxquels les revendications de l'annuaire rattachent l'agent.
+  lireReferentiel = async () => null,
+  // LE RÉSEAU, injecté comme le reste : `httpJson(url, init)` →
+  // `{ ok, status, body, text }` (voir le port dans server.mjs). C'est le seul
+  // chemin par lequel ce module parle au fournisseur d'identité — et il n'y en
+  // a aucun en dehors du service, si bien que les épreuves n'ont pas de réseau
+  // à simuler : elles posent un faux.
+  httpJson = null,
+  // Le mode du déploiement (`AUTH_MODE`) : « oidc » fait de l'annuaire la porte
+  // ordinaire ; « password » n'en fait qu'une SECONDE PORTE, ouverte seulement
+  // si le référentiel la demande (`auth.annuaire`).
+  modeDeploiement = "",
 } = {}) {
   // Un dérivé factice, de coût identique : vérifié quand l'identifiant est
   // inconnu, pour que la durée de la réponse ne dise pas si le compte existe.
@@ -513,6 +567,101 @@ export function createComptes({
   // ==========================================================================
   const utilisateurPublic = (compte) => compte;
 
+  // ---------------------------------------------- l'annuaire de la collectivité
+  // LES RÉGLAGES EFFECTIFS, relus à chaque connexion : un réglage change donc
+  // dans l'interface sans qu'on redémarre le service (le cache court est tenu
+  // par `annuairePublie`, server.mjs).
+  async function annuaireCourant() {
+    try {
+      return annuaireEffectif({ publie: await lireAnnuaire(), modeDeploiement });
+    } catch (e) {
+      console.error("[annuaire]", e && e.message);
+      return null;
+    }
+  }
+
+  // L'identifiant de connexion d'un compte créé par l'annuaire : la partie
+  // locale de son adresse, rendue UNIQUE (même règle que `uniqueLogin`, à la
+  // création d'un compte dans l'application). Deux agents « jean.dupont » de
+  // services différents ne doivent pas se disputer le même identifiant : c'est
+  // celui des journaux et de la présence, pas de l'authentification.
+  async function loginLibre(voulu) {
+    const base = normaliserLogin(voulu) || "compte";
+    if (!(await store.lireCompteParLogin(base))) return base;
+    for (let i = 2; i < 500; i++) if (!(await store.lireCompteParLogin(base + i))) return base + i;
+    return base + "-" + crypto.randomBytes(3).toString("hex");
+  }
+
+  // L'annuaire branché DÉSACTIVE les comptes de démonstration — un jeu fictif
+  // qui garderait des comptes actifs à côté d'un annuaire réel serait une porte
+  // dérobée. C'est la même règle que `syncDemoAccounts` côté navigateur
+  // (src/lib/auth.js) ; ici, elle est appliquée par le service, car c'est lui
+  // qui vient d'authentifier l'agent. La RÉACTIVATION, elle, reste au
+  // navigateur : c'est lui qui connaît l'état du réglage (voir `syncDemoAccounts`).
+  async function desactiverComptesDemo() {
+    const at = iso(now());
+    let demo = [];
+    try { demo = await store.listerComptesDemo(); } catch (e) { return; }
+    for (const compte of demo) {
+      if (!compte || (compte.active === false && compte.deactivatedBy === "oidc")) continue;
+      await store.ecrireCompte({ ...compte, active: false, deactivatedBy: "oidc", deactivatedAt: at });
+    }
+  }
+
+  // LA CONNEXION PAR L'ANNUAIRE. Le service est le client OIDC : il découvre le
+  // fournisseur, échange le code (avec le vérificateur PKCE que le navigateur a
+  // gardé), vérifie le jeton d'identité, en tire un compte, l'écrit au
+  // référentiel et ouvre SA session — un cookie `HttpOnly`, exactement comme la
+  // connexion par mot de passe. C'est ce qui fait qu'un agent entré par
+  // l'annuaire lit les actes comme les autres, et que le fournisseur n'a pas
+  // besoin de parler CORS (aucun appel ne part du navigateur).
+  async function connexionAnnuaire({ code, verifier, redirectUri = "", nonce = "", ip, userAgent } = {}) {
+    const auth = await annuaireCourant();
+    if (!auth || !annuaireAccepte(auth)) {
+      return { ok: false, code: "annuaire_non_branche", message: "L'annuaire de la collectivité n'est pas branché sur ce service (Administration › Annuaire, ou SCRIBA_ANNUAIRE_* du .env)." };
+    }
+    if (typeof httpJson !== "function") {
+      return { ok: false, code: "reseau_indisponible", message: "Ce service n'a pas le moyen d'appeler un fournisseur d'identité : la connexion par l'annuaire n'est pas disponible ici." };
+    }
+    if (!String(code || "").trim() || !String(verifier || "").trim()) {
+      return { ok: false, code: "code_manquant", message: "Le code d'autorisation et le vérificateur PKCE sont requis." };
+    }
+
+    const verdict = await verifierConnexionAnnuaire({ auth, code, verifier, redirectUri, nonce, httpJson, crypto, now });
+    if (!verdict.ok) return { ok: false, code: verdict.code, message: verdict.erreur, checks: verdict.checks };
+
+    const referentiel = await lireReferentiel().catch(() => null);
+    const sub = String(verdict.claims.sub || "");
+    const email = String(verdict.claims.email || verdict.claims.preferred_username || "").trim();
+    const existant = await store.lireCompteParOidc({ sub, email, login: partieLocale(email) });
+    if (!existant && auth.autoProvision === false) {
+      return {
+        ok: false, code: "compte_inconnu",
+        message: "Aucun compte ne correspond à cette identité (" + (email || sub || "inconnue") + ") et la création automatique est désactivée dans le référentiel. Demandez à un administrateur de pré-enregistrer le compte.",
+      };
+    }
+
+    const res = revendicationsVersCompte({ referentiel, auth, claims: verdict.claims, existing: existant, now });
+    const fiche = compteApplique({ existant, patch: res.patch, principal: res.role });
+    if (!existant) {
+      fiche.id = "u-" + crypto.randomBytes(6).toString("hex");
+      fiche.login = await loginLibre(partieLocale(email) || sub);
+      fiche.createdAt = iso(now());
+      fiche.memberships = Array.isArray(fiche.memberships) ? fiche.memberships : [];
+    }
+    fiche.lastLogin = iso(now());
+    await store.ecrireCompte(fiche);
+    if (auth.disableDemo !== false) await desactiverComptesDemo();
+
+    const { jeton, csrf } = await ouvrirSession(fiche, { ip, userAgent });
+    return {
+      ok: true, jeton, csrf, utilisateur: fiche,
+      checks: verdict.checks, warnings: verdict.warnings,
+      created: !existant, linked: existant ? "reprise" : "création",
+      role: res.role, visiteur: res.visiteur, reason: res.reason,
+    };
+  }
+
   function sessionCourante(req) {
     const cookies = lireCookies(req.headers && req.headers.cookie);
     return {
@@ -596,6 +745,78 @@ export function createComptes({
       if (!res.ok) return ko(res.code === "demonstration_desactivee" ? 403 : 401, err(res.code, res.message));
       return ok({ utilisateur: utilisateurPublic(res.utilisateur), mustChange: false, csrf: res.csrf },
         { "set-cookie": cookiesDeSession(res.jeton, res.csrf, { secure }) });
+    }
+
+    // ---- connexion par l'ANNUAIRE DE LA COLLECTIVITÉ -------------------------
+    // La seule autre route ouverte sans session, à côté de la connexion locale :
+    // le retour du fournisseur d'identité arrive ici. Le service échange le
+    // code, vérifie le jeton et ouvre la session (voir `connexionAnnuaire`).
+    // Le corps porte le code, le vérificateur PKCE (gardé par le navigateur),
+    // le `nonce` et l'adresse de retour ; RIEN d'autre : les points de
+    // terminaison et l'identifiant du client viennent des réglages du service,
+    // jamais du navigateur — un service ne va pas chercher une adresse
+    // arbitraire pour le premier venu.
+    if (path === "/v1/auth/annuaire" && method === "POST") {
+      const body = req.body || {};
+      const res = await connexionAnnuaire({
+        code: body.code,
+        verifier: body.verifier ?? body.code_verifier,
+        redirectUri: body.redirectUri ?? body.redirect_uri ?? "",
+        nonce: body.nonce ?? "",
+        ip,
+        userAgent: (req.headers && req.headers["user-agent"]) || "",
+      });
+      if (!res.ok) {
+        // 404 : rien à brancher ; 403 : l'identité est refusée ou inconnue
+        // (jeton refusé, compte inconnu et création automatique éteinte) ; 401 :
+        // tout le reste (code invalide, fournisseur injoignable, échange refusé).
+        const statut = res.code === "annuaire_non_branche" ? 404
+          : ["jeton_refuse", "compte_inconnu"].includes(res.code) ? 403
+            : res.code === "reseau_indisponible" ? 503 : 401;
+        return ko(statut, err(res.code, res.message, res.checks ? { checks: res.checks } : undefined));
+      }
+      return ok({
+        utilisateur: utilisateurPublic(res.utilisateur), mustChange: false, csrf: res.csrf,
+        checks: res.checks, warnings: res.warnings,
+        created: res.created, linked: res.linked, role: res.role, visiteur: res.visiteur, motif: res.reason || "",
+      }, { "set-cookie": cookiesDeSession(res.jeton, res.csrf, { secure }) });
+    }
+
+    // ---- éprouver l'annuaire AVANT de s'y connecter --------------------------
+    // C'est le bouton « Découverte » de l'administration : le SERVICE lit le
+    // document du fournisseur et rend les points de terminaison. L'appel part
+    // donc du service, pas du navigateur : un fournisseur sans en-têtes CORS
+    // (Keycloak, LemonLDAP, ADFS…) se branche comme les autres.
+    //
+    // Ce que l'appelant peut demander dépend de qui il est : un ADMINISTRATEUR
+    // fait éprouver l'adresse qu'il vient de saisir (et ses points de
+    // terminaison à la main, le cas échéant) ; tout autre appelant n'obtient
+    // que ce que le service a déjà enregistré — le document de découverte est
+    // public, mais le service ne devient pas un relais ouvert pour autant.
+    if (path === "/v1/auth/annuaire/decouverte" && method === "POST") {
+      const body = req.body || {};
+      // L'ORDRE DES DEUX REFUS COMPTE : « rien n'est branché » (404) se dit avant
+      // « je ne peux pas appeler » (503) — c'est la cause première, et la seule
+      // qui se répare en cliquant dans Administration › Annuaire.
+      const configure = await annuaireCourant();
+      if (!configure) return ko(404, err("annuaire_non_branche", "L'annuaire de la collectivité n'est pas branché sur ce service."));
+      if (typeof httpJson !== "function") return ko(503, err("reseau_indisponible", "Ce service n'a pas le moyen d'appeler un fournisseur d'identité."));
+      const session = await compteDeSession(sessionCourante(req).jeton).catch(() => null);
+      if (session && csrfObligatoire(req) && !csrfValide(req)) {
+        return ko(403, err("csrf_invalide", "Jeton anti-CSRF absent ou incorrect : rechargez la page, puis réessayez."));
+      }
+      const demande = String(body.issuer || "").trim();
+      const endpoints = estObjet(body.endpoints) ? body.endpoints : null;
+      const cible = session && estAdmin(session.compte) && (demande || endpoints)
+        ? {
+          ...configure,
+          issuer: demande || (configure.issuer || ""),
+          endpoints: endpoints || (configure.endpoints || {}),
+        }
+        : configure;
+      const res = await decouvrir({ auth: cible, httpJson });
+      if (!res.ok) return ko(502, err(res.code, res.erreur));
+      return ok(res);
     }
 
     // ---- à partir d'ici : une session est nécessaire -------------------------

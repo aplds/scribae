@@ -11,7 +11,7 @@
 //     du service en fait un objet de pièces, la réponse de dépôt un tableau de
 //     types MIME. Confondre les deux fait disparaître le texte de l'acte.
 //
-//   node --test src/tests/
+//   node --test tests/
 // ============================================================================
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ function actePublie({ id = "acte-1", cle = "arr-2026-0001-vsl@2026-01-02-origina
 }
 
 test("publications locales : seuls les actes RÉELLEMENT publiés entrent au recueil", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
 
   const liste = mod.publicationsLocales([
@@ -59,7 +59,7 @@ test("publications locales : seuls les actes RÉELLEMENT publiés entrent au rec
 });
 
 test("publications locales : les versions d'un même ELI sont rangées, la plus récente est `latest`", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
 
   const ancienne = actePublie({
@@ -80,7 +80,7 @@ test("publications locales : les versions d'un même ELI sont rangées, la plus 
 });
 
 test("publications locales : un acte réservé aux agents n'est pas montré", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
 
   const actes = [actePublie({ publication: { reserve: true } })];
@@ -89,7 +89,7 @@ test("publications locales : un acte réservé aux agents n'est pas montré", as
 });
 
 test("publications locales : les pièces viennent de `formats` ou des champs à plat", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
 
   // Fiche complète du service : `formats` est un OBJET de pièces.
@@ -111,14 +111,14 @@ test("publications locales : les pièces viennent de `formats` ou des champs à 
 });
 
 test("publications locales : une clé inconnue ne rend rien", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
   assert.equal(mod.publicationLocale([actePublie()], "inconnue@2026-01-01-originale"), null);
   assert.equal(mod.publicationLocale([actePublie()], ""), null);
 });
 
 test("informations locales : un brouillon n'est jamais publié", async (t) => {
-  const mod = await charger("../lib/publications-locales.js");
+  const mod = await charger("../src/lib/publications-locales.js");
   if (!mod) return t.skip("module indisponible hors navigateur");
   const liste = mod.informationsLocales([
     { id: "i1", publie: true },
@@ -127,4 +127,26 @@ test("informations locales : un brouillon n'est jamais publié", async (t) => {
     null,
   ]);
   assert.deepEqual(liste.map((i) => i.id), ["i1"]);
+});
+
+test("publications locales : la signature est qualifiée, ou reprise de l'acte", async (t) => {
+  const mod = await charger("../src/lib/publications-locales.js");
+  if (!mod) return t.skip("module indisponible hors navigateur");
+
+  // 1. L'enregistrement de publication porte la signature : c'est lui qui fait foi.
+  const duService = actePublie({ id: "s1", publication: { signature: { niveau: "qualifiee", signataires: [] } } });
+  assert.equal(mod.publicationLocale([duService], duService.publication.cle).signature.niveau, "qualifiee");
+
+  // 2. Enregistrement ANTÉRIEUR (ou recueil d'une page statique sans service) :
+  //    l'acte porte le circuit, et la signature se déduit de lui — sans quoi un
+  //    acte signé « en simple » se présenterait sans mention.
+  const signeSimple = actePublie({ id: "s2", signatureSimple: { signeLe: "2026-01-03T09:00:00.000Z" }, signeLe: "2026-01-03T09:00:00.000Z" });
+  const rec = mod.publicationLocale([signeSimple], signeSimple.publication.cle);
+  assert.equal(rec.signature.niveau, "simple");
+  assert.equal(rec.signature.signeLe, "2026-01-03T09:00:00.000Z");
+
+  // 3. Un acte publié sans circuit connu ne reçoit AUCUNE qualification : on ne
+  //    devine pas ce que vaut une signature qu'on ne sait pas lire.
+  const muet = actePublie({ id: "s3" });
+  assert.equal(mod.publicationLocale([muet], muet.publication.cle).signature, null);
 });

@@ -23,6 +23,8 @@ import {
   etapeActive, validationAJour, avancement, ETAPE_STATUTS, VALIDATION_STATUTS, etiquetteEtape, STEP_ROLES, etapeCible,
 } from "../../lib/validation.js";
 import { soumettreCircuit, reprendreCircuit, carteDecision } from "../parapheur-actions.js";
+import { parcoursDeActe } from "../../lib/parcours.js";
+import { bandeauParcours } from "../parcours.js";
 import { docOfActe } from "./modifier.js";
 
 // Les identifiants d'onglet SONT les clés de la file rendue par `parapheur()`
@@ -173,6 +175,14 @@ function carteActe(a, paint) {
       can("actes.signer") && v?.statut === "valide" ? button("Signer", { variant: "tertiary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
     ),
   ));
+
+  // Le fil de parcours : l'acte ne s'arrête pas au circuit. Le parapheur vient
+  // AVANT la révision, qui vient avant la signature (voir src/lib/parcours.js) —
+  // le valideur voit ainsi ce que son étape débloque, et que la vérification
+  // qu'il franchit n'est pas la révision du réviseur, qui la suit.
+  box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
+    bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
 
   // ------------------------------------------------------ le circuit
   if (!v) {

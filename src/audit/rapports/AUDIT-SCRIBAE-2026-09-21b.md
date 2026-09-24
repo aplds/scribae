@@ -10,6 +10,12 @@ registre: src/audit/REGISTRE-NON-CONFORMITES.md
 precedent: src/audit/rapports/AUDIT-SCRIBAE-2026-09-21.md
 ---
 
+
+> **Document de travail — un audit constate, il ne certifie pas.** Ce rapport de la deuxième campagne ne corrige rien : il
+> relève, prouve et propose. Les non-conformités qu'il établit sont suivies dans le **registre
+> cumulatif** (`../REGISTRE-NON-CONFORMITES.md`), où leur **statut évolue** d'une campagne à l'autre —
+> une fiche lue ici peut être **levée depuis**, ou au contraire encore **ouverte**. Les termes employés
+> (gravité, cotation, preuve, contrat de sortie) sont définis par le cadre : `../PROMPT-AUDIT-SCRIBAE.md`.
 # Audit Scribae — 2e campagne (2026-09-21)
 
 **Objet.** Deuxième campagne d'audit de `https://perchance.org/scribae`, menée **après la mise

@@ -3,6 +3,7 @@ import {
   currentUser, emit, signalerEcranCollab, libererRedaction, demandeAtelier,
 } from "./state.js";
 import { h, clear, icon, button, badge, toast } from "./dom.js";
+import { chatErreurEl } from "./chats-erreur.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "./brand.js";
 import { mentionAffichee, contenuMention } from "./mention.js";
 import { versionBadge, releasedLabel } from "../lib/version.js";
@@ -14,7 +15,7 @@ import { authConfig, isTestProvider, accesLocal, sessionDeService } from "../lib
 import { themeButton, themeChooser } from "./theme.js";
 import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
-import { demoNotice, viergeNotice } from "./notice.js";
+import { demoNotice, viergeNotice, staticNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
 import { ouvrirChangementMotDePasse } from "./mot-de-passe.js";
 import { renderSansAcces } from "./views/sans-acces.js";
@@ -37,7 +38,7 @@ import { renderSignature } from "./views/signature.js";
 import { renderPublications } from "./views/publications.js";
 import { renderInformations } from "./views/informations.js";
 import { renderBulletin } from "./views/bulletin.js";
-import { renderRecueilPublic, retirerMetaRecueil } from "./views/recueil-public.js";
+import { renderRecueilPublic, redessinerRecueilPublic, retirerMetaRecueil } from "./views/recueil-public.js";
 import { amorcerRecueil } from "./demo-publications.js";
 import { appliquerAbrogations } from "./abrogations-apply.js";
 import { renderDocs } from "./views/docs.js";
@@ -332,7 +333,7 @@ function shell() {
   // que si le DÉPLOIEMENT a allumé la démonstration (voir src/lib/demo.js).
   const notice = demoNotice(can("referentiel.gerer")
     ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
-    : null);
+    : null) || staticNotice();
 
   // Invitation du premier pas : démonstration éteinte et référentiel vierge.
   // Elle occupe la place du bandeau de démonstration — jamais les deux à la fois.
@@ -378,7 +379,11 @@ function shell() {
     ),
   );
 
-  const nav = h("nav", { class: "app-nav" });
+  // Le repère de navigation : le RGAA (12.6) demande que les zones de
+  // regroupement de liens soient identifiables — le recueil public porte le
+  // sien (« Navigation principale du recueil »), l'atelier doit porter le sien
+  // (audit, NC-III-007).
+  const nav = h("nav", { class: "app-nav", "aria-label": "Navigation principale de l'atelier" });
   for (const g of NAV) {
     const items = g.items.filter((it) => !it.perm || can(it.perm));
     if (!items.length) continue;
@@ -444,6 +449,7 @@ function drawViewNow() {
     mainEl.appendChild(h("div", { class: "fr-alert fr-alert--error" },
       h("p", { class: "fr-alert__title", text: "Erreur d'affichage" }),
       h("pre", { class: "fr-mono", text: String(e && e.stack || e) }),
+      chatErreurEl(500),
     ));
   }
 }
@@ -512,6 +518,7 @@ async function boot() {
     root.appendChild(h("div", { class: "fr-alert fr-alert--error" },
       h("p", { class: "fr-alert__title", text: "Initialisation impossible" }),
       h("pre", { class: "fr-mono", text: String(e && e.stack || e) }),
+      chatErreurEl(500),
     ));
     return;
   }
@@ -631,7 +638,17 @@ function renderRootMaintenant(root) {
   normaliserRoute();
   publicMode = EST_PUBLIQUE(state.route.view);
   clear(root);
-  if (publicMode) { renderRecueilPublic(root, state.route.params || {}); return; }
+  if (publicMode) {
+    // L'écran public se redessine PAR LUI-MÊME : ses lectures aboutissent après
+    // coup, et l'atelier l'invalide (un dépôt de démonstration, un réglage du
+    // bulletin). `redrawView` est le redessin de l'atelier — il ne fait rien
+    // quand l'écran public est affiché (voir `drawView`) —, on enregistre donc
+    // celui du recueil tant qu'il est là : sans cela, une invalidation resterait
+    // sans effet jusqu'au rechargement de la page.
+    setViewRenderer(redessinerRecueilPublic);
+    renderRecueilPublic(root, state.route.params || {});
+    return;
+  }
   // On quitte le recueil : ses métadonnées (titre, canonique, JSON-LD) n'ont
   // plus lieu d'être dans la page de l'atelier.
   retirerMetaRecueil();

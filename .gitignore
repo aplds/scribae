@@ -5,7 +5,19 @@ node_modules/
 .env
 .env.local
 
+# Données du service en « rangement par fichiers » (STOCKAGE=fichier) : elles
+# contiennent le référentiel, les actes, les comptes et les sessions. Elles
+# n'ont rien à faire dans un dépôt public, et se sauvegardent en copiant le
+# dossier (voir docs/ADMINISTRATION.md, § Rangement des données).
+data/
+
 # Fichiers système
 .DS_Store
 Thumbs.db
 *~
+
+# Réglages LOCAUX des assistants de code (Claude Code, Mistral Vibe) : ils
+# dépendent du poste et de la session. Les instructions PARTAGÉES, elles, sont
+# versionnées : AGENTS.md (lu par les deux) et CLAUDE.md.
+.claude/settings.local.json
+.vibe/

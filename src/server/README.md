@@ -83,6 +83,25 @@ rester d'accord : `password`).
 | `ADMIN_NOM`, `ADMIN_EMAIL`, `ADMIN_ENTITY` | son nom, son adresse, son entité de rattachement |
 | `SESSION_DAYS`, `MDP_MIN_LONGUEUR`, `SCRYPT_N` | durée de session, longueur minimale, coût du dérivé |
 | `COOKIE_SECURE` | `true` en production ; `false` **seulement** pour un essai en clair |
+| `SCRIBA_ANNUAIRE_*` | l'**annuaire de la collectivité** (OpenID Connect), **déclaratif** : émetteur, `client_id`, portées, correspondance des groupes (`SCRIBA_ANNUAIRE_ROLES=…=administrateur, …=editeur`), politique des agents sans groupe, périmètre, seconde porte, points de terminaison. Aucun secret (client **public**, PKCE). Ces réglages sont **publiés** par `GET /v1/auth/config` : l'écran de connexion peut donc proposer l'annuaire **même en mode `password`**, où le référentiel n'est lisible qu'avec une session. Voir `../docs/VARIABLES.md`, groupe « Annuaire (OIDC) », et `mysql/annuaire.mjs` |
+
+**L'annuaire de la collectivité.** Il se règle dans l'application (Administration › Annuaire) ou,
+pour tout un parc d'un coup, par les variables `SCRIBA_ANNUAIRE_*` ci-dessus. `AUTH_MODE=oidc` en
+fait la **porte ordinaire** ; `SCRIBA_ANNUAIRE_SECONDE_PORTE=true` le propose **en plus** de la
+porte ordinaire (comptes locaux, ou comptes de l'application). Dans les deux cas, les comptes
+locaux restent ouverts (porte de service).
+
+**Depuis 1.6.1p, c'est le SERVICE qui est le client OIDC.** La route `POST /v1/auth/annuaire`
+(`comptes.mjs`, branchement dans `annuaire-service.mjs`) découvre le fournisseur, échange le code
+d'autorisation avec le vérificateur PKCE que le navigateur lui remet, vérifie le jeton d'identité
+(`jws.mjs` : clés du `jwks_uri`, RS/PS/ES — `alg: none` et `HS*` refusés), écrit le compte au
+référentiel puis ouvre **sa** session : les mêmes cookies que la connexion par mot de passe. Rien
+ne part du navigateur vers le fournisseur, donc **le fournisseur n'a pas besoin d'ouvrir le CORS**
+(c'était la cause du « Découverte impossible (Failed to fetch) » de l'onglet), et un agent entré
+par l'annuaire **lit les actes** — la seconde porte est alors proposée même en
+`AUTH_MODE=password`. Le service l'annonce dans `GET /v1/auth/config` (champ `annuaireService`).
+Pour un accès aux données par l'annuaire sans passer par le service, protégez-le **en amont** (SSO
+devant l'application) ou réglez-le en mode à jeton.
 
 **Les clés d'API.** Un administrateur crée des **clés d'API à rôles** (*Administration › Base de
 données* → « Créer une clé d'API ») : ce sont des **comptes de service** — ils n'apparaissent nulle
@@ -136,7 +155,7 @@ La référence complète (les deux portées — service et référentiel —, av
 et exemple) est dans **`../docs/VARIABLES.md`**, engendrée depuis le registre :
 
 ```bash
-node src/scripts/generer-variables.mjs
+node scripts/generer-variables.mjs
 ```
 
 Pour ajouter une variable : un descripteur dans le registre, une ligne dans `env.example`,
@@ -323,7 +342,7 @@ service.
 | Écritures `403 jeton_invalide` | `API_TOKEN` ne correspond pas à l'empreinte de `API_TOKENS` | recalculer `printf '%s' "$API_TOKEN" \| sha256sum` |
 | Le navigateur bloque les appels (`CORS`) | application et API sur des origines différentes | renseigner `CORS_ORIGINS` avec l'origine de l'application |
 | La signature ne fonctionne pas | page servie en `http://` (hors `localhost`) | passer en HTTPS (WebCrypto exige un contexte sécurisé) |
-| Page blanche | modules non chargés | ouvrir la console : vérifier que `/src/ui/app.js` répond 200. Le code est **dans l'image de la façade** : après une mise à jour du dépôt, reconstruisez-la (`docker compose build web && docker compose up -d web`) — ou montez-le le temps d'un correctif (§ 9 bis) |
+| Page blanche | deux causes, à distinguer par la console : **(1)** un module qui ne se charge pas (souvent : façade non reconstruite après une mise à jour du dépôt, donc 404 sur un fichier récent) ; **(2)** un module `.mjs` servi avec un type MIME non-JavaScript | **(1)** l'ouvrir : vérifier que `/src/ui/app.js` répond 200 ; le code est **dans l'image de la façade**, reconstruisez-la (`docker compose build web && docker compose up -d web`) — ou montez-la le temps d'un correctif (§ 9 bis). **(2)** si la console dit « Expected a JavaScript module script but the server responded with a MIME type of "application/octet-stream" » pour une adresse `/src/…mjs`, la façade est **antérieure au correctif 1.6.1o** : la table des types de nginx (`mime.types`) ne connaît pas l'extension `mjs`, et `nginx.conf` ne la déclarait pas — deux modules partagés avec le service (`chats-erreur.mjs`, `original-signe.mjs`) étaient donc servis en `application/octet-stream`, que le navigateur **refuse** pour un module ES (contrôle strict du type MIME). Le graphe d'imports casse, `app.js` ne s'exécute jamais, la page reste blanche. Reconstruire la façade (`docker compose up -d --build web`) : `nginx.conf` déclare désormais `application/javascript` pour `\.mjs$` |
 | Un acte publié n'apparaît pas sur `/recueil` | la façade ne route pas le recueil vers l'API | `nginx.conf` intercepte `/robots.txt`, `/llms.txt`, `/sitemap.xml`, `/recueil.json`, `/recueil` et `/eli` **avant** la page de l'application (`location /`) ; après une modification de `nginx.conf`, reconstruire et recréer la façade (`docker compose up -d --build web`) |
 
 ## 9 bis. Travailler sur le code sans reconstruire la façade
@@ -443,6 +462,11 @@ src/server/
                          /v1/auth/… (comptes), /v1/config (réglages déclaratifs)
     variables.mjs        REGISTRE DES VARIABLES DU .env (source de vérité du wiki)
     variables.test.mjs   tests du registre (`npm test`)
+    annuaire.mjs         ce que le service PUBLIE de l'annuaire (liste blanche, aucun
+                         secret) : relu du référentiel, variables SCRIBA_ANNUAIRE_*
+                         par-dessus — l'écran de connexion y lit l'annuaire branché,
+                         même en mode « comptes locaux »
+    annuaire.test.mjs    épreuves de la publication de l'annuaire (`npm test`)
     actes.mjs            domaine signature/publication (sans dépendance à Node),
                          et les PAGES PUBLIQUES rendues côté serveur (recueil, actes,
                          bulletins, flux RSS/Atom) : HTML et CSS, sans JavaScript

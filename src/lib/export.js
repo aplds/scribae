@@ -1,6 +1,6 @@
 import { esc, slug, download } from "./util.js";
 import { parseExpr } from "./expr.js";
-import { renderDocument, personSignatureName, personRoleLines, documentToHtml } from "./render.js";
+import { personSignatureName, personRoleLines, documentToHtml } from "./render.js";
 import { amendmentMentions, amendmentMention } from "./amend.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
 import { styleForDoc, styleCss, paperMargins } from "./styles.js";

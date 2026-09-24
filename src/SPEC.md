@@ -1003,6 +1003,20 @@ L'application tourne au démarrage (`src/ui/app.js`) et après chaque publicatio
 **« Abroger tout l'acte »** (panneau « L'acte entier ») : l'acte modificatif abroge alors tous
 les articles, et la version consolidée porte l'avertissement `abrogationNotice`.
 
+**Abroger un acte : qu'advient-il de ses ANNEXES ?** La réponse est **juridique**, et elle dépend
+de la façon dont l'annexe est publiée (`src/lib/abrogation-annexes.js`, module **pur**) :
+
+| L'annexe… | Ce que l'abrogation en fait |
+|---|---|
+| **n'a pas de publication autonome** (tableau, grille tarifaire, état annexé — `trame.nature: "annexe"`, sans `trame.reglement`) | elle est **réputée faire partie de sa décision mère** : elle est **abrogée avec elle**, au même jour, sans qu'aucune clause ne la vise (`abrogePar.parAnnexion`) |
+| **est autonome** (un règlement, publié pour lui-même sous son propre ELI — `trame.reglement`) | elle **survit** à l'abrogation de sa décision d'adoption : elle doit être **abrogée ou modifiée par un acte autonome**, et l'application le **signale** (`annexesAutonomesRestantes` sur l'acte abrogeant, journal `abrogation.annexe_autonome_a_traiter`) |
+
+Le signalement apparaît **dès la rédaction** — dans le panneau des abrogations, quand le
+rédacteur choisit l'acte visé (`avertissementAnnexesAutonomes`) — puis sur la **fiche** de l'acte
+abrogeant, et sur l'annexe emportée, dont la phrase d'abrogation explique pourquoi aucune clause
+ne la désigne. La consolidation qui retire toutes les dispositions d'un acte
+(`src/ui/views/signature.js`) applique la même règle.
+
 **Renumérotation.** Les mêmes mécanismes servent à **réattribuer un numéro** à un article
 (refusé s'il est occupé : `numbersUsed`) et à **« tout renuméroter »** (`applyRenumbering`,
 option `renum` de `buildConsolidated`). Un article abrogé n'occupe pas de rang : quand la
@@ -1343,6 +1357,24 @@ et `originalInterneDe(acte)` composent la part interne au moment de la publicati
 
 Le champ `niveau` de la signature (`simple` / `avancee`) dit le procédé employé ; il voyage dans
 la publication (`signature.niveau`) et sur l'acte (`acte.signatureSimple.niveau`).
+
+**Ce que l'acte publié dit de sa signature.** Un niveau ne suffit pas : il faut une phrase, et une
+seule, pour que tous les lecteurs de l'acte — page publiée, recueil, JSON-LD, exports — en disent
+la même chose. `src/lib/qualification-signature.js` (module **pur**) la porte :
+
+| Niveau | Ce que l'acte affiche |
+|---|---|
+| `simple` | **« Signature simple — non qualifiée »** : donnée dans l'application, par le signataire, avec son compte ; elle n'est pas qualifiée au sens du règlement (UE) n° 910/2014 (eIDAS), et la valeur probante repose sur l'original conservé et la vérifiabilité de sa signature |
+| `avancee` | **« Signature avancée »** — et, quand le prestataire est **simulé**, la mention le dit (certificat de démonstration) |
+| `qualifiee` | **« Signature qualifiée »** (prestataire de confiance qualifié) |
+| `externe` | **« Signature externe »** : signée hors de l'application ; c'est la version signée déposée qui fait foi |
+| inconnu | **rien** : on ne devine pas la valeur d'une signature qu'on ne sait pas lire |
+
+La mention est rendue **dans le document publié** (`buildWebVersion` la place sous le texte, à côté
+du certificat de transmission, donc elle s'imprime avec lui), reprise par la notice du **recueil**
+(pastille + phrase) et transportée par le **JSON-LD** (`eli:signature_level` et
+`dcterms:description`). C'est la réponse à l'écart NC-IV-001 de l'audit : tant qu'aucun prestataire
+qualifié n'est branché, ce qui n'est pas qualifié se nomme.
 
 #### 2.6 quinquies Les notifications par courriel, et le serveur SMTP
 
@@ -2256,10 +2288,32 @@ s'y invite pas) :
   (l'homologue de `reviseursPour` de `src/lib/revision.js`) ;
 - `fileSignature(config, user, actes, trameDe)` — ce que l'onglet « Ma signature » met sous les
   yeux : `aSigner` (les actes qui attendent **sa** signature), `engagee` (les actes signés au
-  titre de sa délégation, qu'il doit pouvoir suivre) ;
+  titre de sa délégation, qu'il doit pouvoir suivre). Les **annexes** en sont écartées : elles ne
+  se signent pas (§ 2.2.4 ter), et leur chaîne de signature désigne pourtant souvent la même
+  personne que celle de l'acte qui les adopte ;
 - `placeDansChaine` (« autorité de tête », « par délégation », « par subdélégation ») et
   `situationDeSignature` (ce que la personne signe en général : en son nom, et/ou au titre de ses
   délégations).
+
+**Le fil de parcours.** Le chemin d'un acte — ses **portes**, leur **ordre**, et **qui** les
+tient — se lit une seule fois pour toutes dans `parcoursDeActe(acte, { config, trames, users,
+trame })` (`src/lib/parcours.js`, module **pur**), qui rend `{ phases, courante, annexe }`. Chaque
+phase porte `{ cle, nature, label, titre, acteur, fait, etat }` (`etat` : `fait` | `encours` |
+`avenir` | `sansobjet`) et, pour le parapheur, `sousEtapes` (les étapes du circuit **vues de
+l'intérieur** : intitulé, nature, titulaire, sort, facultatif). `sansobjet` est le cas d'une porte
+**passée sans être franchie** : l'acte est allé plus loin qu'elle (un acte signé et publié avant
+que le référentiel ne prévoie une révision n'en porte aucune trace), et la dire « encours »
+contredirait le fil — elle ne compte donc pas comme la phase courante (`marquerEtats`). L'ordre
+est l'ordre **réel** du chemin :
+`redaction → parapheur → revision → signature → publication` — la révision **après** le parapheur
+et **avant** la signature, avec sa position dite en toutes lettres ; dans le circuit **externe**,
+la révision cède la place à la `certification`, **après** la signature. Une **annexe** a son
+propre parcours (`redaction → adoption → information`), sans signature ni révision. Le fil est
+dessiné par `bandeauParcours` (`src/ui/parcours.js`, styles `.pc-parcours`) sur la rédaction
+(`src/ui/views/rediger.js`), le circuit de signature (`src/ui/views/signature.js`), le parapheur
+(`src/ui/views/parapheur.js`), la révision (`src/ui/views/revision.js`) et la fiche d'un acte
+(`src/ui/views/modifier.js`) : les écrans **ne redessinent pas** le parcours chacun à leur façon,
+ils donnent le même objet au même rendu.
 
 `visibleActes()` (`src/ui/state.js`) ouvre au compte, en plus de son périmètre administratif et de
 sa compétence de révision, les actes dont sa signature relève (`parSignature`). La qualité étant
@@ -2358,8 +2412,30 @@ navigation : il n'est pas un poste de travail.
 
 ### 2.7 bis Annuaire de la collectivité (OpenID Connect)
 
-Le mode d'authentification est un **réglage du référentiel** (`config.auth`) :
-`demo` (comptes de l'application) ou `oidc` (annuaire). Ce réglage voyage avec l'export.
+Le mode d'authentification est un **réglage du référentiel** (`config.auth`) : `demo` (comptes de
+l'application) ou `oidc` (annuaire) ; le mode `password` (comptes locaux) est un réglage du
+**déploiement** (§ 2.7 bis.1), et le déploiement l'emporte toujours. Ce réglage voyage avec
+l'export.
+
+**L'annuaire peut être une SECONDE PORTE** (`auth.annuaire`, ou `SCRIBA_ANNUAIRE_SECONDE_PORTE`) :
+proposé **à côté** de la porte ordinaire, que celle-ci soit un compte local ou les comptes de
+l'application. L'écran de connexion propose alors les deux, la porte ordinaire d'abord. Trois
+prédicats, dans `src/lib/auth.js`, tiennent la règle — et **ne se confondent pas** :
+`isOidc` (l'annuaire est la porte ordinaire), `annuaireSecondePorte` (il est demandé en plus),
+`annuairePropose` (l'écran doit le proposer). Une seconde porte n'est proposée que si elle est
+**réellement branchée** (émetteur ET identifiant de client, ou annuaire d'essai choisi
+explicitement) **et si elle peut ouvrir quelque chose** (`annuaireFermePour` dit pourquoi, le cas
+échéant) : une case cochée sans fournisseur n'ouvre rien, et un service qui sert les données par
+ses propres sessions n'accepterait pas une session d'annuaire — voir « Portée honnête » ci-dessous.
+
+**Les réglages sont partout.** L'onglet **Administration › Annuaire (OIDC)** affiche ses quatre
+cartes (mode de connexion, fournisseur, rôles et périmètre, porte de secours) **dans tous les
+modes** — y compris en mode `password` — et le `.env` les porte tous, en déclaratif
+(`SCRIBA_ANNUAIRE_*`, 22 variables validées par le registre, `src/server/mysql/variables.mjs`).
+En mode `password` (et en mode `oidc`), le référentiel n'étant lisible qu'avec une session, c'est
+le **service** qui publie ces réglages dans `GET /v1/auth/config` (champ `annuaire`) : il relit le
+référentiel, applique par-dessus les variables du `.env`, et ne rend qu'une **liste blanche**
+(`src/server/mysql/annuaire.mjs`) — jamais un secret, l'application étant un client public.
 
 **Exigences.**
 
@@ -2396,11 +2472,34 @@ Le mode d'authentification est un **réglage du référentiel** (`config.auth`) 
 7. **Porte de secours.** Un repli depuis l'écran de connexion ramène au mode `demo`
    (`allowRecovery`, défaut vrai), sauf si l'administrateur l'a retiré.
 
-**Portée honnête.** L'application est un client : ces contrôles sont des contrôles
-*d'interface*. La barrière réelle reste le **service de données** (jeton d'API, réseau, SSO
-placé devant l'application). C'est écrit tel quel dans `docs/ADMINISTRATION.md`.
+**Le SERVICE est le client OIDC (depuis 1.6.1p).** Les quatre appels du branchement ne partent plus
+du navigateur : le service découvre le fournisseur, échange le code (avec le vérificateur PKCE que
+le navigateur a gardé le temps de l'aller-retour), vérifie le jeton d'identité, en tire le compte
+(règles de `src/lib/oidc.js` **reprises à l'identique** — la concordance des deux implémentations
+est éprouvée, `src/tests/purs.test.mjs`) et ouvre **sa** session (`POST /v1/auth/annuaire`). Deux
+raisons, et deux conséquences :
 
-**Écrans.** Écran de connexion (`views/connexion.js`), panneau de connexion et retour du
+* **un fournisseur qui n'ouvre pas le CORS se branche** : aucun appel ne part d'une autre origine,
+  donc le navigateur n'a rien à refuser — c'était la cause du « Découverte impossible (Failed to
+  fetch) » que l'onglet affichait, et beaucoup d'annuaires d'administration n'ouvrent pas le CORS ;
+* **un agent entré par l'annuaire lit les actes** : la session ouverte est celle du service, donc
+  acceptée par un service réglé sur ses propres sessions (`AUTH_MODE=password`). La seconde porte
+  est alors **proposée** (`annuairePropose`), et la session se ferme à la déconnexion comme les
+  autres.
+
+Le service publie ce qu'il sait faire (`annuaireService`, `GET /v1/auth/config`) : c'est ce drapeau,
+et non une supposition du client, qui commande `annuairePropose`/`annuaireFermePour`. Un service
+antérieur (drapeau absent) garde le comportement d'avant — la porte n'est pas proposée, et l'onglet
+dit de mettre le service à jour. Ce que le navigateur ne voit jamais : le jeton d'accès et le jeton
+d'identité, qui ne quittent pas le service.
+
+**Portée honnête.** L'application est un client : ses contrôles d'interface ne sont pas la barrière.
+La barrière réelle reste le **service** (session, jeton d'API, réseau, SSO placé devant
+l'application) — et, depuis 1.6.1p, c'est lui qui vérifie le jeton de l'annuaire avant d'ouvrir une
+session. C'est écrit tel quel dans `docs/ADMINISTRATION.md`.
+
+**Écrans.** Écran de connexion (`views/connexion.js` : la porte ordinaire, et — quand elle est
+proposée — l'annuaire en seconde porte sous elle), panneau de connexion et retour du
 fournisseur (`ui/oidc.js`), écran « pas d'accès » du visiteur (`views/sans-acces.js`, § 2.7.3),
 onglet **Administration › Annuaire (OIDC)** (mode, fournisseur,
 correspondance des groupes, porte de secours), **Comptes et rôles** (provenance des comptes,
@@ -2509,7 +2608,7 @@ sa valeur d'exemple. Il en découle :
   (`src/lib/deploiement-config.js`) ; le `.env` l'emporte donc sur l'interface, sans modifier
   le référentiel enregistré : une variable retirée n'est plus imposée au lancement suivant, et
   l'interface reprend la main ;
-- le **wiki** `src/docs/VARIABLES.md`, engendré par `node src/scripts/generer-variables.mjs` et
+- le **wiki** `src/docs/VARIABLES.md`, engendré par `node scripts/generer-variables.mjs` et
   rendu dans *Documentation technique › Variables de déploiement*.
 
 Une variable vide ou absente ne change rien. Les variables de **service** (base, comptes,
@@ -3294,7 +3393,7 @@ technique). Une rubrique dont aucune entrée n'est permise pour le profil dispar
    son **code** et sa **durée**. L'appel emprunte le même chemin que l'application
    (`call()`, `src/lib/remote.js`) : il figure donc dans « API & journal » comme
    n'importe quel échange. La même description engendre **`src/docs/API.md`**
-   (`node src/scripts/generer-api.mjs`), que l'écran *Documentation technique* rend : le
+   (`node scripts/generer-api.mjs`), que l'écran *Documentation technique* rend : le
    document livré et l'écran ne peuvent pas diverger. Écran ouvert à qui peut voir la
    documentation (`docs.voir`). Un appel d'écriture **modifie réellement les données** —
    l'écran le dit avant d'envoyer.

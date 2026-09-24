@@ -29,6 +29,706 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
+## [1.6.1q] — 2026-09-23 — L'outillage prend ses quartiers à la racine du dépôt
+
+Le dépôt range désormais son outillage **là où on le cherche** : `scripts/` (les vérifications,
+l'analyse statique, les générateurs de documents), `tests/` (les épreuves transverses) et
+`package.json` sont à la **racine**, aux côtés de `index.html`, de `main.pjs` et de `src/` — le
+code de l'application. L'outillage vivait auparavant sous `src/` : ni un intégrateur ni un agent
+ne le trouvait, et les commandes ne partaient pas de la racine (audit, NC-I-007).
+
+De quoi rendre le dépôt **maniable par un agent** (Claude Code, Mistral Vibe…) sans qu'il le
+casse : un **`AGENTS.md`** à la racine — où chaque chose vit, comment vérifier, les règles du
+projet, les pièges connus —, un **`CLAUDE.md`** qui y renvoie, et un **`tests/README.md`** qui
+dit à qui ouvre une épreuve ce qu'elle tient et pourquoi ses imports disent `../src/…`.
+
+L'outillage **constate** la racine du code au lieu de la supposer (`scripts/racine-code.mjs`) :
+il fonctionne donc dans les deux dispositions — celle du dépôt, où le code est sous `src/`, et
+celle de l'atelier, où tout voisine sous `src/`.
+
+### Modifié
+
+- **L'outillage est livré à la racine** : `scripts/`, `tests/`, `package.json`. Les commandes
+  s'exécutent **depuis la racine** ; `npm run syntaxe`, `npm run style` et `npm run verifier`
+  existent désormais, et `verifier` inclut le **style en mode strict** (syntaxe, style, épreuves)
+  — c'est ce que la chaîne exécute.
+- **La chaîne d'intégration** (`.github/workflows/ci.yml`) sépare ses trois étapes — syntaxe,
+  style, épreuves — pour qu'un échec nomme du premier coup celle qui a lâché : une chaîne rouge
+  dont personne ne distingue la cause ne rend pas le service qu'une chaîne rend (NC-I-008).
+- **Les épreuves de parcours** s'importent depuis `tests/parcours.mjs` sur un déploiement, et
+  depuis `https://perchance.org/src/tests/parcours.mjs` dans l'atelier.
+- Les documents suivent la nouvelle disposition : `README.md` (§ « Exporter le dépôt GitHub »,
+  architecture), `SPEC.md`, `TODO.md`, `docs/REPRISE.md`, `docs/INDUSTRIALISATION.md`
+  (§ 1 les cinq commandes, § 3 l'intégration continue) ; `docs/API.md` et `docs/VARIABLES.md`
+  sont régénérés.
+
+### Retiré
+
+- Du dépôt : `src/scripts/`, `src/tests/`, `src/github/`, `src/package.json` et
+  `src/docs/GITHUB.md` — ces sources sont **recopiées à la racine** par l'export et n'y restent
+  pas : un fichier ne vit qu'à un seul endroit, sinon on corrige celui que personne ne lit.
+  **Mise à jour d'un clone** : les supprimer (`git rm -r src/scripts src/tests src/github
+  src/package.json src/docs/GITHUB.md`) avant de décompresser l'archive par-dessus.
+
+### Documentation
+
+- **`AGENTS.md`** (racine du dépôt) et sa source `src/AGENTS.md` : points d'entrée, disposition,
+  commandes, règles du projet (aucune dépendance, métier sans DOM ni réseau, documents engendrés)
+  et pièges (le fichier unique, la CI stricte, l'image `web` à reconstruire).
+- **`tests/README.md`** : ce que tient chaque épreuve, et pourquoi ces fichiers sont écrits pour
+  la disposition LIVRÉE — le code y est `../src/…`, l'outillage `../scripts/…`.
+- `docs/INDUSTRIALISATION.md` : la table des commandes, l'intégration continue (section
+  numérotée), et la règle « un fichier, un seul endroit ».
+- **`README.md`** (racine du dépôt, source `src/docs/GITHUB.md`) : une section **« Travailler sur
+  le code »** — où vit chaque chose, les commandes de vérification, et le fait qu'un agent
+  commence par `AGENTS.md` ; les **chiffres de l'audit** y sont remis à jour (1 ouverte, 8 en
+  cours, 27 levées), en accord avec la synthèse du registre — dont la ligne « Observation » ne
+  sommait pas juste.
+- **`.gitignore`** : les réglages **locaux** des assistants de code (`.claude/settings.local.json`,
+  `.vibe/`) ne sont pas versionnés ; les instructions partagées (`AGENTS.md`, `CLAUDE.md`), elles,
+  le sont.
+
+
+## [1.6.1p] — 2026-09-23 — La connexion par l'annuaire passe par le service (fini le « Failed to fetch »)
+
+Un constat d'exploitation : un annuaire d'administration branché, l'adresse de l'émetteur juste, et
+pourtant **Administration › Annuaire** répondait « **Découverte impossible sur
+https://…/.well-known/openid-configuration (Failed to fetch)** », avec le conseil de vérifier
+l'adresse ou de saisir les points de terminaison à la main. Ni l'adresse ni le fournisseur n'étaient
+en cause : **les quatre appels OIDC partaient du navigateur**, vers une autre origine que celle de
+l'application. Un fournisseur qui ne publie pas d'en-tête `Access-Control-Allow-Origin` fait donc
+refuser la réponse par le navigateur — et la connexion échouait au même endroit. Beaucoup d'annuaires
+d'administration (Keycloak, LemonLDAP::NG, ADFS…) n'ouvrent pas le CORS, et l'exploitant n'y peut
+rien.
+
+Deuxième conséquence, plus grave : la session ouverte par l'annuaire était une session de
+l'**application**. Un service réglé sur ses propres sessions (`AUTH_MODE=password`) ne l'acceptait
+pas : un agent entré par l'annuaire ne lisait aucun acte — et c'est pourquoi la seconde porte n'était
+même pas proposée dans ce cas.
+
+**Le service est désormais le client OIDC.** Il découvre le fournisseur, échange le code
+d'autorisation (avec le vérificateur PKCE que le navigateur a gardé le temps de l'aller-retour),
+vérifie le jeton d'identité — signature comprise (JWKS, RS/PS/ES), émetteur, audience, validité,
+nonce —, en tire le compte (groupes → rôle, services et entité), l'écrit au référentiel, puis ouvre
+**SA** session : les mêmes cookies que la connexion par mot de passe. Le navigateur ne fait plus que
+ce qu'il est seul à pouvoir faire : rediriger, garder `state`, `nonce` et vérificateur, et confronter
+le `state` au retour. Conséquences visibles : la découverte fonctionne sur un annuaire qui n'ouvre
+pas le CORS, la connexion aussi, l'agent lit les actes comme tout le monde, et la **seconde porte est
+proposée même en mode « comptes locaux »**.
+
+### Ajouté
+
+- **`POST /v1/auth/annuaire`** : le service échange le code, vérifie le jeton et ouvre une session.
+  Le corps porte le code, le vérificateur PKCE, l'adresse de retour et le `nonce` — jamais le
+  fournisseur ni l'identifiant du client, qui viennent des réglages du service : un service ne va pas
+  chercher une adresse arbitraire pour le premier venu.
+- **`POST /v1/auth/annuaire/decouverte`** : éprouve une adresse AVANT de l'enregistrer (bouton
+  « Vérifier la découverte du fournisseur »). Un administrateur fait éprouver ce qu'il vient de
+  saisir ; tout autre appelant n'obtient que ce que le service a déjà enregistré.
+- `GET /v1/auth/config` publie **`annuaireService`** : le service sait-il ouvrir une session
+  d'annuaire ? C'est ce drapeau, et non une supposition du client, qui décide si la seconde porte est
+  proposée. Un service antérieur (drapeau absent) garde le comportement d'avant.
+
+### Modifié
+
+- **Le service devient le client OIDC** (`src/server/mysql/annuaire-service.mjs`, module pur, éprouvé
+  avec un fournisseur simulé), et la vérification de signature a son propre module (`jws.mjs`) pour
+  être éprouvée avec de vraies clés et de vraies signatures.
+- Les règles « revendications → compte » sont écrites des deux côtés — l'image du service ne contient
+  que son dossier, il ne peut pas importer le client du navigateur —, et leur **concordance est
+  éprouvée** : `src/tests/purs.test.mjs` confronte les deux implémentations (rôles, périmètre,
+  jusqu'aux libellés des contrôles montrés à l'administrateur après connexion).
+- Le motif d'une porte fermée dit désormais QUOI corriger : « mettez le service à jour » quand c'est
+  le service qui ne sait pas encore ouvrir la session.
+- Les textes de l'application suivent : **Administration › Annuaire** annonce que c'est le service qui
+  est le client OIDC (donc qu'aucune origine n'est à autoriser chez le fournisseur) et affiche un
+  repère « connexion faite par le service » quand c'est le cas ; l'aide de la porte de secours et les
+  descriptions des variables `SCRIBA_ANNUAIRE_*` ne présentent plus l'application comme le client.
+- Le contrôle de style refuse désormais les **imports jamais employés**
+  (`src/scripts/analyse-imports.mjs`, éprouvé dans `src/tests/purs.test.mjs`) : dix-neuf fichiers en
+  portaient quarante et une mentions — `views/signature.js`, `views/rediger.js`, `ui/components.js`,
+  `lib/oidc.js`, `lib/export.js`… —, toutes nettoyées. Sans effet à l'exécution, elles trompaient la
+  lecture ; la liste ne peut plus se reformer sans que la chaîne le dise.
+
+### Corrigé
+
+- `RATE_MAX_CONNEXIONS` (tentatives de connexion par fenêtre et par adresse) existait dans le code,
+  était décrit dans `docs/VARIABLES.md`, et **manquait des deux modèles de `.env`** : la ligne est
+  ajoutée à `src/server/mysql/env.example`, et une épreuve tient désormais la règle du projet —
+  **toute variable du registre se pose dans un `.env.example`** — pour l'ensemble du registre.
+- **Le drapeau `annuaireService` n'arrivait pas jusqu'au client.** Le service le publiait bien dans
+  `GET /v1/auth/config`, mais `chargerModeDeploiement` (src/ui/state.js) ne le transmettait pas à
+  `setDeploiementAuth` — non plus que `comptesLocaux`, `session` et `adminPanne`. Le client croyait
+  donc parler à un service ANTÉRIEUR : la découverte repartait du navigateur — « Failed to fetch »
+  chez un fournisseur qui n'ouvre pas le CORS, exactement le symptôme que cette note doit faire
+  disparaître —, et la seconde porte n'était pas proposée, service à jour ou non. Le même oubli
+  existait dans le rattrapage du mode (`reparerPilote`), quand ce rattrapage est le seul à aboutir.
+  Une épreuve fixe désormais le contrat : **tout champ que le client lit du service doit lui être
+  transmis** (src/tests/purs.test.mjs) ; elle a été vérifiée sur la version fautive, où elle nomme
+  les quatre champs perdus.
+
+### Sécurité
+
+- La signature du jeton est vérifiée par le service avec les clés que publie le fournisseur
+  (`jwks_uri`) : un jeton non signé (`alg: none`) ou signé symétriquement (`HS*`) est refusé, une clé
+  EC ne vaut pas une signature RS256, et une longueur de sel PSS fausse ne valide rien.
+- Une connexion d'annuaire réussie **désactive les comptes de démonstration** (un jeu fictif resté
+  actif à côté d'un annuaire réel serait une porte dérobée).
+- Aucun secret ne circule dans le navigateur : le jeton d'accès et le jeton d'identité ne quittent
+  pas le service.
+
+### Documentation
+
+- `docs/ADMINISTRATION.md` § 4.4 : la découverte et la connexion se font chez le service ; la ligne
+  de dépannage « Découverte impossible » distingue maintenant le refus du navigateur (CORS) de
+  l'injoignabilité **depuis le service**.
+- `docs/VARIABLES.md` est régénéré (les descriptions des points de terminaison disent que c'est le
+  service qui appelle), ainsi que `README.md`, `SPEC.md`, `TODO.md`, `wiki.js`, `docs/API.md` et le
+  registre d'audit.
+
+
+## [1.6.1o] — 2026-09-23 — La façade sert enfin les modules `.mjs` : fini la page blanche
+
+Un constat d'exploitation : sur une installation **auto-hébergée**, ouvrir le site donnait une **page
+blanche** — dans tous les modes d'authentification, et même après avoir réparé les identifiants de la
+base. Ni l'authentification, ni la base n'étaient en cause.
+
+Deux modules sont **partagés** entre le service (Node) et le navigateur : `chats-erreur.mjs` (les
+chats des pages d'erreur) et `original-signe.mjs` (la part publique d'un original signé). Le client
+les importe directement, donc c'est la **façade** qui les sert — et leur extension est `mjs`. Or la
+table des types de nginx ne connaît **pas** `mjs` : elle ne déclare que `application/javascript js`.
+Le `.mjs` retombait donc sur le type par défaut de l'image, `application/octet-stream` — et le
+navigateur **refuse d'exécuter un module dont le type MIME n'est pas du JavaScript** (le contrôle est
+strict pour les modules ES). Le graphe d'imports cassait en amont, `app.js` ne s'exécutait jamais, et
+la page restait blanche : **le seul indice était dans la console du navigateur**, jamais dans le
+journal de nginx — qui répondait `200`, comme il faut, pour un fichier simplement mal étiqueté.
+
+### Corrigé
+
+- **La façade déclare le type des modules `.mjs`** (`src/server/nginx.conf` et
+  `src/server/nginx.standalone.conf`). Un bloc `location ~ \.mjs$` imbriqué dans `location /src/`
+  pose `default_type application/javascript` pour la seule extension concernée. C'est un choix, et
+  non un `types { … }` : en nginx, un bloc `types` **remplace** la table héritée au lieu de s'y
+  ajouter — le déclarer ici reviendrait à perdre d'un coup tous les autres types (`js`, `css`, `svg`,
+  `woff2`…). Conséquence visible : la page blanche disparaît, et les deux modules partagés se
+  chargent. **Après ce correctif, la façade doit être reconstruite** (`docker compose up -d --build
+  web`) : nginx lit sa configuration à son démarrage.
+
+### Documentation
+
+- **La ligne « Page blanche »** du dépannage de `src/server/README.md` distingue désormais les deux
+  causes — un module qui ne se charge pas (façade non reconstruite), et un module `.mjs` servi avec
+  un type MIME non-JavaScript — et dit le message exact à chercher dans la console, ainsi que le
+  geste qui répare.
+
+
+## [1.6.1n] — 2026-09-23 — L'annuaire se branche aussi là où il manquait : l'interface et le `.env`
+
+Un constat d'exploitation : **l'annuaire de la collectivité ne pouvait être branché que depuis un
+seul endroit**, et seulement quand l'application était DÉJÀ réglée sur lui. En mode « comptes
+locaux » — le mode d'une installation réelle —, Administration › Annuaire n'affichait que le
+réglage des comptes de démonstration : ni fournisseur, ni correspondance des groupes, ni adresse de
+retour. Le fichier `.env` du déploiement, de son côté, ne portait **aucune** variable d'annuaire :
+un parc n'avait donc aucun moyen de le brancher sans cliquer dans chaque interface, et une
+installation à comptes locaux n'avait aucun moyen de le brancher du tout.
+
+Les réglages sont désormais **partout**, quel que soit le mode, et le service les publie lui-même
+là où l'écran de connexion peut les lire.
+
+### Ajouté
+
+- **LA SECONDE PORTE — l'annuaire à côté de la porte ordinaire.** Jusqu'ici, l'annuaire était soit
+  la porte ordinaire (mode « annuaire »), soit absent. Il peut maintenant être proposé **en plus**
+  de la porte ordinaire — des comptes locaux, ou les comptes de l'application —, par une case de
+  l'Administration › Annuaire ou par `SCRIBA_ANNUAIRE_SECONDE_PORTE=true` dans le `.env`. L'écran
+  de connexion propose alors les deux : la porte ordinaire d'abord, l'annuaire ensuite
+  (`annuairePropose`, `annuaireSecondePorte`, `src/lib/auth.js`). Un même compte garde son
+  historique, qu'il soit entré par l'une ou par l'autre.
+- **Les variables `SCRIBA_ANNUAIRE_*` (22).** Le `.env` pose désormais tout l'annuaire :
+  émetteur, identifiant du client, portées, adresse de retour, invite, revendication et
+  correspondance des groupes (écrite « groupe=rôle, groupe=rôle »), politique des agents sans
+  groupe reconnu, revendications de service et d'entité, autorité des groupes, création des
+  comptes inconnus, `userinfo`, exigence de signature, les quatre points de terminaison (quand la
+  découverte est bloquée) et la porte de secours. Le registre des variables les valide au
+  démarrage : une correspondance fautive est **refusée en entier** (un rôle inconnu, un couple mal
+  formé) plutôt qu'appliquée à moitié. Wiki engendré : `docs/VARIABLES.md`.
+- **Le SERVICE publie les réglages de l'annuaire** (`GET /v1/auth/config`, champ `annuaire`,
+  `src/server/mysql/annuaire.mjs`). C'est ce qui manquait pour brancher l'annuaire en mode
+  « comptes locaux » : dans ce mode, le référentiel n'est lisible qu'avec une session, et l'écran
+  de connexion — qui vient avant — n'y avait donc pas accès. Le service relit le référentiel pour
+  lui (copie de dix secondes, oubliée dès qu'il est réécrit) et publie la **liste blanche** des
+  champs d'annuaire : rien de secret n'en sort, et un champ hors liste — un secret de client, quel
+  qu'il soit — n'est jamais rendu. Le MODE, lui, reste celui du déploiement (`AUTH_MODE`).
+
+### Modifié
+
+- **Administration › Annuaire montre toujours tout.** Les quatre cartes — mode de connexion,
+  fournisseur d'identité, rôles et périmètre, porte de secours — sont affichées **dans tous les
+  modes**, y compris en mode « comptes locaux » et en mode « annuaire ». Chaque champ posé par le
+  `.env` le dit (« Posé par le .env : une saisie ici ne tient pas. »), et un bandeau d'état dit
+  toujours où en est la porte : *porte ordinaire*, *non proposée*, ou *demandée mais pas encore
+  ouverte — voici pourquoi*. Le réglage du mode annonce désormais ce que le déploiement impose
+  (`AUTH_MODE`) au lieu de laisser croire qu'un choix du référentiel tient.
+- **L'annuaire d'essai et les problèmes de fournisseur valent pour les deux portes**
+  (`isTestProvider`, `providerProblems`, `src/lib/auth.js`) : ils ne s'appliquaient qu'au mode
+  « annuaire ».
+
+### Sécurité
+
+- **La seconde porte n'est pas proposée quand elle n'ouvrirait rien.** Si le service sert les
+  données par ses propres sessions (mode « comptes locaux »), une connexion par l'annuaire
+  ouvrirait une identité dans l'application mais **aucun acte** : l'agent arriverait devant une
+  application vide, chaque lecture refusée. La porte n'est donc pas ouverte, et l'écran dit
+  pourquoi (`annuaireFermePour`) — elle s'emploie là où le service de données est protégé en amont
+  (SSO devant l'application) ou réglé en mode à jeton. L'échange du jeton d'annuaire contre une
+  session de service est inscrit au programme (`src/TODO.md`).
+- **Cocher la case n'ouvre pas l'annuaire d'essai.** Une seconde porte demandée sans émetteur ni
+  identifiant de client reste fermée : un déploiement ne doit pas offrir des identités fictives,
+  sans mot de passe, pour avoir coché une case. L'annuaire d'essai reste disponible, mais il faut
+  l'avoir choisi (`test`, `SCRIBA_ANNUAIRE_ESSAI`).
+- **Rien de secret ne sort de la route publique.** `GET /v1/auth/config` est lisible sans session :
+  seuls les champs de la liste blanche y passent, et deux épreuves tiennent les listes du service
+  et du navigateur égales (`src/server/mysql/annuaire.test.mjs`, `src/tests/purs.test.mjs`).
+
+## [1.6.1m] — 2026-09-23 — Le parcours se lit d'un bout à l'autre, et les annexes cessent d'être « prêtes à signer »
+
+Deux constats d'usage, une même cause : ce que l'application SAIT ne se lisait pas là où on en
+avait besoin. L'écran de signature annonçait « Prêt à signer » sur des documents qui ne se signent
+pas, et rien ne montrait comment le circuit de validation et la révision s'enchaînaient — ni
+pourquoi l'un passait avant l'autre.
+
+La relecture des écrans, circuit par circuit, a montré un troisième cas de la même famille : une
+porte que l'acte a PASSÉE sans la franchir (un acte signé et publié avant que le référentiel ne
+prévoie une révision n'en porte aucune trace) s'affichait partout comme la porte **ouverte** — le
+fil annonçait « Étape en cours : Révision » sur un acte déjà publié, et le circuit de signature la
+présentait comme la marche à venir.
+
+### Corrigé
+
+- **Une porte passée sans être franchie n'est plus annoncée comme « en cours ».** Le fil de
+  parcours et les marches du circuit de signature disent maintenant la même chose que le dossier :
+  cette porte est « **non franchie** » (`marquerEtats`, `src/lib/parcours.js`). Sa puce reste
+  creuse et en pointillés, la marche porte un tiret au lieu d'un numéro, et la fiche de l'acte
+  cesse d'inviter à « soumettre à la révision » un acte qui est allé plus loin. L'inverse est
+  préservé : tant que l'acte n'a pas dépassé la porte, elle reste la porte ouverte.
+
+- **Une annexe n'est plus « prête à signer ».** Dans l'onglet Signature, la liste des actes donnait
+  aux annexes le statut de leur état interne (`pret` → « Prêt à signer »), alors qu'une annexe ne
+  se signe pas : c'est l'acte qui l'adopte qui porte la signature. La ligne porte désormais
+  « **Annexe — ne se signe pas** », et le circuit de signature s'ouvre par défaut sur un acte qui
+  en attend vraiment un.
+- **Les annexes quittent la file « Ma signature ».** Le signataire ne les y voit plus, même
+  lorsque la chaîne de signature de leur trame désigne sa propre personne
+  (`fileSignature`, `src/lib/signataires.js`) : elles n'y avaient rien à faire, et leur présence
+  laissait croire à un geste en attente.
+
+### Ajouté
+
+- **Le FIL DE PARCOURS — les étapes d'un acte, dans leur ordre réel.** Une ligne de puces
+  partagée (`parcoursDeActe`, `src/lib/parcours.js`, module pur ; `bandeauParcours`,
+  `src/ui/parcours.js`) montre, sur l'écran de **rédaction**, le **circuit de signature**, le
+  **parapheur** et la **révision** : *Rédaction → Parapheur → Révision → Signature →
+  Publication*, la phase en cours mise en avant, le **titulaire** de chacune, et — sous le
+  parapheur — ses étapes **vues de l'intérieur** (leur nature : vérification, visa, signature —
+  et qui les porte). C'est ce qui rend l'**imbrication** lisible : la révision est une porte
+  **distincte** du circuit, franchie **après** lui et **avant** la signature, et sa puce le dit
+  en toutes lettres («après le parapheur · avant la signature»). Dans le circuit **externe**, la
+  révision cède la place à la **certification de conformité**, **après** la signature.
+- **Le parcours propre à une annexe** : *Rédaction → Adoption par l'acte → Publication
+  informative* (pour un règlement), qui rappelle qu'une annexe ne se signe ni ne se publie pour
+  elle-même.
+
+### Modifié
+
+- **Le détail des étapes de signature** énumère les étapes du circuit de validation (intitulé,
+  nature, titulaire, sort de chacune) au lieu du seul compteur « 2/2 », et chaque marche qui
+  s'intercale — révision, certification — dit **où elle se place** par rapport aux autres. Le fil
+  de parcours est affiché au-dessus, sous le titre « Le parcours de l'acte — chaque porte à sa
+  place ».
+- **La note du fil de parcours** (« Étape en cours : … ») se range sous les puces, alignée à
+  gauche comme le reste, au lieu de s'isoler à droite ; et le maillon « › » entre deux phases
+  appartient désormais à la phase qu'il précède — sur une ligne qui se replie, il ne se retrouve
+  plus seul en tête de ligne, où il se lisait comme une puce de plus.
+
+
+## [1.6.1l] — 2026-09-23 — Le service peut se passer de MariaDB, et les pages d'erreur ont un chat
+
+Deux demandes, deux réponses liées par la même idée : ce qui est **optionnel** doit l'être
+franchement — réglable, documenté, et jamais imposé. Le service auto-hébergé peut désormais
+tourner **sans aucun serveur de base de données** (`STOCKAGE=fichier`), et une collectivité peut
+décider d'**illustrer ses pages d'erreur** d'une photographie de chat — une option éteinte par
+défaut, parce qu'elle fait sortir le visiteur vers un site tiers.
+
+### Ajouté
+
+- **Le rangement par FICHIERS : le service sans MariaDB.** `STOCKAGE=fichier` range tout — référentiel,
+  trames, actes, comptes, sessions, état de signature, journaux — dans un **dossier** (`DATA_DIR`,
+  `./data` par défaut), **en clair**. Une collectivité qui ne veut administrer qu'un seul logiciel
+  installe le service sur un poste, et sauvegarder devient une **copie de dossier** (`LISEZ-MOI.txt`
+  dans le dossier le rappelle). Le protocole reste **exactement** celui de MariaDB : mêmes
+  collections, mêmes révisions, mêmes conflits de synchronisation, même journal — l'application ne
+  peut pas distinguer les deux, et les mêmes épreuves les couvrent. L'écriture est **atomique** et
+  sérialisée par une file interne. Les limites sont dites sans détour : **un seul service sur une
+  seule machine**, et les commandes de ligne de commande (`--mot-de-passe`, `--reconcilier`) ne se
+  lancent **pas pendant** que le service tourne.
+- **`src/server/docker-compose.fichier.yml`** : la pile Compose **sans MariaDB** — deux services
+  (`api` et `web`) et un seul montage (`./data` sur `/data`). C'est un fichier à part, et non un
+  `-f` par-dessus l'autre : le compose principal exige `DB_PASSWORD` et `DB_ROOT_PASSWORD` à
+  l'interpolation, ce qui suffirait à empêcher le démarrage d'une installation sans base.
+- **Le `.gitignore` livré ignore `data/`** : le dossier du rangement par fichiers contient les
+  actes et les comptes, et n'a rien à faire dans un dépôt public. Sa source est désormais
+  `src/github/gitignore`, recopiée à la racine du dépôt (comme `ci.yml`).
+- **Les chats des pages d'erreur (option, éteinte par défaut).** Administration › Publication ›
+  Apparence du site public porte une case *Illustrer les pages d'erreur d'un chat (http.cat)*.
+  Allumée, les pages d'erreur — « acte introuvable », « page introuvable », « bulletin introuvable »,
+  identifiant ELI inconnu, atelier fermé depuis une adresse non autorisée, panne d'affichage —
+  montrent une **photographie de chat** choisie selon le **code** de l'erreur. La règle vit une fois
+  (`server/mysql/chats-erreur.mjs`) et sert les deux côtés : le recueil rendu par le service **et**
+  les écrans de l'application. Elle **borne** les codes (100–599) et **replie** un code que http.cat
+  ne publie pas sur le représentant de sa classe, pour ne jamais lier une image qui ne serait pas
+  celle du code annoncé. Pourquoi éteinte par défaut : l'image est demandée à un **site tiers**, qui
+  voit alors l'adresse IP du visiteur — c'est écrit dans le libellé de l'option, dans le guide et
+  dans la documentation d'exploitation. Le réglage **suit les publications**, comme les renvois et
+  les mentions : le recueil servi par le service l'applique à partir de la publication suivante.
+
+### Modifié
+
+- **Le service passe par un « magasin ».** Le stockage était MariaDB et rien d'autre ; il est
+  désormais un **contrat** (`magasin.mjs`) rempli par deux implémentations (`magasin-mysql.mjs`,
+  `magasin-fichier.mjs`). L'algorithme de synchronisation — révisions, conflits, journal — est écrit
+  **une fois**, dans le contrat, et chaque magasin n'apporte que ses primitives. Un seul endroit à
+  relire, et deux rangements qui ne peuvent pas diverger.
+- **`SCRIBA_ATELIER_IPS` hors sujet ? non : `STOCKAGE` et `DATA_DIR` entrent au registre des
+  variables**, avec leur type, leurs bornes et leur description — donc dans `docs/VARIABLES.md`
+  (régénéré) et dans l'écran « Variables de déploiement ».
+
+### Corrigé
+
+- **La documentation d'exploitation disait que le service auto-hébergé ne rendait pas les renvois
+  ni les mentions du recueil** (un `TODO` périmé depuis la 1.6.1j). C'est faux depuis que ces
+  réglages voyagent avec les publications : `docs/ADMINISTRATION.md` le dit maintenant dans le bon
+  sens, et les chats d'erreur suivent le même chemin.
+
+
+## [1.6.1k] — 2026-09-23 — La dette de reprise : une règle, un seul endroit
+
+Trois constats d'audit se répondaient : la même règle écrite plusieurs fois (NC-I-004), la
+documentation monolithique (NC-I-003) et une feuille de style de plus de trois mille lignes. Le
+travail de cette note ne change **rien** à ce que voit l'utilisateur : il rend le dépôt
+**reprenable** par quelqu'un qui n'aurait pas écrit le code — ce qui est la question directrice
+de l'audit.
+
+### Modifié
+
+- **La part publique d'un original signé n'est plus écrite qu'une fois.** Elle vivait en trois
+  exemplaires (`src/lib/signature.js`, `src/server/mysql/actes.mjs` et le script du service de
+  démonstration) ; elle vit maintenant dans `src/server/mysql/original-signe.mjs`, que
+  l'application et le service importent. Le service de démonstration, qui ne peut pas importer de
+  modules, garde sa copie — mais un test l'**compare** au module et à `node:crypto` sur une
+  batterie d'entrées (`src/tests/original-signe.test.mjs`) : la duplication ne peut plus dériver
+  en silence.
+- **La feuille de style est découpée par sujet** : `src/css/app.css` (3 609 lignes) devient une
+  entrée de dix lignes qui importe dix parties (`app-base.css`, `app-atelier.css`,
+  `app-guide.css`, `app-redaction.css`, `app-signature.css`, `app-comptes.css`, `app-sombre.css`,
+  `app-registre.css`, `app-recueil.css`, `app-outils.css`). **L'ordre d'origine est conservé** :
+  en CSS, l'ordre des feuilles tranche entre deux règles de même poids, et c'est lui qui garantit
+  que rien n'a bougé à l'écran.
+
+### Ajouté
+
+- **`src/docs/REPRISE.md`, le kit de reprise** : les points d'entrée du code, la carte des
+  « un seul point de vérité par règle », comment vérifier avant de livrer, comment livrer (dépôt
+  statique et auto-hébergement), et — surtout — **ce qui n'est pas couvert**. Un kit de reprise
+  qui tairait ses trous ferait perdre plus de temps qu'il n'en fait gagner.
+
+
+## [1.6.1j] — 2026-09-23 — L'auto-hébergement rattrape le service de démonstration
+
+Le service auto-hébergé (Node + MariaDB) parlait presque le même contrat que le service de
+démonstration embarqué dans la page ; quatre écarts traînaient, tous déjà écrits au `TODO`.
+Cette note les ferme : sur une pile auto-hébergée, l'agent peut désormais **retirer une
+publication** du recueil, le **jeton d'écriture ne descend plus dans le navigateur**, le schéma
+est **versionné**, et l'espace public porte enfin ses **renvois et ses mentions**.
+
+### Ajouté
+
+- **`POST /v1/publications/{cle}/retrait`** dans le service Node (`src/server/mysql/actes.mjs`) :
+  le geste exceptionnel de retrait — motif technique obligatoire (422 `motif_absent`), trace
+  conservée sur l'acte et au journal d'audit, l'acte redevenant *signé* donc publiable de nouveau,
+  et les autres versions publiées sous le même ELI laissées intactes. C'est le pendant de la route
+  que le service de démonstration exposait déjà, et que le jeu de conformité réclamait aux **deux**
+  implémentations.
+- **Les renvois du bas de page public et les mentions du recueil sont portés par le service.**
+  `Recueils extérieurs` (« Autres recueils », sites de référence) et mentions (légales, conditions
+  de réutilisation, accessibilité) sont des réglages du **référentiel**, que le service ne connaît
+  pas : ils voyagent donc avec chaque publication, comme le titre du recueil, et le service les
+  rend dans `/recueil` (bloc « Vous ne trouvez pas ce que vous recherchez ? » et pied de page),
+  dans `/recueil.json` (`renvois`, `mentions`) et dans `llms.txt`.
+- **Les migrations du schéma sont versionnées** (`src/server/mysql/migrations.mjs` + table
+  `sb_migrations`) : chaque migration est appliquée **une fois**, son passage est inscrit avec son
+  empreinte, et une migration modifiée après coup est **signalée** au lieu d'être rejouée. Le
+  socle (`schema.sql`) est la version 1 ; la suite s'ajoute, elle ne se réécrit pas.
+
+### Sécurité
+
+- **Le jeton d'écriture n'est plus servi au navigateur** dès que le déploiement administre par
+  session (`AUTH_MODE=password` ou `oidc`) : `config.js` est un fichier public, et un jeton qui s'y
+  trouve est un jeton **publié**. La façade le retire du fichier (`web/entrypoint.sh`) et l'hôte
+  refuse de le lire (`web/host.js`) ; les écritures passent alors par le cookie de session, comme
+  elles le faisaient déjà. Le mode « démonstration », lui, garde sa clé — il n'a rien à protéger.
+
+### Corrigé
+
+- Le service enregistre désormais, sur chaque publication, l'acte déposé dont elle est la version
+  en ligne (`acteId`) : c'est ce qui permet au retrait de rendre l'acte *signé*, comme le fait
+  déjà le service de démonstration.
+
+
+## [1.6.1i] — 2026-09-23 — Le contrat du service et les parcours sont enfin éprouvés
+
+L'audit le répétait depuis la première campagne : « aucun test automatisé du code client »
+(NC-I-001), et « l'API est implémentée deux fois » (NC-I-010) — démonstration et auto-hébergement —
+sans rien qui garantisse qu'elles répondent la même chose. Deux jeux d'épreuves comblent ces
+manques : un **contrat commun**, joué contre les deux services, et des **parcours** qui traversent
+l'application dans le navigateur.
+
+### Ajouté
+
+- **Un jeu d'appels commun aux deux implémentations du service** (`src/tests/conformite-service.mjs`) :
+  treize appels qui décrivent le contrat — santé, OpenAPI, autorisation, registre public, ressource
+  inconnue, résolution ELI, routes fermées, dépublication — avec, pour chacun, ce qu'il exige
+  (statut exact ou classe, jamais un 5xx). Le jeu s'exécute contre le service de démonstration
+  chargé en mémoire (`conformite-service.test.mjs`), contre le service que l'application utilise
+  réellement (dans les parcours), et contre une installation auto-hébergée quand on lui donne son
+  adresse (`SCRIBA_CONFORMITE_URL`) — avec, alors, la **comparaison** des deux.
+- **Des épreuves de parcours** (`src/tests/parcours.mjs`) : dépôt → signature → publication →
+  recueil, repli local, signature qualifiée, session, contrat du service. Elles s'exécutent dans le
+  **navigateur**, contre les modules réels de l'application et le service vivant, et elles
+  attendent ce qu'elles observent au lieu de supposer qu'un rendu est terminé.
+- **Les épreuves des deux règles nouvelles** (qualification de signature, abrogation des annexes)
+  et de la reprise de la signature locale, soit dix épreuves pures de plus.
+
+
+## [1.6.1h] — 2026-09-23 — Abroger un acte : ce qu'il advient de ses annexes est désormais écrit
+
+La question restait ouverte depuis l'arrivée des annexes : que devient le règlement intérieur
+quand la délibération qui l'a adopté est abrogée ? L'application n'en disait rien — l'abrogation
+de la délibération laissait le règlement en vigueur, sans que personne ne le sache, ou l'éteignait
+silencieusement selon le chemin. La règle est maintenant écrite, appliquée, et dite à l'écran :
+une annexe **sans publication autonome** fait partie de sa décision mère et s'éteint avec elle ;
+une annexe **publiée à part** y survit, et demande un acte autonome pour être retirée ou modifiée.
+
+### Ajouté
+
+- **La règle, en fonctions pures** (`src/lib/abrogation-annexes.js`) : la sorte d'une annexe se lit
+  sur sa trame (`trame.reglement` : publication autonome, oui ou non), et un acte abrogé est
+  décomposé en « annexes emportées » et « textes autonomes qui survivent ».
+- **L'application de la règle** (`src/ui/abrogations-apply.js`) : les annexes emportées reçoivent
+  la marque de l'abrogation au même jour, avec la mention `parAnnexion` (elles s'éteignent par
+  l'effet de l'abrogation de leur décision, sans clause qui les vise) ; les textes autonomes sont
+  rangés sur l'acte abrogeant (`annexesAutonomesRestantes`), avec leur identifiant de recueil. Le
+  tout entre au journal (`abrogation.annexe_emportee`, `abrogation.annexe_autonome_a_traiter`).
+  La consolidation qui retire toutes les dispositions d'un acte applique la même règle.
+- **L'avertissement, au bon moment** : dans le panneau des abrogations, dès que le rédacteur
+  choisit un acte dont une annexe est publiée à part ; sur la fiche de l'acte abrogeant, sous le
+  titre « Texte publié à part à traiter » ; et sous la phrase d'abrogation de l'annexe emportée,
+  qui explique pourquoi aucune clause ne la désigne.
+
+### Modifié
+
+- **Les deux questions laissées ouvertes au `TODO` sont tranchées** (« Abroger une annexe »,
+  « Règlement et abrogation ») : la réponse est celle de la nature de l'annexe, et elle est
+  désormais tenue par le logiciel, documentée dans `SPEC.md` § 2.5 bis et dans le guide.
+
+
+## [1.6.1g] — 2026-09-23 — L'acte publié dit ce que vaut sa signature
+
+Un acte signé « en simple » — dans l'application, avec son compte — n'a pas la valeur d'un acte
+signé devant notaire : le règlement européen sur l'identification électronique réserve l'équivalent
+d'une signature manuscrite à la seule signature **qualifiée**. Or rien, dans l'acte publié, ne le
+disait : un lecteur, un juge ou un service instructeur lisait « signé » et rien de plus. L'audit
+avait relevé l'écart (NC-IV-001 : « ce qui est simulé doit être nommé ») ; voici la réponse, qui
+rend le logiciel défendable en l'état — sans prestataire qualifié, et sans rien cacher.
+
+### Ajouté
+
+- **Une qualification de la signature, écrite en un seul endroit**
+  (`src/lib/qualification-signature.js`), et affichée partout où l'acte se lit : sous le texte de la
+  **version publiée** (elle s'imprime avec l'acte, à côté du certificat de transmission), dans la
+  **notice du recueil** (une pastille et la phrase), et dans le **JSON-LD** (`eli:signature_level`,
+  plus la phrase en `dcterms:description`). Quatre cas : signature simple (non qualifiée), signature
+  avancée (et, si le prestataire est simulé, la mention « prestataire simulé »), signature
+  qualifiée, signature externe. Un niveau inconnu — un enregistrement ancien — ne donne **aucune**
+  mention : on ne devine pas la valeur d'une signature qu'on ne sait pas lire.
+- **Le niveau de signature voyage avec la publication** : l'application l'envoie (`niveau`), les
+  deux services le rangent sous `signature.niveau`, et il revient dans la notice comme dans la
+  fiche — y compris pour le recueil d'une page statique, qui le déduit de l'acte quand le service
+  ne répond pas. Les actes déjà publiés gardent leur enregistrement tel quel : aucune reprise.
+
+
+## [1.6.1f] — 2026-09-23 — L'édition statique dit ce qu'elle est, et peut se brancher sur un service
+
+Le recueil publié en démonstration vit dans le navigateur de chaque visiteur : deux collègues qui
+ouvrent la même adresse ne voient pas les mêmes actes. C'est le prix de l'édition « sans serveur »,
+et il n'était dit nulle part — sinon dans le libellé d'un écran d'administration, celui du mode de
+persistance. Le bandeau de tête le dit maintenant, là où tout le monde le lit, et la page peut
+aussi être **reliée à un service** sans rien changer à la façon dont elle est servie.
+
+### Ajouté
+
+- **Relier une page statique à un service partagé.** Poser `window.__SCRIBA_SERVICE_URL__` avant le
+  chargement de `src/pages/host.js` (une ligne dans `index.html`) fait viser à la page l'API d'un
+  service — celui de `src/server/`, ou toute installation qui répond au même contrat. Le stockage
+  local subsiste (réglages, session, file d'attente), les collections passent par le service, et
+  tous les postes voient alors le même référentiel : c'est le partage entre postes, sans héberger
+  l'application. Le service doit autoriser l'origine de la page (`CORS_ORIGINS`). Sans la ligne,
+  rien ne change.
+
+### Modifié
+
+- **Le bandeau de tête dit ce que l'édition statique ne fait pas.** En édition statique (GitHub
+  Pages, ou tout service de fichiers), le bandeau de démonstration — dans l'atelier **et** sur le
+  recueil public — ajoute que la page héberge elle-même son service, que l'état vit dans **votre**
+  navigateur et que **rien n'est partagé entre postes**, en renvoyant au README. Reliée à un
+  service distant, la même place dit l'inverse : les données sont communes à tous les postes qui
+  visent ce service. Le bandeau existe aussi hors démonstration, quand une installation servie en
+  fichiers ne se dit pas « démonstration » mais n'en est pas moins sans partage.
+
+### Corrigé
+
+- **Le test d'arrêt du service embarqué ne bloque plus le service distant.** Quand la page vise un
+  service distant, elle n'installe plus le service embarqué (sinon l'appel partait vers la page
+  au lieu du service) ; le stockage local, lui, reste disponible — exactement comme dans
+  l'édition auto-hébergée.
+- **Un service injoignable ne suspend plus l'application.** Un appel HTTP sans délai attendait
+  indéfiniment un service qui ne répondrait jamais (adresse inconnue, port filtré) : la page
+  restait sur son écran « Chargement… ». Les appels au service de données (`src/lib/db/service.js`)
+  et à l'API (`src/lib/remote.js`) portent désormais un délai de douze secondes ; passé ce délai,
+  le service est déclaré injoignable, l'application s'affiche avec ses données locales et la
+  pastille dit que la base est hors ligne. Cela vaut pour toute installation — auto-hébergée
+  comprise —, pas seulement pour le nouveau branchement.
+
+
+## [1.6.1e] — 2026-09-23 — Le dépôt dit son état en tête
+
+Une audition de ce dépôt (forum, évaluation, service informatique qui hésite) pose toujours les
+mêmes questions avant de lire une ligne de code : quelle version, est-ce que ça marche, qu'est-ce
+qui est montré en ligne, et qu'est-ce que l'audit en dit ? Répondre demande aujourd'hui de croiser
+le changelog, le registre et la démonstration. Le README du dépôt s'ouvre désormais sur un
+**tableau d'état** : version courante, voyant de la chaîne d'intégration, nature de la
+démonstration publiée (statique, propre à chaque navigateur), absence d'instance partagée publique,
+et le compte de l'audit (5 non-conformités ouvertes, 8 en cours, 23 levées, sur 3 campagnes). Le
+tableau renvoie au registre pour le détail, et rappelle qu'un voyant rouge sur la chaîne veut dire
+« ne pas livrer ».
+
+### Ajouté
+
+- **Un tableau d'état en tête du README du dépôt** (le fichier `README.md` livré, tenu ici dans
+  `src/docs/GITHUB.md`) : version, état de la chaîne (voyant), état des deux démonstrations, compte
+  et statut de l'audit. Un lecteur pressé sait en dix secondes où en est le logiciel, et où lire la
+  suite.
+
+
+## [1.6.1d] — 2026-09-23 — Le recueil ne reprend plus la main, et sa rubrique Informations ne s'efface plus
+
+Deux défauts constatés sur la démonstration publiée, et qui n'en font qu'un : l'écran public se
+croyait partout chez lui.
+
+**Le recueil se redessinait par-dessus l'écran où l'on était.** Une lecture lancée à l'affichage de
+la page publique peut aboutir après qu'on l'a quittée — pour l'atelier, par exemple. Le recueil
+réécrivait alors tout le contenu de la page : l'atelier (ou l'écran de connexion) disparaissait,
+et l'on « retombait » sur le recueil sans avoir rien demandé. C'est la **route** qui dit ce qui est
+affiché : le recueil ne se redessine plus que si c'est lui. Le repli sur la page publique — une
+adresse illisible y ramène (1.5.3) — reste évidemment en place.
+
+**La rubrique « Informations » disparaissait définitivement.** Le dépôt de démonstration
+invalide les billets que le recueil avait lus (le service ne les connaissait pas encore) : la
+liste était oubliée, mais **rien ne relançait la lecture**, et la rubrique ne revenait plus
+jamais — ni sur la page d'accueil, ni par son lien du pied de page. Un redessin **réarme**
+désormais les lectures du recueil : elles sont idempotentes (chacune sort d'elle-même quand la
+donnée est là, ou qu'une lecture est en vol), et l'écran public se répare donc quel que soit
+l'ordre des événements.
+
+### Corrigé
+
+- **Le recueil ne s'affiche plus par-dessus l'atelier.** Une lecture qui aboutit après coup ne
+  réécrit plus la page si l'écran public n'est plus celui qui est affiché. Le recul était visible
+  en démonstration : on ouvrait l'atelier et l'on retombait sur le recueil.
+- **La rubrique « Informations » ne peut plus rester perdue.** Invalider ne suffisait pas :
+  le redessin relance les trois lectures du recueil (les actes publiés, les informations, le
+  bulletin). C'est ce qui fait revenir la rubrique — et son lien du pied de page — après le dépôt
+  des billets, au lieu d'attendre un rechargement de la page.
+- **Une réponse ancienne n'écrase plus une réponse récente** pour les informations : chaque
+  lecture porte son rang, et seule la plus récente écrit. C'était le cas quand l'état était
+  invalidé pendant qu'une lecture était encore en vol.
+- **L'écran public se redessine depuis l'atelier.** `redrawView` ne s'adressait qu'à l'atelier (il
+  ne fait rien quand l'écran public est affiché) : l'application enregistre maintenant le redessin
+  du recueil tant que c'est lui qui est à l'écran. Une invalidation venue d'un geste
+  d'administration — le dépôt de démonstration, un réglage du bulletin — l'atteint donc, au lieu
+  de rester sans effet jusqu'au prochain chargement de la page.
+
+
+## [1.6.1c] — 2026-09-23 — La chaîne redevient verte, et la démonstration cesse d'être indexée
+
+Cette note applique le **plan d'action** de l'audit du 2026-09-23. Rien de nouveau à l'écran : ce qui
+devait tenir se remet à tenir, et deux choses se voient de l'extérieur — une fiche fictive ne peut plus
+se retrouver dans un moteur de recherche, et un lecteur d'écran retrouve la navigation de l'atelier.
+
+**Le contrôle automatique contrôlait mal.** Le contrôle de style cherchait le code à analyser au mauvais
+endroit : dans le dépôt livré, il ne reconnaissait plus ses propres exemptions, comptait trois de ses
+propres commentaires comme des erreurs et **sortait en échec**. La chaîne d'intégration était donc
+**rouge à chaque envoi** — et un voyant rouge permanent ne se distingue plus d'une panne réelle. Il
+analyse désormais le dossier **parent** de l'outillage (le code du projet, dans la copie de travail comme
+dans le dépôt livré) et rend des chemins toujours relatifs, sans préfixe `./`. Une **épreuve de
+non-régression** lance le contrôle tel qu'il est livré : une faute de chemin ne se voit pas dans le code,
+elle se voit à l'exécution.
+
+**Cinq épreuves du domaine de la signature accusaient le code à tort.** Le gestionnaire qui ouvre un
+circuit de signature est **asynchrone** — il interroge le prestataire —, donc sa réponse est une
+promesse ; les épreuves la lisaient sans l'attendre et échouaient sur un `TypeError`, sans rien dire du
+code éprouvé. Elles l'attendent maintenant, comme le fait le serveur HTTP. `docs/INDUSTRIALISATION.md`
+le dit noir sur blanc : une promesse ne se lit pas comme une réponse.
+
+### Ajouté
+
+- **Le verrou des dépendances du service** (`src/server/mysql/package-lock.json`) : les douze paquets
+  dont dépend `mysql2` sont épinglés — version, adresse de retrait, **empreinte SHA-512**, chaque
+  empreinte étant vérifiée contre l'archive réellement retirée du registre. La chaîne d'intégration et
+  les `Dockerfile` installent désormais par **`npm ci`** : deux constructions successives donnent le même
+  arbre, et une dépendance compromise ne peut plus se glisser sous une plage de versions.
+- **Une épreuve de non-régression de l'outillage** (`src/tests/industrialisation.test.mjs`) : elle
+  exécute le contrôle de style sur l'arborescence livrée, exige le code de sortie 0 — mode ordinaire et
+  mode strict — et vérifie que le parcours a bien **vu** tout le code (un parcours qui ne trouve rien
+  sortirait, lui aussi, en 0).
+- **Une section « Audit » au README du dépôt**, qui renvoie à la **synthèse** et au **plan d'action** du
+  rapport le plus récent plutôt qu'aux fiches : une non-conformité lue hors de son statut se cite à
+  contresens.
+
+### Modifié
+
+- **La démonstration publiée n'est plus indexée.** Le logiciel pose `noindex, nofollow` depuis
+  **le seul domaine de la démonstration du projet** (`demo.scribae.eu`, l'adresse du `CNAME`) : ses
+  arrêtés sont fictifs, et une fiche fictive lue dans un moteur de recherche se prendrait pour un acte
+  réel. Une **instance auto-hébergée**, ou un fork sous son propre nom, reste indexable — son recueil
+  ouvert est fait pour être trouvé. Un `robots.txt` à la racine a été écarté : il serait hérité par
+  chaque fork, alors qu'il appartient au déploiement.
+- **Le registre d'audit et ses trois rapports** s'ouvrent sur un chapeau « **document de travail** »
+  (non-conformités encore ouvertes, statuts qui évoluent, fiches qui ne se lisent qu'avec leur statut et
+  leur preuve).
+- **La synthèse du registre est recalculée** sur les fiches : 36 non-conformités, **5 ouvertes, 8 en
+  cours, 23 levées**.
+
+### Corrigé
+
+- **La navigation de l'atelier retrouve son repère** : son `nav` porte
+  `aria-label="Navigation principale de l'atelier"`. Il l'avait perdu — régression relevée par
+  l'audit —, ce qui privait les lecteurs d'écran de la zone de liens principale. Le recueil public,
+  lui, n'avait pas bougé (« Navigation principale du recueil », « Pages du site »).
+- **Les exemptions du contrôle de style s'appliquent de nouveau** dans le dépôt livré : le code du
+  service n'est plus signalé pour ses `console.log` — il journalise **pour l'exploitant**, c'est son
+  métier — et le démarrage en ES5 volontaire (`host.js`) n'est plus compté comme un reliquat.
+
+
 ## [1.6.1b] — 2026-09-23 — La démonstration a son adresse, et l'éditeur sa mention
 
 Deux choses au même moment : la démonstration publiée passe sous son **propre nom de domaine**, et

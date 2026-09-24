@@ -2,7 +2,7 @@
 
 Scribae expose tout ce qu'il sait faire par une API REST en JSON. C'est elle que le navigateur interroge quand vous travaillez, c'est elle qu'un script d'import, un logiciel de gestion documentaire ou un tableur peuvent interroger à leur tour, et c'est elle qu'il faut connaître pour brancher un prestataire de signature électronique.
 
-Cette référence est **engendrée depuis le code** (`src/lib/api-reference.js`, par `node src/scripts/generer-api.mjs`) : elle décrit exactement la surface que le service répond, ni plus ni moins. Le même document alimente l'écran « API REST » de l'application, où un panneau de commande permet d'envoyer une requête et de lire la réponse sans quitter la page.
+Cette référence est **engendrée depuis le code** (`src/lib/api-reference.js`, par `node scripts/generer-api.mjs`) : elle décrit exactement la surface que le service répond, ni plus ni moins. Le même document alimente l'écran « API REST » de l'application, où un panneau de commande permet d'envoyer une requête et de lire la réponse sans quitter la page.
 
 ## Deux familles, une même porte
 
@@ -76,7 +76,7 @@ curl -X GET 'https://api.exemple.fr/v1/' \
 
 ### `GET /v1/config` — Réglages de référentiel et état du prestataire
 
-Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.
+Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.
 
 - **Authentification** : publique
 - **Service** : auto-hébergé
@@ -258,7 +258,7 @@ Le mode d'authentification, l'ouverture de session, les mots de passe locaux.
 
 ### `GET /v1/auth/config` — Mode d'authentification du service
 
-Le mode du déploiement (`AUTH_MODE` : demo, password, oidc), si les comptes locaux sont ouverts (`comptesLocaux`), si les données se lisent par une session (`session`), le commutateur de démonstration, et l'état du déploiement (base joignable, compte d'administration amorcé). En mode « demo » seulement, la liste des comptes de démonstration. Aucun secret.
+Le mode du déploiement (`AUTH_MODE` : demo, password, oidc), si les comptes locaux sont ouverts (`comptesLocaux`), si les données se lisent par une session (`session`), le commutateur de démonstration, et l'état du déploiement (base joignable, compte d'administration amorcé). Porte aussi les RÉGLAGES DE L'ANNUAIRE de la collectivité (`annuaire` : fournisseur, portées, correspondance des groupes, seconde porte, points de terminaison) : le service les relit du référentiel et applique par-dessus les variables `SCRIBA_ANNUAIRE_*` du `.env`. C'est nécessaire parce qu'en mode « comptes locaux » le référentiel n'est lisible qu'avec une session, et l'écran de connexion vient avant. En mode « demo » seulement, la liste des comptes de démonstration. Aucun secret.
 
 - **Authentification** : publique
 - **Service** : auto-hébergé
@@ -272,12 +272,14 @@ curl -X GET 'https://api.exemple.fr/v1/auth/config' \
 
 | Code | Signification |
 |---|---|
-| 200 | Mode, état, comptes de démonstration éventuels |
+| 200 | Mode, état, réglages de l'annuaire, comptes de démonstration éventuels |
 
 | Champ | Type | Description |
 |---|---|---|
 | auth | string | demo \| password \| oidc |
 | comptesLocaux | booléen | La connexion identifiant + mot de passe est-elle ouverte ? |
+| annuaire | objet\|null | Réglages publics de l'annuaire (liste blanche, jamais de secret) |
+| annuaireService | booléen\|null | Le service sait-il ouvrir une session d'annuaire ? (vrai = c'est lui le client OIDC : la seconde porte est proposée même quand les données se lisent par une session) |
 | adminAmorce | booléen\|null | Le compte d'administration du .env peut-il se connecter ? |
 
 ### `POST /v1/auth/connexion` — Ouvrir une session
@@ -310,6 +312,83 @@ curl -X POST 'https://api.exemple.fr/v1/auth/connexion' \
 | 200 | Session ouverte |
 | 401 | Identifiants invalides |
 | 429 | Compte bloqué quelques instants |
+
+### `POST /v1/auth/annuaire` — Ouvrir une session par l'annuaire de la collectivité
+
+C'est le SERVICE qui est le client OIDC : il découvre le fournisseur, échange le code d'autorisation (avec le vérificateur PKCE que le navigateur a gardé), vérifie le jeton d'identité (signature par le JWKS du fournisseur, émetteur, audience, validité, nonce), en tire le compte (groupes → rôle, services et entité), l'écrit au référentiel, puis ouvre SA session — les mêmes cookies que la connexion par mot de passe. Aucun appel ne part du navigateur vers le fournisseur : le fournisseur n'a donc pas besoin d'autoriser le CORS (c'est ce qui fait fonctionner un annuaire qui ne l'ouvre pas), et l'agent lit les actes comme tout le monde.
+
+- **Authentification** : publique
+- **Service** : auto-hébergé
+
+**Corps de la requête**
+
+```json
+{
+  "code": "…",
+  "verifier": "…",
+  "redirectUri": "https://actes.maville.fr/",
+  "nonce": "…"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/auth/annuaire' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"code":"…","verifier":"…","redirectUri":"https://actes.maville.fr/","nonce":"…"}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Session ouverte ; `checks` dit ce qui a été vérifié, `created`/`linked` si le compte a été créé ou repris |
+| 401 | Code invalide, échange refusé, ou fournisseur injoignable |
+| 403 | Jeton refusé, ou compte inconnu et création automatique éteinte |
+| 404 | Aucun annuaire branché sur ce service |
+| 503 | Le service n'a pas le moyen d'appeler un fournisseur |
+
+| Champ | Type | Description |
+|---|---|---|
+| code | string | Le code d'autorisation reçu du fournisseur |
+| verifier | string | Le vérificateur PKCE (code_verifier), détenu par le navigateur |
+| redirectUri | string | La même adresse de retour que celle de la demande d'autorisation |
+| nonce | string | Le nonce de la demande, que le jeton doit porter |
+
+### `POST /v1/auth/annuaire/decouverte` — Éprouver l'annuaire (bouton « Découverte »)
+
+Le SERVICE lit `/.well-known/openid-configuration` chez le fournisseur et rend les points de terminaison. C'est le bouton « Vérifier la découverte du fournisseur » de l'administration : l'appel partant du service et non du navigateur, un annuaire sans en-têtes CORS se branche comme les autres. Un administrateur (session) peut faire éprouver l'adresse qu'il vient de saisir (`issuer`) et des points de terminaison à la main (`endpoints`) ; tout autre appelant n'obtient que ce que le service a déjà enregistré.
+
+- **Authentification** : publique
+- **Service** : auto-hébergé
+
+**Corps de la requête**
+
+```json
+{
+  "issuer": "https://annuaire.maville.fr/realms/agents",
+  "endpoints": {
+    "authorization": "https://…/auth",
+    "token": "https://…/token"
+  }
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/auth/annuaire/decouverte' \
+  -H 'accept: application/json' \
+  -H 'content-type: application/json' \
+  -d '{"issuer":"https://annuaire.maville.fr/realms/agents","endpoints":{"authorization":"https://…/auth","token":"https://…/token"}}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Les points de terminaison retenus, et leur source (découverte ou manuel) |
+| 404 | Aucun annuaire branché sur ce service |
+| 502 | Découverte impossible (fournisseur injoignable, document incomplet) |
+| 503 | Le service n'a pas le moyen d'appeler un fournisseur |
 
 ### `GET /v1/auth/session` — Session courante
 
@@ -1766,6 +1845,8 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/journal` | administrateur | Journal d'audit du service |
 | GET | `/v1/auth/config` | public | Mode d'authentification du service |
 | POST | `/v1/auth/connexion` | public | Ouvrir une session |
+| POST | `/v1/auth/annuaire` | public | Ouvrir une session par l'annuaire de la collectivité |
+| POST | `/v1/auth/annuaire/decouverte` | public | Éprouver l'annuaire (bouton « Découverte ») |
 | GET | `/v1/auth/session` | public | Session courante |
 | POST | `/v1/auth/deconnexion` | public | Fermer la session |
 | POST | `/v1/auth/mot-de-passe` | public | Changer son mot de passe |
@@ -1820,4 +1901,4 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 
 ---
 
-Document engendré par `node src/scripts/generer-api.mjs` depuis `src/lib/api-reference.js`. Ne pas modifier à la main : corriger la description, puis régénérer.
+Document engendré par `node scripts/generer-api.mjs` depuis `src/lib/api-reference.js`. Ne pas modifier à la main : corriger la description, puis régénérer.

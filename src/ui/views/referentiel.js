@@ -1,8 +1,8 @@
 import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, oublierBulletinsRecueil } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
-import { download, pickFile, uid, formatDate, todayIso, copyText } from "../../lib/util.js";
+import { download, pickFile, uid, todayIso, copyText } from "../../lib/util.js";
 import * as cles from "../../lib/cles-service.js";
-import { textField, selectField, choiceField, fontField, confirmDialog, promptDialog, sectionHeader, helpLink } from "../components.js";
+import { textField, selectField, choiceField, fontField, confirmDialog, sectionHeader, helpLink } from "../components.js";
 import { clearAll, saveConfig } from "../../lib/store.js";
 import * as db from "../../lib/db/index.js";
 import { seedConfig, seedTrames } from "../../lib/seed.js";
@@ -21,12 +21,12 @@ import { VARIABLES_CSS, EXEMPLE_CSS, PORTEE_CSS } from "../../lib/informations.j
 import { TYPES_RECUEIL_EXTERNE, newRecueilExterne, RENVOIS_RECOMMANDES, MENTIONS_PUBLIQUES, MENTIONS_DEFAUT, mentionsParDefaut } from "../../lib/recueil.js";
 import { LICENCE_DEFAUT } from "../../lib/recueil.js";
 import {
-  CADENCES_BULLETIN, UNITES_BULLETIN, bulletinReglages, normaliserCadence, libelleCadence,
+  CADENCES_BULLETIN, UNITES_BULLETIN, bulletinReglages, libelleCadence,
   adresseBulletins, adresseFluxBulletin,
 } from "../../lib/bulletins.js";
 import * as bs from "../../lib/bulletins-service.js";
 import {
-  signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, MODES_TRAME, trameModeLabel,
+  signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, trameModeLabel,
   circuitPour, circuitsDisponibles, modeLabel,
   circuitElectroniqueSimule, motifCircuitSimule, prestataireDuService,
 } from "../../lib/externe.js";
@@ -36,7 +36,7 @@ import { DEMO_TEXT } from "../notice.js";
 import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
 import { optionsDeployees, poseParLeDeploiement } from "../../lib/deploiement-config.js";
 import { post, errorMessage } from "../../lib/remote.js";
-import { modeDeploiement, comptesDuDeploiement, sessionDeService } from "../../lib/auth.js";
+import { comptesDuDeploiement, sessionDeService } from "../../lib/auth.js";
 import { cleService } from "../../lib/cle-service.js";
 import { annuairePanel } from "../oidc.js";
 import {
@@ -493,7 +493,7 @@ export function renderReferentiel(root) {
         : null,
       h("hr", { class: "fr-sep" }),
       h("p", { class: "fr-small fr-muted", text: "Les comptes et leurs rôles se gèrent dans « Comptes et rôles »." }),
-      h("p", { class: "fr-small fr-muted", text: "Le mode de connexion — comptes de l'application, ou annuaire de la collectivité (OIDC) — se règle dans l'onglet « Annuaire (OIDC) ». Brancher l'annuaire désactive automatiquement les comptes de démonstration. Le mode « comptes locaux » (identifiant et mot de passe) est, lui, un réglage du déploiement (`AUTH_MODE=password` dans le `.env` du service), et prime sur le référentiel." }),
+      h("p", { class: "fr-small fr-muted", text: "Le mode de connexion — comptes de l'application, ou annuaire de la collectivité (OIDC) — se règle dans l'onglet « Annuaire (OIDC) », où l'annuaire peut aussi être proposé en SECONDE PORTE à côté de la porte ordinaire. Brancher l'annuaire désactive automatiquement les comptes de démonstration. Le mode « comptes locaux » (identifiant et mot de passe) est, lui, un réglage du déploiement (`AUTH_MODE=password` dans le `.env` du service), et prime sur le référentiel ; le reste de l'annuaire se pose par les variables `SCRIBA_ANNUAIRE_*` du même fichier." }),
       h("p", { class: "fr-small fr-muted", text: "Le rangement des données — stockage de ce navigateur, service partagé, ou base MySQL / MariaDB de la collectivité — se règle dans l'onglet « Base de données »." }),
       h("div", { class: "fr-row" },
         button("Comptes et rôles", { variant: "secondary", icon: "lock", onClick: () => navigate("comptes") }),
@@ -2342,6 +2342,29 @@ function apparencePubliqueBloc(save, redraw) {
   }
   bloc.appendChild(h("hr", { class: "fr-sep" }));
   bloc.appendChild(bInfos);
+
+  // ------------------------------------- les chats des pages d'erreur
+  // Une option de CONfort, éteinte par défaut : elle illustre les pages
+  // d'erreur — celles de l'atelier comme celles du recueil public — d'une
+  // photographie de http.cat. Le libellé dit franchement le transfert : afficher
+  // l'image, c'est demander à un site tiers, depuis le navigateur du visiteur.
+  // Voir src/server/mysql/chats-erreur.mjs (la règle) et src/ui/chats-erreur.js
+  // (le rendu côté atelier).
+  const bChats = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+  bChats.appendChild(h("div", { class: "fr-row" },
+    h("strong", { class: "fr-small", text: "Pages d'erreur" }),
+    h("div", { class: "fr-spacer" }),
+    button("Voir http.cat", { variant: "tertiary", size: "sm", icon: "globe", onClick: () => window.open("https://http.cat", "_blank", "noopener") })));
+  bChats.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 10px" }, text: "Une page d'erreur — « acte introuvable », atelier fermé depuis cette adresse, panne d'affichage — peut être illustrée d'une photographie de chat, choisie selon le code de l'erreur. C'est un ornement : ce que la page doit dire, elle le dit de toute façon." }));
+  bChats.appendChild(choiceField({
+    label: "Illustrer les pages d'erreur d'un chat (http.cat)",
+    value: p.chatsErreur === true,
+    options: [{ value: true, label: "Affichés" }, { value: false, label: "Éteints" }],
+    help: "Éteints (le défaut), les pages d'erreur restent sobres. Affichés, elles demandent une image au service public http.cat : le navigateur du visiteur ouvre alors une connexion vers ce site, qui voit son adresse IP et la page d'où il vient. À n'allumer qu'en connaissance de cause.",
+    onChange: (v) => { p.chatsErreur = v === true; save(); redraw(); },
+  }));
+  bloc.appendChild(h("hr", { class: "fr-sep" }));
+  bloc.appendChild(bChats);
   return bloc;
 }
 

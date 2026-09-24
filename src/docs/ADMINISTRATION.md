@@ -122,7 +122,8 @@ Un seul processus HTTP, deux familles de ressources :
 | **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/publications…`, `/v1/eli/…`, `/v1/health`, `GET /v1/` (OpenAPI) | table `sb_etat` |
 | **Public** | `/v1/config`, `/v1/health`, `/v1/db/health`, `/v1/atelier/acces`, `/v1/informations` | ces routes sont servies **sans session** (hors de la porte de l'atelier) ; `/v1/informations` lit la collection `informations` dans `sb_record` |
 
-Il n'ouvre **aucune connexion sortante** : il ne parle qu'à la base.
+Il n'ouvre **aucune connexion sortante** : il ne parle qu'à son **rangement** — la base MariaDB,
+ou le dossier de données en mode « fichiers » (§ 2.4).
 
 ### 2.3 La base (MariaDB / MySQL)
 
@@ -140,6 +141,62 @@ Quatre tables et trois vues, toutes en `utf8mb4` / InnoDB :
 les clés, ce qui ferait croire à l'application que le document a changé à chaque
 aller-retour. Les colonnes indexées sont recopiées par le service à chaque écriture — elles
 ne sont jamais saisies à la main.
+
+### 2.4 Le rangement : MariaDB, ou un dossier de fichiers
+
+Le service ne connaît pas ses données par MariaDB : il les connaît par un **magasin** — un
+**contrat** unique, que deux implémentations remplissent (`src/server/mysql/magasin.mjs`,
+`magasin-mysql.mjs`, `magasin-fichier.mjs`). Le choix se pose dans le `.env` :
+
+```
+STOCKAGE=mysql      # le défaut : tout dans MariaDB (une base partagée, répliquée, sauvegardée)
+STOCKAGE=fichier    # tout dans un DOSSIER — DATA_DIR, « ./data » par défaut
+DATA_DIR=./data     # le dossier du rangement par fichiers
+```
+
+Les deux rangements rendent **exactement le même service** : mêmes collections, mêmes
+révisions, mêmes conflits de synchronisation, même journal technique, même recherche de
+compte. L'application ne peut pas les distinguer — c'est délibéré, et c'est ce qui garantit
+qu'un changement de rangement ne change rien aux données ni aux écrans.
+
+**Pourquoi un rangement par fichiers ?** Une collectivité peut vouloir un service d'actes sans
+administrer de serveur de base de données : un poste, une petite mairie, une machine où l'on
+ne veut qu'un seul logiciel. Le volume d'un service d'actes tient dans quelques mégaoctets, et
+une sauvegarde par simple **copie de dossier** vaut alors mieux qu'un `mysqldump` que personne
+ne pense à lancer.
+
+**Ce que le dossier contient**, en clair :
+
+| Fichier | Contenu |
+|---|---|
+| `etat.json` | l'état de signature et de publication (un document JSON) |
+| `collections/<nom>.json` | une collection : `{ revision, records }` (référentiel, trames, actes, comptes) |
+| `journal.jsonl` | le journal technique — une ligne JSON par geste |
+| `courriel.jsonl` | la trace des courriels expédiés (ou non) |
+| `secrets/mots-de-passe.json` | les **empreintes** de mots de passe (jamais les mots de passe) |
+| `secrets/sessions.json` | les sessions ouvertes (rangées par l'empreinte de leur jeton) |
+| `STOCKAGE.json` | la version du rangement (pour les migrations futures) |
+| `LISEZ-MOI.txt` | ce que ce dossier contient, et comment le sauvegarder |
+
+Tout y est **lisible tel quel** — c'est le principe, et c'est aussi ce qui commande la
+prudence : ce dossier contient les actes et le référentiel en clair. Il se protège par les
+droits du système de fichiers, se sauvegarde en le copiant, et **n'a rien à faire dans un
+dépôt git** (voir le `.gitignore` livré).
+
+**Les limites, dites franchement.** Le rangement par fichiers suppose **UN service sur UNE
+machine** : deux processus ne doivent pas écrire dans le même dossier (les écritures y sont
+sérialisées dans le processus, pas entre processus). Les commandes de ligne de commande
+(`node server.mjs --mot-de-passe`, `--reconcilier`) écrivent, elles, dans leur propre
+processus : on ne les lance donc **pas pendant que le service tourne** — on arrête le service,
+on lance la commande, on le redémarre. C'est la seule contrainte d'exploitation du mode
+fichiers. Le dossier doit être accessible **en écriture** par le compte du service ; sinon le
+service refuse de démarrer et le dit (il donne la marche à suivre dans son journal et sur son
+écran de santé).
+
+**Passer d'un rangement à l'autre.** Il n'y a pas de migration automatique : on **exporte** et
+on **importe**. L'application sait exporter l'intégralité de son contenu (Administration ›
+Données), et le remettre dans une installation neuve. C'est le chemin recommandé — il vaut
+mieux qu'une copie de fichiers entre deux formats qui n'ont pas la même forme.
 
 ---
 
@@ -311,6 +368,54 @@ le **déploiement** qui décide, et non le navigateur. Pour la refermer tout à 
 service ne détienne **aucun** compte local — ne pas créer de compte d'administration (`ADMIN_PASSWORD`
 vide) et n'attribuer de mot de passe à personne : la porte disparaît alors, avec ce qu'elle protège.
 
+**L'annuaire en SECONDE PORTE.** L'annuaire n'est pas forcément la porte ordinaire : il peut être
+proposé **à côté** d'elle, que la porte ordinaire soit un compte local (mode `password`) ou les
+comptes de l'application (mode `demo`). C'est la case *« Proposer AUSSI la connexion par l'annuaire
+de la collectivité »* de l'onglet **Annuaire (OIDC)**, ou `SCRIBA_ANNUAIRE_SECONDE_PORTE=true` dans
+le `.env` ; l'écran de connexion propose alors les deux, la porte ordinaire d'abord. Une case
+cochée sans fournisseur (ni adresse d'émetteur, ni identifiant de client) n'ouvre rien : un
+déploiement ne doit pas offrir des identités fictives pour avoir coché une case.
+
+**Où se règlent les réglages de l'annuaire.** Partout, et les deux sources se composent :
+
+| Source | Ce qu'elle porte | Quand elle est indispensable |
+|---|---|---|
+| **Administration › Annuaire (OIDC)** (référentiel, `config.auth`) | tout : fournisseur, portées, adresse de retour, correspondance des groupes, politique des agents sans groupe, périmètre, porte de secours, seconde porte | quand un administrateur règle l'annuaire à la main |
+| **`.env` du service** (`SCRIBA_ANNUAIRE_*`, 22 variables) | les mêmes réglages, en déclaratif — le déploiement l'emporte sur le référentiel | pour poser un parc entier d'un coup, **et pour tout brancher en mode « comptes locaux »** (voir ci-dessous) |
+
+**Pourquoi le `.env` compte particulièrement en mode « comptes locaux ».** Dans ce mode, le
+référentiel n'est lisible **qu'avec une session** — et l'écran de connexion vient avant. Les
+réglages enregistrés dans l'onglet seraient donc invisibles à l'écran qui doit proposer
+l'annuaire. Le service y remédie : il relit lui-même les réglages du référentiel, y applique les
+variables `SCRIBA_ANNUAIRE_*`, et les **publie** dans `GET /v1/auth/config` (champ `annuaire`,
+route publique, **liste blanche** : aucun secret n'en sort — l'application est un client OIDC
+public).
+
+**Qui fait la connexion : le SERVICE (depuis 1.6.1p).** Le service est le **client OIDC**. Il
+découvre le fournisseur, échange le code d'autorisation (avec le vérificateur PKCE que le navigateur
+a gardé le temps de l'aller-retour), vérifie le jeton d'identité — signature comprise (JWKS,
+RS/PS/ES), émetteur, audience, validité, nonce —, en tire le compte (groupes → rôle, services et
+entité), l'écrit au référentiel, puis ouvre **sa** session : les mêmes cookies que la connexion par
+mot de passe. Le navigateur ne fait plus que ce qu'il est seul à pouvoir faire : rediriger, garder
+`state`, `nonce` et vérificateur, et confronter le `state` au retour.
+
+Deux conséquences pour l'exploitant :
+
+* **Le fournisseur n'a pas besoin d'ouvrir le CORS.** Aucun appel ne part du navigateur : c'est ce
+  qui fait fonctionner un annuaire d'administration (Keycloak, LemonLDAP::NG, ADFS…) qui refuse les
+  appels d'une autre origine — le cas le plus fréquent, et la cause du « Découverte impossible
+  (Failed to fetch) » que l'onglet affichait auparavant.
+* **La seconde porte ouvre les données.** Un agent entré par l'annuaire obtient une session du
+  service : il lit les actes comme tout le monde, y compris sur un service réglé sur ses propres
+  sessions (`AUTH_MODE=password`). Le service publie ce qu'il sait faire dans
+  `GET /v1/auth/config` (champ `annuaireService`) : tant qu'il répond `false` (service antérieur à
+  1.6.1p), la seconde porte n'est **pas proposée** et l'onglet dit quoi corriger. Elle s'emploie
+  alors là où le service de données est protégé **en amont** (SSO placé devant l'application, ou
+  service réglé en mode à jeton).
+
+Ce que le navigateur ne voit jamais : le jeton d'accès et le jeton d'identité, qui ne quittent pas
+le service.
+
 ### 4.3 bis Comptes locaux (mot de passe) — sans annuaire
 
 C'est le mode des collectivités qui n'ont pas d'annuaire à brancher, ou qui n'en veulent pas : une
@@ -470,8 +575,15 @@ n'existe plus (mot de passe lu sur l'entrée standard). Pour supprimer un compte
 
 ### 4.4 Brancher l'annuaire (OpenID Connect)
 
-Tout se règle dans **Administration › Annuaire (OIDC)**, sans redéploiement. Aucun secret n'est
-nécessaire : l'application est un **client public** (PKCE).
+Tout se règle dans **Administration › Annuaire (OIDC)**, **dans tous les modes** — les quatre
+cartes (mode de connexion, fournisseur, rôles et périmètre, porte de secours) y sont toujours
+affichées —, et tout se pose aussi dans le **`.env`** du service par les variables
+`SCRIBA_ANNUAIRE_*` (voir `docs/VARIABLES.md`, groupe « Annuaire (OIDC) ») : c'est ce qu'il faut
+pour équiper un parc entier sans cliquer dans chaque interface, et c'est **la seule façon de faire
+connaître l'annuaire à l'écran de connexion en mode « comptes locaux »**, où le référentiel n'est
+pas encore lisible (le service le publie alors dans `GET /v1/auth/config`). Aucun secret n'est
+nécessaire : l'application est un **client public** (PKCE), il n'y a ni `client_secret`, ni
+certificat à poser.
 
 **Ce qu'il faut demander à l'administrateur de l'annuaire :**
 
@@ -483,11 +595,24 @@ nécessaire : l'application est un **client public** (PKCE).
 | Groupes annoncés | `scribae-administrateurs`, `scribae-editeurs`, `scribae-redacteurs` | *Correspondance des groupes* |
 
 À déclarer chez le fournisseur : **client public** (pas de secret), **flux code d'autorisation
-avec PKCE (S256)**, adresse de retour **à l'identique**, et l'autorisation des appels depuis le
-navigateur (en-têtes CORS sur la découverte, le jeton et les clés). Le bouton **Vérifier la
-découverte du fournisseur** lit `/.well-known/openid-configuration` et affiche ce qui a été
-trouvé ; si le fournisseur ne l'expose pas à l'application, les points de terminaison se
-saisissent à la main (section repliable).
+avec PKCE (S256)**, adresse de retour **à l'identique**, et — c'est tout. Depuis la **1.6.1p**, les
+appels à la découverte, au jeton et aux clés partent du **service**, pas du navigateur : il n'y a
+donc **aucun en-tête CORS à ouvrir** chez le fournisseur (et rien à faire s'il les refuse, ce qui
+est le cas de la plupart des annuaires d'administration). Le bouton **Vérifier la découverte du
+fournisseur** fait lire `/.well-known/openid-configuration` **par le service** et affiche ce qui a
+été trouvé ; si le fournisseur ne l'expose pas, les points de terminaison se saisissent à la main
+(section repliable).
+
+**Deux points à vérifier chez le fournisseur**, qui expliquent presque tous les échecs restants :
+
+- **Le point de terminaison « jeton » doit accepter un client SANS authentification** (client
+  public, `token_endpoint_auth_method: none`). Certains serveurs n'inscrivent que
+  `client_secret_post`, `private_key_jwt` et `client_secret_basic` : il faut alors créer le client
+  comme public, sans secret. Le service, lui, n'envoie que `client_id` + `code_verifier` — il n'a
+  aucun secret à envoyer, et n'en veut pas.
+- **L'adresse de l'émetteur doit être celle des jetons**, revendication `iss` comprise : même
+  schéma, même hôte, même port (la barre finale, elle, est tolérée). Un `https` là où le
+  fournisseur annonce `http`, ou un autre port, fait refuser le jeton au contrôle « Émetteur ».
 
 **Mise en service, dans l'ordre :**
 
@@ -613,6 +738,8 @@ Les plus importantes :
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | écoute du service |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SOCKET` | — | accès à la base. Le compte applicatif est **aligné sur `DB_PASSWORD`** à chaque démarrage par le service `db-init`, qui **applique ensuite le schéma** avec ce compte |
 | `DB_POOL` | `8` | connexions simultanées |
+| `STOCKAGE` | `mysql` | `mysql` (tout dans la base) ou `fichier` (tout dans un **dossier**). Voir § 2.4 |
+| `DATA_DIR` | `./data` | le dossier du rangement par **fichiers** (`STOCKAGE=fichier`) : créé au démarrage s'il manque, et à sauvegarder en le copiant |
 | `API_TOKENS` | — | jetons d'écriture, en `libellé:empreinte_sha256` |
 | `CORS_ORIGINS` | *aucune* | origines autorisées à appeler l'API, séparées par des virgules. **Vide = aucune** (une API de service public n'a pas à être appelable en lecture de cookies depuis n'importe quel site). À renseigner seulement si l'application est servie par une **autre origine** que le service : `CORS_ORIGINS=https://actes.exemple.fr`. `*` reste possible, mais il ne transporte **aucune session** (la spécification interdit `access-control-allow-credentials` avec `*`) : il ne convient qu'à un accès sans cookie |
 | `MAX_BODY` | `8388608` | taille maximale d'une requête (8 Mio) |
@@ -786,8 +913,10 @@ référentiel, comme le reste) :
   ajoute, les ordonne et les retire ; un bouton **« Rétablir les renvois livrés »** fait revenir
   Légifrance et service-public.gouv.fr. Ils s'affichent **en bas de page** du recueil public et **à la
   fin des résultats de recherche**, sous le titre « Vous ne trouvez pas ce que vous recherchez ? ».
-  Selon la plateforme, ce bloc n'apparaît que dans la vue servie par l'application (démonstration) :
-  le service auto-hébergé, qui rend `/recueil`, ne connaît pas encore ce réglage (voir `TODO.md`).
+  Le service auto-hébergé, qui rend lui-même `/recueil`, ne lit pas le référentiel : ces renvois
+  **voyagent avec chaque publication** (`reglagesDiffusion`), et le recueil les reprend dès la
+  publication suivante. Ils figurent aussi dans les données ouvertes (`recueil.json`) et dans
+  `llms.txt`.
 - **Mentions du recueil public** — les deux mentions que tout site public porte en bas de page. Les
   **mentions légales** rappellent à quelles conditions un acte est **exécutoire et opposable**
   (publication et transmission au représentant de l'État, article L. 2131-1 du CGCT) et le **délai de
@@ -799,8 +928,8 @@ référentiel, comme le reste) :
   légales du site principal de la collectivité, par exemple) ou **rien**. Dans le texte, une **ligne
   vide** sépare deux paragraphes et une ligne commençant par **« - »** devient une puce. Un bouton
   **« Rétablir le texte livré »** ramène la mention livrée avec l'application — elle n'est donc jamais
-  perdue. Comme les renvois, ces mentions ne sont pour l'instant portées que par la vue servie par
-  l'application (voir `TODO.md`).
+  perdue. Comme les renvois, ces mentions **voyagent avec chaque publication** et le service
+  auto-hébergé les rend sur `/recueil`.
 - **Apparence du site public** — la **feuille de style de la collectivité**, écrite dans
   l'administration et injectée dans le site public. Sa portée utile est le conteneur `.recueil` :
   une poignée de variables (couleur d'accent, police, largeur du contenu — la table dépliable les
@@ -812,6 +941,17 @@ référentiel, comme le reste) :
   son **titre** (« Informations », « Actualités », « Communications »…), son **chapeau** et son
   **interrupteur**. Éteinte, la rubrique disparaît du site public et de son pied de page ; les
   billets, eux, restent dans l'atelier et se republient d'un clic.
+- **Pages d'erreur** — l'option *Illustrer les pages d'erreur d'un chat (http.cat)*, **éteinte par
+  défaut**. Allumée, les pages d'erreur — « acte introuvable », « page introuvable », atelier fermé
+  depuis une adresse non autorisée, panne d'affichage — montrent une **photographie de chat**
+  choisie selon le **code** de l'erreur (404, 403, 500, 503…). C'est un ornement : la page dit de
+  toute façon ce qu'elle a à dire. **L'image est demandée à un site tiers**, `http.cat` : en
+  l'affichant, le navigateur du visiteur ouvre une connexion vers ce site, qui voit son **adresse
+  IP** et la page d'où il vient. C'est ce qui justifie qu'elle soit **éteinte par défaut** — ne
+  l'allumez qu'en connaissance de cause. Le réglage suit les publications : le recueil servi par le
+  service l'applique à partir de la **prochaine publication** (comme les renvois et les mentions).
+  La règle du choix de l'image vit dans `server/mysql/chats-erreur.mjs`, partagée par l'application
+  et le service (`src/lib/chats-erreur.js`, `src/ui/chats-erreur.js`).
 - **Accès à l'atelier** — la **liste d'adresses** autorisées à ouvrir l'atelier, et le message
   montré à qui vient d'ailleurs (voir « Restreindre l'atelier à un réseau » ci-dessous).
 
@@ -1478,6 +1618,13 @@ auto-hébergé, le service expose `/robots.txt`, `/llms.txt`, `/sitemap.xml` et 
 acte, sans JavaScript. Tout ce qui est publié est donc **indexable** — ce qui est le but d'un
 recueil, mais qui doit être su avant de publier un acte dont la publicité est restreinte.
 
+**Une seule chose fait sortir le visiteur vers un tiers : l'option « chats des pages d'erreur ».**
+Éteinte par défaut, elle ne demande rien à personne. Allumée (§ 5.5), elle fait charger une image
+de `http.cat` par le **navigateur du visiteur** : ce site tiers voit alors son adresse IP et la page
+d'où il vient. Le service, lui, n'établit toujours aucune connexion sortante — le transfert est
+celui du lecteur. C'est la raison pour laquelle l'option est éteinte par défaut, et pourquoi son
+libellé le dit.
+
 **Ce qui n'est jamais public : la part interne de l'original signé.** Publier un acte ne veut pas
 dire tout publier de sa signature. L'original signé se partage en deux (voir § 6.6) : la part
 **publique** — nom, fonction, date du signataire, empreinte et certificat — part au recueil et
@@ -1719,7 +1866,22 @@ La démonstration sert à essayer, à montrer et à former — jamais à conserv
 
 ## 8. Sauvegardes et restauration
 
-Trois choses à sauvegarder, et une à tester :
+Trois choses à sauvegarder, et une à tester.
+
+**En rangement par FICHIERS** (`STOCKAGE=fichier`, § 2.4), c'est plus simple encore : la
+sauvegarde **est** la copie du dossier `DATA_DIR`. Arrêtez le service (ou copiez pendant une
+accalmie : le dossier n'est jamais laissé dans un état incohérent, chaque écriture étant
+atomique), puis :
+
+```bash
+cp -a ./data ./data-sauvegarde-$(date +%F)
+```
+
+La restauration se fait en sens inverse, **service arrêté** : on remet le dossier à sa place.
+C'est tout — il n'y a ni dump, ni moteur à réinstaller. Le fichier `LISEZ-MOI.txt` déposé dans
+le dossier rappelle cette marche à suivre à qui l'ouvre.
+
+**En rangement MariaDB**, trois choses à sauvegarder :
 
 1. **La base** (référentiel, trames, actes, comptes, journal, état du service) — c'est
    l'essentiel. En mode **comptes locaux**, les tables `sb_motdepasse` (les dérivés) et
@@ -1814,7 +1976,9 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
 | `web` en boucle, `find: /docker-entrypoint.d/40-scriba-web.sh: Permission denied` puis `[emerg] open() "/etc/nginx/conf.d/default.conf" failed (13: Permission denied)` | la machine **refuse au conteneur la lecture des fichiers montés depuis l'hôte** (SELinux, AppArmor, système de fichiers réseau, espace de noms d'utilisateurs) : `stat` lui-même est refusé, `root` dans le conteneur n'y peut rien | depuis la **1.5.3b**, la pile ne monte plus aucun fichier de l'hôte (tout est construit dans l'image) : mettre le dépôt à jour, puis `docker compose build --pull && docker compose up -d`. Sur une version antérieure : `:z` sur les montages de `web`, ou l'**image autonome** (`../docs/DOCKER.md`), qui n'en exige aucun |
 | `Access denied for user 'scriba'@…` après avoir modifié le `.env` | le compte applicatif **en base** porte encore l'ancien mot de passe : MariaDB ne le pose qu'au premier démarrage du dossier de données. La pile le repose elle-même à chaque démarrage (service `db-init`, voir § 7.1 et le § 9 de `../server/README.md`) — si l'erreur dure, `db-init` n'a pas pu le faire : c'est le mot de passe **root** qui a changé, et lui n'est posé qu'à la création | `docker compose logs db-init` (il dit pourquoi), puis `docker compose run --rm db-init` pour réessayer (il repose le compte **et** applique le schéma). Mot de passe root perdu : repartir d'un dossier de données vierge (`docker compose down -v && docker compose up -d`), si les données peuvent être perdues |
 | Plus personne ne peut se connecter après avoir branché l'annuaire | fournisseur injoignable, ou adresse de retour refusée | ouvrir la **porte de secours** de l'écran de connexion (« L'annuaire est injoignable ? ») pour revenir aux comptes de l'application, puis corriger le réglage |
-| « Découverte impossible » dans Administration › Annuaire | découverte bloquée (réseau, CORS) | saisir les points de terminaison à la main, et autoriser l'adresse de l'application chez le fournisseur |
+| « Découverte impossible » dans Administration › Annuaire | depuis la **1.6.1p**, la découverte est faite **par le service** : c'est donc le service qui ne joint pas l'adresse (adresse interne vue du navigateur seulement, DNS, certificat, pare-feu), ou l'adresse qui est erronée — et non plus le CORS du fournisseur. Sur une façade antérieure à la **1.6.1o**, la page blanche ou un message de module `.mjs` peut encore masquer la vraie cause | lire le message : il nomme l'adresse interrogée et la cause (« fetch failed », `HTTP 404`…). Vérifier que le service joint l'adresse (`docker compose exec api wget -qO- <adresse>/.well-known/openid-configuration`), sinon saisir les points de terminaison à la main |
+| « Découverte impossible (Failed to fetch) », et les journaux du fournisseur montrent `Request origin … does not have permission to access the resource` | l'appel part encore du **navigateur** : le service a répondu `200`, c'est le navigateur qui refuse de livrer la réponse. Trois causes, dans l'ordre : le service est **antérieur** à la **1.6.1p** ; ou son `AUTH_MODE` vaut **`demo`** — dans ce mode il n'ouvre aucune session, donc ce n'est pas lui qui peut mener la connexion ; ou le drapeau `annuaireService` ne lui est pas parvenu (défaut de câblage de la 1.6.1p, corrigé depuis : reprendre le zip) | lire `curl -s http://<adresse-de-l-application>/v1/auth/config` : `auth` doit valoir `password` ou `oidc` (**pas** `demo`) et `annuaireService` **`true`**. Corriger `AUTH_MODE` dans le `.env`, puis `docker compose up -d --build` (l'image `api`). À défaut de mise à jour : autoriser l'origine de l'application chez le fournisseur, ou saisir les points de terminaison à la main |
+| La seconde porte n'est pas proposée à l'écran de connexion, alors que la case est cochée | le service sert les données par ses **propres sessions** (mode « comptes locaux ») et ne sait pas encore ouvrir une session à partir de l'annuaire : une session d'annuaire n'y ouvrirait **aucun acte**, et la porte reste donc fermée (l'onglet le dit) | mettre le service à jour (**1.6.1p** : il échange lui-même le code et ouvre sa session — la porte est alors proposée), ou protéger le service de données **en amont** (SSO placé devant l'application) ; § 4.3 |
 | « Jeton d'identité refusé » à la connexion | émetteur, audience, horloge ou signature | lire l'encart de contrôle affiché après une connexion : il nomme le contrôle en échec |
 
 ---
@@ -1823,10 +1987,15 @@ Le dépannage de l'installation (conteneurs, base, jetons, TLS) est dans
 
 - **Authentification** — trois modes : comptes de l'application (simulation, pour la
   démonstration), comptes locaux à mot de passe (§ 4.3 bis, réglé par le `.env` du service), ou
-  annuaire de la collectivité en OpenID Connect (§ 4.4). En mode simulé, l'installation doit être
+  annuaire de la collectivité en OpenID Connect (§ 4.4). Les réglages de l'annuaire sont dans
+  l'interface **et** dans le `.env` (`SCRIBA_ANNUAIRE_*`), et l'annuaire peut être proposé en
+  **seconde porte** à côté de la porte ordinaire. En mode simulé, l'installation doit être
   protégée par le réseau ; en mode annuaire, le jeton d'API du service de données reste à rendre
-  non public. Il reste à faire : réinitialisation du mot de passe par l'agent, second facteur
-  (TOTP), journal des connexions, et purge planifiée des sessions.
+  non public. **Depuis 1.6.1p, le service est le client OIDC** : il échange le code, vérifie le
+  jeton et ouvre sa propre session, si bien que la seconde porte ouvre aussi les données (§ 4.3) et
+  que le fournisseur n'a plus à autoriser le CORS. Il reste à faire : la réinitialisation du mot de
+  passe par l'agent, second facteur (TOTP), journal des connexions, purge planifiée des sessions,
+  déconnexion fédérée (`end_session_endpoint`), rafraîchissement par `refresh_token`, et SAML.
 - **Signature non qualifiée** — prestataire simulé (§ 6.6).
 - **Export PDF/A** — la chaîne est **livrée** (`src/lib/pdfa.js` : PDF/A-2b et PDF/A-1b, polices
   et profil sRGB embarqués, métadonnées, langue, identifiant ELI) ; il reste à en faire valider la

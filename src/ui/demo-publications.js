@@ -28,7 +28,7 @@
 // service injoignable est repris quelques fois de plus (voir `planifierReprise`)
 // avant de laisser le recueil tel quel.
 // ============================================================================
-import { state, touch, actePubliable, oublierBulletinsRecueil, redrawView } from "./state.js";
+import { state, touch, actePubliable, oublierBulletinsRecueil, oublierInformationsRecueil, redrawView } from "./state.js";
 import { demoActif } from "../lib/demo.js";
 import { get, post, beginFlow, bodyOf } from "../lib/remote.js";
 import { publicationSettings } from "../lib/eli.js";
@@ -145,7 +145,13 @@ async function amorcerInformations({ silencieux = true } = {}) {
     const res = await post("/v1/db/collections/informations/sync", { force: true, upserts, deletes }, { token, label: "Dépôt des informations (démonstration)" });
     if (!res.ok) return 0;
     // Le recueil avait pu lire une liste vide : on l'invalide pour qu'il relise.
-    if (state.recueil) state.recueil.infos = null;
+    // Et on le REDESSINE : l'invalidation seule ne suffisait pas — rien ne
+    // relançait la lecture, et la rubrique des informations, oubliée, ne
+    // revenait plus jamais (le dépôt, lui, n'a lieu qu'une fois). Voir
+    // `oublierInformationsRecueil` (src/ui/state.js) et `rafraichir`
+    // (src/ui/views/recueil-public.js), qui réarme les lectures.
+    oublierInformationsRecueil();
+    redrawView();
     return upserts.length;
   } catch (e) {
     if (!silencieux) console.warn("Dépôt des informations (démonstration) :", e);

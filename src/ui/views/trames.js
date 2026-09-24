@@ -2,7 +2,7 @@ import { state, touch, navigate, redrawView, can, visibleTrames, tramesCorbeille
 import { resetDraft } from "./rediger.js";
 import { h, button, toast, clear, icon } from "../dom.js";
 import { newTrame, tramePublishable } from "../../lib/schema.js";
-import { targetLabel, serviceById, servicesInScope, coversAllServices, authorLabel } from "../../lib/scope.js";
+import { targetLabel, servicesInScope, coversAllServices, authorLabel } from "../../lib/scope.js";
 import { download, pickBinaryFile } from "../../lib/util.js";
 import { exampleTrameFile, readTrameFile } from "../../lib/trame-format.js";
 import { importerTrameDocument } from "../import-trame.js";

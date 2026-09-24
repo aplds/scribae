@@ -11,9 +11,25 @@
 --
 -- Toute écriture laisse une trace dans `sb_journal` : c'est le registre des
 -- modifications, consultable en SQL (qui a touché quoi, quand).
+--
+-- VERSIONNAGE : ce fichier est la migration 1 (« socle »), appliquée une fois et
+-- inscrite dans `sb_migrations` par le service (voir migrations.mjs). Pour faire
+-- évoluer une base en service, on AJOUTE une migration — on ne modifie pas ce
+-- fichier : une base qui l'a déjà appliqué ne le rejouerait pas.
 -- ============================================================================
 
 SET NAMES utf8mb4;
+
+-- Le registre des migrations : une ligne par migration appliquée, avec son
+-- empreinte. C'est là que le service lit ce qui a déjà été fait (migrations.mjs),
+-- et ce qui lui permet de signaler une migration modifiée après coup.
+CREATE TABLE IF NOT EXISTS sb_migrations (
+  version      INT UNSIGNED NOT NULL,
+  nom          VARCHAR(191) NOT NULL,
+  checksum     CHAR(64)     NOT NULL,
+  appliquee_le DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Une ligne par collection : le compteur de révision est incrémenté à chaque
 -- écriture. Il sert à dater les changements d'ensemble (synthèses, exports).

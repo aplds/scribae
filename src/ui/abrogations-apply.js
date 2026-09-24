@@ -18,6 +18,15 @@
 // d'application (`appliedAt`) et n'est jamais appliquée deux fois. Elle est
 // silencieuse — on ne prévient personne d'un fait qui découle du texte — mais
 // elle entre au JOURNAL, parce que c'est un fait du dossier.
+//
+// LES ANNEXES. L'abrogation d'un acte emporte ses annexes qui n'ont PAS de
+// publication autonome : elles sont réputées faire partie de la décision qui
+// les adopte, et s'éteignent avec elle, au même jour. Une annexe AUTONOME — un
+// règlement publié pour lui-même — survit au contraire à l'abrogation de sa
+// décision d'adoption : elle ne peut être retirée que par un acte autonome, et
+// l'application le SIGNALE sur l'acte abrogeant, plutôt que de laisser en
+// vigueur un texte auquel plus personne ne pense. La règle vit dans
+// src/lib/abrogation-annexes.js (pure) ; ici, on l'applique.
 // ============================================================================
 import { state, touch, journaliser } from "./state.js";
 import { fullName } from "../lib/users.js";
@@ -26,6 +35,7 @@ import { compile } from "../lib/compile.js";
 import { entreeEnVigueur, aujourdhui } from "../lib/execution.js";
 import { abrogationsDe, designationDe as designationDeActe } from "../lib/abrogations.js";
 import { newAmend, planAmendments, buildConsolidated, articleKey } from "../lib/amend.js";
+import { effetAbrogationSurAnnexes, phraseAnnexeAutonome, phraseAnnexeEmportee } from "../lib/abrogation-annexes.js";
 
 // Le document d'un acte : celui qu'il transporte (acte importé, modificatif,
 // consolidation), ou celui que sa trame compile.
@@ -59,7 +69,7 @@ export async function appliquerAbrogations() {
     if (!date || date > jour) continue;
     for (const abr of list) {
       if (abr.appliedAt) continue;
-      const fait = appliquer(a, abr, date);
+      const fait = await appliquer(a, abr, date);
       abr.appliedAt = new Date().toISOString();
       abr.appliedOn = date;
       if (fait) faits.push(fait);
@@ -78,7 +88,7 @@ export async function appliquerAbrogations() {
 }
 
 // Une entrée d'abrogation, appliquée à l'acte qu'elle vise.
-function appliquer(acte, abr, date) {
+async function appliquer(acte, abr, date) {
   const cible = state.actes.find((x) => x.id === abr.acteId);
   const marque = {
     acteId: acte.id, numero: acte.numero || "", designation: designationDe(acte),
@@ -96,7 +106,43 @@ function appliquer(acte, abr, date) {
   // L'acte entier.
   cible.abrogePar = { ...marque, enAttente: false };
   cible.updatedAt = new Date().toISOString();
+  await emporterAnnexes(acte, cible, marque, date);
   return { acteId: acte.id, label: acte.numero || acte.id, kind: "acte", detail: `abrogation de l'acte ${cible.numero || cible.id} à compter du ${date}` };
+}
+
+// LES ANNEXES DE L'ACTE ABROGÉ. Deux sorts, deux gestes :
+//
+//   • celles qui font partie de la décision mère reçoivent la marque de
+//     l'abrogation (`parAnnexion`), au même jour et par le même acte — sans
+//     clause, puisqu'elles ne sont pas un texte distinct ;
+//   • celles qui sont publiées à part sont LAISSÉES EN VIGUEUR et SIGNALÉES sur
+//     l'acte abrogeant (`annexesAutonomesRestantes`), avec leur identifiant :
+//     c'est ce qui permet de retrouver ce qu'il reste à abroger ou à modifier.
+export async function emporterAnnexes(acteAbrogeant, cible, marque, date) {
+  const { emportees, autonomes } = effetAbrogationSurAnnexes(cible, { actes: state.actes, trames: state.trames });
+  const now = new Date().toISOString();
+  for (const a of emportees) {
+    const annexe = state.actes.find((x) => x.id === a.id);
+    if (!annexe || annexe.abrogePar) continue;
+    annexe.abrogePar = { ...marque, enAttente: false, parAnnexion: true, decisionMere: cible.id };
+    annexe.updatedAt = now;
+    await journaliser({
+      action: "abrogation.annexe_emportee", cible: "acte", cibleLabel: annexe.numero || annexe.id, acteId: annexe.id,
+      detail: phraseAnnexeEmportee(a, cible), to: [],
+    }).catch(() => {});
+  }
+  if (!autonomes.length) return;
+  acteAbrogeant.annexesAutonomesRestantes = autonomes.map((a) => ({
+    acteId: a.id, numero: a.numero, designation: a.designation, eli: a.eli,
+    decisionAbrogee: cible.numero || cible.id, le: date,
+  }));
+  acteAbrogeant.updatedAt = now;
+  for (const a of autonomes) {
+    await journaliser({
+      action: "abrogation.annexe_autonome_a_traiter", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
+      detail: phraseAnnexeAutonome(a), to: [],
+    }).catch(() => {});
+  }
 }
 
 // L'article visé est abrogé par une NOUVELLE VERSION CONSOLIDÉE de l'acte qui

@@ -14,12 +14,14 @@
 // ============================================================================
 import {
   state, touch, navigate, redrawView, can, visibleTrames, visibleActes,
-  journaliser, circuitDe, signalerRedaction, libererRedaction, quiRedige, parapheurActif,
-  revisionPour, revisionRequisePour,
+  journaliser, circuitDe, signalerRedaction, quiRedige, parapheurActif,
+  revisionPour,
 } from "../state.js";
 import { fullName } from "../../lib/users.js";
 import { ajouterRevision } from "../../lib/historique-brouillons.js";
-import { circuitFor, etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
+import { etapeActive, validationAJour, VALIDATION_STATUTS } from "../../lib/validation.js";
+import { parcoursDeActe } from "../../lib/parcours.js";
+import { bandeauParcours, noteDeParcours } from "../parcours.js";
 import { soumettreCircuit } from "../parapheur-actions.js";
 import { etatRevision } from "../../lib/revision.js";
 import { h, clear, button, icon, toast, modal, fitPaper } from "../dom.js";
@@ -38,20 +40,21 @@ import { estExterne, reserverNumero, fixerSequence } from "../../lib/numbering.j
 import { safeEval } from "../../lib/expr.js";
 import { listSlots, locateAddr, fieldIdsInText, valeurReglage } from "../../lib/redaction.js";
 import { abrogationVocab, clauseAbrogation, cibleTexte, KINDS, designationDe as designationDeActe } from "../../lib/abrogations.js";
+import { avertissementAnnexesAutonomes } from "../../lib/abrogation-annexes.js";
 import { entreeEnVigueur } from "../../lib/execution.js";
 import { buildRedactionDoc, controlFor, focusFieldWidget, focusNodeWidget, hiddenPassages, bindConfig, closeTokenEditor } from "./wysiwyg.js";
 import { AUTO_TOKENS } from "../../lib/auto-tokens.js";
 import { annotationStrip, notesByPath, countNotes } from "../annotations.js";
 import { signerPicker } from "../signer-picker.js";
 import { champFonction, roleDeFonction } from "../../lib/fonctions.js";
-import { ordresModifies, rangerCommeLaTrame, ordreConteneur, rangDe, deplacerVers, aOrdre } from "../../lib/ordre.js";
+import { ordresModifies, rangerCommeLaTrame, ordreConteneur, rangDe, deplacerVers } from "../../lib/ordre.js";
 import {
-  ajoutsDe, ajouterA, ajoutPour, retirerAjoutPour, suppressions, supprimer, retablir, slotsAjoutes, majAjout,
+  ajouterA, ajoutPour, retirerAjoutPour, suppressions, supprimer, retablir, slotsAjoutes, majAjout,
 } from "../../lib/structure.js";
 import { glissable } from "../dnd.js";
 import { trameEstDisponible } from "../mise-a-disposition.js";
 import { natureOfActe, identification, annexesVocab, libelleAnnexe, appellationAnnexe, numeroAffiche } from "../../lib/annexes.js";
-import { annexesJointes, libellePartAnnexe } from "../../lib/annexe-docs.js";
+import { annexesJointes } from "../../lib/annexe-docs.js";
 
 export function openActe(acte) {
   state.ui = state.ui || {};
@@ -413,7 +416,7 @@ export function renderRediger(root, params) {
   // C'est ce qui répond à la question « et maintenant, je fais quoi ? » — le
   // rédacteur novice ne devine pas que le circuit, puis la signature, puis la
   // publication s'enchaînent après la rédaction.
-  const parcours = h("div", { class: "rx-parcours", id: "rediger-parcours" });
+  const parcours = h("div", { id: "rediger-parcours" });
   root.appendChild(parcours);
 
   // Un autre poste rédige le même acte : on le dit, plutôt que de laisser deux
@@ -666,31 +669,11 @@ export function renderRediger(root, params) {
   // chemin — on le rédige, on le soumet au circuit, un réviseur le contrôle
   // quand la collectivité l'exige, on le signe, on le publie — mais ce chemin
   // n'est pas visible dans l'écran de rédaction : le rédacteur devait le
-  // connaître par cœur. Cette ligne le lui montre, et met en avant le geste à
-  // faire maintenant (voir `paintSuite`, qui pose le bouton dans l'en-tête).
+  // connaître par cœur. Le fil partagé le lui montre (voir src/lib/parcours.js
+  // pour le calcul, src/ui/parcours.js pour le dessin), et met en avant le geste
+  // à faire maintenant (voir `paintSuite`, qui pose le bouton dans l'en-tête).
   function parcoursDe(acte) {
-    const circuit = acte ? circuitDe(acte) : circuitFor(state.config, { trame });
-    const v = acte?.validation;
-    const valide = !!(v && validationAJour(acte) && v.statut === "valide");
-    const signe = !!(acte && (acte.original || ["signee", "publie", "en_attente"].includes(acte.statut || "")));
-    const publie = !!(acte && (acte.publication || acte.statut === "publie"));
-    const rev = acte ? revisionPour(acte) : { requise: false };
-    const etapes = [
-      { cle: "rediger", label: "Rédiger", fait: !!acte, hint: acte ? "" : "en cours d'écriture" },
-    ];
-    if (circuit) etapes.push({ cle: "circuit", label: "Soumettre au circuit", fait: valide, hint: circuit.label });
-    if (rev.requise) etapes.push({ cle: "revision", label: "Révision", fait: acte?.revision?.statut === "valide", hint: "contrôle avant signature" });
-    etapes.push({ cle: "signer", label: "Signer", fait: signe, hint: "" });
-    if (tramePublishable(trame)) etapes.push({ cle: "publier", label: "Publier", fait: publie, hint: "recueil des actes" });
-    // La première étape non faite est celle où l'on se trouve ; les suivantes
-    // sont à venir. Si tout est fait, il n'y a plus d'étape en cours.
-    let encours = false;
-    for (const e of etapes) {
-      if (e.fait) e.etat = "fait";
-      else if (!encours) { e.etat = "encours"; encours = true; }
-      else e.etat = "avenir";
-    }
-    return etapes;
+    return parcoursDeActe(acte, { config: state.config, trames: state.trames, users: state.users, trame });
   }
 
   function paintParcours() {
@@ -698,29 +681,8 @@ export function renderRediger(root, params) {
     if (!el) return;
     clear(el);
     const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
-    const etapes = parcoursDe(acte);
-    const liste = h("ol", { class: "rx-parcours__liste" });
-    etapes.forEach((e, i) => {
-      liste.appendChild(h("li", {
-        class: "rx-parcours__etape rx-parcours__etape--" + e.etat,
-        title: e.hint || "",
-      },
-        h("span", { class: "rx-parcours__puce" }, h("span", { class: "rx-parcours__num", text: String(i + 1) })),
-        h("span", { class: "rx-parcours__label", text: e.label }),
-      ));
-    });
-    el.appendChild(liste);
-    // Ce que le rédacteur doit retenir, en une phrase : l'export n'est pas la
-    // fin du parcours.
-    const libelle = h("span", { class: "rx-parcours__note" });
-    const faites = etapes.filter((e) => e.etat === "fait").length;
-    if (faites === etapes.length) {
-      libelle.textContent = "Parcours terminé : l'acte est signé" + (tramePublishable(trame) ? " et publié au recueil." : " et conservé au registre.");
-    } else {
-      const courante = etapes.find((e) => e.etat === "encours");
-      libelle.textContent = "Étape en cours : " + (courante?.label || "") + ". Exporter sert à imprimer ou transmettre l'acte — ce n'est pas la fin du parcours.";
-    }
-    el.appendChild(libelle);
+    const parcours = parcoursDe(acte);
+    el.appendChild(bandeauParcours(parcours, { note: noteDeParcours(parcours, { avecExport: true }) }));
   }
 
   // Le bouton mis en avant dans l'en-tête : le prochain geste, et lui seul.
@@ -1882,6 +1844,10 @@ export function renderRediger(root, params) {
 
   function abrogationCard(a) {
     const des = designationActe();
+    // Une annexe PUBLIÉE À PART (un règlement) n'est pas emportée par
+    // l'abrogation de sa décision d'adoption : le dire dès la rédaction évite de
+    // croire l'affaire réglée (voir src/lib/abrogation-annexes.js).
+    const avert = avertissementAnnexesAutonomes(state.actes.find((x) => x.id === a.acteId), { actes: state.actes, trames: state.trames });
     return h("div", { class: "rx-field" },
       h("div", { class: "rx-field__head" },
         h("span", { class: "rx-field__label", text: libelleCible(a) }),
@@ -1891,6 +1857,7 @@ export function renderRediger(root, params) {
       ),
       h("p", { class: "fr-small", style: { margin: "4px 0 0" }, text: clauseAbrogation(a, { config, designation: des }) }),
       h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: "Effet : à l'entrée en vigueur de l'acte." }),
+      avert ? h("p", { class: "fr-small", style: { margin: "4px 0 0", color: "#8a6d10" }, text: avert }) : null,
     );
   }
 
@@ -1997,6 +1964,16 @@ export function renderRediger(root, params) {
       corps.appendChild(h("div", { class: "fr-alert fr-alert--info" },
         h("p", { class: "fr-alert__title", text: "Clause qui figurera dans l'acte" }),
         (apercuEl = h("p", { class: "fr-small", style: { margin: 0 }, text: apercuTexte() }))));
+      // L'acte visé publie peut-être un TEXTE À PART (un règlement) : celui-là ne
+      // sera pas emporté par l'abrogation, et il faudra un acte autonome pour le
+      // retirer. Le dire ici, au moment du choix, vaut mieux que de le découvrir
+      // après l'entrée en vigueur.
+      const avertAnnexes = val.kind === "texte" ? "" : avertissementAnnexesAutonomes(acteDe(val.acteId), { actes: state.actes, trames: state.trames });
+      if (avertAnnexes) {
+        corps.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+          h("p", { class: "fr-alert__title", text: "Texte publié à part" }),
+          h("p", { class: "fr-small", style: { margin: 0 }, text: avertAnnexes })));
+      }
     }
     peindre();
 

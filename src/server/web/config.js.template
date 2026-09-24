@@ -13,6 +13,11 @@
 // jeu fictif est installé ; éteint, l'outil est une page vierge. Vide = le
 // déploiement n'en parle pas, et le navigateur retombe sur le mode (voir
 // src/lib/demo.js).
+//
+// `apiToken` est VIDE dès que le déploiement administre par session
+// (`AUTH_MODE=password` ou `oidc`) : ce fichier est public, et un jeton
+// d'écriture qui y figure est un jeton publié. En mode « demo », la clé de
+// service reste (elle ne protège rien de secret dans une démonstration).
 window.__SCRIBA_CONFIG__ = {
   apiBase: "${API_BASE}",
   apiToken: "${API_TOKEN}",

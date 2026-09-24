@@ -28,7 +28,7 @@ import { get } from "../../lib/remote.js";
 import {
   newDelegation, arbreDelegations, entiteDeDelegation, qualiteDeDelegation,
   qualitePersonne, genreDe, avecArticle, lignesQualites, decisionsDeSignature, libelleDecision,
-  DECISIONS, CHAMPS_DECISION, libelleChampDecision,
+  DECISIONS, CHAMPS_DECISION,
   sourceDeDecision, intituleDecision, lienDecision, lienDeReference, decisionRenseignee, decisionsManquantes,
 } from "../../lib/delegations.js";
 import { personName, personSignatureName } from "../../lib/render.js";

@@ -13,10 +13,12 @@
 // ============================================================================
 import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, parapheurActif, controleLegaliteActif, revisionPour, revisionRequisePour, visibleActes, trameById, reviseursDe, modeSignatureDe, circuitSignatureDe, peutCertifier, estCircuitExterne } from "../state.js";
 import { h, clear, button, toast, modal, icon, badge } from "../dom.js";
-import { textField, selectField, emptyState, helpLink, confirmDialog } from "../components.js";
-import { docOfActe, natureOf } from "./modifier.js";
+import { textField, selectField, emptyState, helpLink } from "../components.js";
+import { docOfActe } from "./modifier.js";
 import { natureOfActe, appellationAnnexe, estReglement } from "../../lib/annexes.js";
-import { licenceReutilisation } from "../../lib/recueil.js";
+import { parcoursDeActe, etapesDuCircuit } from "../../lib/parcours.js";
+import { bandeauParcours } from "../parcours.js";
+import { licenceReutilisation, recueilsExternes, mentionsPubliques } from "../../lib/recueil.js";
 import { natureDe, natureDocs, natureJuridiqueDe } from "../../lib/schema.js";
 import { annexesJointes } from "../../lib/annexe-docs.js";
 import { exportAkn, printHtml, documentCss, exportMarkdown, exportStandaloneHtml } from "../../lib/export.js";
@@ -30,22 +32,23 @@ import {
 } from "../../lib/eli.js";
 import { PRESTATAIRE, prestataire, buildSignedPackage, partiePublique, dossierInterne } from "../../lib/signature.js";
 import {
-  envoyerNotification, tracesCourriel, dossierSignatureInterne, destinatairesRole,
+  envoyerNotification, tracesCourriel, dossierSignatureInterne,
   destinataireDeCompte,
 } from "../../lib/courriel.js";
 import { validationPourSignature, avancement, empreinteTexte } from "../../lib/validation.js";
 import {
-  circuitPour, circuitsDisponibles, modeSignature, modeLabel, MODES_TRAME, trameModeLabel,
-  versionSignee, certificationDe, estCertifie, publicationExternePossible,
-  statutExterneLabel, statutExterneColor, dossierSimple, signeeSimple,
-  reglagesPrestataire, circuitElectroniqueSimule, motifCircuitSimule,
+  circuitPour, circuitsDisponibles, modeLabel, trameModeLabel,
+  versionSignee, certificationDe, publicationExternePossible, dossierSimple, signeeSimple,
+  reglagesPrestataire, circuitElectroniqueSimule,
+  signatureSettings,
 } from "../../lib/externe.js";
+import { niveauDepuisCircuit } from "../../lib/qualification-signature.js";
 import { enregistrerFormalite } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE, verifierCertificatTransmission } from "../../lib/legalite.js";
 import { get, post, connect, apiStatus, errorMessage, beginFlow, onStatus, recordExternal } from "../../lib/remote.js";
 import { renderApiTab } from "./api-console.js";
 import { soumettreARevision } from "../revision-actions.js";
-import { appliquerAbrogations } from "../abrogations-apply.js";
+import { appliquerAbrogations, emporterAnnexes } from "../abrogations-apply.js";
 import { hasRole, fullName } from "../../lib/users.js";
 import {
   ROLE_SIGNATAIRE, personneDeCompte, etatRapprochement, rapprocher,
@@ -92,6 +95,16 @@ const STATUTS = {
 
 export const statutLabel = (s) => (STATUTS[s] || [, s || "Brouillon"])[0];
 export const statutColor = (s) => (STATUTS[s] || ["", "warning"])[1];
+
+// L'étiquette d'état d'un acte dans la LISTE de l'écran. Elle suit le statut —
+// sauf pour une ANNEXE : elle ne se signe pas, et lui laisser « Prêt à signer »
+// ferait croire qu'un geste l'attend, alors que c'est l'acte qui l'adopte qui
+// porte la signature (voir src/lib/annexes.js). On le dit dès la liste, sans
+// attendre que l'annexe soit ouverte.
+export const etatListeActe = (acte, trames) =>
+  natureOfActe(acte, trames) === "annexe"
+    ? ["Annexe — ne se signe pas", "info"]
+    : (STATUTS[acte?.statut] || STATUTS.brouillon);
 
 // Les messages de la publication se taisent pendant l'amorçage du recueil de
 // démonstration (voir src/ui/demo-publications.js) : l'agent n'a pas à voir
@@ -418,7 +431,7 @@ function renderCircuit(root, ctx) {
   left.appendChild(listBox);
   for (const a of acts) {
     const d = docs.get(a.id);
-    const [label, color] = STATUTS[a.statut] || STATUTS.brouillon;
+    const [label, color] = etatListeActe(a, state.trames);
     listBox.appendChild(h("button", {
       class: "sig-item" + (a.id === acte.id ? " is-on" : ""),
       onClick: () => { ui.acteId = a.id; paint(); },
@@ -467,6 +480,11 @@ function renderCircuit(root, ctx) {
   // défaut. Active, elle ajoute une marche ENTRE la signature et la
   // publication, et l'acte signé y passe automatiquement (voir plus bas).
   const controleLegalite = controleLegaliteActif();
+  // Le PARCOURS de l'acte, calculé une seule fois (src/lib/parcours.js) : c'est
+  // lui qui montre, d'un bout à l'autre, l'ordre réel des portes — parapheur,
+  // puis révision, puis signature —, et le titulaire de chacune. Les marches
+  // détaillées, en dessous, en disent les dates et les empreintes.
+  const parcours = parcoursDeActe(acte, { config: state.config, trames: state.trames, users: state.users, trame });
 
   if (estAnnexe) {
     // Le circuit n'existe pas pour une annexe : on montre l'acte qui l'adopte,
@@ -478,7 +496,8 @@ function renderCircuit(root, ctx) {
       // l'adopte (voir src/lib/annexes.js).
       h("h2", { class: "fr-card__title", text: appellationAnnexe(acte, state.config) }),
       h("p", { class: "fr-small fr-muted", text: [acte.objet, doc?.meta?.entity?.name].filter(Boolean).join(" · ") }),
-      h("div", { class: "fr-alert fr-alert--info" },
+      h("div", { style: { marginTop: "8px" } }, bandeauParcours(parcours, { compact: true, nu: true, titre: "Le parcours de l'annexe :" })),
+      h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
         h("p", { class: "fr-alert__title", text: "Une annexe ne se signe pas" }),
         h("p", { class: "fr-small", text: "Elle n'a pas d'autorité propre : c'est l'acte qui l'adopte qui est signé, et sa signature la lui donne. L'original de cet acte est suivi du texte de l'annexe, dans le même document. Il n'y a donc ici ni envoi en signature, ni publication séparée." })),
       adoption
@@ -492,31 +511,41 @@ function renderCircuit(root, ctx) {
         : null,
     ));
   } else {
+    // Les marches DÉTAILLÉES (dates, empreintes) : calculées d'abord, pour que
+    // le fil de parcours ci-dessus les résume et les situe les unes par rapport
+    // aux autres.
+    const steps = externe
+      ? etapesExterne({
+        parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
+        blocking, doc, acte, publiable, config,
+      })
+      : simple
+        ? etapesSimple({
+          parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
+          blocking, doc, acte, publiable, rev, config,
+        })
+        : etapesCircuit({
+          parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
+          blocking, doc, acte, signed, publiable, rev,
+          controleLegalite, transmission: acte.execution?.transmission || null, config,
+        });
     right.appendChild(h("div", { class: "fr-card" },
       h("h2", { class: "fr-card__title", text: `Circuit — ${acte.numero || "acte sans numéro"}` }),
       h("p", { class: "fr-small fr-muted", text: [acte.objet, doc?.meta?.entity?.name].filter(Boolean).join(" · ") }),
       h("div", { class: "sig-circuit-mode" },
         h("span", { class: "fr-badge fr-badge--" + (externe ? "warning" : "info"), text: modeLabel(modeSig) }),
         h("span", { class: "fr-small fr-muted", text: circuitSig.source === "trame" ? "réglé par la trame" : "réglage général" })),
+      // Le PARCOURS : l'ordre réel des portes, avec leur titulaire — c'est lui
+      // qui montre que la révision vient après le parapheur et avant la
+      // signature (voir src/lib/parcours.js).
+      h("div", { style: { marginTop: "10px" } },
+        bandeauParcours(parcours, { nu: true, titre: "Le parcours de l'acte — chaque porte à sa place :" })),
+      h("p", { class: "fr-small fr-muted", style: { margin: "10px 0 0" }, text: "Le détail des étapes :" }),
       h("div", { class: "sig-steps" },
         // Les étapes sont numérotées par POSITION : la marche « Parapheur »
         // disparaît quand aucun circuit ne s'applique, sans trou dans la
         // numérotation.
-        ...(externe
-          ? etapesExterne({
-            parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
-            blocking, doc, acte, publiable,
-          })
-          : simple
-            ? etapesSimple({
-              parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
-              blocking, doc, acte, publiable, rev,
-            })
-            : etapesCircuit({
-              parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
-              blocking, doc, acte, signed, publiable, rev,
-              controleLegalite, transmission: acte.execution?.transmission || null,
-            })).map((e, i) => stepEl(i + 1, e.title, e.done, e.lines)),
+        ...steps.map((e, i) => stepEl(i + 1, e.title, e.done, e.lines, e.sansObjet)),
       ),
     ));
   }
@@ -644,13 +673,18 @@ function renderCircuit(root, ctx) {
 }
 // L'acte sur lequel s'ouvre le circuit : le premier qui attend encore un geste
 // (rédigé, non signé, sans contrôle bloquant) ; à défaut, le dernier acte signé,
-// plutôt que le premier de la liste (qui peut être un brouillon incomplet).
+// plutôt que le premier de la liste (qui peut être un brouillon incomplet). Une
+// ANNEXE ne suit pas le circuit de signature : elle est écartée du choix par
+// défaut, même si elle reste dans la liste (pour qu'on puisse lire pourquoi).
 function defaultCircuitActe(acts, docs) {
+  const estAnnexe = (a) => natureOfActe(a, state.trames) === "annexe";
   const signed = (a) => !!(a.original || a.statut === "signee" || a.statut === "publie");
   const blocking = (a) => (a.issues || docs.get(a.id)?.issues || []).some((i) => i.level === "blocking");
-  return acts.find((a) => !signed(a) && !blocking(a) && a.kind !== "consolide")
-    || acts.find((a) => !signed(a) && !blocking(a))
-    || acts.find(signed)
+  const candidats = acts.filter((a) => !estAnnexe(a));
+  return candidats.find((a) => !signed(a) && !blocking(a) && a.kind !== "consolide")
+    || candidats.find((a) => !signed(a) && !blocking(a))
+    || candidats.find(signed)
+    || candidats[0]
     || acts[0];
 }
 
@@ -661,9 +695,13 @@ function kv(k, v, mono) {
     h("span", { class: mono ? "fr-mono sig-kv" : "sig-kv", text: v }));
 }
 
-function stepEl(n, title, done, lines) {
-  return h("div", { class: "sig-step" + (done ? " is-done" : "") },
-    h("span", { class: "sig-step__dot", text: done ? "✓" : String(n) }),
+// `sansObjet` : la marche n'a pas été franchie alors que l'acte est allé plus
+// loin (voir `marquerEtats`, src/lib/parcours.js). Elle se dessine creuse, et sa
+// pastille porte un tiret plutôt qu'un numéro : on ne la présente pas comme la
+// marche à venir.
+function stepEl(n, title, done, lines, sansObjet) {
+  return h("div", { class: "sig-step" + (done ? " is-done" : "") + (sansObjet ? " is-so" : "") },
+    h("span", { class: "sig-step__dot", text: done ? "✓" : sansObjet ? "–" : String(n) }),
     h("div", { class: "sig-step__body" },
       h("p", { class: "sig-step__title", text: title }),
       ...(lines || []).map((l) => h("p", { class: "sig-step__line", text: l })),
@@ -676,7 +714,37 @@ function stepEl(n, title, done, lines) {
 // que si un circuit s'applique à l'acte, et la marche « Transmis au
 // contrôle de légalité » que si la sienne l'est : la liste, plutôt qu'une suite
 // d'appels numérotés à la main, évite un trou dans la numérotation.
-function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, signed, publiable, rev, controleLegalite, transmission }) {
+//
+// LA PLACE DE CHAQUE PORTE. Ces marches ne sont pas interchangeables, et leur
+// ordre n'est pas celui qu'on devine : le PARAPHEUR d'abord (le circuit du
+// référentiel, achevé), puis la RÉVISION (le contrôle du réviseur compétent),
+// puis la signature. La mention de position le dit en toutes lettres, en plus
+// du fil de parcours affiché au-dessus (voir src/lib/parcours.js) : c'est ce qui
+// répond à « qui passe avant qui, et où est la révision par rapport au
+// circuit ? ». Dans le circuit externe, la révision n'est pas en amont : elle
+// devient la certification de conformité, APRÈS la signature.
+const POSITION_REVISION = "Place : après le parapheur, et avant la signature — le réviseur contrôle le TEXTE, non la pièce signée.";
+const POSITION_CERTIFICATION = "Place : après la signature, et avant la publication — le contrôle porte sur la PIÈCE signée déposée.";
+
+// L'acte est-il allé jusqu'à la signature ? Sert à distinguer une marche qui
+// ATTEND (l'acte est encore en deçà) d'une marche PASSÉE SANS ÊTRE FRANCHIE
+// (l'acte est déjà signé sans elle — donnée d'avant la fonction, ou contrôle non
+// requis ce jour-là). On ne présente pas les deux de la même façon.
+const acteDejaSigne = (a) => !!(a && (a.original || a.statut === "signee" || a.statut === "publie"));
+
+// Les lignes de la marche « Parapheur » : l'avancement, puis les étapes du
+// circuit vues de l'intérieur — leur nature (vérification, visa, signature) et
+// qui les tient. Un parapheur ne se réduit pas à un compteur : c'est là que se
+// lit l'imbrication avec la révision, puisque le circuit s'ouvre souvent par une
+// vérification confiée au réviseur, alors que la révision, elle, est une porte
+// distincte, franchie après le circuit.
+function lignesParapheur(validation, config) {
+  if (!validation) return [];
+  return etapesDuCircuit(null, validation, null, config).map((s, i) =>
+    `${i + 1}. ${s.label} — ${s.nature}${s.optional ? " (facultative)" : ""} — ${s.titulaire || "titulaire à désigner"} — ${s.fait ? "franchie" : s.statutLabel}`);
+}
+
+function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, signed, publiable, rev, controleLegalite, transmission, config }) {
   const etapes = [{
     title: "Acte finalisé",
     done: !!(acte.values || acte.doc),
@@ -690,7 +758,11 @@ function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, b
       ? {
         title: "Parapheur — " + (validation.circuitLabel || "circuit de validation"),
         done: para.ok,
-        lines: [`${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`, para.ok ? "" : para.raison].filter(Boolean),
+        lines: [
+          `${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`,
+          ...lignesParapheur(validation, config),
+          para.ok ? "" : para.raison,
+        ].filter(Boolean),
       }
       : {
         title: "Parapheur",
@@ -702,15 +774,27 @@ function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, b
   // l'acte : sans réviseur, il n'y a pas de contrôle à montrer.
   if (rev?.requise) {
     const r = acte.revision;
+    // L'acte est déjà signé et la révision n'est pas franchie : la porte a été
+    // passée sans être empruntée (donnée antérieure à la fonction, ou contrôle
+    // non requis ce jour-là). On le dit, plutôt que d'annoncer une marche qui
+    // attendrait encore sur un acte publié.
+    const passee = !rev.ok && acteDejaSigne(acte);
+    const rejet = r && r.statut === "rejete";
+    // Le statut de la révision n'est PAS annoncé « en attente » quand la porte a
+    // été passée : il n'attend plus rien, l'acte est signé. Le rejet, lui, est
+    // conservé — il explique pourquoi le contrôle n'a pas été franchi.
+    const statut = !r ? "Pas encore soumis au réviseur"
+      : rejet ? "Rejeté : " + (r.motif || "motif au dossier")
+        : r.statut === "en_attente" ? "En attente" + (r.demandeeParNom ? ` (soumis par ${r.demandeeParNom})` : "")
+          : `${r.valideParNom || "révisé"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}${r.corrige ? " · texte corrigé" : ""}`;
     etapes.push({
       title: "Révision — contrôle avant signature",
       done: rev.ok,
+      sansObjet: passee,
       lines: [
-        r ? (r.statut === "rejete" ? "Rejeté : " + (r.motif || "motif au dossier")
-          : r.statut === "en_attente" ? "En attente" + (r.demandeeParNom ? ` (soumis par ${r.demandeeParNom})` : "")
-            : `${r.valideParNom || "révisé"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}${r.corrige ? " · texte corrigé" : ""}`)
-          : "Pas encore soumis au réviseur",
-        rev.ok ? "" : rev.raison,
+        POSITION_REVISION,
+        passee && !rejet ? "" : statut,
+        passee ? "Non franchie : l'acte est allé plus loin sans ce contrôle (aucune révision au dossier)." : (rev.ok ? "" : rev.raison),
       ].filter(Boolean),
     });
   }
@@ -764,7 +848,7 @@ function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, b
 // pièce signée est conforme à la version numérique qui sera publiée. Les
 // marches du parapheur restent, quand la fonction est active : elles portent sur
 // le texte, en amont, et ne dépendent pas du mode de signature.
-function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable }) {
+function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable, config }) {
   const etapes = [{
     title: "Acte finalisé",
     done: !!(acte.values || acte.doc),
@@ -778,7 +862,11 @@ function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, b
       ? {
         title: "Parapheur — " + (validation.circuitLabel || "circuit de validation"),
         done: para.ok,
-        lines: [`${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`, para.ok ? "" : para.raison].filter(Boolean),
+        lines: [
+          `${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`,
+          ...lignesParapheur(validation, config),
+          para.ok ? "" : para.raison,
+        ].filter(Boolean),
       }
       : {
         title: "Parapheur",
@@ -794,9 +882,12 @@ function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, b
     etapes.push({
       title: "Révision — contrôle du texte",
       done: r.statut === "valide",
-      lines: [r.statut === "valide"
-        ? `Révisé par ${r.valideParNom || "—"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}`
-        : "Révision non aboutie : elle ne conditionne pas le circuit externe (le contrôle porte sur la pièce signée)."],
+      lines: [
+        "Place : le contrôle du texte, s'il a eu lieu, précède la remise au signataire — il ne conditionne pas le circuit externe, dont le contrôle porte sur la pièce signée (marche « certificat » ci-dessous).",
+        r.statut === "valide"
+          ? `Révisé par ${r.valideParNom || "—"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}`
+          : "Révision non aboutie : elle ne conditionne pas le circuit externe (le contrôle porte sur la pièce signée).",
+      ],
     });
   }
   etapes.push({
@@ -828,16 +919,23 @@ function etapesExterne({ parapheur, validation, para, paraAvancement, circuit, b
   // la compétence des réviseurs, pour annoncer la marche à venir.
   const requise = acte.externe ? !!acte.externe.certificationRequise : revisionRequisePour(acte);
   const cert = certificationDe(acte) || {};
+  // Même règle que pour la révision : un acte déjà publié sans certification
+  // (donnée d'avant la fonction, ou contrôle non requis ce jour-là) a PASSÉ la
+  // porte sans l'emprunter. On ne l'annonce pas comme une marche à venir.
+  const certPassee = cert.statut !== "conforme" && acte.statut === "publie";
   etapes.push(requise
     ? {
       title: "Conformité certifiée par le réviseur",
       done: cert.statut === "conforme",
+      sansObjet: certPassee,
       lines: [
+        POSITION_CERTIFICATION,
         cert.statut === "conforme" ? `Certifié conforme par ${cert.parNom || "—"} le ${formatDate(String(cert.le || "").slice(0, 10))}`
           : cert.statut === "non_conforme" ? "Conformité refusée" + (cert.motif ? " : " + cert.motif : "")
-            : "En attente : le réviseur compare la pièce signée à la version numérique.",
+            : certPassee ? "" : "En attente : le réviseur compare la pièce signée à la version numérique.",
+        certPassee ? "Non franchie : l'acte est publié sans certification au dossier." : "",
         "La certification porte sur la PIÈCE signée, non sur le texte avant signature.",
-      ],
+      ].filter(Boolean),
     }
     : {
       title: "Conformité certifiée par le réviseur",
@@ -995,7 +1093,7 @@ function destinatairesAdministration(acte) {
 // Les marches du circuit simple : pas de remise, pas de dépôt de PDF, pas de
 // certification. Le document est vérifié puis signé, et le dossier interne est
 // la dernière marche avant la publication.
-function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable, rev }) {
+function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable, rev, config }) {
   const etapes = [{
     title: "Acte finalisé",
     done: !!(acte.values || acte.doc),
@@ -1009,7 +1107,11 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
       ? {
         title: "Parapheur — " + (validation.circuitLabel || "circuit de validation"),
         done: para.ok,
-        lines: [`${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`, para.ok ? "" : para.raison].filter(Boolean),
+        lines: [
+          `${paraAvancement.faites}/${paraAvancement.total} étape(s) franchie(s)`,
+          ...lignesParapheur(validation, config),
+          para.ok ? "" : para.raison,
+        ].filter(Boolean),
       }
       : {
         title: "Parapheur",
@@ -1019,12 +1121,20 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
   }
   if (rev?.requise) {
     const r = acte.revision;
+    const passee = !rev.ok && acteDejaSigne(acte);
+    const statut = !r ? "Pas encore soumis au réviseur"
+      : r.statut === "rejete" ? "Rejeté : " + (r.motif || "motif au dossier")
+        : r.statut === "en_attente" ? "En attente" + (r.demandeeParNom ? ` (soumis par ${r.demandeeParNom})` : "")
+          : `${r.valideParNom || "révisé"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}`;
     etapes.push({
       title: "Révision — contrôle avant signature",
       done: rev.ok,
-      lines: [r ? (r.statut === "rejete" ? "Rejeté : " + (r.motif || "motif au dossier")
-        : r.statut === "en_attente" ? "En attente" + (r.demandeeParNom ? ` (soumis par ${r.demandeeParNom})` : "")
-          : `${r.valideParNom || "révisé"} le ${formatDate(String(r.valideLe || "").slice(0, 10))}`) : "Pas encore soumis au réviseur", rev.ok ? "" : rev.raison].filter(Boolean),
+      sansObjet: passee,
+      lines: [
+        POSITION_REVISION,
+        passee && !(r && r.statut === "rejete") ? "" : statut,
+        passee ? "Non franchie : l'acte est allé plus loin sans ce contrôle (aucune révision au dossier)." : (rev.ok ? "" : rev.raison),
+      ].filter(Boolean),
     });
   }
   const d = dossierSimple(acte) || {};
@@ -1453,6 +1563,19 @@ function themeDe(acte, doc) {
   const f = (state.config?.families || []).find((x) => x.id === id);
   return { themeId: id, themeLabel: (f && f.label) || "" };
 }
+
+// Les RÉGLAGES DE DIFFUSION DU RECUEIL PUBLIC portés par la publication : les
+// renvois (« Autres recueils », sites de référence), les mentions du pied de
+// page, et les chats des pages d'erreur. Ce sont des réglages du RÉFÉRENTIEL ;
+// le service auto-hébergé, qui rend lui-même l'espace public (`/recueil`,
+// `/recueil.json`, `llms.txt`), ne le connaît pas — ils voyagent donc avec
+// chaque publication, comme le titre du recueil. Voir src/server/mysql/actes.mjs
+// (`reglagesDiffusion`).
+const diffusionRecueil = (config) => ({
+  recueilsExternes: recueilsExternes(config),
+  mentions: mentionsPubliques(config),
+  chatsErreur: config?.publication?.chatsErreur === true,
+});
 
 // Libellé d'un acte dans le journal et les notifications : le numéro s'il
 // existe, sinon l'objet, sinon l'identifiant technique.
@@ -2736,6 +2859,15 @@ async function publier(acte, doc, form, paint) {
   const original = originalBrut ? partiePublique(originalBrut) : originalBrut;
   const originalExterne = externe ? original : null;
   const originalInterne = !externe && originalBrut ? originalInterneDe(acte) : null;
+  // LA QUALIFICATION DE LA SIGNATURE : quel circuit a signé, et à quel niveau.
+  // Elle voyage avec la publication — le service la range sous
+  // `signature.niveau` — et l'acte publié s'en sert pour dire ce que vaut sa
+  // signature : un acte signé « en simple », ou par un prestataire simulé, ne
+  // doit pas se présenter comme qualifié (NC-IV-001). Voir
+  // src/lib/qualification-signature.js.
+  const circuitSignature = modeSignatureDe(acte);
+  const niveauSignature = niveauDepuisCircuit(circuitSignature, signatureSettings(config).api.niveau);
+  const prestataireSimule = circuitSignature === "electronique" ? circuitElectroniqueSimule() : false;
   const record = {
     eliUri: eliU, url, numero: acte.numero || doc.meta?.numero || "", nature: doc.meta?.actTypeId || "Décision",
     // Le type d'acte et l'entité voyagent AVEC la publication : c'est ce que le
@@ -2755,6 +2887,17 @@ async function publier(acte, doc, form, paint) {
     reserve: reserve || undefined,
     auteur: auteurDe(acte, doc).nom, originalSha256: (original && original.document && original.document.sha256) || "",
     originalExterne,
+    // La signature telle que l'acte publié doit la présenter (niveau, prestataire
+    // simulé ou non) : `buildWebVersion` en fait la mention portée par le
+    // document, et le JSON-LD le niveau.
+    signature: {
+      niveau: niveauSignature,
+      prestataire: original?.prestataire || null,
+      simule: prestataireSimule || undefined,
+      signeLe: acte.signeLe || acte.signatureSimple?.signeLe || "",
+      algorithme: externe ? "signature hors application — circuit externe" : "ECDSA P-256 / SHA-256",
+    },
+    signatureSimulee: prestataireSimule || undefined,
     // Le certificat de transmission au contrôle de légalité, s'il y en a un :
     // la version en ligne en porte la mention, et le registre des publications
     // le conserve (voir src/lib/eli.js).
@@ -2767,7 +2910,7 @@ async function publier(acte, doc, form, paint) {
     annexes: (acte.annexes?.length ? acte.annexes : doc.meta?.annexes) || [],
   };
   const html = buildWebVersion({ doc, config, record });
-  const jsonld = publicationJsonLd({ ...record, brandName: config.brand.name, licence: licenceReutilisation(config), signature: { signataires: [{ nom: record.auteur }], signeLe: acte.signeLe, algorithme: externe ? "signature hors application — circuit externe" : "ECDSA P-256 / SHA-256" } });
+  const jsonld = publicationJsonLd({ ...record, brandName: config.brand.name, licence: licenceReutilisation(config), signature: { ...record.signature, signataires: [{ nom: record.auteur }] } });
   const kind = kindFor(acte);
   // Le texte de l'acte voyage avec sa publication, en Markdown et en texte brut :
   // c'est ce que lisent les moteurs et les agents (voir le recueil ouvert,
@@ -2787,6 +2930,13 @@ async function publier(acte, doc, form, paint) {
     // La DIFFUSION restreinte : l'acte est publié, mais le recueil public ne le
     // sert qu'aux personnes connectées (voir src/server/mysql/actes.mjs).
     reserve: reserve || undefined,
+    // Le NIVEAU de la signature : le service le range sous `signature.niveau`,
+    // et tous les lecteurs (recueil, JSON-LD, version publiée) en tirent la
+    // qualification de la signature — voir src/lib/qualification-signature.js.
+    niveau: niveauSignature || undefined,
+    // Les réglages de diffusion du recueil public (renvois extérieurs, mentions
+    // du pied de page) : le service auto-hébergé les rend lui-même.
+    ...diffusionRecueil(config),
     html, akn, jsonld, md, texte, original, transmission: record.transmission,
     // Un acte ÉPINGLÉ (mis en avant depuis l'onglet « Actes ») dépose son
     // drapeau avec sa version en ligne : le recueil public le présentera dans sa
@@ -2974,6 +3124,9 @@ async function publierReglements(acte, doc, { token, flow, datePublication, recu
       // La diffusion du règlement suit celle de l'acte qui l'adopte : un
       // règlement annexé à un acte réservé aux agents l'est aussi.
       reserve: reserve === true || undefined,
+      // Le service auto-hébergé rend lui-même l'espace public : les renvois et
+      // mentions du recueil voyagent avec la publication.
+      ...diffusionRecueil(config),
       ...themeDe(a, reg),
     };
     try {
@@ -3075,6 +3228,9 @@ async function publierConsolide(cons, form, { token, flow }) {
       kind: "consolidee", html, akn, jsonld, md, texte, original: pack,
       // Une version consolidée d'un acte à diffusion restreinte reste réservée.
       reserve: form.reserve === true || undefined,
+      // Le service auto-hébergé rend lui-même l'espace public : les renvois et
+      // mentions du recueil voyagent avec la publication.
+      ...diffusionRecueil(config),
       ...themeDe(cons, doc),
     };
     const res = await post(`/v1/actes/${dep.body.id}/publication`, payload, {
@@ -3113,6 +3269,11 @@ async function publierConsolide(cons, form, { token, flow }) {
         dateEntreeEnVigueur: dateOpposabilite, enAttente: false,
       };
       socle.updatedAt = new Date().toISOString();
+      // Les ANNEXES suivent la même règle que pour une abrogation prévue : celles
+      // qui n'ont pas de publication autonome s'éteignent avec l'acte ; un texte
+      // publié à part, lui, survit et reste à traiter (voir
+      // src/lib/abrogation-annexes.js).
+      await emporterAnnexes(cons, socle, socle.abrogePar, dateOpposabilite);
       touch("actes", { rerender: false });
       await journaliser({
         action: "abrogation.appliquee", cible: "acte", cibleLabel: socle.numero || socle.id, acteId: socle.id,

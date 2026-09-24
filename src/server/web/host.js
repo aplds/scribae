@@ -30,7 +30,16 @@
   var config = window.__SCRIBA_CONFIG__ || {};
   window.__SCRIBA_SELF_HOSTED__ = true;
   window.__SCRIBA_API_BASE__ = config.apiBase || "";
-  if (config.apiToken) window.__SCRIBA_API_TOKEN__ = config.apiToken;
+  // LE JETON D'ÉCRITURE NE SERT PAS EN MODE « SESSION ». `config.js` est un
+  // fichier public : un jeton qui s'y trouve est publié. Le conteneur de la
+  // façade n'en écrit déjà plus dès que le déploiement administre par session
+  // (`AUTH_MODE=password` ou `oidc`, voir web/entrypoint.sh) ; on refuse ici
+  // aussi de le lire, pour qu'un `config.js` oublié d'un déploiement antérieur
+  // ne remette pas le secret dans le navigateur. Les écritures passent, elles,
+  // par le cookie de session (voir src/lib/remote.js, `sessionDeService`).
+  var modeSession = /^(password|oidc)$/i.test(String(config.authMode || "").trim());
+  if (config.apiToken && !modeSession) window.__SCRIBA_API_TOKEN__ = config.apiToken;
+  if (config.apiToken && modeSession) console.warn("Scribae — un jeton d'écriture figure dans config.js alors que ce déploiement administre par session : il est ignoré. Retirez API_TOKEN du .env de la façade (les écritures passent par la session).");
 
   // Le mode annoncé par le déploiement, s'il en annonce un (AUTH_MODE dans le
   // .env). « password » : la porte est une session à mot de passe tenue par le

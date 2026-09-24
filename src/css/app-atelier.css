@@ -1,0 +1,882 @@
+/* ============================================================================
+   Scribae — L'atelier de l'administrateur : commentaires d'un bloc (annotations), réserve de l'éditeur de trame et glisser-déposer.
+
+   Partie 2/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   LES COMMENTAIRES (annotations d'un bloc).
+
+   Ils ne vivent pas dans une marge : ils s'affichent DANS la page, sous le bloc
+   qu'ils visent, en bande nettement distincte du texte de l'acte (fond coloré,
+   intitulé en petites capitales, filet pointillé). Un commentaire ne peut donc
+   pas passer inaperçu — ni dans l'éditeur de trame, où on l'écrit, ni dans la
+   rédaction, où le rédacteur le lit. Voir `src/ui/annotations.js`.
+   ========================================================================== */
+.annot {
+  margin: 6px 0 12px; padding: 7px 10px 9px;
+  border: 1px dashed var(--border-strong); border-left: 3px solid var(--info);
+  border-radius: var(--radius); background: var(--info-bg, #e8edff);
+  font-family: var(--font-ui); font-size: .82rem; line-height: 1.45; text-align: left;
+}
+.annot--redaction { border-left-color: var(--brand); background: var(--brand-soft); }
+.annot--bare { margin: 0; padding: 0; border: 0; background: none; }
+.annot__head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2);
+}
+.annot__icon { display: inline-flex; color: var(--brand); }
+.annot__title { font-weight: 700; }
+.annot__add {
+  display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--brand);
+  cursor: pointer; font: inherit; font-size: .7rem;
+}
+.annot__add:hover { background: var(--brand-soft); }
+.annot__item { padding: 5px 0 3px; border-top: 1px solid rgba(0, 0, 145, .1); }
+.annot__item:first-of-type { border-top: 0; }
+.annot__meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .68rem; color: var(--ink-muted); }
+.annot__meta .fr-badge { font-size: .6rem; }
+.annot__quote { margin: 4px 0 0; font-style: italic; color: var(--ink-2); }
+.annot__quote::before { content: "« "; }
+.annot__quote::after { content: " »"; }
+.annot__text { margin: 3px 0 0; white-space: pre-wrap; }
+.annot__actions { display: inline-flex; gap: 2px; }
+.annot__btn {
+  display: inline-flex; align-items: center; justify-content: center; padding: 1px 3px;
+  border: 0; border-radius: 3px; background: none; color: var(--ink-muted); cursor: pointer;
+}
+.annot__btn:hover { color: var(--brand); background: var(--brand-soft); }
+.annot__btn--danger:hover { color: var(--error); background: var(--error-bg); }
+.annot-flash { box-shadow: 0 0 0 3px var(--focus) !important; border-radius: 3px; }
+
+/* La pastille qui suit une sélection de texte dans la page : « Commenter ». */
+.sel-bubble {
+  position: fixed; z-index: 60; display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--brand); font: inherit; font-size: .78rem; font-weight: 600;
+  cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, .22);
+}
+.sel-bubble:hover { background: var(--brand-soft); }
+
+/* La fenêtre d'écriture d'un commentaire (voir `noteComposer`). */
+.note-quote {
+  margin: 0 0 10px; padding: 6px 10px; border-left: 3px solid var(--border-strong);
+  background: var(--bg-alt); color: var(--ink-2); font-style: italic; border-radius: 0 var(--radius) var(--radius) 0;
+}
+.note-quote::before { content: "« "; }
+.note-quote::after { content: " »"; }
+.note-context { margin: 0 0 4px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+
+/* Les commentaires dans l'inspecteur : un groupe par bloc visé. */
+.cmt-group { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+.cmt-group.is-open { border-color: var(--brand); }
+.cmt-group__head { display: flex; align-items: center; gap: 6px; padding: 5px 6px; background: var(--bg-alt); }
+.cmt-group__jump {
+  display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto;
+  border: 0; background: none; font: inherit; font-size: .8rem; color: var(--ink-2); cursor: pointer; text-align: left;
+}
+.cmt-group__jump:hover { color: var(--brand); }
+.cmt-group__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmt-group__body { padding: 6px; }
+.cmt-group__body .note-card { margin-bottom: 6px; }
+.cmt-group__body .note-card:last-child { margin-bottom: 0; }
+
+/* Compteurs cliquables de l'en-tête de l'éditeur de trame. */
+.editor__counts {
+  border: 0; background: none; padding: 0; font: inherit; font-size: .78rem;
+  color: var(--ink-muted); cursor: pointer; text-align: left;
+}
+.editor__counts:hover { color: var(--brand); text-decoration: underline; }
+.editor__counts.is-on { color: var(--brand); font-weight: 600; }
+
+[contenteditable="true"] { outline: none; min-height: 1em; }
+[contenteditable="true"]:hover { background: rgba(10, 118, 246, .06); border-radius: 2px; }
+[contenteditable="true"]:focus { background: rgba(10, 118, 246, .08); box-shadow: 0 0 0 2px var(--focus); border-radius: 2px; }
+
+.insert-bar {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  opacity: 0; transition: opacity .12s; height: 16px; margin: -4px 0;
+}
+.insert-bar:hover, .insert-bar:focus-within { opacity: 1; }
+.insert-bar .insert-bar__btn {
+  border: 1px dashed var(--border-strong); background: var(--bg); color: var(--brand);
+  border-radius: 999px; font-size: .72rem; padding: 0 10px; line-height: 20px; cursor: pointer;
+}
+.insert-bar .insert-bar__btn:hover { background: var(--brand-soft); }
+
+/* ==========================================================================
+   LA RÉSERVE ET LE GLISSER-DÉPOSER (éditeur de trame).
+
+   Le public visé ne programme pas : on ne lui demande pas de choisir un
+   identifiant de champ dans une liste déroulante. On glisse une puce dans le
+   document — ou on la clique (elle s'« arme ») puis on clique dans le texte.
+
+   Pendant un glisser, `<html>` porte `dnd-actif` : toutes les cibles possibles
+   se signalent d'elles-mêmes, ce qui évite d'avoir à expliquer où lâcher.
+   ========================================================================== */
+.reserve { margin-top: 14px; border-top: 1px solid var(--border); }
+.editor__colhead--sub { position: sticky; top: 0; z-index: 2; background: var(--bg); }
+.palette { padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 13px; }
+.palette__groupe { display: flex; flex-direction: column; gap: 6px; }
+.palette__titre { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.palette__aide { font-size: .7rem; line-height: 1.35; color: var(--ink-muted); margin: 0; }
+.palette__puces { display: flex; flex-wrap: wrap; gap: 5px; }
+.puce {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 3px 9px; border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--bg); color: var(--ink-2); font: inherit; font-size: .75rem;
+  line-height: 1.45; cursor: grab;
+}
+.puce:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.puce:active { cursor: grabbing; }
+.puce__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; }
+.puce--neuf { border-style: dashed; color: var(--brand); }
+
+/* --- le choix du type d'un champ ------------------------------------------
+   Une liste de cartes, jamais une liste déroulante : chaque type se reconnaît
+   à son dessin et à son exemple, et se clique d'un seul geste. C'est le
+   réglage le plus fréquent de la création d'une trame ; il ne doit demander
+   aucun vocabulaire technique. */
+.typecards { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.typecards__sep {
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-muted); margin: 7px 0 2px;
+}
+.typecard {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink-2); font: inherit; cursor: pointer;
+}
+.typecard:hover { border-color: var(--brand); background: var(--brand-soft); }
+.typecard.is-on { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); }
+.typecard__ic { flex: 0 0 auto; display: inline-flex; color: var(--ink-muted); margin-top: 1px; }
+.typecard.is-on .typecard__ic { color: var(--brand); }
+.typecard__tx { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.typecard__lb { font-size: .79rem; font-weight: 600; }
+.typecard__hint { font-size: .68rem; line-height: 1.28; color: var(--ink-muted); }
+.typecard.is-on .typecard__lb { color: var(--brand); }
+.typecard__ok { flex: 0 0 auto; color: var(--brand); font-size: .95rem; font-weight: 700; line-height: 1.2; }
+
+/* Placer un champ dans le texte, depuis la question elle-même (et non seulement
+   depuis la réserve) : c'est là qu'on y pense. */
+.champ__placer { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.champ__placer .fr-row { align-items: center; gap: 8px; }
+
+/* La poignée de déplacement. Ce n'est pas la seule prise : le bloc entier se
+   saisit (voir ui/dnd.js) — mais la poignée reste le repère visible, et assez
+   large pour être visée sans y penser. */
+.blk__grip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; min-height: 22px; padding: 0 5px; border-radius: var(--radius);
+  color: var(--ink-muted); font-size: .9rem; line-height: 1; cursor: grab; user-select: none;
+}
+.blk__grip:hover { color: var(--brand); background: var(--brand-soft); }
+.blk__grip:active { cursor: grabbing; }
+/* Un intitulé d'article ou de division se saisit comme la poignée : on attrape
+   « cet article-là » par son titre. */
+.blk__prise-cible { cursor: grab; }
+.blk__prise-cible:active { cursor: grabbing; }
+
+/* Le bandeau qui dit où cliquer quand une puce a été cliquée. */
+.editor__arme {
+  display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 6px 10px;
+  border: 1px solid var(--border); border-left: 3px solid var(--brand);
+  border-radius: var(--radius); background: var(--brand-soft); color: var(--brand); font-size: .8rem;
+}
+
+/* --- pendant le glisser --------------------------------------------------- */
+html.dnd-actif { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+/* La hauteur des barres « + » ne change PAS pendant le glisser : les faire
+   grandir décalerait tout le document sous le pointeur, et l'on déposerait à
+   côté de ce que l'on visait. Seule l'opacité les révèle. */
+html.dnd-actif .insert-bar { opacity: .55; }
+.insert-bar__hint { display: none; font-size: .68rem; color: var(--brand); white-space: nowrap; }
+html.dnd-actif .insert-bar__hint { display: inline; }
+html.dnd-actif .blk { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
+.dnd-source { opacity: .4; }
+/* Une prise qui répond au doigt (la poignée ⠿) : le contact y démarre un
+   glisser au lieu de faire défiler la page. Voir ui/dnd.js. */
+.dnd-prise-doigt { touch-action: none; }
+/* L'étiquette qui suit le pointeur pendant un glisser : elle dit ce qu'on
+   déplace, et elle est le seul repère dont dispose le doigt (qui ne voit pas
+   le curseur « déplacer » du navigateur). */
+.dnd-fantome {
+  position: fixed; z-index: 9999; pointer-events: none;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 11px; border-radius: 999px; background: var(--brand); color: #fff;
+  font-family: var(--font-ui); font-size: .74rem; line-height: 1.5;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+}
+.dnd-sur { position: relative; }
+.blk.dnd-sur, .outline__item.dnd-sur { background: var(--brand-soft); box-shadow: inset 0 0 0 2px var(--brand); }
+.insert-bar.dnd-sur { opacity: 1; background: var(--brand-soft); border-radius: 999px; }
+[contenteditable="true"].dnd-sur { background: rgba(0, 0, 145, .1); box-shadow: inset 0 0 0 2px var(--brand); }
+.fcard.dnd-sur { box-shadow: inset 3px 0 0 var(--brand); }
+/* le trait qui montre l'endroit exact du rangement (avant / après la cible) */
+.blk.dnd-avant::before, .blk.dnd-apres::after,
+.outline__item.dnd-avant::before, .outline__item.dnd-apres::after,
+.fcard.dnd-avant::before, .fcard.dnd-apres::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 3px;
+  background: var(--brand); border-radius: 2px; z-index: 6;
+}
+.blk.dnd-avant::before, .outline__item.dnd-avant::before, .fcard.dnd-avant::before { top: -3px; }
+.blk.dnd-apres::after, .outline__item.dnd-apres::after, .fcard.dnd-apres::after { bottom: -3px; }
+.outline__item.dnd-avant::before, .outline__item.dnd-apres::after { left: 2px; right: 2px; }
+
+/* « Réglages avancés » d'un champ : là, mais repliés (identifiant technique,
+   conditions d'affichage — le vocabulaire du code, pas celui d'un rédacteur). */
+.inspector__plus { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.inspector__plus > summary { cursor: pointer; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.inspector__plus[open] > summary { margin-bottom: 8px; }
+
+/* --- une question du formulaire (onglet « Questions ») --------------------
+   Repliée, elle tient en une ligne : le nom, le type, et l'on voit d'un coup
+   d'œil tout le formulaire. Dépliée, elle livre ses réglages. Le tout est
+   construit sur <details>/<summary> : le clavier et les lecteurs d'écran le
+   comprennent sans qu'on ait rien à ajouter. */
+.fcard { position: relative; border-bottom: 1px solid var(--border); background: var(--bg); }
+.fcard__tete {
+  display: flex; align-items: center; gap: 7px; padding: 9px 12px;
+  cursor: pointer; list-style: none;
+}
+.fcard__tete::-webkit-details-marker { display: none; }
+.fcard__tete:hover { background: var(--brand-soft); }
+.fcard__nom { flex: 1 1 auto; min-width: 0; font-size: .84rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcard__type { flex: 0 0 auto; font-size: .7rem; color: var(--ink-muted); }
+.fcard__chev { flex: 0 0 auto; display: inline-flex; color: var(--ink-muted); transform: rotate(-90deg); transition: transform .15s; }
+.fcard[open] .fcard__chev { transform: rotate(0deg); }
+.fcard__corps { padding: 2px 12px 14px; }
+.fcard__pied { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
+
+.inspector__section { border-bottom: 1px solid var(--border); padding: 12px; }
+.inspector__section:last-child { border-bottom: 0; }
+.inspector__label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; display: block; }
+.inspector textarea { width: 100%; }
+.note-card { border: 1px solid var(--border); border-left: 3px solid var(--info); border-radius: var(--radius); padding: 8px; margin-bottom: 8px; background: var(--bg); }
+.note-card--legal { border-left-color: var(--error); }
+.note-card--question { border-left-color: var(--warning); }
+.note-card--watch { border-left-color: var(--success); }
+.note-card__head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: .75rem; }
+
+.rule-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; background: var(--bg); }
+.rule-card--blocking { border-left: 3px solid var(--error); }
+.rule-card--warning { border-left: 3px solid var(--warning); }
+.rule-card--info { border-left: 3px solid var(--info); }
+.expr { font-family: var(--font-mono); font-size: .78rem; background: var(--bg-alt); padding: 6px 8px; border-radius: var(--radius); overflow-x: auto; }
+
+/* --------------------------------------- ce que la signature donnera, et les visas
+   L'aperçu d'une fiche de délégation : c'est la seule façon de vérifier
+   l'accord en genre, l'ordre des étages et la série des visas sans rédiger un
+   acte pour voir. Voir src/lib/delegations.js et views/delegations.js. */
+.deleg-apercu {
+  border: 1px solid var(--border); border-left: 3px solid var(--brand);
+  border-radius: var(--radius); background: var(--bg); padding: 10px 12px; margin: 8px 0 4px;
+}
+.deleg-apercu__l { margin: 0; font-size: .82rem; line-height: 1.45; color: var(--ink-2); }
+.deleg-apercu__l--nom { font-weight: 600; letter-spacing: .02em; }
+.deleg-apercu__l--tete { font-weight: 600; }
+/* Le lien d'une décision, dans l'aperçu : c'est exactement ce que portera
+   l'acte publié (recueil, PDF). */
+.deleg-apercu__lien { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.deleg-apercu__lien:hover { text-decoration-color: currentColor; }
+.deleg-lien { color: var(--brand); word-break: break-all; text-decoration: underline; text-underline-offset: 2px; }
+
+/* --- les deux décisions d'une délégation ---------------------------------- */
+.deleg-decision {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-alt); padding: 12px 14px;
+}
+.deleg-decision__tete { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.deleg-decision__titre { font-weight: 700; font-size: .92rem; }
+.deleg-decision__aide { font-size: .8rem; color: var(--ink-muted); line-height: 1.45; }
+.deleg-decision__corps:not(:empty) { margin-bottom: 4px; }
+.deleg-decision__state { margin: 6px 0 0; font-size: .8rem; }
+.deleg-decision__state.is-ok { color: var(--success); }
+.deleg-decision__state.is-manque { color: var(--warning); }
+.deleg-decision__intitule { margin: 0; font-size: .86rem; line-height: 1.45; }
+.deleg-decision__etat > p { margin: 0; }
+
+/* ----------------------------------------------------------------- lecture */
+.doc { font-family: var(--font-doc); color: #111; font-size: 11pt; line-height: 1.5; }
+.doc--compact { font-size: 10pt; }
+.doc-title { font-size: 1.06em; font-weight: 700; text-align: center; margin: 0 0 .9em; }
+.doc-authority { margin: 0 0 .8em; }
+.doc-visas { margin: 0 0 .9em; padding-left: 0; list-style: none; }
+.doc-visas li { text-align: justify; margin-bottom: .25em; }
+/* Une décision fondant la signature est un LIEN (recueil en ligne ou adresse
+   externe) : souligné dans le document, et couleur d'accent dans le recueil, où
+   il se lit comme un lien de site. Voir src/lib/render.js. */
+.doc-visas-link { color: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.doc-visas-link:hover { text-decoration-color: currentColor; }
+.recueil-acte .doc-visas-link { color: var(--brand); }
+/* Un lien écrit sous forme d'identifiant ELI, RÉSOLU par le recueil : l'acte
+   cité est ouvert DANS l'instance (voir lib/recueil.js, `resoudreLiensEli`).
+   Quand l'acte cité n'est pas publié ici, la mention reste — mais sans lien :
+   le lecteur voit l'identifiant, et non un lien qui ne mène nulle part. */
+.recueil-acte .recueil-lien-eli { color: var(--brand); }
+.recueil-acte .recueil-lien-eli--hors {
+  color: inherit; text-decoration: none; cursor: help;
+  border-bottom: 1px dotted var(--border-strong);
+}
+.doc-recitals { margin: 0 0 .9em; }
+.doc-recitals p { text-align: justify; margin: 0 0 .4em; }
+.doc-enact { text-align: center; font-weight: 700; margin: 1em 0; }
+/* Divisions du texte : Livre, Titre, Chapitre, Section… (voir schema.js). Un
+   échelon plus haut s'entoure d'air et s'écrit plus gros ; chaque échelon se
+   distingue du suivant par la taille et par l'alignement, sans couleur — un
+   acte administratif n'est pas une page de magazine. */
+.doc-division { margin: 1.4em 0 1em; }
+.doc-division--n2 { margin-left: .6em; }
+.doc-division--n3 { margin-left: 1.2em; }
+.doc-division--n4, .doc-division--n5, .doc-division--n6 { margin-left: 1.8em; }
+.doc-division-head { font-weight: 700; margin: 0 0 .5em; }
+.doc-division--n1 > .doc-division-head { font-size: 1.08em; text-align: center; margin-top: 1.2em; }
+.doc-division--n2 > .doc-division-head { font-size: 1.02em; }
+.doc-division--n3 > .doc-division-head { font-size: 1em; }
+.doc-division--n4 > .doc-division-head, .doc-division--n5 > .doc-division-head { font-size: .98em; font-style: italic; }
+.doc-division-num { font-weight: 700; }
+.doc-division-heading { font-weight: 700; }
+/* En édition (trame comme rédaction), une division se repère à son filet. */
+.blk .doc-division, .doc--redaction .doc-division { border-top: 1px solid var(--border); padding-top: .6em; }
+/* La liste des annexes d'un acte, à la fin du dispositif. */
+.doc-annexes { margin: 1.4em 0 .8em; }
+.doc-annexes-title { font-size: 1em; font-weight: 700; margin: 0 0 .4em; }
+.doc-annexes-list { margin: 0; padding-left: 1.4em; }
+.doc-annexes-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* La partie ANNEXÉE : le texte de l'annexe, imprimé à la suite de l'acte qui
+   l'adopte (voir src/lib/annexe-docs.js). À l'impression, elle commence sur une
+   page neuve ; dans l'atelier, où elle est montrée en lecture seule sous le
+   document, un filet et son intitulé la séparent de l'acte. */
+.doc-annexe-part { break-before: page; page-break-before: always; margin-top: 18px; }
+.doc-annexe-part__head { border-top: 1px solid var(--border-strong); padding-top: 8px; margin: 0 0 .9em; }
+.doc-annexe-part__label { font-size: .72em; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-muted); margin: 0; }
+.doc-annexe-part__title { font-weight: 700; margin: .12em 0 0; }
+/* Les deux cartes de l'écran de rédaction : l'acte qui ADOPTE le document
+   (une annexe) et les documents ANNEXÉS à l'acte. Voir src/ui/views/rediger.js. */
+.rx-annexe, .rx-annexes { margin-top: 10px; }
+.rx-annexe__titre { margin: 0 0 6px; font-weight: 700; font-size: .9rem; }
+.rx-annexes .rx-annexe__ligne { padding: 3px 0; border-top: 1px solid var(--border); }
+/* Le renvoi d'une fiche vers l'autre acte du couple acte/annexe. */
+.rx-annexe__lien { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+/* Le TEXTE des documents ANNEXÉS, montré en lecture seule sous le document dans
+   l'atelier de rédaction : il suit l'acte dans l'original signé, mais il ne se
+   rédige pas ici — il vit dans son propre acte (voir src/ui/views/rediger.js). */
+.rx-annexes-doc { margin-top: 12px; }
+.rx-annexe-paper__bandeau { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 2px 0; }
+.rx-annexe-paper__label { font-size: .72em; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-muted); }
+.rx-annexe-paper__titre { font-weight: 700; font-size: .9rem; }
+.rx-annexe-paper__note { margin: 2px 2px 8px; }
+/* La ligne de PARCOURS — les phases de l'acte (rédaction, parapheur, révision,
+   signature, publication), celle où l'on se trouve mise en avant, et — quand un
+   circuit de validation s'applique — ses étapes vues de l'intérieur, pour que
+   le positionnement du parapheur et de la révision se lise d'un coup d'œil.
+   Elle sert à l'écran de rédaction ET au circuit de signature (voir
+   src/ui/parcours.js) : un seul objet, donc une seule règle. */
+.pc-parcours {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt);
+}
+.pc-parcours--nu { border: 0; background: none; padding: 0; margin: 0 0 8px; }
+.pc-parcours__liste { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+/* Une puce peut porter un titulaire long ou une mention de position : sur un
+   écran étroit, son contenu passe à la ligne AU-DEDANS de la puce, plutôt que
+   de pousser toute la page en travers (le débordement horizontal d'une page est
+   le pire des défauts d'affichage). */
+.pc-parcours__phase { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; padding: 2px 8px; border-radius: 999px; font-size: .84rem; color: var(--ink-muted); }
+/* Le maillon entre deux phases. Il appartient à la puce qui le suit, et non à
+   l'espace entre les deux : sur une ligne qui se replie, un séparateur détaché
+   se retrouverait seul en tête de ligne et se lirait comme une puce de plus. */
+.pc-parcours__sep { color: var(--border-strong); margin-right: -2px; }
+.pc-parcours__puce {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  font-size: .72rem; font-weight: 700;
+  border: 1px solid var(--border-strong); color: var(--ink-muted);
+}
+.pc-parcours__phase--fait { color: var(--ink); }
+.pc-parcours__phase--fait .pc-parcours__puce { background: var(--success); border-color: var(--success); color: #fff; }
+.pc-parcours__phase--fait .pc-parcours__puce::before { content: "✓"; }
+.pc-parcours__phase--fait .pc-parcours__num { display: none; }
+.pc-parcours__phase--encours { color: var(--ink); font-weight: 700; background: rgba(0, 0, 145, .07); }
+.pc-parcours__phase--encours .pc-parcours__puce { background: var(--brand); border-color: var(--brand); color: #fff; }
+/* Une porte PASSÉE SANS ÊTRE FRANCHIE (voir `marquerEtats`) : la puce reste
+   creuse et en pointillés — l'acte ne l'a pas empruntée, et elle n'attend pas
+   non plus. */
+.pc-parcours__phase--sansobjet { color: var(--ink-muted); }
+.pc-parcours__phase--sansobjet .pc-parcours__puce { background: none; border-style: dashed; color: var(--ink-muted); }
+.pc-parcours__acteur { font-size: .74rem; font-weight: 400; color: var(--ink-muted); min-width: 0; }
+.pc-parcours__phase--encours .pc-parcours__acteur { color: var(--ink-2); }
+/* La mention de POSITION (« après le parapheur · avant la signature ») : elle
+   dit où la porte se situe, sans qu'il faille compter les puces. */
+.pc-parcours__pos {
+  font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; max-width: 100%;
+}
+/* « non franchie » : une mention d'ÉTAT, non de position — en minuscules et en
+   italique, pour ne pas se confondre avec la puce de position au-dessus. */
+.pc-parcours__pos--so { text-transform: none; letter-spacing: 0; font-style: italic; border-style: dashed; }
+/* Les étapes d'un circuit, vues de l'intérieur : numérotées, avec leur nature
+   et leur titulaire, et l'étape ouverte mise en avant. */
+.pc-parcours__sous { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
+.pc-parcours__sous-titre { font-size: .74rem; color: var(--ink-muted); }
+.pc-sub {
+  display: inline-flex; align-items: center; gap: 5px; font-size: .74rem;
+  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--bg);
+}
+.pc-sub--fait { color: var(--ink-2); }
+.pc-sub--fait .pc-sub__puce { color: var(--success); }
+.pc-sub--encours { border-color: var(--brand); background: var(--brand-soft); color: var(--ink); }
+.pc-sub__nature { text-transform: uppercase; letter-spacing: .03em; font-size: .62rem; color: var(--ink-muted); }
+.pc-sub__titulaire { color: var(--ink-muted); }
+.pc-parcours__note { flex: 1 1 100%; font-size: .78rem; color: var(--ink-muted); }
+.paper--lecture { box-shadow: inset 0 0 0 1px var(--border); }
+.doc-article { margin-bottom: 1em; }
+.doc-article-head { font-size: 1em; font-weight: 700; margin: 0 0 .35em; }
+.doc-article-num { font-weight: 700; }
+.doc-p { text-align: justify; margin: 0 0 .55em; }
+/* Blocs déplaçables du document (rédaction, et division en rédaction) : la
+   poignée et les deux flèches sont TOUJOURS là — un peu effacées au repos,
+   nettes dès qu'on survole le bloc. On ne devine pas un geste. */
+.mv { position: relative; border-radius: 3px; }
+.mv:hover { background: rgba(0, 0, 145, .03); }
+.mv__tools {
+  position: absolute; right: -2px; top: -15px; z-index: 5;
+  display: flex; align-items: center; gap: 1px;
+  padding: 1px; border: 1px solid transparent; border-radius: var(--radius);
+  opacity: .28; transition: opacity .12s, background .12s, border-color .12s;
+}
+.mv:hover > .mv__tools, .mv:focus-within > .mv__tools, .mv__tools:hover {
+  opacity: 1; background: var(--bg); border-color: var(--border);
+}
+.mv__grip {
+  cursor: grab; user-select: none; padding: 0 3px; line-height: 1;
+  color: var(--ink-muted); font-size: 1rem;
+}
+.mv__grip:hover { color: var(--brand); background: var(--brand-soft); border-radius: 3px; }
+.mv__grip:active { cursor: grabbing; }
+.mv.dnd-sur { background: var(--brand-soft); box-shadow: inset 0 0 0 2px var(--brand); }
+.mv.dnd-avant::before, .mv.dnd-apres::after {
+  content: ""; position: absolute; left: 2px; right: 2px; height: 3px;
+  background: var(--brand); border-radius: 2px; z-index: 6;
+}
+.mv.dnd-avant::before { top: -3px; }
+.mv.dnd-apres::after { bottom: -3px; }
+.doc-list { margin: 0 0 .7em; padding-left: 1.4em; }
+.doc-list li { text-align: justify; margin-bottom: .25em; }
+.doc-table-wrap { margin: 0 0 .8em; overflow-x: auto; }
+.doc-table-caption { font-size: .9em; margin: 0 0 .3em; font-style: italic; }
+.doc-table { border-collapse: collapse; width: 100%; font-size: .92em; }
+.doc-table th, .doc-table td { border: 1px solid #8993A5; padding: 3px 6px; text-align: left; vertical-align: top; }
+.doc-table th { background: #f0f0f0; }
+
+/* --- Paramètres propres aux blocs ---------------------------------------
+   Ce que règle l'onglet « Ce bloc » de l'éditeur de trame : retrait et
+   encadré d'un paragraphe, filets d'un tableau, légende au-dessous, etc.
+   (voir `paramsBloc`, src/lib/schema.js — et les mêmes règles dans
+   `documentCss`, src/lib/export.js, pour le HTML autonome et le Word.)
+   Le sélecteur part de `.doc` : un réglage de BLOC est un choix explicite, il
+   doit l'emporter sur la feuille de style — dont les règles sont plus
+   spécifiques à l'écran (`[data-sheet="…"] .doc-table th`). Les couleurs
+   viennent des variables de la feuille, avec une valeur de repli. */
+.doc .doc-p--boxed { border: 1px solid var(--doc-rule, #8993A5); padding: .5em .7em; }
+.doc .doc-p--indent-first { text-indent: 1.5em; }
+.doc .doc-p--indent-none { text-indent: 0; }
+.doc .doc-p--indent-all { margin-left: 1.5em; }
+.doc .doc-recitals--inline p { margin: 0; }
+.doc .doc-table--rows th, .doc .doc-table--rows td { border: 0; border-bottom: 1px solid var(--doc-grid, #8993A5); }
+.doc .doc-table--rows th { background: transparent; border-bottom: 2px solid var(--doc-rule, #8993A5); }
+.doc .doc-table--zebra tbody tr:nth-child(even) { background: var(--doc-neutral, #f0f0f0); }
+.doc .doc-table--center th, .doc .doc-table--center td { text-align: center; }
+.doc .doc-table--right th, .doc .doc-table--right td { text-align: right; }
+.doc-table-wrap > .doc-table + .doc-table-caption { margin: .3em 0 0; }
+.doc-signature { margin-top: 1.6em; display: flex; justify-content: space-between; align-items: flex-end; gap: 1em; }
+.doc-signature-place { margin: 0; }
+.doc-signature-block { text-align: center; min-width: 40%; }
+.doc-signature-role, .doc-signature-name { margin: 0; }
+.doc-signature-role { white-space: pre-line; }
+.doc-mention { text-align: justify; font-size: .92em; margin: 1em 0 0; color: #222; }
+
+/* --------------------------------------------------- modifications apparentes
+   Version consolidée : ce qui a été ajouté, ce qui a été supprimé. Les couleurs
+   sont douces pour rester lisibles à l'impression en noir et blanc (le fond
+   clair et les bordures restent visibles, et le texte supprimé est barré). */
+.doc-quote { margin: .3em 0 .7em; padding: 0 0 0 14px; border-left: 2px solid var(--border-strong); }
+.doc-quote::before { content: "«\00a0"; }
+.doc-quote::after { content: "\00a0»"; }
+.doc-ins { background: rgba(24, 117, 60, .10); box-shadow: inset 0 0 0 1px rgba(24, 117, 60, .35); }
+.doc-del { background: rgba(206, 5, 0, .07); box-shadow: inset 0 0 0 1px rgba(206, 5, 0, .30); }
+.doc-del .doc-p, .doc-del p, .doc-del li, .doc-del .doc-article-head { text-decoration: line-through; color: var(--ink-muted); }
+.doc-mod { background: rgba(179, 64, 0, .05); }
+.doc-consolidation { border: 1px solid #d9c98b; background: #fffdf3; padding: 10px 12px; margin: 0 0 1.2em; font-family: var(--font-ui); font-size: .78rem; line-height: 1.4; }
+.doc-consolidation__title { margin: 0 0 4px; font-weight: 700; }
+.doc-consolidation__notice, .doc-consolidation__meta { margin: 0 0 4px; }
+.doc-consolidation__legend { margin: 6px 0 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.doc-consolidation__legend span { padding: 1px 6px; font-size: .72rem; }
+.doc-consolidation__hint { margin: 6px 0 0; }
+/* Suivi des modifications NON affiché : l'article porte seulement la mention de
+   l'acte qui l'a modifié, en italique sous son intitulé. */
+.doc-amend-mention { font-style: italic; font-size: .92em; color: var(--ink-muted); margin: -.15em 0 .55em; }
+.doc-trail { margin-top: 2.2em; border-top: 1px solid var(--border-strong); padding-top: 12px; font-family: var(--font-ui); }
+.doc-trail__title { font-size: .9rem; margin: 0 0 8px; }
+.doc-trail__entry { margin: .7em 0 .3em; font-weight: 700; font-size: .85rem; }
+.doc-trail__table { font-size: .76rem; }
+
+/* En-tête et pied d'une charte graphique (feuille de style). Les valeurs
+   précises — hauteur du logo, filets, couleurs — viennent de la feuille, dans
+   `#sheet-css` (voir lib/styles.js). Ici, seulement la charpente, pour que le
+   document reste lisible même sans charte. */
+.doc-sheet-header { display: flex; gap: 14px; align-items: center; margin: 0 0 14px; }
+.doc-sheet-logo { height: 42px; width: auto; max-width: 45%; flex: none; }
+.doc-sheet-headtext { margin: 0; font-size: .86em; color: var(--ink-muted); }
+.doc-sheet-footer { margin-top: 1.6em; padding-top: 8px; font-size: .78em; color: var(--ink-muted); text-align: center; }
+
+/* ------------------------------------------------------- feuilles de style
+   L'écran « Feuilles de style » : la liste des chartes à gauche, les réglages,
+   et l'aperçu du document habillé — l'aperçu colle au défilement, pour qu'un
+   changement de police ou de filet se voie sans quitter le champ.
+
+   Deux modes, deux dispositions (mêmes colonnes) :
+   — « Réglages »  : liste | tous les réglages | aperçu ;
+   — « Édition directe » : liste | aperçu | réglages de l'élément cliqué.
+   Dans les deux cas l'aperçu reste le vrai rendu du document. */
+.styles-grid { display: grid; grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); gap: 18px; align-items: start; }
+/* Un enfant de grille a `min-width: auto` : sans cette remise à zéro, la colonne
+   s'élargit au minimum du contenu et déborde — visible sur un volet étroit. */
+.styles-grid > * { min-width: 0; }
+/* En dessous de 1440 px, il n'y a que deux colonnes : la liste des feuilles à
+   gauche, tout le reste empilé dans la seconde colonne (l'aperçu, puis les
+   réglages — ou les réglages, puis l'aperçu). */
+.styles-preview, .styles-inspector, .styles-editor { grid-column: 2; }
+.styles-editor { min-width: 0; }
+@media (min-width: 1440px) {
+  /* Trois colonnes : l'ordre du document décide — liste | réglages | aperçu en
+     vue « Réglages », liste | aperçu | réglages en édition directe. */
+  .styles-grid { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(360px, 440px); }
+  .styles-preview, .styles-inspector, .styles-editor { grid-column: auto; }
+  .styles-grid > .styles-preview { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+}
+@media (max-width: 1080px) {
+  .styles-grid { grid-template-columns: 1fr; }
+  .styles-preview, .styles-inspector, .styles-editor { grid-column: 1; }
+}
+
+/* les réglages, en deux colonnes de champs */
+/* les réglages, en colonnes de champs — `min(…, 100%)` évite qu'une colonne
+   plus large que son conteneur (volet étroit) ne fasse déborder la page */
+.styles-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 0 14px; }
+.styles-fields .fr-field { margin-bottom: 12px; }
+.styles-field--wide { grid-column: 1 / -1; }
+.styles-group-title { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 16px 0 6px; }
+.styles-group-title:first-of-type { margin-top: 10px; }
+
+/* bascule Réglages / Édition directe */
+.styles-tabs { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.styles-tab { border: 0; background: none; font: inherit; font-size: .82rem; padding: 5px 13px; border-radius: 999px; cursor: pointer; color: var(--ink-2); }
+.styles-tab:hover { background: var(--bg-alt); }
+.styles-tab.is-on { background: var(--brand); color: #fff; font-weight: 600; }
+[data-theme="dark"] .styles-tab.is-on { color: #101219; }
+
+/* modèles de départ */
+.styles-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px; }
+.styles-preset {
+  text-align: left; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); padding: 9px 11px; cursor: pointer; font: inherit; color: var(--ink);
+}
+.styles-preset:hover { border-color: var(--brand); background: var(--brand-soft); }
+.styles-preset__tete { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.styles-preset__name { font-weight: 600; font-size: .86rem; }
+.styles-preset__badge {
+  flex: none; font-size: .6rem; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-muted);
+}
+.styles-preset__badge--warning { border-color: var(--warning); color: var(--warning); background: var(--warning-bg); }
+.styles-preset__hint { display: block; font-size: .74rem; color: var(--ink-muted); margin-top: 2px; }
+.styles-preset:hover .styles-preset__hint { color: var(--ink-2); }
+.styles-sep { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+.styles-identity > summary { cursor: pointer; font-size: .85rem; color: var(--brand); margin-bottom: 8px; }
+
+/* éditeur direct : cliquer l'élément du document */
+.styles-pickbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.styles-chip { border: 1px solid var(--border); background: var(--bg); border-radius: 999px; font: inherit; font-size: .76rem; padding: 3px 10px; cursor: pointer; color: var(--ink-2); }
+.styles-chip:hover { border-color: var(--brand); color: var(--brand); }
+.styles-chip.is-on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.styles-pickstatus { margin: 0 0 10px; }
+.styles-pickable .styles-pick-hover { outline: 2px dashed var(--brand); outline-offset: 2px; background: rgba(0, 0, 145, .04); }
+.styles-pickable .styles-pick-on { outline: 2px solid var(--focus); outline-offset: 2px; }
+.styles-pickable .styles-pick-on.styles-pick-hover { outline-style: solid; }
+.paper-box--sheet { padding: 16px; }
+.styles-sheet { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius); padding: 9px 11px; margin-bottom: 7px; cursor: pointer; }
+.styles-sheet:hover { border-color: var(--border-strong); }
+.styles-sheet.is-on { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
+.styles-sheet__label { display: block; font-weight: 600; font-size: .88rem; }
+.styles-sheet__sub { display: block; font-size: .74rem; color: var(--ink-muted); margin-top: 2px; }
+.styles-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--border-strong); vertical-align: -2px; margin-right: 5px; }
+.styles-color-row { display: flex; align-items: center; gap: 8px; }
+.styles-color-row input[type="color"] { width: 42px; height: 34px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: #fff; }
+
+/* les côtés d'un encadré : quatre pastilles à basculer (voir `styleField`) */
+.styles-sides { display: flex; flex-wrap: wrap; gap: 6px; }
+.styles-side {
+  border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius);
+  font: inherit; font-size: .78rem; padding: 5px 11px; cursor: pointer; color: var(--ink-muted);
+}
+.styles-side:hover { border-color: var(--brand); color: var(--brand); }
+.styles-side.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.styles-font { display: grid; gap: 6px; }
+.styles-font__custom { display: grid; gap: 2px; }
+
+/* ---------------------------------------------------------- modifier un acte
+   Le document est édité en place (colonne de gauche) ; les modifications
+   relevées et les deux documents produits (acte modificatif / version
+   consolidée) sont dans la colonne de droite — voir `redaction-grid`. */
+.paper-box { background: var(--bg-alt); padding: 16px; border-radius: var(--radius); overflow: auto; }
+/* Barre d'options d'affichage d'un document (ex. suivi des modifications de la
+   version consolidée), au-dessus de la feuille. */
+.doc-optbar { display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; }
+.fr-card--soft { background: var(--bg-alt); }
+.fr-table--small { font-size: .82rem; }
+
+/* ---------------------- modifier un acte : édition directe du document
+   Le dispositif se réécrit dans la page : chaque passage éditable est marqué
+   quand il s'écarte du texte publié, et chaque article porte ses outils
+   (abroger / insérer) qui n'apparaissent qu'au survol. */
+.amend-region {
+  border-radius: 2px;
+  min-height: 1.1em;
+  transition: background .12s;
+}
+.amend-region:hover { background: rgba(10, 118, 246, .05); box-shadow: inset 0 -1px 0 rgba(10, 118, 246, .35); }
+.amend-region:focus { background: rgba(10, 118, 246, .07); box-shadow: 0 0 0 2px var(--focus); }
+.amend-region--inline { display: inline; }
+.amend-region--changed {
+  background: rgba(179, 64, 0, .08);
+  box-shadow: inset 3px 0 0 var(--warning);
+  padding-left: 4px;
+}
+.amend-region--changed:hover { background: rgba(179, 64, 0, .12); }
+.amend-region--changed:focus { box-shadow: inset 3px 0 0 var(--warning), 0 0 0 2px var(--focus); }
+
+.amend-article { position: relative; }
+.amend-article--removed { opacity: .5; }
+.amend-article--removed .doc-p,
+.amend-article--removed .doc-list,
+.amend-article--removed .doc-article-head { text-decoration: line-through; }
+
+.amend-tools {
+  float: right;
+  display: none;
+  gap: 4px;
+  margin-left: 8px;
+  font-family: var(--font-ui);
+  font-weight: 400;
+}
+.amend-article:hover .amend-tools { display: inline-flex; }
+.amend-tool {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--brand);
+  border-radius: 999px;
+  font-size: .7rem;
+  line-height: 18px;
+  padding: 0 9px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+.amend-tool:hover { background: var(--brand-soft); }
+.amend-tool--demo { border: 1px dashed var(--border-strong); cursor: default; margin: 0 2px; }
+
+.amend-removed-note { font-family: var(--font-ui); font-size: .78rem; color: var(--ink-muted); margin: 4px 0 0; }
+
+.amend-article--inserted {
+  border: 1px dashed rgba(24, 117, 60, .55);
+  background: rgba(24, 117, 60, .05);
+  border-radius: var(--radius);
+  padding: 8px 10px 4px;
+  margin-bottom: 1em;
+}
+.amend-article--inserted .doc-article-head { color: #14622f; }
+.amend-ins__block { position: relative; }
+.amend-ins__tools { float: right; display: none; }
+.amend-ins__block:hover .amend-ins__tools { display: inline-flex; }
+.amend-ins__actions { display: flex; gap: 6px; margin: 6px 0 2px; font-family: var(--font-ui); }
+.amend-append { text-align: center; margin: 14px 0 4px; }
+
+/* Structure du texte : chaque bloc — ou chaque ligne — porte ses outils. Un
+   paragraphe les montre au survol, à droite de sa première ligne ; une liste ou
+   un tableau, sous lui ; le tableau ajoute une colonne d'outils, qui n'appar-
+   tient pas au texte (elle disparaît à l'impression et de l'aperçu). */
+.amend-block { position: relative; }
+.amend-block__tools { position: absolute; right: 0; top: -2px; display: none; gap: 3px; }
+.amend-block:hover > .amend-block__tools { display: inline-flex; }
+.amend-blockgroup { position: relative; }
+.amend-blockbar { display: flex; gap: 5px; flex-wrap: wrap; font-family: var(--font-ui); margin: 2px 0 10px; opacity: .5; }
+.amend-blockbar:hover, .amend-block:hover .amend-blockbar { opacity: 1; }
+.doc-list li:hover > .amend-line__tools { display: inline-flex; }
+.amend-line__tools { float: right; display: none; gap: 3px; margin-left: 6px; }
+.amend-th__tools, .amend-td__tools { border: 1px dashed var(--border-strong); background: none; width: 1%; white-space: nowrap; text-align: right; }
+.amend-th__tools { color: var(--ink-muted); font-size: .7rem; }
+.amend-td__tools .amend-tool { padding: 0 6px; margin-left: 3px; }
+
+/* --- un TABLEAU édité en place (éditeur de trame) ------------------------
+   Le tableau de l'aperçu est le formulaire : chaque case se réécrit, et une
+   gouttière d'outils — jamais imprimée — porte les gestes. Même dispositif que
+   l'éditeur de modification (`.amend-*-tools`, ci-dessus), avec ses propres
+   classes pour que les deux écrans restent libres d'évoluer séparément. */
+.tbl-tools-td { border: 1px dashed var(--border-strong); background: none; width: 1%; white-space: nowrap; text-align: right; }
+.tbl-tools { display: inline-flex; gap: 1px; margin-left: 4px; opacity: 0; transition: opacity .12s; vertical-align: middle; }
+th:hover > .tbl-tools, td:hover > .tbl-tools, .tbl-tools:focus-within { opacity: 1; }
+.tbl__geste {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border: 1px solid transparent; border-radius: var(--radius);
+  background: none; color: var(--ink-muted); cursor: pointer; font-family: var(--font-ui);
+}
+.tbl__geste:hover { color: var(--brand); background: var(--brand-soft); border-color: var(--border); }
+.tbl__bar { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-family: var(--font-ui); opacity: .55; transition: opacity .12s; }
+.doc-table-wrap:hover > .tbl__bar, .tbl__bar:focus-within { opacity: 1; }
+.tbl__btn {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+  border: 1px dashed var(--border-strong); border-radius: 999px; background: none;
+  color: var(--brand); font: inherit; font-size: .72rem; cursor: pointer;
+}
+.tbl__btn:hover { background: var(--brand-soft); }
+.tbl__hint { font-size: .7rem; color: var(--ink-muted); }
+/* La formule d'un considérant, montrée par l'éditeur devant chaque élément :
+   elle n'est pas saisie là (elle appartient au bloc), elle s'annonce. */
+.doc-recitals__formule, .doc-recitals__fin { color: var(--ink-muted); }
+
+/* --- la GRILLE d'un tableau, dans l'inspecteur --------------------------- */
+.tbl-edit { display: grid; gap: 4px; align-items: center; margin-top: 4px; }
+.tbl-edit__coin, .tbl-edit__num { font-size: .7rem; color: var(--ink-muted); font-family: var(--font-ui); padding-right: 2px; text-align: right; }
+.tbl-edit__coin { font-weight: 700; }
+.tbl-edit__entete { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tbl-edit__case { min-width: 0; font-size: .8rem; padding: 3px 5px; }
+.tbl-edit__outils { display: inline-flex; gap: 1px; justify-content: flex-end; }
+.tbl-edit__pied { display: flex; }
+.tbl-edit__geste {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; justify-self: start;
+  border: 1px dashed var(--border-strong); border-radius: 999px; background: none;
+  color: var(--brand); font: inherit; font-size: .7rem; cursor: pointer;
+}
+.tbl-edit__geste:hover { background: var(--brand-soft); }
+.amend-num {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--brand);
+  border-radius: 999px;
+  font-size: .66rem;
+  line-height: 16px;
+  padding: 0 7px;
+  margin: 0 7px 0 0;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-weight: 400;
+  vertical-align: middle;
+}
+.amend-num:hover { background: var(--brand-soft); }
+.amend-article:hover .amend-num { background: var(--brand-soft); }
+
+.mod-preview { background: var(--bg-alt); }
+.mod-preview--full { display: flex; justify-content: center; }
+.mod-preview--full .paper { width: 21cm; box-shadow: none; }
+.mod-preview__opt { margin: 0 0 12px; }
+.mod-col--doc { min-width: 0; }
+
+/* récapitulatif des modifications (colonne étroite : liste, pas tableau) */
+.mod-changes { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.mod-change {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.mod-change__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mod-change__article { font-weight: 700; }
+.mod-change__action { font-size: .8rem; color: var(--ink-muted); flex: 1 1 auto; }
+.mod-change__detail {
+  margin: 4px 0 0;
+  font-size: .82rem;
+  color: var(--ink-muted);
+  /* deux lignes au plus : le détail complet s'affiche dans l'aperçu */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mod-hist--current { background: var(--brand-soft); }
+
+.doc-notes { margin-top: 2em; border-top: 1px dashed var(--border-strong); padding-top: 10px; font-family: var(--font-ui); font-size: .8rem; }
+.doc-notes__title { font-size: .85rem; margin-bottom: 6px; }
+.doc-notes__list { list-style: none; padding: 0; margin: 0; }
+.doc-notes__item { display: flex; gap: 6px; margin-bottom: 4px; }
+.doc-notes__kind { font-size: .68rem; text-transform: uppercase; color: var(--ink-muted); flex: none; min-width: 80px; }
+.doc-notes__quote { color: var(--ink-2); font-style: italic; flex: none; max-width: 40%; }
+.doc-notes__author { color: var(--ink-muted); }
+
+/* impression
+   L'aperçu de l'application est déjà un papier A4 (21 × 29,7 cm, marges de
+   2 cm / 1,8 cm : voir `src/lib/paper.js`). À l'impression (Ctrl+P, ou
+   « Imprimer / PDF » depuis l'export), on ne peut pas déléguer les marges au
+   bloc : c'est `@page` qui porte la page A4, et le papier se contente de
+   remplir la surface imprimable. Les nombres sont ceux de `paper.js`. */
+@media print {
+  body { background: #fff; }
+  .app-header, .app-nav, .no-print { display: none !important; }
+  /* L'éditeur en place ne doit pas imprimer ses outils ni ses surlignages. */
+  .amend-tools, .amend-append, .amend-ins__actions, .amend-ins__tools { display: none !important; }
+  .amend-num, .amend-blockbar, .amend-block__tools, .amend-line__tools,
+  .amend-th__tools, .amend-td__tools { display: none !important; }
+  /* Les commandes du tableau de l'aperçu (gouttière, barre de gestes) ne sont
+     pas de l'acte : elles ne s'impriment jamais. */
+  .tbl-tools, .tbl-tools-td, .tbl__bar { display: none !important; }
+  .amend-region--changed { background: none !important; box-shadow: none !important; padding-left: 0 !important; }
+  .amend-article--inserted { border: 0 !important; background: none !important; padding: 0 !important; }
+  .paper { box-shadow: none; width: auto; min-height: 0; padding: 0; }
+  @page { size: A4 portrait; margin: 20mm 18mm; }
+  .doc-title, .doc-article-head, .doc-enact, .doc-signature,
+  .doc-consolidation, .doc-trail__entry, .doc-amend-mention { break-after: avoid; page-break-after: avoid; }
+  .doc-title, .doc-signature, .doc-consolidation, .doc-trail__entry,
+  .doc-table-caption, .doc-amend-mention { break-inside: avoid; page-break-inside: avoid; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  .doc-p, .doc-list li, .doc-mention { orphans: 2; widows: 2; }
+  .doc-trail__table thead { display: table-header-group; }
+}
+
+/* mode étroit : un seul panneau à la fois, sélectionné par onglets */
+.editor--narrow .editor__col { display: none; max-height: none; border: 0; }
+.editor--narrow .editor__col.is-panel { display: flex; }
+.editor--narrow .canvas { padding: 12px 8px 40px; }
+.editor--narrow .editor__colhead { display: none; }
+
+/* -------------------------------------------------------------- responsive */
+@media (max-width: 1100px) {
+  .editor { grid-template-columns: minmax(0, 1fr); }
+  .editor__col--left, .editor__col--right { border: 0; border-top: 1px solid var(--border); max-height: 320px; }
+  .paper { width: 100%; padding: 18px; min-height: 0; }
+}
+@media (max-width: 760px) {
+  .app-body { flex-direction: column; }
+  .app-nav { width: auto; flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px; }
+  .app-nav__group { display: none; }
+  .app-nav__item { width: auto; white-space: nowrap; }
+  .app-main { padding: 12px; }
+  /* En-tête compact : la devise et le nom de la structure passent à la trappe,
+     seuls le sigle et le logo restent (la structure est rappelée dans la page). */
+  .app-brand__sub, .app-org__name { display: none; }
+  .app-org { padding: 3px; }
+}
+
+@media (max-width: 900px) {
+  .rediger-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-head__actions { width: 100%; flex-wrap: wrap; align-items: stretch; }
+  .page-head__actions .fr-field { flex: 1 1 160px; }
+  .page-head__actions .fr-btn { flex: 1 1 auto; justify-content: center; }
+}

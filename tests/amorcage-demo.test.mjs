@@ -7,7 +7,7 @@
 // personne, rôle, référence, famille, trame, acte ni compte, et AUCUNE mention de
 // la collectivité fictive (ni à l'écran, ni dans les données servies).
 //
-//   node --test src/tests/
+//   node --test tests/
 //
 // Les modules sont chargés DYNAMIQUEMENT : un module qui exigerait un navigateur
 // ferait échouer l'import, et les tests sont alors SAUTÉS au lieu de faire
@@ -33,8 +33,8 @@ function sansFiction(valeur, quoi) {
 }
 
 test("démonstration éteinte : l'amorçage ne sème rien", async (t) => {
-  const store = await charger("../lib/store.js");
-  const auth = await charger("../lib/auth.js");
+  const store = await charger("../src/lib/store.js");
+  const auth = await charger("../src/lib/auth.js");
   if (!store || !auth) return t.skip("module indisponible hors navigateur");
 
   await store.clearAll();
@@ -63,8 +63,8 @@ test("démonstration éteinte : l'amorçage ne sème rien", async (t) => {
 });
 
 test("démonstration active : le jeu livré est installé", async (t) => {
-  const store = await charger("../lib/store.js");
-  const auth = await charger("../lib/auth.js");
+  const store = await charger("../src/lib/store.js");
+  const auth = await charger("../src/lib/auth.js");
   if (!store || !auth) return t.skip("module indisponible hors navigateur");
 
   await store.clearAll();

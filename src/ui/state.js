@@ -2,7 +2,7 @@ import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, s
 import * as db from "../lib/db/index.js";
 import { seedConfigVierge } from "../lib/seed.js";
 import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
-import { demoAccountsDisabled, isOidc, sessionDeService, authConfig, setDeploiementAuth, deploiementAuth } from "../lib/auth.js";
+import { demoAccountsDisabled, isOidc, sessionDeService, setDeploiementAuth } from "../lib/auth.js";
 import { setDeploiementConfig, appliquerOptions } from "../lib/deploiement-config.js";
 import * as motdepasse from "../lib/motdepasse.js";
 import { applyOidcUser } from "../lib/oidc.js";
@@ -108,12 +108,33 @@ export async function chargerModeDeploiement() {
     marque: r.body.marque || null,
     comptes: r.body.demoComptes || [],
     serveur: true,
+    // CE QUE LE SERVICE SAIT FAIRE DE SES PORTES — les comptes locaux sont-ils
+    // ouverts (`comptesLocaux`), les données se lisent-elles par une session
+    // (`session`), et le service est-il le CLIENT OIDC (`annuaireService`) ? Ce
+    // dernier a été oublié ici à la 1.6.1p, et le client croyait alors parler à
+    // un service ANTÉRIEUR : la découverte repartait du navigateur (donc « Failed
+    // to fetch » chez un fournisseur sans CORS) et la seconde porte n'était pas
+    // proposée, alors que le service savait très bien faire les deux. Ces trois
+    // champs viennent du service : on les transmet, on ne les suppose pas.
+    comptesLocaux: r.body.comptesLocaux,
+    session: r.body.session,
+    annuaireService: r.body.annuaireService,
     baseDisponible: r.body.baseDisponible,
     baseMessage: r.body.baseMessage,
     baseRemede: r.body.baseRemede,
+    // LES RÉGLAGES DE L'ANNUAIRE publiés par le service : en mode « mot de
+    // passe », le référentiel n'est pas lisible avant la session, et c'est donc
+    // la seule façon pour l'écran de connexion de savoir si l'annuaire est
+    // branché en seconde porte. Aucun secret n'y figure : l'application est un
+    // client OIDC public (voir src/server/mysql/annuaire.mjs).
+    annuaire: r.body.annuaire || null,
     adminAmorce: r.body.adminAmorce,
     adminMotif: r.body.adminMotif,
     adminAvertissement: r.body.adminAvertissement,
+    // L'amorçage du compte d'administration a-t-il échoué pour une PANNE (le
+    // référentiel des comptes est injoignable) plutôt que par refus de
+    // configuration ? Les deux ne se réparent pas au même endroit.
+    adminPanne: r.body.adminPanne,
   });
   // Les réglages de RÉFÉRENTIEL posés par le `.env` (identité, vocabulaire,
   // numérotation, délais, recueil, fonctions) : le service les rend à part,
@@ -304,6 +325,27 @@ export async function loginWithClaims(claims) {
   emit();
   if (!estVisiteur(u)) collab.demarrer(u).catch((e) => console.warn("Collaboration indisponible :", e));
   return { ok: true, user: u, created: res.created, linked: res.linked, role: res.role };
+}
+
+// Ouverture de session après une connexion d'annuaire faite PAR LE SERVICE
+// (voir src/lib/oidc.js, `connexionParLeService`) : le service a déjà échangé le
+// code, vérifié le jeton, écrit le compte au référentiel et ouvert SA session
+// (cookie `HttpOnly`). Il n'y a donc plus rien à décider ici — seulement à
+// charger le registre (c'est maintenant possible : la session est ouverte) et à
+// adopter le compte. C'est le pendant d'`ouvrirSessionLocale`, qui sert à la
+// connexion par mot de passe ; le corps est celui que rend `POST /v1/auth/annuaire`.
+export async function loginWithAnnuaireSession(corps = {}) {
+  const u = await ouvrirSessionLocale(corps.utilisateur || {}, { mustChange: false });
+  if (!u) return { ok: false, reason: "Ce compte n'est pas utilisable dans l'application (compte désactivé)." };
+  return {
+    ok: true,
+    user: u,
+    created: !!corps.created,
+    linked: corps.linked || "reprise",
+    role: corps.role || u.role,
+    visiteur: !!corps.visiteur,
+    reason: corps.motif || "",
+  };
 }
 
 export async function logout() {
@@ -947,6 +989,20 @@ export function oublierBulletinsRecueil() {
   st.chargementBulletins = false;
   st.bulletinsActes = {};
   st.flux = undefined;
+}
+
+// Les INFORMATIONS du recueil : le dépôt de démonstration les a écrites au
+// service APRÈS que le recueil les avait lues — la liste gardée en mémoire ne
+// vaut donc plus rien, et l'écran public afficherait longtemps une rubrique
+// vide. L'invalidation seule ne suffisait pourtant pas : personne ne relançait
+// la lecture, et la rubrique ne revenait plus jamais. Le redessin, lui, réarme
+// les lectures (voir `rafraichir`, src/ui/views/recueil-public.js) : l'appelant
+// oublie PUIS redessine — c'est le geste que fait aussi le bulletin.
+export function oublierInformationsRecueil() {
+  const st = state.recueil;
+  if (!st) return;
+  st.infos = null;
+  st.chargementInfos = false;
 }
 
 export const trameById = (id) => state.trames.find((t) => t.id === id);

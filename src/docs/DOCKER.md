@@ -192,6 +192,43 @@ services:
 volumes: { donnees: }
 ```
 
+### 5.4. Sans aucune base de données : le rangement par fichiers
+
+Le service sait se passer de MariaDB : `STOCKAGE=fichier` range tout dans un **dossier**
+(`DATA_DIR`, `./data` par défaut), en clair, et une sauvegarde devient une **copie de dossier**.
+C'est le déploiement d'un poste, d'une petite collectivité, ou d'une machine où l'on ne veut
+qu'un seul logiciel (voir `ADMINISTRATION.md` § 2.4).
+
+Avec l'**image autonome** (§ 1), il suffit de monter un volume sur le dossier de données :
+
+```bash
+mkdir -p ./data
+docker run -d --name scribae --restart unless-stopped -p 8080:80 \
+  -v "$PWD/data:/data" \
+  -e STOCKAGE=fichier -e DATA_DIR=/data \
+  -e AUTH_MODE=password -e ADMIN_PASSWORD='…' \
+  "$REGISTRE/scribae:$VERSION"
+```
+
+Et avec la **pile Compose livrée**, c'est un fichier à part — `src/server/docker-compose.fichier.yml` —
+parce que la pile MariaDB exige `DB_PASSWORD` et `DB_ROOT_PASSWORD` à l'interpolation (les
+réclamer suffirait à empêcher le démarrage d'une installation sans base) :
+
+```bash
+cp src/server/env.example .env      # renseignez surtout ADMIN_PASSWORD
+docker compose -f src/server/docker-compose.fichier.yml up -d --build
+```
+
+Elle décrit deux services, `api` et `web`, et **un seul montage** : `./data` sur `/data`. Tout le
+reste est orchestré comme dans la pile principale (mêmes images, mêmes variables `SCRIBA_*` par
+`env_file`). Le dossier de données **survit à la recréation du conteneur** ; il se sauvegarde en
+le copiant, et il est ignoré par git (voir le `.gitignore` livré).
+
+Deux choses à savoir : le rangement par fichiers suppose **un seul service** écrivant dans le
+dossier (on ne lance pas deux `api` sur le même `./data`, et on n'exécute pas `--mot-de-passe` ou
+`--reconcilier` pendant que le service tourne) ; et le dossier doit être **accessible en écriture**
+par le compte du conteneur — sinon le service refuse de démarrer et le dit dans ses journaux.
+
 ## 6. Configurer
 
 Toute la configuration passe par l'**environnement** du conteneur. La référence complète
@@ -204,7 +241,10 @@ de déploiement*). Les plus utiles au démarrage :
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | la base de données. Avec `DB_ROOT_PASSWORD`, le conteneur **remet lui-même le compte applicatif** au mot de passe de son environnement et **applique le schéma** à chaque démarrage (voir § 9) ; sans lui, ces deux gestes se font à la main (`node /srv/service/server.mjs --reconcilier`) |
 | `DB_ROOT_PASSWORD` | mot de passe administrateur de la base : il n'est lu que pour l'alignement du compte applicatif et le schéma, au démarrage. À omettre quand la base est administrée ailleurs — le conteneur ne touche alors à rien |
 | `AUTO_MIGRATE=true` | appliquer le schéma au démarrage (premier lancement, et à chaque reprise de la base) |
-| `AUTH_MODE` | `password` (défaut sûr) ou `demo` (essai, sans mot de passe) |
+| `STOCKAGE` | `mysql` (défaut) ou `fichier` — le rangement des données (§ 5.4). En mode `fichier`, les variables `DB_*` ne servent pas |
+| `DATA_DIR` | le dossier du rangement par fichiers (`STOCKAGE=fichier`) : monté sur un volume, il porte tout — à sauvegarder en le copiant |
+| `AUTH_MODE` | `password` (défaut sûr) ou `demo` (essai, sans mot de passe) ; `oidc` fait de l'annuaire la porte ordinaire, les comptes locaux restant ouverts comme porte de service |
+| `SCRIBA_ANNUAIRE_*` | l'**annuaire de la collectivité** (OpenID Connect), déclaré : émetteur, `client_id`, portées, correspondance des groupes (`SCRIBA_ANNUAIRE_ROLES=…=administrateur, …=editeur`), seconde porte, points de terminaison. Aucun secret : c'est un client **public** (PKCE). C'est par là qu'on le branche en mode « comptes locaux » (voir `docs/VARIABLES.md`) |
 | `ADMIN_LOGIN`, `ADMIN_PASSWORD` | le compte d'administration, créé au premier démarrage |
 | `DEMO=false` | référentiel **vierge** : aucune donnée fictive |
 | `COOKIE_SECURE` | `true` en production (HTTPS) |
@@ -222,7 +262,9 @@ l'interface reprend la main sur la valeur enregistrée.
 2. Connectez-vous avec `ADMIN_LOGIN` / `ADMIN_PASSWORD`. Le service a créé ce compte au
    premier démarrage ; changez son mot de passe dès la première connexion s'il a circulé.
 3. **Administration › Identité** : vérifiez le nom, l'emblème, l'adresse de base.
-4. Créez les autres comptes dans **Comptes et rôles**, ou branchez l'annuaire (OIDC).
+4. Créez les autres comptes dans **Comptes et rôles**, ou branchez l'annuaire (OIDC) —
+   **Administration › Annuaire (OIDC)**, ou variables `SCRIBA_ANNUAIRE_*` du `.env` pour équiper
+   tout un parc d'un coup.
 
 Si `ADMIN_PASSWORD` ne respecte pas la politique (longueur, classes de caractères),
 **aucun compte n'est créé** — et l'écran de connexion le dit, avec le motif. Corrigez la

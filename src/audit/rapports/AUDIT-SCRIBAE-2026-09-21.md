@@ -10,6 +10,12 @@ registre: src/audit/REGISTRE-NON-CONFORMITES.md
 precedent: —
 ---
 
+
+> **Document de travail — un audit constate, il ne certifie pas.** Ce rapport le premier ne corrige rien : il
+> relève, prouve et propose. Les non-conformités qu'il établit sont suivies dans le **registre
+> cumulatif** (`../REGISTRE-NON-CONFORMITES.md`), où leur **statut évolue** d'une campagne à l'autre —
+> une fiche lue ici peut être **levée depuis**, ou au contraire encore **ouverte**. Les termes employés
+> (gravité, cotation, preuve, contrat de sortie) sont définis par le cadre : `../PROMPT-AUDIT-SCRIBAE.md`.
 # Audit Scribae — 2026-09-21
 
 ## 1. En-tête

@@ -23,6 +23,12 @@
 import { recordExternal } from "./remote.js";
 import { hostKv } from "./hosts.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN } from "./paper.js";
+// LA PART PUBLIQUE DE L'ORIGINAL est une règle partagée avec le service
+// auto-hébergé : elle vit dans UN SEUL module, que le navigateur importe par son
+// chemin relatif (le service, lui, l'importe depuis son propre dossier — voir
+// l'en-tête de ce fichier, et l'audit NC-I-004).
+import { partiePublique } from "../server/mysql/original-signe.mjs";
+export { partiePublique };
 
 const b64 = (bytes) => {
   let s = "";
@@ -176,28 +182,12 @@ export async function buildSignedPackage({ akn, pageHtml, pageCss, numero, objet
   return pack;
 }
 
-// La PARTIE PUBLIQUE d'un original signé : le paquet débarrassé de son dossier
-// interne, et de tout ce qui, dans l'identité du signataire, n'a pas à être
-// publié — l'adresse électronique, le rattachement au compte, le compte de
-// l'outil de signature et l'état du rapprochement. Ce qui reste (nom, fonction,
-// entité) est ce que la signature donne à lire au public.
-//
-// C'est cette partie-là qui est déposée au recueil ; la part interne reste au
-// registre, sous `originalInterne`, et ne se lit qu'avec une session.
-export function partiePublique(pack) {
-  if (!pack || typeof pack !== "object") return pack;
-  const { interne, ...reste } = pack;
-  const signatures = (pack.signatures || []).map((s) => {
-    const sig = { ...(s.signataire || {}) };
-    delete sig.courriel;
-    delete sig.personId;
-    delete sig.compteId;
-    delete sig.compteOutil;
-    delete sig.rapproche;
-    return { ...s, signataire: sig };
-  });
-  return { ...reste, signatures };
-}
+// La PARTIE PUBLIQUE d'un original signé est définie une seule fois, dans
+// `src/server/mysql/original-signe.mjs` (importée et ré-exportée plus haut) : le
+// paquet débarrassé de son dossier interne, et de tout ce qui, dans l'identité du
+// signataire, n'a pas à être publié. C'est cette partie-là qui est déposée au
+// recueil ; la part interne reste au registre, sous `originalInterne`, et ne se
+// lit qu'avec une session.
 
 // Le dossier INTERNE d'un acte signé : la part non diffusable de l'original,
 // qu'elle provienne de la signature simple (signée dans l'application) ou d'un

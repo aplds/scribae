@@ -4,6 +4,14 @@ Ce dossier contient le **cadre d'audit** de Scribae et ses **livrables**. Il ne 
 pas l'audit : il contient la méthode, le registre des non-conformités, et les rapports
 successifs.
 
+> **Ce dossier est un document de travail.** Le registre porte des non-conformités
+> **encore ouvertes**, et un rapport décrit l'état d'un outil **à sa date** : rien ici n'est une
+> certification. Une fiche lue sans son **statut**, sans sa **preuve** et sans les **propositions**
+> qui l'accompagnent se cite à contresens — commencez donc par la **synthèse** du registre et le
+> **plan d'action** du rapport le plus récent, et ne descendez aux fiches qu'ensuite. Les statuts
+> évoluent (une non-conformité peut être levée depuis) ; les fiches, elles, ne sont jamais
+> effacées.
+
 ## Contenu
 
 | Fichier | Rôle |

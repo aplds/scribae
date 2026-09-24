@@ -18,6 +18,7 @@ import { h, icon, button } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
 import { demoNotice } from "../notice.js";
+import { chatErreurEl } from "../chats-erreur.js";
 import { fullName, initialsOf, sourceOf, ROLES, VISITEUR } from "../../lib/users.js";
 
 export function renderSansAcces(root) {
@@ -70,6 +71,10 @@ export function renderSansAcces(root) {
     ),
 
     h("p", { class: "connexion__note", text: "L'espace public — le recueil des actes administratifs — est ouvert à tous, sans compte : ses adresses se partagent et se citent. Si vous pensez qu'il s'agit d'une erreur, signalez-le au service qui gère l'application." }),
+
+    // Un compte reconnu mais sans rôle : c'est un refus d'accès (403). Voir
+    // src/ui/chats-erreur.js.
+    chatErreurEl(403, { legende: "Accès refusé — aucun rôle n'ouvre l'atelier à ce compte" }),
   );
 
   root.appendChild(h("div", { class: "connexion sans-acces" },

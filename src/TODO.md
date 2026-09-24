@@ -3,6 +3,35 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Demandes 1.6.1 (livrées en 1.6.1m)
+
+- [x] **Les annexes ne sont plus « prêtes à signer ».** L'onglet Signature leur donne l'étiquette
+      « Annexe — ne se signe pas », et elles quittent la file « Ma signature » : une annexe tient
+      son autorité de l'acte qui l'adopte, et n'a rien à faire dans la file d'un signataire
+      (`fileSignature`, `src/lib/signataires.js`).
+- [x] **Le fil de parcours.** Les étapes d'un acte — rédaction, parapheur, révision, signature,
+      publication — sont calculées une fois (`parcoursDeActe`, `src/lib/parcours.js`) et dessinées
+      par un objet partagé (`bandeauParcours`, `src/ui/parcours.js`) sur la rédaction, le circuit
+      de signature, le parapheur, la révision et la fiche d'un acte. Le fil montre le titulaire de
+      chaque porte, les étapes du circuit **vues de l'intérieur** (nature et porteur), et la
+      position de la révision («après le parapheur · avant la signature»).
+- [x] **Relecture des écrans, circuit par circuit** (contre-vérification demandée après la
+      livraison) : le circuit a été parcouru de bout en bout à l'écran — soumission, vérification,
+      visa — et chaque étape a été regardée sur les écrans concernés. Trois défauts corrigés :
+      (1) une porte **passée sans être franchie** (acte signé et publié sans trace de révision)
+      s'affichait comme « la porte ouverte » — elle est désormais « **non franchie** », dans le fil
+      comme dans les marches du circuit et sur la fiche (`marquerEtats`, `stepEl`) ; (2) la note du
+      fil s'isolait à droite au lieu de se ranger sous les puces ; (3) le maillon « › » entre deux
+      phases se retrouvait seul en tête de ligne quand le fil se replie — il appartient maintenant
+      à la phase qu'il précède.
+
+Reste ouvert :
+
+- [ ] **Le fil de parcours au REGISTRE.** Le fil est affiché partout où l'on ouvre un acte, mais le
+      **registre** (`src/ui/views/actes.js`, et `src/ui/views/corbeille.js`) n'en montre encore que
+      le seul statut. Une colonne — ou une infobulle sur la pastille d'état — « porte en cours »
+      éviterait d'ouvrir chaque acte pour savoir où il en est.
+
 ## Demandes 1.6.0 (livrées en 1.6.0)
 
 - [x] **Le bulletin (ou Journal) des actes.** La collectivité **ouvre un bulletin** et lui donne
@@ -123,10 +152,13 @@ réseau.
 
 ## Reste à faire (petits chantiers ouverts)
 
-- **Imports inutilisés** : quelques modules importent des noms qu'ils n'emploient
-  plus (`views/signature.js`, `views/rediger.js`, `ui/components.js`,
-  `lib/oidc.js`, `lib/export.js`…). Sans effet à l'exécution, mais ils trompent
-  la lecture — à nettoyer au passage, un fichier à la fois.
+- **Imports inutilisés : fait (1.6.1p), et tenu par le contrôle de style.** Dix-neuf
+  fichiers portaient un import que plus personne n'employait (quarante et une
+  mentions : `views/signature.js`, `views/rediger.js`, `ui/components.js`,
+  `lib/oidc.js`, `lib/export.js`…). Ils sont nettoyés, et `npm run style` les
+  refuse désormais (`scripts/analyse-imports.mjs`, éprouvé dans
+  `tests/purs.test.mjs`) : la liste ne peut plus se reformer sans que la CI
+  le dise.
 - **Le service de démonstration ne voit pas l'adresse de l'appelant** : sa
   réponse le dit (`restriction_appliquee: false` + note), et le simulateur reste
   juste, mais l'aperçu ne peut donc pas montrer la restriction appliquée — c'est
@@ -307,12 +339,20 @@ résolution unique des services (`src/lib/hosts.js`), `index.html` autonome (`<!
 `viewport`, titre), libellé du mode adapté. Toute la chaîne (dépôt → signature ECDSA →
 publication → ELI) fonctionne sans serveur, y compris après rechargement.
 
-- [ ] **Partage entre postes.** L'état du service embarqué vit dans le navigateur : deux
-      personnes sur la même démonstration ne voient pas le même référentiel. Un service
-      hébergé ailleurs (le déploiement `src/server/`, ou une API publique) le permettrait :
-      il suffit de poser `window.__SCRIBA_SELF_HOSTED__` et l'adresse avant `host.js`.
-- [ ] **Bandeau « démonstration statique ».** Signaler dans l'interface que rien n'est
-      partagé (aujourd'hui : le libellé du mode de persistance seulement).
+- [x] **Partage entre postes.** L'état du service embarqué vit dans le navigateur : deux
+      personnes sur la même démonstration ne voyaient pas le même référentiel. Poser
+      `window.__SCRIBA_SERVICE_URL__` **avant** `src/pages/host.js` branche désormais la page
+      statique sur un **service distant** (`src/server/`, ou toute installation au même contrat) :
+      le stockage local reste (réglages, session, file d'attente), les collections passent par
+      l'API, et tous les postes voient le même référentiel. Le service doit autoriser l'origine
+      de la page (`CORS_ORIGINS`). Documenté dans `docs/GITHUB.md` (« Travailler à plusieurs tout
+      en restant sur GitHub Pages ») ; `__SCRIBA_STATIC_SHARED__` dit au bandeau qu'il ne doit
+      pas annoncer « rien n'est partagé ».
+- [x] **Bandeau « démonstration statique ».** Le bandeau de tête (atelier **et** recueil public)
+      dit maintenant, en édition statique, que la page héberge son propre service et que rien
+      n'est partagé entre postes — au lieu de ne le laisser lire que dans le libellé du mode de
+      persistance. Relié à un service distant (`__SCRIBA_SERVICE_URL__`), il dit l'inverse : les
+      données sont communes (`src/ui/notice.js`).
 - [ ] **L'état durable de l'émulateur de serveur de l'ÉDITEUR ne survit pas à tout.** Ce n'est
       pas le logiciel : c'est l'émulateur du générateur non enregistré, dont la mémoire durable
       est recopiée à des moments que nous ne maîtrisons pas (un instantané prélevé pendant
@@ -345,14 +385,33 @@ Reste à faire, par ordre d'importance :
       jeton (émetteur, audience, validité, nonce, signature JWKS), groupes → rôles,
       périmètre par revendications, reprise ou création des comptes. Le brancher **désactive
       automatiquement les comptes de démonstration**, de façon réversible (`syncDemoAccounts`).
-      Reste possible, non fait : SAML (les collectivités en ont encore), déconnexion fédérée
-      (`end_session_endpoint`), et rafraîchissement de session par `refresh_token`.
+      Depuis la note **1.6.1n**, les réglages sont présents **dans tous les modes** — l'annuaire
+      peut être proposé en **seconde porte**, à côté des comptes locaux ou des comptes de
+      l'application — et le `.env` les porte tous (`SCRIBA_ANNUAIRE_*`, 22 variables, validées par
+      le registre) ; le service les republie dans `GET /v1/auth/config`, seule façon pour l'écran
+      de connexion de les lire en mode « comptes locaux », où le référentiel n'est pas encore
+      accessible.
+      **Depuis la note 1.6.1p, c'est le SERVICE qui est le client OIDC** : la route
+      `POST /v1/auth/annuaire` (voir `src/server/mysql/comptes.mjs` et le branchement dans
+      `annuaire-service.mjs`) découvre le fournisseur, échange le code avec le vérificateur PKCE
+      que le navigateur a gardé, vérifie le jeton d'identité (JWKS du fournisseur, `iss`, `aud`,
+      `exp`, `nonce`, signature RS/PS/ES — voir `jws.mjs`), écrit le compte au référentiel puis
+      ouvre une session `sb_session`. L'agent entré par l'annuaire lit donc les actes comme les
+      autres, la seconde porte s'ouvre en mode « comptes locaux », et le fournisseur n'a plus
+      besoin d'autoriser le CORS : plus aucun appel ne part du navigateur. Les contrôles et la
+      correspondance des revendications sont éprouvés séparément (`annuaire-service.test.mjs`,
+      `jws.test.mjs`), et leur concordance avec le client du navigateur est tenue par
+      `tests/purs.test.mjs`.
+
+      Reste possible, non fait :
+      - SAML (les collectivités en ont encore), déconnexion fédérée (`end_session_endpoint`), et
+        rafraîchissement de session par `refresh_token`.
 - [x] **Comptes locaux (mot de passe) sans annuaire (livré).** `AUTH_MODE=password` dans le `.env` :
       comptes vérifiés par le service (dérivé `scrypt`, blocage après échecs, comparaison à temps
       constant), session dans un cookie `HttpOnly` + jeton anti-CSRF, compte d'administration créé
       depuis le `.env`, administration des mots de passe depuis *Comptes et rôles*, mode
       démonstration réglable (`DEMO_ACCOUNTS`). Banc d'essai : `src/server/mysql/comptes.test.mjs`
-      (27 épreuves, `npm test`). Reste possible : réinitialisation par l'agent (lien à usage unique
+      (39 épreuves, `npm test`). Reste possible : réinitialisation par l'agent (lien à usage unique
       par courriel — le service de courriel est désormais là, § « La signature simple et le
       courriel »), second facteur (TOTP), journal des connexions, et purges planifiées de
       `sb_session`.
@@ -372,10 +431,14 @@ Reste à faire, par ordre d'importance :
       `src/docs/DOCKER.md`. Reste possible : une tâche d'intégration continue qui construit et publie
       l'image (`buildx`, multi-architecture) à chaque version figée, et un `schema.sql` versionné
       pour l'image (aujourd'hui, l'exploitant lance `--migrate` ou pose `AUTO_MIGRATE=true`).
-- [ ] **Éprouver la suite de tests Node depuis un vrai Node.** `comptes.test.mjs` a été vérifié
-      ici avec un substitut de `node:crypto` (le domaine, lui, est éprouvé), mais
-      `npm test` dans `src/server/mysql` n'a pas pu être lancé dans l'atelier : à faire au premier
-      `npm install` sur un poste.
+- [ ] **Éprouver la suite de tests depuis un vrai Node.** Le domaine des comptes a été vérifié ici
+      avec un substitut de `node:crypto`, et les **277 épreuves des 24 fichiers** y passent
+      **fichier par fichier** — c'est ainsi que `node --test` les exécute, chaque fichier dans son
+      propre processus (un harnais qui les exécute tous dans le même processus n'est pas
+      représentatif). Le verrou du service est désormais livré
+      (`src/server/mysql/package-lock.json`, installé par `npm ci`). Reste à le confirmer sur un
+      poste outillé, en une commande : `cd src/server/mysql && npm ci && npm test`, puis, à la
+      racine, `npm run verifier` — exactement ce que la chaîne d'intégration exécute à chaque envoi.
 - [ ] **La marque du recueil public avant la session.** En mode `password`, le référentiel n'est pas
       lisible avant la connexion : le recueil public (qui, lui, reste ouvert — `/v1/publications`
       l'est aussi) s'affiche donc avec la marque par défaut au lieu de celle de la collectivité. Le
@@ -385,16 +448,19 @@ Reste à faire, par ordre d'importance :
       reste la main sur les comptes pré-enregistrés ; un annuaire qui n'annonce aucun groupe
       utile oblige à choisir « refuser » ou un rôle de repli global. Des règles par groupe
       plus fines (plusieurs correspondances, exceptions) seraient la suite logique.
-- [ ] **Jeton client non public.** Le jeton d'écriture est injecté dans `config.js`, donc
-      servi à tout visiteur ; il faudrait l'échanger contre un jeton de session après
-      authentification (l'annuaire donne maintenant l'identité de départ).
+- [x] **Jeton client non public.** Livré : dès que le déploiement administre par session
+      (`AUTH_MODE=password` ou `oidc`), la façade ne l'écrit plus dans `config.js`
+      (`web/entrypoint.sh`) et l'hôte refuse de le lire (`web/host.js`) ; les écritures passent
+      par le cookie de session. Le mode « démonstration » garde sa clé — il n'a rien à protéger.
 - [ ] **TLS fourni.** La pile s'arrête à HTTP ; le reverse-proxy TLS est à la charge de
       l'exploitant (un profil Caddy/Traefik pourrait être fourni).
 - [ ] **Sauvegarde outillée.** Fournir un service de dump planifié avec rotation, plutôt que
       de laisser la commande dans la documentation.
 - [ ] **Sonde de supervision** dédiée (et non `/v1/db/health`, qui interroge la base).
-- [ ] **Migrations versionnées.** `schema.sql` est idempotent mais sans numéro de version ;
-      une table de migrations rendrait les évolutions traçables.
+- [x] **Migrations versionnées.** Livré : table `sb_migrations` et liste ordonnée de migrations
+      (`src/server/mysql/migrations.mjs`), chacune appliquée une fois et inscrite avec son
+      empreinte — une migration modifiée après coup est signalée, jamais rejouée. Le socle
+      (`schema.sql`) est la version 1 ; la suite s'AJOUTE (voir `src/docs/REPRISE.md`).
 
 ## Base de données (chantier livré — suite possible)
 
@@ -427,6 +493,20 @@ Reste à faire, par ordre d'intérêt :
 - [ ] **Pilote local plus riche.** Le mode local repose sur le stockage du
       navigateur (IndexedDB). Un pilote SQLite/OPFS donnerait des requêtes locales — utile
       seulement si le mode local devait devenir autre chose qu'une démonstration.
+- [x] **Le rangement par fichiers (livré — 1.6.1l).** Le service peut se passer de MariaDB :
+      `STOCKAGE=fichier` range tout dans un dossier (`DATA_DIR`), en clair. Le protocole est celui
+      du magasin (`magasin.mjs`), donc identique à MariaDB — mêmes collections, révisions, conflits
+      et journal ; l'algorithme de synchronisation est écrit une fois et partagé. Banc d'essai
+      entièrement en mémoire (`magasin-fichier.test.mjs`, 14 épreuves).
+- [ ] **Migrer d'un rangement à l'autre, outillé.** Le passage MariaDB ↔ fichiers se fait
+      aujourd'hui par **export/import** (Administration › Données) ; une commande de conversion
+      (`--exporter-fichiers`, `--importer-fichiers`) épargnerait un aller-retour par l'interface,
+      et permettrait une bascule scriptée.
+- [ ] **Éprouver le rangement par fichiers par un VRAI service.** Les épreuves du magasin
+      tournent en mémoire (disque injecté) : solides sur la logique, elles ne couvrent ni les
+      droits du système de fichiers, ni l'écriture atomique réelle, ni le comportement à l'arrêt
+      d'un processus. À confirmer sur un poste outillé : `STOCKAGE=fichier DATA_DIR=/tmp/scribae
+      node src/server/mysql/server.mjs`, puis un cycle complet (dépôt, signature, publication).
 - [ ] **Points ouverts de l'audit ciblé du 22/09/2026** (session, anti-CSRF, file
       d'attente ; détails et propositions dans `src/docs/AUDIT-BUGS-2026-09-22.md`) :
       `GET /v1/db/health` est publique et décrit l'hôte, le port et la version de la
@@ -560,9 +640,14 @@ Restent ouverts :
       **registre public** ignore encore le lien `annexes`, et l'on ne peut pas remonter de l'acte à
       ses annexes depuis le recueil. Il faudrait rendre `annexes` dans `src/lib/recueil.js` et les
       présenter (une liste, un encart).
-- [ ] **Abroger une annexe.** L'abrogation d'un acte (`src/lib/abrogations.js`) ne dit rien des
-      annexes : qu'advient-il du règlement intérieur quand la délibération qui l'a adopté est
-      abrogée ? La question est juridique avant d'être technique.
+- [x] **Abroger une annexe.** Tranché et livré : par sa nature. Une annexe **sans publication
+      autonome** (un tableau, une grille tarifaire) fait partie de sa décision mère et **s'abroge
+      avec elle**, au même jour, sans clause (`abrogePar.parAnnexion`) ; une annexe **autonome**
+      (un règlement, `trame.reglement`) **survit** à l'abrogation de sa décision d'adoption, et
+      doit être abrogée ou modifiée par un **acte autonome** — l'application le **signale** dès
+      la rédaction, puis sur la fiche de l'acte abrogeant et sur celle de l'annexe. Règle :
+      `src/lib/abrogation-annexes.js` (pure, éprouvée) ; application :
+      `src/ui/abrogations-apply.js` ; documentation : `SPEC.md` § 2.5 bis.
 - [ ] **Relire le texte des annexes à l'import.** Un fichier Akoma Ntoso d'acte d'adoption est
       suivi du texte de ses annexes (`<attachments>`), mais `src/lib/akn.js` ne les **compte** que
       pour avertir le lecteur : il ne les rattache pas, parce qu'une annexe est ici un acte à part
@@ -613,10 +698,12 @@ Restent ouverts :
       nouvelle version sous le même identifiant, l'ancienne restant dans l'historique des versions.
 - [ ] **Un lien direct de la notice du règlement vers l'acte d'adoption** (aujourd'hui l'acte
       d'adoption est nommé dans la méta, mais pas encore cliquable depuis le recueil).
-- [ ] **Règlement et abrogation.** Voir « Abroger une annexe » ci-dessus : que devient le règlement
-      publié à part quand la délibération qui l'a adopté est abrogée ? La question est **juridique**
-      avant d'être technique — un règlement publié pour lui-même pourrait survivre à son acte
-      d'adoption, ou devoir disparaître avec lui.
+- [x] **Règlement et abrogation.** Tranché avec les annexes, et dans le même sens : un règlement
+      publié à part **survit** à l'abrogation de la délibération qui l'a adopté — c'est un texte
+      normatif, consultable pour lui-même — mais l'application le **dit** et le désigne, pour qu'il
+      soit abrogé ou remplacé par un acte autonome (voir « Abroger une annexe »). Reste ouvert, en
+      revanche : ce qu'il advient de sa **publication informative** au recueil (une « dépublication »
+      du règlement, ou la mention qu'il n'est plus en vigueur, n'est pas encore outillée).
 
 ## Circuit de signature externe (livré — suite possible)
 
@@ -824,6 +911,12 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       occupée (reconstruction du jeu de démonstration, écriture d'un registre volumineux) et la
       première lecture du recueil échoue avant même d'avoir commencé — le recueil restait alors
       vide pour toute la session.
+      Les **billets** suivent le même chemin (`amorcerInformations`) : le recueil les avait lus
+      avant que le service ne les connaisse, et l'invalidation qui suit le dépôt — sans relecture —
+      faisait disparaître la rubrique « Informations » pour de bon, jusqu'au chargement suivant.
+      Corrigé en `1.6.1d` : un redessin du recueil réarme ses lectures, et il n'écrit que s'il est
+      l'écran affiché — une lecture qui aboutit après coup ne réécrit plus la page par-dessus
+      l'atelier.
 - [ ] **Les publications de démonstration déjà déposées chez le service ne se rattrapent pas.**
       `amorcerRecueil` reprend un enregistrement existant tel qu'il est (« le service est la
       source ») : une version de la démonstration antérieure au régime des annexes (SEED_VERSION
@@ -834,25 +927,14 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       réservée à la démonstration, ou un `dateExpression` distinct pour re-déposer.
 - [ ] **Le recueil public et le texte des annexes.** Voir plus haut : `adoption` / `annexes` ne
       voyagent pas encore jusqu'au service.
-- [ ] **Les recueils extérieurs ne sont pas portés par le service auto-hébergé.** Les renvois du
-      recueil public (« Autres recueils », sites de référence — voir § 2.6 bis du SPEC) sont un
-      réglage **côté application** (`config.publication.recueilsExternes`) et s'affichent dans la vue
-      du recueil (`views/recueil-public.js`) — celle qu'on voit en démonstration. Sur une pile
-      **auto-hébergée**, l'espace public est rendu par le **service** (`/recueil`, `llms.txt`,
-      `recueil.json` — `src/server/mysql/actes.mjs`), qui ne connaît pas le référentiel : le bloc
-      n'y figure donc pas encore. À traiter si le sujet compte : porter le réglage au service
-      (dépôt `recueilsExternes` avec chaque publication, comme `recueil`/`brandName`, ou route de
-      réglage du recueil), puis le rendre dans `pageRecueil` (bas de page) et `indexRecueil`/
-      `llmsTxt`, et couvrir par `actes.test.mjs`.
-- [ ] **Les mentions légales et d'accessibilité ne sont pas portées par le service auto-hébergé.**
-      Même cause que ci-dessus : `config.publication.mentions` (voir § 2.6 bis du SPEC) est un réglage
-      **côté application**, rendu par `blocMentions` dans `views/recueil-public.js` — la vue qu'on voit
-      en démonstration. Sur une pile auto-hébergée, `/recueil` est rendu par le service
-      (`src/server/mysql/actes.mjs`), qui ne connaît pas le référentiel : le bas de page y perd les
-      mentions. À traiter avec le même dépôt que les renvois (mentions et recueils extérieurs voyagent
-      ensemble : ils viennent du même écran, et se rendent au même endroit), puis à couvrir par
-      `actes.test.mjs`.
-- [~] **L'état du service de l'environnement d'édition ne survit pas toujours.** Corrigé côté
+- [x] **Les recueils extérieurs et les mentions sont portés par le service auto-hébergé.** Livré :
+      les renvois (« Autres recueils », sites de référence) et les mentions du pied de page
+      (légales, conditions de réutilisation, accessibilité) voyagent avec **chaque publication**,
+      comme le titre du recueil et le nom de la collectivité — l'application les transmet au dépôt
+      (`src/ui/views/signature.js`, `diffusionRecueil`), et le service les rend dans `/recueil`
+      (bloc « Vous ne trouvez pas ce que vous recherchez ? », pied de page), `/recueil.json`
+      (`renvois`, `mentions`) et `llms.txt`. Couvert par `actes.test.mjs`.
+- [ ] **L'état du service de l'environnement d'édition ne survit pas toujours.** Corrigé côté
       **format** : le document durable du service (`index.html`, `loadDb`/`saveDb`) n'est plus
       relu corrompu — l'écriture efface la version AVANT de recopier et la rétablit en dernier
       (un instantané pris au milieu se reconnaît à sa version, sans relecture), la lecture
@@ -880,16 +962,16 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       (`etatUtilise()` lit le même en-tête), avec les tests d'aller-retour correspondants.
       Le service enregistré (service « natif » de la plateforme) et l'auto-hébergement
       (MariaDB, `sb_etat`) ne sont pas concernés.
-- [~] **Retirer une publication du recueil** (dépublier) — **livré dans l'application**, **reste à
-      porter au service auto-hébergé**. L'écran **Publications (ELI)** porte le retrait sous la
-      permission `publications.depublier` (administrateur seul) : avertissement en grand, **motif
-      technique obligatoire**, motif conservé sur l'acte et inscrit au **journal** d'audit
-      (`publication.depublie`), l'acte redevenant *signé*, donc publiable à nouveau ; le **service
-      de l'environnement d'édition** (index.html) expose la route
-      `POST /v1/publications/{cle}/retrait`. Ce qui manque : le **service Node/MySQL**
-      (`src/server/mysql/actes.mjs`) n'expose pas cette route — sur une pile auto-hébergée, le
-      geste aboutit à une erreur. À ajouter là-bas (même règle : motif exigé, trace au journal,
-      l'acte redevient *signé*), et à couvrir par `actes.test.mjs`.
+- [x] **Retirer une publication du recueil** (dépublier) — **livré des deux côtés**. L'écran
+      **Publications (ELI)** porte le retrait sous la permission `publications.depublier`
+      (administrateur seul) : avertissement en grand, **motif technique obligatoire**, motif
+      conservé sur l'acte et inscrit au **journal** d'audit (`publication.depublie`), l'acte
+      redevenant *signé*, donc publiable à nouveau. Le **service de l'environnement d'édition**
+      (index.html) et le **service Node/MySQL** (`src/server/mysql/actes.mjs`, rôle
+      `administrateur`) exposent tous deux `POST /v1/publications/{cle}/retrait` — même règle,
+      même trace —, et le jeu d'appels de conformité
+      (`tests/conformite-service.mjs`) exige la route des **deux**. Couvert par
+      `actes.test.mjs`.
 - [x] **Actes de démonstration plus variés.** Fait (SEED_VERSION 45/46, puis 53 pour les
       documents non juridiques) : le jeu couvre
       **vingt-cinq trames** et **soixante-neuf actes** — verbatim de séance, déclaration, vœu,

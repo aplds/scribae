@@ -11,6 +11,14 @@
 //
 // Le contrat est le même dans les deux cas, donc tout le reste de l'application
 // ignore où vivent réellement les données.
+//
+// DÉLAI. Un appel HTTP sans limite attend indéfiniment un service qui ne
+// répondra jamais : le navigateur ne rend pas toujours la main sur une adresse
+// inconnue (DNS en attente, port filtré), et l'application restait alors sur son
+// écran de chargement — un service ABSENT doit se dire absent, pas se taire.
+// Chaque appel HTTP porte donc un délai (voir `DELAI_HTTP`), et l'expiration est
+// traduite en panne de service : le pilote bascule en « hors ligne », la file
+// d'attente garde les écritures, et l'écran s'affiche avec ses données locales.
 // ============================================================================
 
 import { call as socketCall, errorMessage } from "../remote.js";
@@ -20,6 +28,9 @@ export { errorMessage };
 
 export const id = "service";
 
+// Délai d'un appel HTTP au service de données. Généreux (le service peut
+// interroger MariaDB), mais borné : au-delà, on considère le service injoignable.
+export const DELAI_HTTP = 12000;
 export function create({
   baseUrl = "", token = "", transport = "socket", label = "Service de données",
   // Mode « comptes locaux (mot de passe) » : la porte est la session du service,
@@ -52,6 +63,10 @@ export function create({
       return { ok: res.ok, status: res.status, body: res.body };
     }
     let res;
+    // Le délai s'applique à CHAQUE appel : un service muet (adresse inconnue,
+    // port filtré) ne doit pas suspendre l'application.
+    const controleur = typeof AbortController === "function" ? new AbortController() : null;
+    const minuteur = controleur ? setTimeout(() => controleur.abort(), DELAI_HTTP) : null;
     try {
       res = await fetch(base + path, {
         method,
@@ -62,9 +77,15 @@ export function create({
           ...(method === "GET" ? {} : entetesCsrf()),
         },
         body: payload === null ? undefined : JSON.stringify(payload),
+        signal: controleur ? controleur.signal : undefined,
       });
     } catch (e) {
-      throw new Error(`Serveur de données injoignable (${base + path}) : ${(e && e.message) || e}`);
+      const abattu = e && (e.name === "AbortError" || controleur && controleur.signal.aborted);
+      throw new Error(abattu
+        ? `Serveur de données injoignable (${base + path}) : pas de réponse après ${Math.round(DELAI_HTTP / 1000)} secondes.`
+        : `Serveur de données injoignable (${base + path}) : ${(e && e.message) || e}`);
+    } finally {
+      if (minuteur) clearTimeout(minuteur);
     }
     let data = null;
     try { data = await res.json(); } catch (e) { data = { message: "Réponse illisible du serveur." }; }

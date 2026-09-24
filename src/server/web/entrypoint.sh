@@ -39,6 +39,21 @@ export AUTH_MODE="${AUTH_MODE:-}"
 export DEMO_ACCOUNTS="${DEMO_ACCOUNTS:-}"
 export DEMO="${DEMO:-}"
 
+# LE JETON NE DESCEND PAS DANS LE NAVIGATEUR EN MODE « SESSION ». `config.js`
+# est servi à TOUT visiteur : y écrire le jeton d'écriture, c'est le publier.
+# Or dès que l'administration passe par une session — mode « password » ou
+# annuaire « oidc » — le navigateur n'a plus besoin d'aucun jeton : ses écritures
+# portent le cookie de session, et le service les autorise ainsi. On retire donc
+# le jeton du fichier, au lieu de le laisser traîner « au cas où ». Le mode
+# « demo », lui, n'a pas de session : il conserve sa clé de service (elle n'y est
+# pas un secret — il n'y a rien à protéger dans une démonstration).
+if [ "$AUTH_MODE" = "password" ] || [ "$AUTH_MODE" = "oidc" ]; then
+  if [ -n "$API_TOKEN" ]; then
+    echo "Scribae — mode « $AUTH_MODE » : le jeton d'écriture n'est pas transmis au navigateur (les écritures passent par la session). Retirez API_TOKEN du .env de la façade."
+  fi
+  API_TOKEN=""
+fi
+
 if [ -r "$TPL/config.js.template" ]; then
   if command -v envsubst >/dev/null 2>&1; then
     envsubst '${API_BASE} ${API_TOKEN} ${AUTH_MODE} ${DEMO_ACCOUNTS} ${DEMO}' < "$TPL/config.js.template" > "$WWW/config.js" || erreur=1

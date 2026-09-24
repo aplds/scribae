@@ -1,0 +1,178 @@
+/* ============================================================================
+   Scribae — Le guide d'utilisation (wiki) : texte plus grand, étapes numérotées, encadrés lisibles par le public visé.
+
+   Partie 3/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Guide d'utilisation (wiki). Public visé : agents peu à l'aise avec
+   l'informatique — texte plus grand, étapes numérotées, encadrés lisibles.
+   ========================================================================== */
+.help-link {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  background: none; border: 0; padding: 4px 6px; border-radius: var(--radius);
+  color: var(--brand); font: inherit; font-size: .85rem; cursor: pointer;
+}
+.help-link:hover { background: var(--brand-soft); }
+
+.welcome { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; max-width: none; margin-bottom: 16px; border-left: 4px solid var(--brand); }
+.welcome__text { flex: 1 1 320px; }
+.welcome__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.guide { max-width: 900px; }
+.guide__hero { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; margin-bottom: 18px; }
+.guide__hero-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.guide__brand { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+.guide__brand .app-mark { color: var(--brand); }
+.guide__title { font-size: 1.7rem; margin-bottom: 6px; }
+.guide__sub { color: var(--ink-2); margin-bottom: 8px; max-width: 60ch; }
+.guide__h2 { margin: 26px 0 12px; }
+.guide__searchbox { margin-bottom: 18px; }
+.guide__search { width: 100%; max-width: 460px; font-size: 1rem; padding: 10px 12px; }
+.guide__cards { display: grid; gap: 10px; }
+.guide__paths { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 8px; }
+
+.gpath { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.gpath__title { margin: 0 0 2px; font-size: 1.05rem; }
+.gpath__hint { color: var(--ink-muted); font-size: .85rem; margin: 0 0 10px; }
+.gpath__links { display: flex; flex-direction: column; gap: 4px; }
+.gpath__link {
+  text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: var(--radius);
+  color: var(--brand); font: inherit; font-size: .92rem; cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+}
+.gpath__link::before { content: "→"; color: var(--ink-muted); flex: none; }
+.gpath__link:hover { background: var(--brand-soft); }
+
+.gcard { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.gcard--link { cursor: pointer; }
+.gcard--link:hover { border-color: var(--brand); background: #fcfcff; }
+.gcard__row { display: flex; gap: 14px; align-items: flex-start; }
+.gcard__num {
+  flex: none; width: 30px; height: 30px; border-radius: 999px; background: var(--brand-soft); color: var(--brand);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.gcard__text { flex: 1 1 auto; min-width: 0; }
+.gcard__title { margin: 0 0 2px; font-size: 1.05rem; }
+.gcard__sub { margin: 0; color: var(--ink-2); font-size: .92rem; }
+.gcard__tags { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.gcard__go { color: var(--ink-muted); flex: none; }
+.gcard--steps { margin: 14px 0; }
+.gcard--steps .gcard__title { margin-bottom: 10px; }
+.gchip {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 600;
+  background: var(--bg-contrast); color: var(--ink-2);
+}
+.gchip--admin { background: var(--info-bg); color: var(--info); }
+
+.gchapter__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.gchapter__meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.gcount { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--brand); }
+.gtime { font-size: .82rem; color: var(--ink-muted); }
+.gchapter__title { font-size: 1.55rem; margin-bottom: 6px; }
+.gchapter__lead { color: var(--ink-2); font-size: 1rem; margin-bottom: 18px; }
+.gchapter__body { font-size: 1.02rem; line-height: 1.65; }
+.gtext { max-width: 68ch; }
+.glist { max-width: 68ch; padding-left: 22px; margin: 0 0 14px; }
+.glist li { margin-bottom: 6px; }
+.gkbd { background: var(--bg-contrast); border-radius: 3px; padding: 1px 5px; font-size: .85em; }
+
+.gsteps { list-style: none; counter-reset: gstep; margin: 16px 0; padding: 0; max-width: 70ch; }
+.gstep { counter-increment: gstep; display: flex; gap: 12px; padding: 0 0 16px; position: relative; }
+.gstep::before {
+  content: counter(gstep); flex: none; width: 30px; height: 30px; border-radius: 999px;
+  background: var(--brand); color: #fff; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.gstep__text { font-weight: 600; }
+.gstep__detail { color: var(--ink-2); font-weight: 400; font-size: .92rem; margin-top: 2px; }
+.gsteps--compact .gstep { padding-bottom: 8px; }
+
+.gnote { border-radius: var(--radius); padding: 12px 14px; margin: 16px 0; border-left: 4px solid var(--info); background: var(--info-bg); }
+.gnote--warn { border-color: var(--warning); background: var(--warning-bg); }
+.gnote--ok { border-color: var(--success); background: #e8f6ec; }
+.gnote__title { display: flex; align-items: center; gap: 8px; font-size: .98rem; margin: 0 0 4px; }
+.gnote p { margin: 0; }
+
+.gterms { margin: 12px 0 18px; max-width: 70ch; }
+.gterms__term { font-weight: 700; margin-top: 10px; }
+.gterms__def { margin: 2px 0 0 0; color: var(--ink-2); }
+
+.gtable { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.gtable th, .gtable td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+.gtable th { background: var(--bg-alt); }
+
+.gfaq { margin: 14px 0; }
+.gfaq__item { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; background: var(--bg); }
+.gfaq__q { cursor: pointer; padding: 12px 14px; font-weight: 600; list-style: none; }
+.gfaq__q::marker { content: ""; }
+.gfaq__q::before { content: "+"; display: inline-block; width: 18px; color: var(--brand); font-weight: 700; }
+.gfaq__item[open] .gfaq__q::before { content: "–"; }
+.gfaq__a { padding: 0 14px 12px 32px; margin: 0; color: var(--ink-2); }
+
+.gshot { margin: 18px 0; }
+.gshot__frame { position: relative; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
+.gshot__frame img { display: block; width: 100%; height: auto; }
+.gshot__box {
+  position: absolute; transform: translate(-50%, -50%); border: 2px dashed var(--error); border-radius: 4px;
+  background: rgba(206, 5, 0, .06); pointer-events: none;
+}
+.gshot__mark {
+  position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 999px;
+  background: var(--error); color: #fff; font-weight: 700; font-size: .78rem;
+  display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  border: 2px solid #fff;
+}
+.gshot__pending { padding: 40px; text-align: center; color: var(--ink-muted); background: var(--bg-alt); }
+.gshot__caption { font-size: .88rem; color: var(--ink-muted); margin: 6px 0 0; }
+.gshot__legend { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; }
+.gshot__legend li { display: flex; gap: 8px; align-items: baseline; font-size: .92rem; color: var(--ink-2); }
+.gshot__num {
+  flex: none; width: 22px; height: 22px; border-radius: 999px; background: var(--error); color: #fff;
+  font-size: .75rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* schéma « message électronique » (illustration, pas une capture) */
+.gmail { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 16px 0; background: var(--bg); max-width: 640px; }
+.gmail__bar { background: var(--bg-contrast); padding: 8px 14px; font-weight: 600; font-size: .92rem; border-bottom: 1px solid var(--border); }
+.gmail__body { padding: 10px 14px 14px; }
+.gmail__row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.gmail__row:last-child { border-bottom: 0; }
+.gmail__label { flex: none; width: 110px; color: var(--ink-muted); font-size: .85rem; padding-top: 3px; }
+.gmail__value { flex: 1 1 auto; min-width: 0; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px; font-size: .9rem; }
+.gmail__attach { display: inline-flex; align-items: center; gap: 8px; background: var(--brand-soft); color: var(--brand); border-radius: 999px; padding: 5px 12px; font-size: .85rem; font-weight: 600; }
+.gmail__send { background: var(--brand); color: #fff; border-radius: var(--radius); padding: 7px 18px; font-size: .9rem; font-weight: 600; }
+
+.gcontact { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin: 18px 0; }
+.gcontact__title { display: flex; align-items: center; gap: 8px; font-size: 1.02rem; margin: 0 0 6px; }
+.gcontact p { margin: 0 0 4px; }
+
+.gnext { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin: 22px 0 6px; }
+.gnav { display: flex; align-items: center; gap: 10px; margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.gnav__hint { width: 100%; margin: 0 0 8px; }
+
+.gdot { display: inline-block; width: 12px; height: 12px; border-radius: 999px; margin-right: 8px; vertical-align: baseline; }
+.gdot--ok { background: var(--success); }
+.gdot--ko { background: var(--error); }
+.gdot--warn { background: var(--warning); }
+
+@media (max-width: 760px) {
+  .guide { max-width: none; }
+  .guide__hero { padding: 16px; }
+  .guide__title { font-size: 1.4rem; }
+  .gchapter__title { font-size: 1.3rem; }
+  .gmail__label { width: 84px; }
+  .gcard__row { gap: 10px; }
+}
+
+/* impression du guide */
+@media print {
+  .guide__hero-actions, .guide__searchbox, .gchapter__head, .gnav, .gnext, .help-link { display: none !important; }
+  .gcard--link { border-color: var(--border); }
+  .gfaq__item { page-break-inside: avoid; }
+  .gshot { page-break-inside: avoid; }
+}

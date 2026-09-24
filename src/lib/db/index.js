@@ -552,8 +552,16 @@ export function reparerPilote({ force = false } = {}) {
       if (r && r.ok && r.body && r.body.auth) {
         // On garde ce que le service a déjà dit de son état (base joignable,
         // amorçage du compte d'administration…) : la découverte du mode ne doit
-        // pas effacer l'écran de connexion.
-        setDeploiementAuth({ ...(deploiementAuth() || {}), mode: r.body.auth, demo: r.body.demo !== false, demoJeu: r.body.demoJeu });
+        // pas effacer l'écran de connexion. Le drapeau `annuaireService` est
+        // repris LUI AUSSI : c'est lui qui dit au client que le service est le
+        // client OIDC (découverte et échange chez lui, pas dans le navigateur).
+        // Ne pas le transmettre ici laissait le client croire à un service
+        // antérieur dès que ce rattrapage était le seul à avoir abouti.
+        setDeploiementAuth({
+          ...(deploiementAuth() || {}),
+          mode: r.body.auth, demo: r.body.demo !== false, demoJeu: r.body.demoJeu,
+          annuaireService: r.body.annuaireService,
+        });
         rafraichi = true;
       }
       const s = await sessionCourante();

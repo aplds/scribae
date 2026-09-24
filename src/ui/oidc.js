@@ -17,15 +17,16 @@
 // ============================================================================
 import { h, clear, button, icon, modal, toast } from "./dom.js";
 import { textField, selectField, choiceField, confirmDialog, helpLink } from "./components.js";
-import { state, loginWithClaims, applyAuthMode } from "./state.js";
+import { state, loginWithClaims, loginWithAnnuaireSession, applyAuthMode } from "./state.js";
+import { poseParLeDeploiement } from "../lib/deploiement-config.js";
 import { ROLES, ROLE_ORDER, accountUsable, isDemoUser, sourceOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
 import {
-  AUTH_MODES, UNKNOWN_POLICIES, authConfig, emptyAuth, isOidc, isTestProvider,
-  providerLabel, providerProblems, redirectUriFor, demoAccountsDisabled, modeDeploiement,
+  AUTH_MODES, UNKNOWN_POLICIES, authConfig, emptyAuth, isTestProvider,
+  annuairePropose, annuaireFermePour, annuaireParLeService, providerLabel, providerProblems, redirectUriFor, demoAccountsDisabled, modeDeploiement,
 } from "../lib/auth.js";
 import {
-  AuthError, buildAuthorizationUrl, completeAuthorizationFromUrl, discover,
+  AuthError, buildAuthorizationUrl, completeAuthorizationFromUrl, discover, decouvrirParLeService,
   TEST_IDENTITIES, testIdToken, readClaims, previewAccount,
 } from "../lib/oidc.js";
 
@@ -142,8 +143,8 @@ export async function handleAuthReturn() {
   const auth = authConfig(state.config);
   cleanUrl();
 
-  if (!isOidc(state.config)) {
-    setAuthError("Une réponse d'annuaire est revenue alors que l'application est réglée sur les comptes de l'application (le mode d'authentification a changé depuis le début de la connexion).");
+  if (!annuairePropose(state.config)) {
+    setAuthError("Une réponse d'annuaire est revenue alors que l'annuaire n'est pas proposé à la connexion (le mode d'authentification ou la seconde porte a changé depuis le début de la connexion).");
     return { handled: true, ok: false, error: lastError };
   }
   if (isTestProvider(auth)) {
@@ -153,7 +154,13 @@ export async function handleAuthReturn() {
   try {
     const res = await completeAuthorizationFromUrl(auth, { search: location.search, redirectUri: redirectUriFor(auth) });
     if (!res) return { handled: false };
-    const session = await loginWithClaims(res.claims);
+    // Deux façons d'entrer, selon QUI a fait l'échange : le service (il a ouvert
+    // SA session — `res.session` — et le compte est déjà écrit au référentiel),
+    // ou le navigateur (il a vérifié le jeton lui-même et rend les
+    // revendications, que l'application traduit en compte).
+    const session = res.session
+      ? await loginWithAnnuaireSession(res.session)
+      : await loginWithClaims(res.claims);
     if (!session.ok) {
       setAuthError(session.reason);
       return { handled: true, ok: false, error: session.reason };
@@ -279,25 +286,62 @@ export function annuairePanel(save, redraw, card) {
   const impose = modeDeploiement();
   const modesReferentiel = AUTH_MODES.filter((m) => m.id !== "password");
   const demoOuverts = !demoAccountsDisabled(state.config);
+  // LE MODE EFFECTIF : celui que l'application applique vraiment, une fois le
+  // déploiement passé par-dessus le référentiel (voir `authConfig`). C'est lui
+  // qui décide de ce que l'écran de connexion proposera — et donc de ce que
+  // cette page doit dire. Un `AUTH_MODE` posé dans le `.env` commande : le
+  // choix du référentiel n'a pas d'effet tant qu'il est en place.
+  const effectif = authConfig(state.config);
+  const ordinaire = effectif.mode === "oidc";
+  const secondePorte = !ordinaire && a.annuaire === true;
+  const propose = annuairePropose(state.config);
+  const fermePour = annuaireFermePour(state.config);
+  // Un champ de l'annuaire est-il POSÉ par le `.env` ? On le dit au pied du
+  // champ concerné, plutôt que de laisser croire qu'une saisie tiendra.
+  const deploie = (cle) => poseParLeDeploiement("auth." + cle);
+  // Le même renseignement, prêt à coller au bout d'une aide de champ.
+  const pose = (cle) => (deploie(cle) ? " Posé par le .env : une saisie ici ne tient pas." : "");
 
   wrap.appendChild(card("Mode de connexion",
-    "L'application sait ouvrir une session de deux façons, que vous choisissez ici : par ses propres comptes (démonstration, sans mot de passe), ou par l'annuaire de la collectivité (OpenID Connect). Brancher l'annuaire désactive automatiquement les comptes de démonstration : ils ne sont plus proposés à la connexion et ne peuvent plus ouvrir de session. Un troisième mode — des comptes locaux protégés par un mot de passe — ne se règle pas ici : il dépend du service qui héberge l'application, et s'active dans le fichier `.env` du déploiement (`AUTH_MODE=password`).",
+    "L'application ouvre une session de trois façons. Deux se règlent ICI : par ses propres comptes (démonstration, sans mot de passe), ou par l'annuaire de la collectivité (OpenID Connect) — qui devient alors la porte ORDINAIRE, et désactive automatiquement les comptes de démonstration. La troisième — de vrais comptes locaux, protégés par un mot de passe que le SERVICE vérifie — ne se règle pas ici : elle s'active dans le fichier `.env` du déploiement (`AUTH_MODE=password`), et c'est ce service qui fait foi. Quel que soit le mode retenu, l'annuaire peut EN PLUS être proposé en seconde porte, à côté de la porte ordinaire : c'est la case ci-dessous.",
     impose === "password"
       ? h("div", { class: "fr-alert fr-alert--info" },
         h("p", { class: "fr-alert__title", text: "Mode « comptes locaux » imposé par le déploiement" }),
-        h("p", { text: "Le service qui héberge l'application exige un identifiant et un mot de passe (AUTH_MODE=password). Ce réglage du déploiement prime sur le référentiel : le choix ci-dessous est sans effet tant qu'il est en place." }))
+        h("p", { text: "Le service qui héberge l'application exige un identifiant et un mot de passe (AUTH_MODE=password). Ce réglage du déploiement prime sur le référentiel : le choix ci-dessous est sans effet tant qu'il est en place. L'annuaire reste branchable en SECONDE PORTE." }))
+      : impose === "oidc"
+        ? h("div", { class: "fr-alert fr-alert--info" },
+          h("p", { class: "fr-alert__title", text: "Mode « annuaire » imposé par le déploiement" }),
+          h("p", { text: "Le service de la collectivité annonce AUTH_MODE=oidc : l'annuaire est la porte ordinaire, et les comptes locaux restent ouverts comme porte de service. Le choix ci-dessous est sans effet tant que ce réglage est en place ; les réglages de l'annuaire, eux, se font plus bas dans cette page." }))
+        : impose === "demo"
+          ? h("div", { class: "fr-alert fr-alert--info" },
+            h("p", { class: "fr-alert__title", text: "Mode « démonstration » imposé par le déploiement" }),
+            h("p", { text: "Ce déploiement annonce AUTH_MODE=demo : les comptes de l'application, sans mot de passe. La porte ordinaire est fixée par le service ; pour ouvrir une vraie porte, activez les comptes locaux dans le `.env` (AUTH_MODE=password), ou proposez l'annuaire en SECONDE PORTE ci-dessous." }))
+          : choiceField({
+            label: "Qui délivre les identités ?",
+            value: a.mode,
+            options: modesReferentiel.map((m) => ({ value: m.id, label: m.label })),
+            help: modesReferentiel.find((m) => m.id === a.mode)?.summary,
+            onChange: (v) => change(() => {
+              a.mode = v;
+              // Aucun fournisseur encore renseigné : l'annuaire d'essai prend le
+              // relais, pour ne jamais bloquer l'installation sur un écran de
+              // connexion inutilisable.
+              if (v === "oidc" && !String(a.issuer || "").trim()) a.test = true;
+            }, { auth: true, rerender: true }),
+          }),
+    // LA SECONDE PORTE. Quand l'annuaire est déjà la porte ordinaire, la
+    // question ne se pose pas : on l'explique plutôt que d'afficher une case
+    // sans objet. Ailleurs — y compris en mode « comptes locaux », le cas d'une
+    // installation sans annuaire qui veut pourtant l'ouvrir — elle est là.
+    ordinaire
+      ? h("p", { class: "fr-small fr-muted", text: "L'annuaire est ici la porte ordinaire : il n'y a pas de « seconde porte » à ajouter, et les réglages ci-dessous le décrivent. Les comptes locaux du service, quand le déploiement en tient, restent proposés sous le bouton de l'annuaire." })
       : choiceField({
-        label: "Qui délivre les identités ?",
-        value: a.mode,
-        options: modesReferentiel.map((m) => ({ value: m.id, label: m.label })),
-        help: modesReferentiel.find((m) => m.id === a.mode)?.summary,
-        onChange: (v) => change(() => {
-          a.mode = v;
-          // Aucun fournisseur encore renseigné : l'annuaire d'essai prend le
-          // relais, pour ne jamais bloquer l'installation sur un écran de
-          // connexion inutilisable.
-          if (v === "oidc" && !String(a.issuer || "").trim()) a.test = true;
-        }, { auth: true, rerender: true }),
+        label: "Proposer AUSSI la connexion par l'annuaire de la collectivité",
+        value: a.annuaire === true,
+        options: [{ value: true, label: "Oui — les deux portes" }, { value: false, label: "Non — la porte ordinaire seulement" }],
+        help: "La porte ordinaire reste celle qui est choisie ci-dessus ; l'annuaire s'y AJOUTE, et l'écran de connexion propose les deux. La porte n'est ouverte que si le fournisseur est réellement branché (adresse de l'émetteur et identifiant du client renseignés plus bas) — une case cochée sans fournisseur n'ouvre rien."
+          + (deploie("annuaire") ? " Posée par le .env (SCRIBA_ANNUAIRE_SECONDE_PORTE)." : ""),
+        onChange: (v) => change(() => { a.annuaire = v === true; }, { auth: true, rerender: true }),
       }),
     statusLine(),
     h("div", { style: { marginTop: "10px" } }, helpLink("annuaire", "Comment brancher l'annuaire")),
@@ -308,13 +352,13 @@ export function annuairePanel(save, redraw, card) {
   // brancher l'annuaire fermait la porte du compte d'administration du `.env`,
   // et se retrouver enfermé dehors le jour où le fournisseur d'identité est
   // injoignable. Voir src/lib/auth.js (`accesLocal`) et src/server/mysql/server.mjs.
-  if (impose === "oidc") {
+  if (ordinaire) {
     wrap.appendChild(card("Comptes locaux — la porte de service",
       "Ce déploiement impose la connexion par l'annuaire (AUTH_MODE=oidc). Les comptes LOCAUX restent néanmoins ouverts : c'est la porte de service, celle du compte d'administration déclaré dans le fichier .env (ADMIN_LOGIN / ADMIN_PASSWORD). Elle sert le jour où l'annuaire est injoignable, ou depuis un poste qui ne le joint pas. L'écran de connexion propose les deux portes.",
       h("p", { class: "fr-small fr-muted", text: "L'annuaire attribue rôle et périmètre à chaque connexion ; les comptes locaux sont l'accès d'administration et de secours. Leur mot de passe se pose dans « Comptes et rôles », et leur rôle se règle comme celui de tout compte." })));
   }
 
-  if (a.mode !== "oidc" || impose === "password") {
+  if (!ordinaire) {
     wrap.appendChild(card("Comptes de démonstration",
       demoOuverts
         ? "Les comptes de démonstration sont actifs : l'écran de connexion les présente par profil (administrateur, éditeur, rédacteur) et un clic ouvre la session, sans mot de passe. C'est le réglage d'origine, pour essayer l'application."
@@ -325,7 +369,6 @@ export function annuairePanel(save, redraw, card) {
           : "C'est le service qui en décide (DEMO_ACCOUNTS=false dans le fichier `.env`) : le référentiel n'a pas voix au chapitre dans ce mode.")
         : "Pour passer en production, choisissez « Annuaire de la collectivité (OIDC) » ci-dessus : les comptes de démonstration seront désactivés automatiquement, et pourront être réactivés si l'on revient à ce mode." }),
     ));
-    return wrap;
   }
 
   // -------------------------------------------------------- fournisseur
@@ -333,10 +376,33 @@ export function annuairePanel(save, redraw, card) {
   // automatique : un administrateur qui choisit « fournisseur de la
   // collectivité » doit voir les champs à remplir, même si aucune adresse n'est
   // encore saisie (l'annuaire d'essai assure alors la connexion, voir plus bas).
+  //
+  // LES RÉGLAGES SONT TOUJOURS LÀ, quel que soit le mode. C'est le point : une
+  // installation à comptes locaux doit pouvoir préparer son annuaire — et le
+  // brancher en seconde porte — sans qu'on lui cache les champs. Ce qui change
+  // selon le mode, c'est ce que la carte DIT de l'état de la porte : proposée,
+  // demandée mais incomplète, ou simplement préparée.
   const test = !!a.test;
   const fallbackTest = !test && isTestProvider(a);
+  const etatPorte = ordinaire
+    ? h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "L'annuaire est la porte ordinaire" }),
+      h("p", { text: "C'est par lui que la session s'ouvre à l'écran de connexion (mode imposé par le déploiement, AUTH_MODE=oidc). Les réglages ci-dessous le décrivent ; ils ne prennent effet qu'à la prochaine connexion." }))
+    : !secondePorte
+      ? h("div", { class: "fr-alert fr-alert--info" },
+        h("p", { class: "fr-alert__title", text: "L'annuaire n'est pas proposé à la connexion" }),
+        h("p", { text: "La porte ordinaire est celle qui est choisie en haut de cette page. Ces réglages sont CONSERVÉS quand même : renseignez-les dès maintenant, puis cochez « Proposer AUSSI la connexion par l'annuaire » pour ouvrir la seconde porte — ou posez SCRIBA_ANNUAIRE_* dans le fichier .env du déploiement, qui l'emporte sur le référentiel." }))
+      : !propose
+        ? h("div", { class: "fr-alert fr-alert--warning" },
+          h("p", { class: "fr-alert__title", text: "Seconde porte demandée, mais pas encore ouverte" }),
+          h("p", { text: "La case est cochée, mais l'écran de connexion ne propose pas l'annuaire. Raison : " + (fermePour || "configuration incomplète.") }),
+          h("p", { class: "fr-small fr-muted", text: "Les réglages ci-dessous sont CONSERVÉS tels quels : ils s'appliqueront dès que la raison ci-dessus aura disparu, sans rien ressaisir." }))
+        : null;
   wrap.appendChild(card("Fournisseur d'identité",
-    "L'application est un client public : elle ne détient aucun secret. La connexion utilise le flux « code d'autorisation » avec PKCE (S256), et le jeton d'identité est vérifié (émetteur, audience, validité, nonce, signature) avant qu'une session ne soit ouverte.",
+    annuaireParLeService()
+      ? "Depuis cette version, c'est le SERVICE qui est le client OIDC : la découverte, l'échange du code d'autorisation (PKCE, S256) et la vérification du jeton (émetteur, audience, validité, nonce, signature) se font côté service, et c'est lui qui ouvre ensuite sa propre session. Le navigateur ne parle donc plus au fournisseur en dehors de la redirection, et celui-ci n'a AUCUNE origine à autoriser (plus de CORS, donc plus de « Failed to fetch »). Ni l'application ni le service ne détiennent de secret de client."
+      : "L'application est un client public : elle ne détient aucun secret. La connexion utilise le flux « code d'autorisation » avec PKCE (S256), et le jeton d'identité est vérifié (émetteur, audience, validité, nonce, signature) avant qu'une session ne soit ouverte.",
+    etatPorte,
     choiceField({
       label: "Annuaire utilisé",
       value: test ? "test" : "reel",
@@ -355,17 +421,17 @@ export function annuairePanel(save, redraw, card) {
       )
       : h("div", {},
         h("div", { class: "fr-grid fr-grid--2" },
-          textField({ label: "Adresse du fournisseur (émetteur)", value: a.issuer, placeholder: "https://annuaire.valmont-sur-loire.fr/realms/agents", help: "L'adresse publiée dans les jetons (revendication « iss »), sans le /.well-known/openid-configuration.", onChange: (v) => { a.issuer = v.trim(); commit(); } }),
-          textField({ label: "Identifiant du client (client_id)", value: a.clientId, placeholder: "scribae-application", help: "L'application déclarée chez le fournisseur, en client public (sans secret), avec PKCE.", onChange: (v) => { a.clientId = v.trim(); commit(); } }),
+          textField({ label: "Adresse du fournisseur (émetteur)", value: a.issuer, placeholder: "https://annuaire.valmont-sur-loire.fr/realms/agents", help: "L'adresse publiée dans les jetons (revendication « iss »), sans le /.well-known/openid-configuration." + pose("issuer"), onChange: (v) => { a.issuer = v.trim(); commit(); } }),
+          textField({ label: "Identifiant du client (client_id)", value: a.clientId, placeholder: "scribae-application", help: "L'application déclarée chez le fournisseur, en client public (sans secret), avec PKCE." + pose("clientId"), onChange: (v) => { a.clientId = v.trim(); commit(); } }),
         ),
         h("div", { class: "fr-grid fr-grid--2" },
-          textField({ label: "Portées demandées (scope)", value: a.scopes, help: "« openid » est indispensable ; « profile » et « email » fournissent le nom et l'adresse.", onChange: (v) => { a.scopes = v.trim(); commit(); } }),
-          textField({ label: "Invite (prompt)", value: a.prompt, placeholder: "—", help: "Vide en général. « select_account » force le choix du compte à chaque connexion.", onChange: (v) => { a.prompt = v.trim(); commit(); } }),
+          textField({ label: "Portées demandées (scope)", value: a.scopes, help: "« openid » est indispensable ; « profile » et « email » fournissent le nom et l'adresse." + pose("scopes"), onChange: (v) => { a.scopes = v.trim(); commit(); } }),
+          textField({ label: "Invite (prompt)", value: a.prompt, placeholder: "—", help: "Vide en général. « select_account » force le choix du compte à chaque connexion." + pose("prompt"), onChange: (v) => { a.prompt = v.trim(); commit(); } }),
         ),
         h("div", { class: "fr-grid fr-grid--2" },
           textField({
             label: "Adresse de retour (redirect_uri)", value: a.redirectUri, placeholder: redirectUriFor(a),
-            help: "Doit être déclarée À L'IDENTIQUE chez le fournisseur. Vide = l'adresse de la page courante.",
+            help: "Doit être déclarée À L'IDENTIQUE chez le fournisseur. Vide = l'adresse de la page courante." + pose("redirectUri"),
             onChange: (v) => { a.redirectUri = v.trim(); commit(); },
           }),
           h("div", { class: "fr-row", style: { alignItems: "flex-end", paddingBottom: "6px" } },
@@ -384,7 +450,7 @@ export function annuairePanel(save, redraw, card) {
         epSlot,
         h("details", { class: "fr-details" },
           h("summary", { text: "Points de terminaison (si la découverte est bloquée)" }),
-          h("p", { class: "fr-small fr-muted", text: "À renseigner seulement si le fournisseur n'expose pas /.well-known/openid-configuration à l'application : recopiez-les depuis sa documentation." }),
+          h("p", { class: "fr-small fr-muted", text: "À renseigner seulement si le fournisseur n'expose pas /.well-known/openid-configuration à l'application : recopiez-les depuis sa documentation." + pose("endpoints") }),
           textField({ label: "Authorisation", value: a.endpoints.authorization, onChange: (v) => { a.endpoints.authorization = v.trim(); commit(); } }),
           textField({ label: "Jeton (token)", value: a.endpoints.token, onChange: (v) => { a.endpoints.token = v.trim(); commit(); } }),
           textField({ label: "Clés de signature (jwks)", value: a.endpoints.jwks, onChange: (v) => { a.endpoints.jwks = v.trim(); commit(); } }),
@@ -394,13 +460,13 @@ export function annuairePanel(save, redraw, card) {
           choiceField({
             label: "Compléter par /userinfo", value: a.useUserinfo !== false,
             options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
-            help: "Utile quand les groupes ne figurent pas dans le jeton d'identité.",
+            help: "Utile quand les groupes ne figurent pas dans le jeton d'identité." + pose("useUserinfo"),
             onChange: (v) => { a.useUserinfo = v; commit(); },
           }),
           choiceField({
             label: "Exiger la vérification de la signature", value: a.requireSignature !== false,
             options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
-            help: "Refuse un jeton dont la signature n'a pas pu être contrôlée avec les clés publiées (jwks_uri). À ne désactiver qu'en connaissance de cause.",
+            help: "Refuse un jeton dont la signature n'a pas pu être contrôlée avec les clés publiées (jwks_uri). À ne désactiver qu'en connaissance de cause." + pose("requireSignature"),
             onChange: (v) => { a.requireSignature = v; commit(); },
           }),
         ),
@@ -411,36 +477,36 @@ export function annuairePanel(save, redraw, card) {
   wrap.appendChild(card("Rôles et périmètre",
     "Le rôle de l'agent vient des groupes annoncés par l'annuaire : le premier groupe reconnu décide. Le périmètre (services et bureaux) se déduit des revendications de service, en rapprochant les codes de ceux du référentiel.",
     h("div", { class: "fr-grid fr-grid--2" },
-      textField({ label: "Revendication des groupes", value: a.roleClaim, placeholder: "groups", help: "Chemin dans le jeton : « groups », « roles », « realm_access.roles »…", onChange: (v) => { a.roleClaim = v.trim(); commit(); redraw(); } }),
+      textField({ label: "Revendication des groupes", value: a.roleClaim, placeholder: "groups", help: "Chemin dans le jeton : « groups », « roles », « realm_access.roles »…" + pose("roleClaim"), onChange: (v) => { a.roleClaim = v.trim(); commit(); redraw(); } }),
       selectField({
         label: "Agent sans groupe reconnu", value: a.unknownPolicy, options: UNKNOWN_POLICIES.map((p) => ({ value: p.id, label: p.label })),
-        help: "« Aucun accès » est le réglage sûr : l'agent est authentifié par l'annuaire, mais l'application ne lui ouvre rien — il arrive sur un écran qui le lui explique et le renvoie vers l'espace public.",
+        help: "« Aucun accès » est le réglage sûr : l'agent est authentifié par l'annuaire, mais l'application ne lui ouvre rien — il arrive sur un écran qui le lui explique et le renvoie vers l'espace public." + pose("unknownPolicy"),
         onChange: (v) => { a.unknownPolicy = v; commit(); redraw(); },
       }),
     ),
     a.unknownPolicy === "default" ? selectField({
       label: "Rôle de repli", value: a.defaultRole,
       options: ROLE_ORDER.map((r) => ({ value: r, label: ROLES[r].label })),
-      help: "Le rôle le plus étroit est recommandé : « Rédacteur » pour un agent qui n'a rien demandé, « Visiteur » pour ne lui ouvrir aucun accès.",
+      help: "Le rôle le plus étroit est recommandé : « Rédacteur » pour un agent qui n'a rien demandé, « Visiteur » pour ne lui ouvrir aucun accès." + pose("defaultRole"),
       onChange: (v) => { a.defaultRole = v; commit(); },
     }) : null,
     h("h3", { class: "oidc-sub", text: "Correspondance des groupes" }),
-    roleMapEditor(a, commit, redraw),
+    roleMapEditor(a, commit, redraw, pose),
     h("div", { class: "fr-grid fr-grid--2" },
-      textField({ label: "Revendication des services", value: a.serviceClaim, placeholder: "services", help: "Contient un ou plusieurs codes de service du référentiel (ex. DSI, SG, CCAS).", onChange: (v) => { a.serviceClaim = v.trim(); commit(); } }),
-      textField({ label: "Revendication de l'entité", value: a.entityClaim, placeholder: "entity", help: "Code de l'entité de rattachement (ex. VSL, CCAS).", onChange: (v) => { a.entityClaim = v.trim(); commit(); } }),
+      textField({ label: "Revendication des services", value: a.serviceClaim, placeholder: "services", help: "Contient un ou plusieurs codes de service du référentiel (ex. DSI, SG, CCAS)." + pose("serviceClaim"), onChange: (v) => { a.serviceClaim = v.trim(); commit(); } }),
+      textField({ label: "Revendication de l'entité", value: a.entityClaim, placeholder: "entity", help: "Code de l'entité de rattachement (ex. VSL, CCAS)." + pose("entityClaim"), onChange: (v) => { a.entityClaim = v.trim(); commit(); } }),
     ),
     h("div", { class: "fr-grid fr-grid--2" },
       choiceField({
         label: "Les groupes de l'annuaire font foi", value: a.authoritative !== false,
         options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
-        help: "Oui : le rôle et le périmètre sont repris à chaque connexion. Non : l'annuaire authentifie seulement, et les rôles réglés dans « Comptes et rôles » sont conservés.",
+        help: "Oui : le rôle et le périmètre sont repris à chaque connexion. Non : l'annuaire authentifie seulement, et les rôles réglés dans « Comptes et rôles » sont conservés." + pose("authoritative"),
         onChange: (v) => { a.authoritative = v; commit(); },
       }),
       choiceField({
         label: "Créer les comptes inconnus", value: a.autoProvision !== false,
         options: [{ value: true, label: "Oui" }, { value: false, label: "Non" }],
-        help: "Oui : un agent de l'annuaire qui n'a pas encore de compte en reçoit un à sa première connexion. Non : il faut pré-enregistrer son adresse dans « Comptes et rôles ».",
+        help: "Oui : un agent de l'annuaire qui n'a pas encore de compte en reçoit un à sa première connexion. Non : il faut pré-enregistrer son adresse dans « Comptes et rôles »." + pose("autoProvision"),
         onChange: (v) => { a.autoProvision = v; commit(); },
       }),
     ),
@@ -454,7 +520,7 @@ export function annuairePanel(save, redraw, card) {
       label: "Autoriser le retour aux comptes de l'application depuis l'écran de connexion",
       value: a.allowRecovery !== false,
       options: [{ value: true, label: "Autoriser" }, { value: false, label: "Retirer" }],
-      help: "À retirer une fois l'annuaire éprouvé. Rappel : l'application est un client, son code est public ; le contrôle d'accès réel est celui du service de données (jeton, réseau, SSO devant l'application).",
+      help: "À retirer une fois l'annuaire éprouvé. Rappel : le code de l'application est public ; le contrôle d'accès réel est celui du service de données, c'est-à-dire la session qu'il exige à chaque appel (et, devant lui, le réseau ou un SSO)." + pose("allowRecovery"),
       onChange: (v) => { a.allowRecovery = v; commit(); redraw(); },
     }),
   ));
@@ -473,6 +539,13 @@ function statusLine() {
       ? h("span", { class: "fr-badge fr-badge--warning", text: demo.length - actifs + " compte(s) de démonstration désactivé(s)" })
       : h("span", { class: "fr-badge fr-badge--info", text: actifs + " compte(s) de démonstration actif(s)" }),
     oidc ? h("span", { class: "fr-badge fr-badge--success", text: oidc + " compte(s) rattaché(s) à l'annuaire" }) : null,
+    // QUI FAIT LA CONNEXION ? Depuis 1.6.1p, le service peut être le client OIDC
+    // (drapeau `annuaireService` de `GET /v1/auth/config`) : c'est alors lui qui
+    // découvre le fournisseur, échange le code et vérifie le jeton, et la session
+    // ouverte est la sienne. On le dit, parce que c'est ce qui explique que la
+    // seconde porte soit ouverte même quand les données se lisent par une
+    // session — et que le fournisseur n'a pas à autoriser le navigateur (CORS).
+    annuaireParLeService() ? h("span", { class: "fr-badge fr-badge--info", text: "connexion faite par le service" }) : null,
     state.user && !accountUsable(c, state.user)
       ? h("span", { class: "fr-badge fr-badge--error", text: "le compte connecté n'est plus utilisable" })
       : null,
@@ -482,8 +555,18 @@ function statusLine() {
 async function runDiscovery(slot, config) {
   clear(slot);
   slot.appendChild(h("p", { class: "fr-small fr-muted", text: "Interrogation du fournisseur…" }));
+  // QUI INTERROGE ? Quand le service est le client OIDC (`annuaireService`),
+  // c'est LUI : l'appel part d'une machine à l'autre, et le fournisseur n'a
+  // aucune raison d'avoir autorisé le navigateur (CORS). Le bouton éprouve
+  // l'adresse SAISIE À L'ÉCRAN — et les points de terminaison à la main, s'il y
+  // en a —, pas seulement ce qui est enregistré : c'est tout l'intérêt d'un
+  // bouton « vérifier ».
+  const a = authConfig(config);
+  const parLeService = annuaireParLeService();
   try {
-    const ep = await discover(authConfig(config));
+    const ep = parLeService
+      ? await decouvrirParLeService({ issuer: a.issuer, endpoints: a.endpoints || null })
+      : await discover(a);
     clear(slot);
     const rows = [
       ["Émetteur (iss)", ep.issuer],
@@ -493,7 +576,7 @@ async function runDiscovery(slot, config) {
       ["Informations utilisateur", ep.userinfo_endpoint || "— non publié —"],
     ];
     slot.appendChild(h("div", { class: "fr-alert fr-alert--success" },
-      h("p", { class: "fr-alert__title", text: "Configuration lue (" + ep.source + ")" }),
+      h("p", { class: "fr-alert__title", text: "Configuration lue (" + ep.source + (parLeService ? ", par le service" : "") + ")" }),
       ...rows.map(([k, v]) => h("p", { class: "fr-small" }, h("strong", { text: k + " : " }), h("span", { class: "fr-mono", text: String(v || "—") }))),
     ));
   } catch (e) {
@@ -501,15 +584,20 @@ async function runDiscovery(slot, config) {
     slot.appendChild(h("div", { class: "fr-alert fr-alert--error" },
       h("p", { class: "fr-alert__title", text: "Découverte impossible" }),
       h("p", { text: (e && e.message) || String(e) }),
-      h("p", { class: "fr-small fr-muted", text: "Un fournisseur qui refuse les appels depuis le navigateur (absence d'en-têtes CORS) empêche aussi la connexion : autorisez l'adresse de l'application dans sa configuration. À défaut, saisissez les points de terminaison à la main." }),
+      h("p", { class: "fr-small fr-muted", text: parLeService
+        ? "L'appel part du SERVICE, pas du navigateur : le fournisseur n'a pas à autoriser le CORS. Si la découverte échoue, c'est que le service ne joint pas cette adresse (adresse interne, DNS, certificat) ou qu'elle est erronée. À défaut, saisissez les points de terminaison à la main."
+        : "Un fournisseur qui refuse les appels depuis le navigateur (absence d'en-têtes CORS) empêche aussi la connexion : autorisez l'adresse de l'application dans sa configuration. À défaut, saisissez les points de terminaison à la main." }),
     ));
   }
 }
 
-function roleMapEditor(a, commit, redraw) {
+function roleMapEditor(a, commit, redraw, pose = () => "") {
   const box = h("div", { class: "oidc-rolemap" });
   const paint = () => {
     clear(box);
+    if (pose("roleMap")) {
+      box.appendChild(h("p", { class: "fr-small fr-muted", text: "Cette correspondance est posée par le fichier .env du déploiement (SCRIBA_ANNUAIRE_ROLES) : une saisie ici ne tient pas tant qu'elle y figure." }));
+    }
     (a.roleMap || []).forEach((row, i) => {
       box.appendChild(h("div", { class: "fr-row oidc-rolemap__row" },
         textField({

@@ -81,16 +81,45 @@ et l'édition web de l'application.
 
 ### Exporter le dépôt GitHub (recette)
 
-L'export est un **zip dont la racine EST le dépôt** : `index.html`, `main.pjs`, tout `src/`,
-plus les fichiers ajoutés à la racine — `.nojekyll` (vide, obligatoire pour GitHub Pages),
-`.gitignore`, `CNAME` (l'adresse de la démonstration publiée, une seule ligne) et `README.md`
-(recopie de **`src/docs/GITHUB.md`**, la page d'accueil du dépôt).
+L'export est un **zip dont la racine EST le dépôt**. C'est la racine qui est lue par un
+intégrateur, par une forge et par un agent : l'outillage y est donc rangé **à sa place
+attendue**, et le code de l'application sous `src/`.
+
+| Dans l'atelier | À la racine du dépôt | Pourquoi |
+|---|---|---|
+| `src/scripts/**` | `scripts/**` | l'outillage se lance depuis la racine (`npm run lint`, `npm test`) |
+| `src/tests/**` | `tests/**` | les épreuves transverses (voir `tests/README.md`) |
+| `src/package.json` | `package.json` | le manifeste, lu par npm et par la forge |
+| `src/github/ci.yml` | `.github/workflows/ci.yml` | la chaîne d'intégration |
+| `src/github/gitignore` | `.gitignore` | |
+| `src/docs/GITHUB.md` | `README.md` | la page d'accueil du dépôt |
+| `src/AGENTS.md` | `AGENTS.md` | les consignes d'un agent qui reprend le dépôt |
+| `src/CLAUDE.md` | `CLAUDE.md` | le pointeur de Claude Code vers `AGENTS.md` |
+| `index.html`, `main.pjs` | `index.html`, `main.pjs` | la page et son code, servis par GitHub Pages |
+| *(écrit par l'export)* | `CNAME`, `.nojekyll` | l'adresse publiée, et de quoi empêcher Jekyll |
+| tout le reste de `src/` | `src/**` | l'application, servie telle quelle par le navigateur |
+
+**Un fichier, un seul exemplaire.** Une source recopiée à la racine **ne reste pas** dans
+`src/` : le dépôt ne porte ni deux `package.json` ni deux outils — un doublon ferait corriger
+le mauvais fichier en silence. L'export **exclut** donc de l'arbre `src/` tout ce qu'il déplace
+(`scripts/`, `tests/`, `package.json`, `github/`, `AGENTS.md`, `CLAUDE.md`, `docs/GITHUB.md`).
+Conséquence pour une mise à jour : ce qui a changé de place doit être **supprimé** du dépôt
+(`git rm -r src/scripts src/tests src/github src/package.json src/docs/GITHUB.md`) avant de
+décompresser le zip par-dessus — sinon les anciens chemins demeurent, et l'on corrige un
+fichier que personne ne lit.
+
+**Dans l'atelier, l'outillage vit sous `src/`** (`src/scripts/`, `src/tests/`) : c'est le seul
+arbre que la plateforme conserve d'une séance à l'autre. Il est pourtant **écrit pour la
+disposition livrée** — le code y est `../src/…`, l'outillage `../scripts/…`. Trois choses le
+rendent tenable : `tests/README.md` le dit à qui ouvre un fichier d'épreuve, `scripts/racine-code.mjs`
+**constate** la racine du code au lieu de la supposer, et le harnais de l'atelier **simule la
+disposition livrée** (voir `docs/INDUSTRIALISATION.md` § 2).
 
 Recette : écrire les fichiers dans un zip (outil `execute_js` + `@zip.js/zip.js`, niveau 9,
 dates fixes pour un export reproductible), en excluant `node_modules`, `scratch/`, `.git` et
-les fichiers système ; ajouter les trois fichiers ci-dessus. Le nom du fichier porte la
-version courante — `scribae-v<APP_VERSION>-github.zip` — et l'archive se décompresse **à la
-racine** du dépôt.
+les fichiers système, en appliquant la table ci-dessus (et en écartant de `src/` ce qu'elle
+déplace). Le nom du fichier porte la version courante — `scribae-v<APP_VERSION>-github.zip` — et
+l'archive se décompresse **à la racine** du dépôt.
 
 Les fichiers sont écrits en **0644**, sauf les scripts (`*.sh`), qui doivent l'être en
 **0755** : c'est ce que `git` enregistre (le bit exécutable), et ce qu'une décompression
@@ -100,15 +129,18 @@ attributes`, 16 bits de poids fort), en laissant le reste de l'archive intact.
 
 Le zip porte en outre **`package.json`** (recopie de `src/package.json`) et
 **`.github/workflows/ci.yml`** (recopie de `src/github/ci.yml`) : la racine est lue par
-l'intégrateur et par la forge, `src/` par le navigateur. Les commandes du `package.json` recopié
-désignent l'outillage **là où il vit dans `src/`** (`src/scripts/…`, `src/tests/`,
-`src/server/mysql/`) : rien n'est dupliqué, et `npm run verifier` fonctionne **depuis la racine**
-du dépôt. `src/scripts/verifier-syntaxe.mjs` et `src/scripts/verifier-style.mjs` retrouvent leur
-arborescence tout seuls, qu'ils soient lancés depuis `src/` (copie de travail) ou depuis la racine
-(dépôt livré).
+l'intégrateur et par la forge, `src/` par le navigateur. Les commandes du manifeste désignent
+l'outillage **là où il vit dans le dépôt** (`scripts/…`, `tests/`, `src/server/mysql/`) : rien
+n'est dupliqué, et `npm run verifier` fonctionne **depuis la racine**. `scripts/verifier-syntaxe.mjs`
+et `scripts/verifier-style.mjs` retrouvent leur arborescence tout seuls, qu'ils soient lancés
+depuis la racine du dépôt livré ou depuis l'atelier, où tout voisine sous `src/`.
 
-Le `.gitignore` ajouté à la racine vaut ceci. Le `.env` n'est **jamais** commité : il porte les
-secrets de déploiement (voir `docs/VARIABLES.md`, qui ne montre aucune valeur).
+Le `.gitignore` ajouté à la racine vaut ceci — il est recopié de
+`src/github/gitignore`, qui en est la source (comme `ci.yml`), et il ignore
+`data/` : le dossier du rangement par FICHIERS (`STOCKAGE=fichier`) contient les
+actes, les comptes et les sessions, et n'a rien à faire dans un dépôt public. Le
+`.env` n'est **jamais** commité : il porte les secrets de déploiement (voir
+`docs/VARIABLES.md`, qui ne montre aucune valeur).
 
 ```gitignore
 # Dépendances
@@ -117,6 +149,12 @@ node_modules/
 # Secrets de déploiement — jamais commités (voir src/server/env.example)
 .env
 .env.local
+
+# Données du service en « rangement par fichiers » (STOCKAGE=fichier) : elles
+# contiennent le référentiel, les actes, les comptes et les sessions. Elles
+# n'ont rien à faire dans un dépôt public, et se sauvegardent en copiant le
+# dossier (voir docs/ADMINISTRATION.md, § Rangement des données).
+data/
 
 # Fichiers système
 .DS_Store
@@ -148,11 +186,11 @@ git push
 `src/docs/GITHUB.md` et le `README.md` du dépôt doivent rester **cohérents** : le premier est
 la source, le second la copie publiée (c'est ce que l'export recopie).
 
-**Vérifier et tester avant de livrer** — `node --test`, la vérification de syntaxe, la CI, et ce
-qui reste à mettre en place : `docs/INDUSTRIALISATION.md`. Trois fichiers de `src/` sont
-destinés à la **racine du dépôt** et doivent y être recopiés : `package.json`,
-`github/ci.yml` (→ `.github/workflows/ci.yml`) — même convention que `docs/GITHUB.md` (→
-`README.md`).
+**Vérifier et tester avant de livrer** — `npm run verifier` (syntaxe, style, épreuves), la CI, et
+ce qui reste à mettre en place : `docs/INDUSTRIALISATION.md`. Des fichiers de `src/` sont
+destinés à la **racine du dépôt** et y sont recopiés par l'export (`package.json`,
+`scripts/`, `tests/`, `github/ci.yml` → `.github/workflows/ci.yml`, `AGENTS.md`,
+`CLAUDE.md`) — même convention que `docs/GITHUB.md` (→ `README.md`).
 
 **Destinataire de `docs/GITHUB.md` : un tiers qui veut *se servir* du logiciel** — un agent, un
 responsable de service, un élu curieux —, **jamais un développeur**, et surtout jamais la
@@ -244,7 +282,7 @@ l'interface : identité, vocabulaire des actes, numérotation, délais, recueil 
 Une seule déclaration les décrit — le registre **`src/server/mysql/variables.mjs`**, qui porte
 leur portée, leur type, leurs bornes et leur rôle. Il en découle la validation (au démarrage
 du service), le transport au navigateur (`GET /v1/config`) et le wiki des variables
-(`src/docs/VARIABLES.md`, engendré par `node src/scripts/generer-variables.mjs`).
+(`src/docs/VARIABLES.md`, engendré par `node scripts/generer-variables.mjs`).
 
 Côté client, `src/lib/deploiement-config.js` reçoit ces réglages et `bootstrap()`
 (`src/lib/store.js`) les applique **par-dessus le référentiel** — en mémoire seulement : le
@@ -574,6 +612,19 @@ Le **mode d'authentification** se lit à deux endroits, et le second fait autori
 | `oidc` | référentiel (`config.auth`) | la session s'ouvre chez le **fournisseur d'identité** de la collectivité |
 | `password` | **déploiement** (`AUTH_MODE` dans le `.env` du service) | **comptes locaux** : identifiant + mot de passe vérifiés par le service, session dans un cookie |
 
+**L'annuaire se règle partout, et peut être une SECONDE PORTE.** Depuis la note **1.6.1n**, les
+réglages de l'annuaire sont disponibles **dans tous les modes** — les quatre cartes de
+Administration › Annuaire (mode de connexion, fournisseur d'identité, rôles et périmètre, porte de
+secours) sont toujours affichées — et le `.env` les porte tous (`SCRIBA_ANNUAIRE_*`, 22 variables
+déclaratives, validées par le registre `src/server/mysql/variables.mjs`). L'annuaire peut en outre
+être proposé **en seconde porte**, à côté de la porte ordinaire (comptes locaux, ou comptes de
+l'application) : `auth.annuaire` dans le référentiel, ou `SCRIBA_ANNUAIRE_SECONDE_PORTE=true` ;
+l'écran de connexion propose alors les deux (`annuairePropose`, `annuaireSecondePorte`,
+`annuaireFermePour` dans `src/lib/auth.js`, `src/ui/views/connexion.js`). En mode « comptes
+locaux », le référentiel n'étant lisible qu'avec une session, c'est le SERVICE qui publie les
+réglages (`GET /v1/auth/config`, champ `annuaire`, liste blanche : `src/server/mysql/annuaire.mjs`)
+— sans quoi l'écran de connexion, qui vient avant, ne saurait jamais que l'annuaire est branché.
+
 Le mode `password` est un mode de **déploiement** : c'est le service qui détient les dérivés de mot
 de passe et qui ouvre les sessions, il est donc seul à savoir si la porte est un jeton ou un
 identifiant. Il est annoncé au navigateur par `GET /v1/auth/config` (`src/lib/motdepasse.js`,
@@ -605,6 +656,26 @@ les comptes locaux créés à la main y entrent, par identifiant et mot de passe
 « Mot de passe » — et le module `src/lib/auth.js` expose les deux prédicats : `accesLocal(config)`
 (les comptes locaux sont joignables) et `sessionDeService(config)` (la session est portée par le
 service et doit donc être fermée à la déconnexion, `logout` dans `src/ui/state.js`).
+
+**Qui fait la connexion : le SERVICE (depuis 1.6.1p).** Le service de la collectivité est le
+**client OIDC** : `annuaire-service.mjs` (module pur : le réseau entre par un port `httpJson`, la
+cryptographie par le port `crypto`) découvre le fournisseur, échange le code avec le vérificateur
+PKCE que le navigateur a gardé, vérifie le jeton d'identité (`jws.mjs` : RS/PS/ES, clés du
+`jwks_uri`), en tire le compte (les règles de `src/lib/oidc.js` reprises à l'identique), l'écrit au
+référentiel, puis ouvre **sa** session — les mêmes cookies que la connexion par mot de passe
+(`POST /v1/auth/annuaire`, `comptes.mjs`). Le navigateur ne fait plus que ce qu'il est seul à
+pouvoir faire : rediriger, garder `state`/`nonce`/vérificateur, confronter le `state` au retour, et
+adopter la session rendue (`connexionParLeService`, `loginWithAnnuaireSession`).
+
+Deux conséquences : **le fournisseur n'a pas besoin d'ouvrir le CORS** (aucun appel ne part du
+navigateur — auparavant, un annuaire d'administration qui n'ouvre pas le CORS faisait répondre
+« Découverte impossible (Failed to fetch) »), et un agent entré par l'annuaire **lit les actes**,
+y compris sur un service réglé sur ses propres sessions. Le service publie ce qu'il sait faire
+(`annuaireService`, `GET /v1/auth/config`) : c'est ce drapeau qui décide si la seconde porte est
+proposée (`annuairePropose`, `annuaireFermePour`, `src/lib/auth.js`) ; tant qu'il est faux ou absent
+(service antérieur), la porte n'est **pas proposée** et l'onglet dit quoi mettre à jour. Les
+libellés des contrôles affichés après connexion sont comparés à ceux du client du navigateur par
+`tests/purs.test.mjs`.
 
 **Brancher l'annuaire désactive automatiquement les comptes de démonstration**
 (`disableDemo`, actif par défaut) : ils ne sont plus proposés à la connexion, ne peuvent plus
@@ -2294,6 +2365,16 @@ la base de l'atelier, et fusionner ferait ressurgir un billet que l'atelier vien
 Pendant le premier dépôt, la page d'accueil dit **« Le recueil se prépare »** (`amorcageEnCours`)
 plutôt que d'annoncer « aucun acte publié », et se redessine d'elle-même.
 
+**Un redessin du recueil réarme ses lectures, et il ne se redessine que s'il est affiché.** Le
+recueil public ne se contente pas d'oublier une donnée invalidée (le dépôt des billets, un réglage
+du bulletin) : `rafraichir` (`src/ui/views/recueil-public.js`) relance ses trois lectures, qui sont
+idempotentes, sans quoi la rubrique oubliée ne revenait jamais — c'est le défaut corrigé en
+`1.6.1d`. Et il n'écrit que si la **route** porte encore le recueil : une lecture lancée à
+l'affichage peut aboutir après que le lecteur est passé à l'atelier, et le recueil se réécrivait
+alors par-dessus l'écran où l'on était. L'application enregistre le redessin public tant qu'il est
+à l'écran (`setViewRenderer`, `src/ui/app.js`), pour qu'une invalidation venue de l'atelier
+l'atteigne vraiment.
+
 **Limites assumées** : le prestataire est simulé, le certificat n'est pas qualifié eIDAS,
 et le service conserve au plus 40 publications (les plus anciennes sont évincées) —
 `state` est un `Uint8Array` de taille fixe, rangé en JSON sur une vue UTF-16.
@@ -2365,6 +2446,25 @@ un **rapport de conformité**, corrige l'acte au besoin, puis le **valide** — 
 signature, par le **même chemin** que le bouton d'envoi — ou le **rejette** en motivant, et l'acte
 **revient en brouillon** chez son rédacteur avec le motif. C'est **indépendant du parapheur** :
 l'ordre est **parapheur → révision → signature** (`pretPourSignature`, `src/ui/state.js`).
+
+**Le fil de parcours — où chaque porte se situe.** Ce chemin est calculé une fois pour toutes
+(`parcoursDeActe`, `src/lib/parcours.js`, module **pur**) et dessiné par un objet partagé
+(`bandeauParcours`, `src/ui/parcours.js`, styles `.pc-parcours`) : une puce par phase —
+rédaction, parapheur, révision, signature, publication — dans l'ordre **réel**, la phase courante
+mise en avant, le **titulaire** de chacune, et les étapes du circuit **vues de l'intérieur** (leur
+nature et qui les porte). Quand la révision s'intercale, sa puce porte sa position en toutes
+lettres (« après le parapheur · avant la signature ») ; dans le circuit **externe**, la révision
+cède la place à la **certification de conformité**, APRÈS la signature. Une porte que l'acte a
+**passée sans la franchir** (un acte signé et publié sans trace de révision, par exemple) ne
+s'affiche ni comme « en cours » ni comme « à venir » : elle est **non franchie** — puce creuse —
+et cette lecture vaut aussi pour les marches du circuit de signature (`stepEl`,
+`src/ui/views/signature.js`) et pour la carte « Révision » de la fiche d'un acte. Le fil s'affiche
+sur la rédaction (`src/ui/views/rediger.js`), le circuit de signature (`src/ui/views/signature.js`), le
+parapheur (`src/ui/views/parapheur.js`) et la révision (`src/ui/views/revision.js`) : les quatre
+écrans disent ainsi la même chose du même acte. Une **annexe** a son propre fil — rédaction →
+adoption → publication informative pour un règlement —, qui rappelle qu'elle ne se signe pas, et
+la liste des actes de l'écran de signature lui donne l'étiquette « Annexe — ne se signe pas » au
+lieu de « Prêt à signer ».
 
 `src/lib/revision.js` est **pur** (ni DOM ni état) :
 
@@ -2772,6 +2872,15 @@ bas, et `docs/ADMINISTRATION.md` § 7.6).
 > ne se publie pas. `.nojekyll` désactive Jekyll. (Autre voie : *Settings → Pages → Source :
 > GitHub Actions*, modèle « Static HTML », qui ne passe pas par Jekyll.)
 
+**La démonstration n'est pas indexée — volontairement.** Ses actes sont **fictifs** (mairie de
+Valmont-sur-Loire) : une fiche lue dans un résultat de recherche se prendrait pour un acte réel. Le
+bootstrap d'`index.html` pose donc `<meta name="robots" content="noindex, nofollow">` quand la page est
+servie depuis **le domaine de la démonstration du projet** (`demo.scribae.eu`, la même adresse que le
+`CNAME`), et depuis lui seul : une **instance auto-hébergée** — ou un fork sous son propre nom — reste
+indexable, comme son recueil ouvert le suppose. Un `robots.txt` à la racine a été **écarté à dessein** :
+il serait hérité par chaque fork, alors que le `robots.txt` appartient au déploiement qui le publie
+(l'installation auto-hébergée publie le sien, avec ses actes et son plan — voir `docs/ADMINISTRATION.md`).
+
 ### Auto-hébergement
 
 Rien n'attache l'application à ces deux hébergements de démonstration : elle ne dépend que de
@@ -2804,12 +2913,15 @@ src/SPEC.md               spécification
 src/docs/ADMINISTRATION.md  DOCUMENTATION D'ADMINISTRATION ET D'EXPLOITATION (auto-hébergement, sécurité, sauvegardes)
 src/docs/API.md           RÉFÉRENCE DE L'API REST (engendrée par scripts/generer-api.mjs, lue par « Documentation technique »)
 src/docs/VARIABLES.md     VARIABLES DE DÉPLOIEMENT (engendré par scripts/generer-variables.mjs)
+src/docs/INDUSTRIALISATION.md  VÉRIFIER, TESTER, LIVRER (outillage, intégration continue, épreuves de parcours)
+src/docs/REPRISE.md       KIT DE REPRISE : points d'entrée, « un seul point de vérité par règle », recettes de livraison, et ce qui n'est pas couvert
 src/docs/AUDIT-BUGS-2026-09-22.md  AUDIT CIBLÉ : session, anti-CSRF, file d'attente, état de la base (constats corrigés et points ouverts)
 src/docs/PERFORMANCE.md   PERFORMANCE MESURÉE : le gel des connexions simultanées, ce qui l'a corrigé, les scénarios et les chiffres avant/après
 src/docs/GITHUB.md        PAGE D'ACCUEIL DU DÉPÔT (recopiée en README.md à la racine par l'export GitHub)
 src/CHANGELOG.md          JOURNAL DES VERSIONS (la première entrée datée = la version en service)
 src/TODO.md               chantiers ouverts
-src/css/app.css           système de design (tokens surchargés par la configuration)
+src/css/app.css           feuille de style : l'ENTRÉE — elle importe dix parties (app-base.css, app-atelier.css, …), dans l'ordre d'origine
+src/css/app-*.css         les parties de la feuille, découpées par sujet (socle, atelier, guide, rédaction, signature, comptes, sombre, registre, recueil, outils) — voir docs/REPRISE.md
 src/lib/
   util.js                 utilitaires (dates françaises, montants, téléchargements, copie, choix d'un fichier texte ou binaire…)
   version.js              VERSION DU LOGICIEL (source unique du numéro) + chemin du changelog
@@ -2850,6 +2962,8 @@ src/lib/
   eli.js                  identifiant ELI, opposabilité, réglages de publication (recueil, automatisme), JSON-LD, et la VERSION EN LIGNE — opposable pour un acte, **informative** pour un règlement (ni opposabilité ni original, mais l'acte qui l'adopte)
   recueil.js              RECUEIL PUBLIC et RECUEIL OUVERT : extraction du document publié (sans sa charte — `data-sheet`, en-tête et pied retirés —, la charte valant pour le papier), **FEUILLE DE STYLE WEB** (`CSS_DOCUMENT_WEB`, la MÊME pour tous les actes : deux entités aux chartes différentes se présentent à l'identique en ligne), mise en page web, thèmes des actes (famille de la trame) et thème sans matière, derniers actes publiés en vigueur, actes épinglés (bande « À la une »), recherche/facettes, adresses d'un acte (de navigation et de référence), représentations lisibles par machine (JSON, Markdown, texte, Akoma Ntoso) et fichiers du site (llms.txt, recueil.json, sitemap.xml, robots.txt)
   validation.js           CIRCUIT DE VALIDATION (le parapheur, fonction ordinaire) : circuits du référentiel, étapes à trois natures (vérification, visa, signature), décisions, empreinte du texte validé
+  parcours.js             LE PARCOURS D'UN ACTE : les phases de son chemin dans leur ORDRE RÉEL (rédaction → parapheur → révision → signature → publication ; dans le circuit externe, certification de conformité après la signature), le titulaire de chacune, les étapes du circuit vues de l'intérieur, et la position de la révision (« après le parapheur, avant la signature ») — le fil que dessinent les écrans (module pur)
+  chats-erreur.js         LES CHATS DES PAGES D'ERREUR : ré-exporte la règle du service (`server/mysql/chats-erreur.mjs` — quel code illustre quel code, l'adresse de l'image, le repli par classe) et ajoute la LECTURE DU RÉGLAGE (`chatsErreurActifs(config)` sur `config.publication.chatsErreur`, éteint par défaut) — l'application et le service ne peuvent donc pas diverger (module pur)
   informations.js         LES INFORMATIONS DU RECUEIL PUBLIC (les billets : actualités, avis, communications) : le modèle d'un billet, les DEUX ordres — celui du SITE (`informationsPubliees`/`informationsOrdonnees` : épinglés d'abord, brouillons exclus) et celui de l'ATELIER (`informationsDeLAtelier` : tous, brouillons compris, sinon le filtre « Brouillons » n'aurait rien à filtrer) —, le résumé, le temps de lecture, ce qu'il faut pour publier (`manquePourPublier`), les réglages de la rubrique, la PORTÉE du CSS de la collectivité et les variables que le recueil honore (module pur)
   bulletins.js            LE BULLETIN (ou Journal) DES ACTES, VU DU POSTE : le vocabulaire des CADENCES (nommées, plus « personnalisée » : toutes les N unités, ancrée), les réglages (`bulletinReglages`, titre, sous-titre, jour de parution, en-tête et pied des courriels), les adresses publiques (les mêmes que le service sert) et les libellés de période
   bulletins-formats.js    LES REPRÉSENTATIONS D'UN NUMÉRO côté poste : texte, Markdown, JSON et FLUX (RSS 2.0 et Atom 1.0) — MIROIR de ce que le service compose (`server/mysql/bulletins.mjs`) et justifié en tête de fichier : sur un déploiement auto-hébergé, c'est le SERVICE qui sert ces octets ; ici, la page les compose, faute de serveur
@@ -2877,7 +2991,7 @@ src/lib/
   conseils.js             LES ASSEMBLÉES DÉLIBÉRANTES : les conseils du référentiel (conseil municipal, conseil d'administration) — entité de rattachement, formule d'autorité de la ligne d'en-tête, et la QUALITÉ QUI SIGNE (un rôle du référentiel, configurable conseil par conseil) ; résolution de l'assemblée d'un acte et qualification en genre du signataire (module pur)
   hosts.js                OÙ SONT LES SERVICES DE L'HÔTE (stockage, canal du service, relais HTTP sans CORS, moteur de langage intégré) — point unique
   assistant.js            LES DEUX ASSISTANTS (Plume, Publia) : réglages (allumé/éteint, nom et icône réglables, moteur interchangeable — intégré / API personnalisée / repli documentaire, flux SSE ou appel simple), préférence de poste (masqué pour soi), connaissances (le guide et ses liens de chapitre pour l'un, les actes publiés, leurs liens et l'acte consulté pour l'autre), composition de l'invite et repli documentaire (recherche dans le guide ou dans les actes publiés, sans réseau)
-  auth.js                 MODE D'AUTHENTIFICATION : comptes de l'application / annuaire (OIDC) / comptes locaux (mot de passe) — modèle du référentiel, PRESAGE du déploiement, et autorité du service
+  auth.js                 MODE D'AUTHENTIFICATION : comptes de l'application / annuaire (OIDC) / comptes locaux (mot de passe) — modèle du référentiel, PRESAGE du déploiement, et autorité du service ; LA SECONDE PORTE (`annuaire`, `annuairePropose`, `annuaireFermePour`, `ANNUAIRE_CLES` : l'annuaire proposé À CÔTÉ de la porte ordinaire, et les réglages que le service publie)
   motdepasse.js           CLIENT DU SERVICE DES COMPTES : /v1/auth/… (connexion, session, mot de passe, état des comptes) + jeton anti-CSRF
   oidc.js                 CLIENT OIDC : PKCE, jeton d'identité (JWKS), revendications → compte, annuaire d'essai
   cle-service.js          CLÉ DU SERVICE (porteur) : la clé d'écriture n'est jamais inscrite dans le code — le déploiement la remet, ou un administrateur la saisit ; ce module n'est que le porteur en mémoire que les vues interrogent
@@ -2891,6 +3005,10 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
                           applicatif au mot de passe du .env, PUIS le schéma) +
                           api (Node) + web (nginx) — aucun fichier de l'hôte
                           monté : les trois derniers sont CONSTRUITS
+  docker-compose.fichier.yml  LA MÊME PILE SANS MARIADB : deux services (api + web) et un seul
+                          dossier monté (`./data`), pour le rangement par fichiers
+                          (`STOCKAGE=fichier`) — un fichier à part, car le compose principal
+                          exige `DB_PASSWORD`/`DB_ROOT_PASSWORD` à l'interpolation
   nginx.conf              façade : application servie, /v1/ en proxy vers api (cuit dans l'image de web)
   Dockerfile              IMAGE AUTONOME : le service, la façade et le code en un conteneur
   env.example             modèle du .env du déploiement
@@ -2910,17 +3028,29 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     ips.test.mjs          banc d'essai des adresses réseau (npm test)
     comptes.mjs           domaine des comptes locaux : mot de passe scrypt, sessions, anti-CSRF (pur, crypto injectée)
     comptes.test.mjs      banc d'essai du domaine des comptes (npm test)
+    magasin.mjs           LE MAGASIN — LE CONTRAT DE STOCKAGE DU SERVICE ET L'ALGORITHME COMMUN : le protocole est le MÊME pour les deux rangements (collections, révisions, conflits, journal), seule l'ÉCRITURE change — `synchroniser(t, {…})` vit donc ici, une fois, piloté par les primitives de la transaction `t` ; porte aussi `str`/`projections` (les colonnes indexées) (module pur)
+    magasin-mysql.mjs     LE RANGEMENT MARIADB : l'adaptateur du magasin (import dynamique de `mysql2/promise`, pool, transaction SQL, `INSERT IGNORE`, schéma et migrations, `reconcilierCompte`) — c'est le rangement PAR DÉFAUT
+    magasin-fichier.mjs   LE RANGEMENT PAR FICHIERS (`STOCKAGE=fichier`) : tout dans un dossier (`DATA_DIR`, `./data` par défaut), EN CLAIR — état, collections, journal, courriels, secrets ; écriture atomique (temporaire + renommage) et SÉRIALISÉE par une file interne ; disque injecté (`io`) pour s'éprouver en mémoire ; mime les FORMES du magasin SQL (comme `createStoreMysql`) pour que le domaine ne voie aucune différence
+    magasin-fichier.test.mjs  banc d'essai du rangement par fichiers, entièrement en mémoire — insert, conflit de révision, `force`, suppression, ordre, état, comptes, mots de passe et sessions, santé, écritures concurrentes (npm test)
+    chats-erreur.mjs      LES CHATS DES PAGES D'ERREUR (http.cat), LA RÈGLE ÉCRITE UNE FOIS : le catalogue des codes réellement publiés, le repli par classe (`codeChat`), l'adresse (`urlChat`) et ce qu'une page doit dire (`chatPour` → code, url, alt, légende) — partagé par le service (`actes.mjs`) et le navigateur (`lib/chats-erreur.js`) ; l'option est éteinte par défaut (module pur)
+    chats-erreur.test.mjs banc d'essai de la règle des chats d'erreur : bornes, repli par classe, adresses, légendes (npm test)
     state.mjs             état du service en base (table sb_etat)
     compte-base.mjs       LE COMPTE APPLICATIF DE LA BASE : les ordres SQL qui le (re)mettent au mot de passe du .env (module pur)
     compte-base.test.mjs  épreuves de l'échappement SQL et des ordres (npm test)
     variables.mjs         REGISTRE DES VARIABLES DE DÉPLOIEMENT : une seule déclaration — le wiki engendré (`docs/VARIABLES.md`), la validation du `.env` et le transport vers le navigateur en découlent (module pur)
+    annuaire.mjs          L'ANNUAIRE DE LA COLLECTIVITÉ VU DU SERVICE : ce que le service PUBLIE de l'annuaire (liste blanche — aucun secret, c'est un client OIDC public), référentiel relu par lui et variables `SCRIBA_ANNUAIRE_*` par-dessus ; c'est ce qui permet à l'écran de connexion de savoir l'annuaire branché en mode « comptes locaux », où le référentiel n'est pas lisible (module pur)
+    annuaire.test.mjs     épreuves de la publication de l'annuaire : liste blanche, précédence du `.env`, correspondance écartée si douteuse (npm test)
+    annuaire-service.mjs  LE SERVICE COMME CLIENT OIDC (depuis 1.6.1p) : découverte du fournisseur, échange du code (vérificateur PKCE du navigateur), vérification du jeton d'identité, revendications → compte (règles de `src/lib/oidc.js` reprises À L'IDENTIQUE) — le réseau entre par `httpJson`, la crypto par `crypto`, l'horloge par `now` (module pur)
+    annuaire-service.test.mjs  épreuves du client OIDC avec un fournisseur SIMULÉ : découverte (dont points de terminaison à la main), échange, JWKS, chaque contrôle du jeton refusé, rôles/visiteur, périmètre, qualités cumulables (npm test)
+    jws.mjs               VÉRIFICATION DE LA SIGNATURE D'UN JETON D'IDENTITÉ (JWS) : RS/PS/ES, clés JWK du fournisseur — isolé pour être éprouvé avec de vraies clés et de vraies signatures
+    jws.test.mjs          épreuves de la signature : vraies paires de clés, chaque algorithme annoncé, un octet changé, clé de mauvaise famille, `alg: none`/`HS256` refusés, membres d'usage du JWK (npm test)
     entetes.mjs           en-têtes de la façade (CORS, sécurité, cache)
     smtp.mjs              LE PROTOCOLE SMTP à l'état pur (aucune dépendance) : le réseau et la configuration lui sont injectés sous forme d'un transport — il s'éprouve donc seul
     courriel.mjs          COURRIEL, LA PART RÉSEAU : la socket (TCP ou TLS), la configuration SMTP, l'envoi et le journal des envois — le mot de passe SMTP ne sort jamais de ce module
     signature.mjs         CLIENT DU PRESTATAIRE DE SIGNATURE : provisionne le document, ajoute les signataires, démarre le circuit, relit le statut — la clé d'API ne quitte jamais ce module
     amorcage.mjs          amorçage du service (compte d'administration du `.env`, clés)
     schema.sql            tables sb_collection / sb_record / sb_journal / sb_etat + vues
-    Dockerfile  README.md  env.example  package.json
+    Dockerfile  README.md  env.example  package.json  package-lock.json
   charge/                 ÉTUDE DE CHARGE : postes simulés à tous les rôles + le public, et rapport
     README.md             comment s'en servir, ce qu'il mesure, ce qu'il ne mesure pas
     charge.mjs            LA COMMANDE (--url ou --sans-base, --profils, --duree, --montee, --pensee, --ecriture…)
@@ -2944,6 +3074,7 @@ src/ui/
   pdfa.js                 LE BOUTON DE L'EXPORT PDF/A : montre son attente, fabrique le fichier (lib/pdfa.js), le télécharge et le dit — posé à côté de « Imprimer / PDF » dans les écrans d'export, deux niveaux (PDF/A-2b, PDF/A-1b)
   dnd.js                  GLISSER-DÉPOSER : primitives partagées sur les POINTER EVENTS (glissable, deposable, conversion d'un point de dépôt en position de curseur) — souris, doigt et stylet d'un seul chemin
   brand.js                nom et marque du logiciel (SVG en ligne, currentColor)
+  chats-erreur.js         LES CHATS DES PAGES D'ERREUR, VUS DE L'ATELIER : `chatErreurEl(code)` rend la figure (image de http.cat + légende + source) si l'administration a allumé l'option (`config.publication.chatsErreur`), `null` sinon — les vues n'ont donc qu'à dire QUEL code illustre leur panne (module de rendu, voir lib/chats-erreur.js)
   notice.js               bandeaux de tête : « Démonstration » (si le déploiement l'allume) et « Référentiel vierge » (démonstration éteinte et référentiel vide), dans l'atelier comme sur le recueil public
   state.js                état global, routeur (sans toucher au hash), persistance différée, corbeille et mise à disposition d'une trame (gestes journalisés)
   markdown.js             rendu markdown → DOM (documentation technique)
@@ -2986,17 +3117,27 @@ src/audit/                CADRE ET LIVRABLES D'AUDIT (voir src/audit/README.md) 
   REGISTRE-NON-CONFORMITES.md  registre cumulatif (identifiants stables, statuts : Ouverte / En cours / Levée / Régression / Acceptée / Obsolète)
   rapports/               les rapports datés, un par campagne
   README.md               mode d'emploi du cadre
-src/tests/                TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR (`npm test`)
-  purs.test.mjs           tests des modules purs : expressions, assainissement, numérotation, version (les modules exigeant un navigateur font SAUTER leurs tests au lieu de faire tomber la suite)
+src/tests/                TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR — dans le dépôt livré : `tests/` (voir src/tests/README.md)
+  README.md               pourquoi ces fichiers sont écrits pour la disposition LIVRÉE (le code y est `../src/…`), et ce que tient chacun
+  purs.test.mjs           tests des modules purs : expressions, assainissement, numérotation, version — et, depuis la 1.6.1p, le contrat des champs que le client lit du service, ainsi que la règle des imports jamais employés (les modules exigeant un navigateur font SAUTER leurs tests au lieu de faire tomber la suite)
+  industrialisation.test.mjs  L'OUTILLAGE éprouvé lui-même : lance le contrôle de style tel qu'il est livré, sur l'arborescence livrée, exige le code de sortie 0 (ordinaire et strict) et vérifie que le parcours a bien vu tout le code — une faute de chemin ne se voit pas dans le code, elle se voit à l'exécution (il se saute là où aucun processus enfant n'est possible)
   publications-locales.test.mjs  tests du repli local du recueil public : seuls les actes publiés entrent au recueil, les versions d'un même ELI sont rangées (la plus récente porte `latest`), un acte réservé reste caché, et les pièces se lisent aussi bien dans `formats` qu'à plat
-src/scripts/
-  verifier-syntaxe.mjs    `npm run lint` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance
-  verifier-style.mjs      `npm run lint` : analyse de style sans dépendance — REFUSE `debugger` hors `scripts/`, SIGNALE `var` et `console.log` dans le code client (`--strict` pour en faire des erreurs)
-  generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`server/mysql/variables.mjs`)
-  generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
-src/github/
-  ci.yml                  à recopier en `<racine>/.github/workflows/ci.yml` : syntaxe + tests, puis le service auto-hébergé
-src/package.json          MANIFESTE DU DÉPÔT (à recopier à la racine) : `npm run lint`, `npm test`, `npm run verifier`
+  conformite-service.mjs  LE JEU D'APPELS COMMUN aux deux services (démonstration et auto-hébergé) — le contrat, pas une épreuve ; conformite-service.test.mjs l'exécute contre la démonstration et le compare à une installation réelle (`SCRIBA_CONFORMITE_URL`)
+  parcours.mjs            LES PARCOURS joués dans le NAVIGATEUR, contre l'application vivante (`lancerParcours()`) — voir docs/INDUSTRIALISATION.md § 2
+  parcours.test.mjs  abrogation-annexes.test.mjs  amorcage-demo.test.mjs  qualification-signature.test.mjs  original-signe.test.mjs  pilote-persistance.test.mjs
+src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
+  verifier-syntaxe.mjs    `npm run syntaxe` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance ; parcourt le dossier qui porte l'outillage (la racine du dépôt, ou tout l'arbre dans l'atelier)
+  verifier-style.mjs      `npm run lint` (avertissements tolérés) et `npm run style` (`--strict` : ils font échouer) : analyse sans dépendance — REFUSE `debugger` hors outillage, SIGNALE `var` et `console.log` dans le code client, ET les imports jamais employés (partout, via `analyse-imports.mjs`) ; les exemptions sont écrites relativement à la RACINE DU CODE, ce qui les rend justes dans les deux dispositions
+  analyse-imports.mjs     MODULE PUR de la règle précédente : rend les noms importés que le reste du fichier n'emploie jamais, avec le numéro de ligne — éprouvé dans `tests/purs.test.mjs`
+  racine-code.mjs         OÙ VIT LE CODE (`RACINE_CODE`, `RACINE_OUTILLAGE`) : le dossier qui porte `lib/version.js` — CONSTATÉ, jamais supposé (il est `src/` dans le dépôt, et la racine de l'outillage dans l'atelier)
+  generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`src/server/mysql/variables.mjs`)
+  generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`src/lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
+src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export les recopie, ils ne restent pas sous src/) :
+  ci.yml                  → `<racine>/.github/workflows/ci.yml` : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
+  gitignore               → `<racine>/.gitignore` : dépendances, secrets de déploiement (`.env*`) et dossier de données `data/` — voir la section « Exporter le dépôt GitHub »
+src/AGENTS.md             → `<racine>/AGENTS.md` : ce qu'un agent (Claude Code, Mistral Vibe…) doit savoir AVANT de toucher au dépôt
+src/CLAUDE.md             → `<racine>/CLAUDE.md` : le pointeur de Claude Code vers `AGENTS.md`
+src/package.json          MANIFESTE DU DÉPÔT (l'export le recopie à la racine) : `npm run lint`, `npm run style`, `npm test`, `npm run verifier`
 src/LICENSE.md            LICENCE, ARBITRÉE : logiciel sous GPL-3.0 (le fichier `LICENSE` vit à la racine du dépôt), réutilisation des actes sous Licence Ouverte 2.0, position sur le code produit par l'IA et table des dépendances
 ```
 
@@ -3320,6 +3461,22 @@ Repères de vérification visuelle : pour l'aperçu, chaque `.paper` doit porter
 `<html data-theme="dark">` et `.paper` doivent garder `--bg: #ffffff` (le papier reste clair) ;
 l'écran des feuilles de style se vérifie dans les deux vues (« Réglages » et « Édition
 directe »), en 390 × 844 et en 1600 × 950.
+
+Vérifier l'outillage depuis l'atelier : l'aperçu du navigateur n'a ni système de
+fichiers ni processus, il ne peut donc pas lancer `scripts/verifier-style.mjs` tel
+qu'il est livré. On monte la disposition livrée dans un système de fichiers
+virtuel (la table ci-dessus), les modules Node (`node:fs`, `node:path`,
+`node:url`, `node:child_process`) sont remplacés par des bouchons, le script
+passe par esbuild, et les écritures reviennent dans `src/`. Les épreuves, elles,
+se lancent **un fichier par processus** (`node --test` les isole, et un bouchon
+qui fuit d'un fichier à l'autre fausse le suivant). Ce banc vit hors du dépôt :
+il n'y a rien à y chercher dans `scripts/` ni dans `tests/`.
+
+Deux pièges de cet environnement : `node:url` n'y est pas traduisible
+(`fileURLToPath` jette), les épreuves qui s'en servent se **sautent** — c'est le
+cas des onze sauts attendus ; et `import.meta.url` doit être servi sous une
+adresse `file://` virtuelle, sans quoi `new URL("..", import.meta.url)` calcule
+faux.
 
 ## Pièges connus
 

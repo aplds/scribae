@@ -1,0 +1,565 @@
+/* ============================================================================
+   Scribae — Le socle : jetons de design (couleurs, polices, espaces), remise à zéro, base des composants, accessibilité, et le mode sombre des jetons.
+
+   Partie 1/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Système de design — sobre, inspiré du DSFR, sans élément d'identité d'État.
+   Tous les tokens sont surchargeables par la configuration de l'application.
+   ========================================================================== */
+
+:root {
+  --brand: #000091;
+  --brand-dark: #1212ff;
+  --brand-soft: #e3e3fd;
+  --ink: #161616;
+  --ink-2: #3a3a3a;
+  --ink-muted: #666666;
+  --border: #dddddd;
+  --border-strong: #929292;
+  --bg: #ffffff;
+  --bg-alt: #f6f6f6;
+  --bg-contrast: #eeeeee;
+  --radius: 4px;
+  --focus: #0a76f6;
+  --success: #18753c;
+  --success-bg: #b8fec9;
+  --warning: #b34000;
+  --warning-bg: #ffe9e6;
+  --error: #ce0500;
+  --error-bg: #ffdedd;
+  --info: #0063cb;
+  --info-bg: #e8edff;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-doc: "Times New Roman", Times, Georgia, serif;
+  --space: 8px;
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Mode sombre.
+
+   Le thème est posé sur `<html data-theme="light|dark">` (voir lib/theme.js) :
+   c'est une préférence de poste, pas une donnée du référentiel. Seule la
+   CHROME de l'application s'assombrit — le papier des actes, lui, reste blanc
+   (`[data-theme="dark"] .paper` rétablit les jetons clairs pour tout ce qu'il
+   contient) : un acte s'imprime sur du papier blanc, et l'aperçu doit montrer
+   le document tel qu'il sera imprimé.
+
+   Les jetons ci-dessous sont l'équivalent sombre de ceux de `:root` ; les
+   quelques couleurs écrites en dur dans la chrome (badges, encadrés, schémas)
+   sont reprises plus bas, à la suite, pour rester lisibles.
+   ========================================================================== */
+[data-theme="dark"] {
+  --ink: #e9ebf1;
+  --ink-2: #c3c8d4;
+  --ink-muted: #9aa0af;
+  --border: #343a46;
+  --border-strong: #5d6472;
+  --bg: #1b1e26;
+  --bg-alt: #14161d;
+  --bg-contrast: #272b35;
+  --success: #7fd8a3;
+  --success-bg: #1e3b2b;
+  --warning: #f5b183;
+  --warning-bg: #3b2716;
+  --error: #ff8f88;
+  --error-bg: #3d1f1c;
+  --info: #9dbcff;
+  --info-bg: #1f2b49;
+  --focus: #7fb0ff;
+  /* Repli si la configuration n'a pas posé `--brand` (voir applyBrand). */
+  --brand: #8f92ff;
+  --brand-soft: #262a44;
+  color-scheme: dark;
+}
+
+/* Copies thématiques destinées au recueil public. Le CSS publié d'un acte (sa
+   charte graphique) pose ses propres `--ink` et `--brand` sur le conteneur du
+   texte : le recueil a besoin des valeurs THÉMÉES de l'application, il les lit
+   donc sous ces noms-là, que le CSS publié ne touche pas (voir lib/recueil.js,
+   `CSS_DOCUMENT_WEB`). */
+:root {
+  --ink-public: var(--ink);
+  --ink-2-public: var(--ink-2);
+  --brand-public: var(--brand);
+}
+
+* { box-sizing: border-box; }
+
+/* L'attribut `hidden` doit TOUJOURS l'emporter — c'est ainsi que l'application
+   cache ce qui ne sert pas (un panneau fermé, un bouton sans objet, une zone de
+   saisie sans moteur) : partout dans le code, on écrit `el.hidden = true`, jamais
+   `style.display`. La plateforme Perchance injecte cette règle ; une page servie
+   en statique (GitHub Pages) ne l'a pas, et une classe qui pose `display: flex`
+   sur l'élément gagne alors contre le `display: none` du navigateur — le
+   sélecteur de type `<attribut>` (0,1,0) bat le sélecteur de type (0,0,1) de la
+   feuille de style du navigateur. Sans cette reprise, un panneau fermé ne se
+   ferme pas hors de Perchance. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-alt);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+h1, h2, h3, h4 { margin: 0 0 .5em; line-height: 1.25; font-weight: 700; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1rem; }
+p { margin: 0 0 .75em; }
+a { color: var(--brand); }
+code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
+::selection { background: var(--brand-soft); }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- structure */
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+/* Écran « plein » (l'éditeur de trame) : la coquille est bornée à la fenêtre,
+   si bien que les volets et le canvas défilent SUR PLACE au lieu d'allonger la
+   page. Sans cela, la hauteur du contenu l'emporte et l'éditeur devient une
+   longue page — les volets perdent le défilement interne pour lequel ils sont
+   écrits (`.editor__scroll`, `.canvas`). */
+.app--plein { height: 100vh; overflow: hidden; }
+@supports (height: 100dvh) { .app--plein { height: 100dvh; } }
+
+/* Le pied de l'ATELIER : la mention de l'éditeur du logiciel (voir
+   src/ui/mention.js et Administration › Identité). Il est discret — un filet, une
+   ligne de petit texte —, et s'efface quand l'écran occupe toute la hauteur
+   (éditeur de trame) : la feuille ne partage pas sa place. */
+.app-pied {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 10px 20px; text-align: left;
+}
+.app-pied__mention { margin: 0; font-size: .76rem; color: var(--ink-muted); }
+.app--plein .app-pied { display: none; }
+/* À l'écran de connexion, le pied ferme une colonne centrée : il se pose sans
+   filet, sur le fond de la page. */
+.app-pied--connexion { background: transparent; border-top: 0; text-align: center; padding: 12px 16px 16px; }
+
+/* Bandeau de démonstration : en tête de l'application, au-dessus de l'en-tête.
+   Il n'apparaît que si le DÉPLOIEMENT allume la démonstration (voir
+   src/lib/demo.js) — le réglage du référentiel ne joue que sans déploiement. */
+.app-demo {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 5px 20px; min-height: 32px;
+  background: var(--warning-bg); color: var(--warning);
+  border-bottom: 1px solid rgba(179, 64, 0, .22);
+  font-size: .78rem; line-height: 1.35; text-align: left;
+}
+.app-demo__tag {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  background: var(--warning); color: #fff; border-radius: 2px;
+  padding: 2px 8px; font-size: .66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.app-demo__text { flex: 1 1 220px; }
+.app-demo .fr-btn { flex: none; }
+.app-demo .fr-btn.fr-btn--tertiary {
+  color: var(--warning); text-decoration: underline;
+  padding: 2px 8px; min-height: 22px; font-size: .74rem;
+}
+.app-demo .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(179, 64, 0, .12); }
+
+/* Bandeau « référentiel vierge » : démonstration éteinte et rien de construit.
+   Il dit au premier écran ce qu'il y a à faire, au lieu de laisser des écrans
+   vides (voir src/ui/notice.js). */
+.app-vierge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 5px 20px; min-height: 32px;
+  background: var(--info-bg); color: var(--info);
+  border-bottom: 1px solid rgba(0, 99, 203, .22);
+  font-size: .78rem; line-height: 1.35; text-align: left;
+}
+.app-vierge__tag {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  background: var(--info); color: #fff; border-radius: 2px;
+  padding: 2px 8px; font-size: .66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.app-vierge__text { flex: 1 1 220px; }
+.app-vierge .fr-btn { flex: none; }
+.app-vierge .fr-btn.fr-btn--tertiary {
+  color: var(--info); text-decoration: underline;
+  padding: 2px 8px; min-height: 22px; font-size: .74rem;
+}
+.app-vierge .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(0, 99, 203, .12); }
+
+.app-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex-wrap: wrap;
+}
+
+.app-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.app-mark { display: inline-flex; flex: none; color: var(--ink); }
+.app-brand__text { display: flex; flex-direction: column; line-height: 1.15; }
+.app-brand__name { font-size: .95rem; }
+.app-brand__sub { font-size: .72rem; color: var(--ink-muted); font-weight: 400; }
+
+/* Rappel de la structure : l'application sert plusieurs entités du référentiel. */
+.app-org {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px 4px 5px; border: 1px solid var(--border); border-radius: 999px;
+}
+.app-org img { height: 22px; width: auto; display: block; border-radius: var(--radius); }
+.app-org__mark {
+  width: 22px; height: 22px; border-radius: var(--radius);
+  background: var(--brand); color: #fff; flex: none;
+  display: grid; place-items: center; font-size: .6rem; letter-spacing: .04em;
+}
+.app-org__name { font-size: .82rem; font-weight: 600; color: var(--ink); white-space: nowrap; }
+
+.app-header__spacer { flex: 1 1 auto; }
+.app-header__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.app-body { flex: 1 1 auto; display: flex; align-items: stretch; min-height: 0; }
+
+.app-nav {
+  width: 232px;
+  flex: none;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.app-nav__group { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); margin: 14px 8px 6px; }
+.app-nav .app-nav__item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: var(--radius);
+  border: 0; background: none; cursor: pointer;
+  font: inherit; color: var(--ink); text-align: left; width: 100%;
+}
+.app-nav__item:hover { background: var(--bg-alt); }
+.app-nav .app-nav__item.is-active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.app-nav__item .fr-icon { color: inherit; }
+
+.app-main { flex: 1 1 auto; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.app-main--flush { padding: 0; }
+
+.page-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.page-head__text { flex: 1 1 320px; }
+.page-head__title { margin: 0; }
+.page-head__sub { color: var(--ink-muted); margin: 4px 0 0; font-size: .9rem; }
+.page-head__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Les contrôles de formulaire : la plateforme injecte un reset qui remet
+   `box-sizing: content-box` sur input/select/textarea (le `*` global ne suffit
+   pas, un sélecteur d'élément est plus spécifique). Sans cette règle, un champ
+   en `width: 100%` déborde de 24 px de son conteneur. */
+input.fr-input, select.fr-select, textarea.fr-textarea { box-sizing: border-box; }
+/* le reset de la plateforme contient « input[type="search"] { box-sizing: content-box } »
+   (spécificité 0,1,1) : il faut donc qualifier l'attribut pour le neutraliser. */
+input[type="search"].fr-input { box-sizing: border-box; }
+
+/* -------------------------------------------------------------- composants */
+.fr-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 14px; min-height: 36px;
+  border-radius: var(--radius); border: 1px solid transparent;
+  font: inherit; font-size: .875rem; font-weight: 500;
+  cursor: pointer; text-decoration: none; background: none; color: inherit;
+  white-space: nowrap;
+}
+.fr-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* la spécificité est doublée volontairement : un reset injecté par la plateforme
+   (button:not([disabled]) { color: inherit }) écrase toute règle à une seule classe. */
+.fr-btn.fr-btn--primary { background: var(--brand); color: #fff; }
+.fr-btn.fr-btn--primary:hover:not(:disabled) { background: var(--brand-dark); }
+.fr-btn.fr-btn--secondary { border-color: var(--border); background: var(--bg); }
+.fr-btn.fr-btn--secondary:hover:not(:disabled) { background: var(--bg-alt); }
+.fr-btn.fr-btn--tertiary { color: var(--brand); padding: 7px 8px; }
+.fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: var(--brand-soft); }
+.fr-btn.fr-btn--danger { color: var(--error); border-color: transparent; }
+.fr-btn.fr-btn--danger:hover:not(:disabled) { background: var(--error-bg); }
+.fr-btn--sm { min-height: 28px; padding: 3px 9px; font-size: .8rem; }
+.fr-btn--icon { padding: 6px; min-height: 30px; }
+/* Bouton « allumé » : un état durable, pas un survol — la punaise qui dit
+   « cet acte est à la une » (voir views/actes.js). */
+.fr-btn.is-on { color: var(--brand); background: var(--brand-soft); }
+.fr-icon { display: inline-flex; align-items: center; flex: none; }
+
+.fr-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; line-height: 1.5;
+  background: var(--bg-contrast); color: var(--ink-2);
+}
+.fr-badge--success { background: var(--success-bg); color: #1b5e2c; }
+.fr-badge--warning { background: var(--warning-bg); color: var(--warning); }
+.fr-badge--error { background: var(--error-bg); color: var(--error); }
+.fr-badge--info { background: var(--info-bg); color: var(--info); }
+.fr-badge--brand { background: var(--brand-soft); color: var(--brand); }
+
+.fr-alert {
+  position: relative; padding: 12px 14px 12px 16px; border-radius: var(--radius);
+  background: var(--bg); border: 1px solid var(--border); border-left: 4px solid var(--info);
+  margin: 0 0 10px;
+}
+.fr-alert__title { margin: 0; font-weight: 700; font-size: .92rem; }
+.fr-alert__title + p { margin-top: 4px; }
+.fr-alert p:last-child { margin-bottom: 0; }
+.fr-alert--info { border-left-color: var(--info); background: var(--info-bg); }
+.fr-alert--success { border-left-color: var(--success); background: #e9f7ee; }
+.fr-alert--warning { border-left-color: var(--warning); background: var(--warning-bg); }
+.fr-alert--error { border-left-color: var(--error); background: var(--error-bg); }
+
+.fr-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+/* Une carte dont la rangée d'ACTIONS est en bas (carte de trame, carte de choix
+   d'une trame à rédiger) : la rangée est collée au bas de la carte, si bien que
+   les boutons s'alignent d'une carte à l'autre dans une grille, quel que soit le
+   nombre de badges ou la longueur de la description. */
+.fr-card--pied { display: flex; flex-direction: column; }
+.fr-card--pied > .fr-row:last-child { margin-top: auto; }
+.fr-card__title { margin: 0 0 4px; font-size: 1rem; }
+.fr-card__sub { color: var(--ink-muted); font-size: .85rem; margin: 0 0 12px; }
+
+.fr-field { margin-bottom: 14px; }
+.fr-label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+.fr-required { color: var(--error); }
+.fr-hint { margin: 0 0 5px; font-size: .78rem; color: var(--ink-muted); }
+.fr-error-text { margin: 4px 0 0; font-size: .78rem; color: var(--error); }
+
+.fr-input, .fr-select, .fr-textarea {
+  width: 100%; padding: 7px 10px; min-height: 36px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: .875rem;
+}
+.fr-textarea { min-height: 76px; resize: vertical; line-height: 1.45; }
+/* La flèche native du menu déroulant se dessine à l'intérieur du champ : sans
+   cette réserve, le texte de l'option choisie passe dessous et paraît rogné. */
+.fr-select { padding-right: 30px; }
+.fr-input:focus, .fr-select:focus, .fr-textarea:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: var(--focus); }
+.fr-input[readonly] { background: var(--bg-alt); color: var(--ink-muted); }
+.fr-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fr-check { display: flex; gap: 8px; align-items: flex-start; font-size: .875rem; margin-bottom: 6px; cursor: pointer; }
+.fr-check input { margin-top: 3px; accent-color: var(--brand); }
+.fr-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.fr-choice {
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 5px 10px; font-size: .82rem; cursor: pointer; background: var(--bg);
+}
+.fr-choice.is-on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+
+.fr-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
+.fr-tabs .fr-tab {
+  padding: 8px 14px; border: 0; border-bottom: 2px solid transparent;
+  background: none; font: inherit; font-size: .875rem; cursor: pointer; color: var(--ink-muted);
+}
+.fr-tabs .fr-tab--active { border-bottom-color: var(--brand); color: var(--brand); font-weight: 700; }
+.fr-tab__count { margin-left: 6px; font-size: .72rem; color: var(--ink-muted); }
+
+.fr-table { width: 100%; border-collapse: collapse; font-size: .85rem; background: var(--bg); }
+.fr-table th, .fr-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.fr-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); font-weight: 600; }
+.fr-table tbody tr:hover { background: var(--bg-alt); }
+.fr-table__empty { padding: 28px; text-align: center; color: var(--ink-muted); }
+
+.fr-grid { display: grid; gap: 16px; }
+/* `min(300px, 100%)` : sous 300 px de conteneur, la colonne se réduit au lieu de
+   déborder — sur un écran très étroit, les formulaires restent dans la page. */
+.fr-grid--2 { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+.fr-grid--3 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+.fr-stack { display: flex; flex-direction: column; gap: 10px; }
+.fr-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fr-muted { color: var(--ink-muted); }
+.fr-small { font-size: .78rem; }
+.fr-mono { font-family: var(--font-mono); font-size: .8rem; }
+.fr-spacer { flex: 1 1 auto; }
+.fr-sep { height: 1px; background: var(--border); margin: 12px 0; border: 0; }
+
+.fr-modal-overlay {
+  position: fixed; inset: 0; background: rgba(22, 22, 22, .55);
+  display: grid; place-items: center; padding: 20px; z-index: 100;
+}
+.fr-modal {
+  background: var(--bg); border-radius: var(--radius); width: min(620px, 100%);
+  max-height: 88vh; display: flex; flex-direction: column;
+  /* Un élément de grille ne descend jamais sous sa largeur « min-content » :
+     sans cela, une fenêtre au contenu large déborde de l'écran au lieu de
+     rétrécir (aperçu étroit, téléphone). */
+  min-width: 0;
+}
+.fr-modal--wide { width: min(1000px, 100%); }
+.fr-modal__header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.fr-modal__title { margin: 0; font-size: 1.05rem; flex: 1 1 auto; }
+.fr-modal__body { padding: 16px; overflow: auto; }
+.fr-modal__footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+.fr-toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 12px);
+  background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius);
+  font-size: .85rem; opacity: 0; transition: opacity .2s, transform .2s; z-index: 200;
+  max-width: 90vw;
+}
+.fr-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.fr-toast--error { background: var(--error); color: #fff; }
+.fr-toast--success { background: var(--success); color: #08130c; }
+
+/* formulaire de rédaction : formulaire + aperçu */
+.rediger-grid { display: grid; gap: 16px; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); align-items: start; }
+.fr-table-wrap { overflow-x: auto; }
+.fr-table-wrap .fr-table { min-width: 640px; }
+
+/* ------------------------------------------------------- éditeur de trame */
+/* Bannière de tête de l'éditeur : un import en cours, ou une trame encore en
+   brouillon. C'est un ÉTAT de la trame, pas une notification : elle tient toute
+   la largeur, collée aux bords, sous la barre de navigation. */
+.editor__banniere { border-radius: 0; margin: 0; border-top: none; border-right: none; }
+.editor {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 340px;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg);
+}
+.editor__col { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.editor__col--left { border-right: 1px solid var(--border); }
+.editor__col--right { border-left: 1px solid var(--border); }
+.editor__colhead {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.editor__scroll { overflow: auto; padding: 12px; flex: 1 1 auto; }
+
+.outline { display: flex; flex-direction: column; gap: 2px; }
+.outline__item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 7px;
+  border-radius: var(--radius); border: 0; background: none; font: inherit;
+  font-size: .82rem; cursor: pointer; text-align: left; width: 100%; color: var(--ink-2);
+}
+.outline__item:hover { background: var(--bg-alt); }
+.outline__item.is-active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.outline__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+.outline__sub { padding-left: 22px; }
+
+.canvas { background: var(--bg-alt); overflow: auto; padding: 22px 12px 60px; flex: 1 1 auto; }
+.paper {
+  width: 21cm; min-height: 29.7cm; margin: 0 auto; background: #fff;
+  /* Les marges du papier viennent de la charte (feuille de style) : la vue qui
+     affiche l'aperçu pose `--paper-pad` (voir `applyPaper`, lib/render.js). À
+     défaut, les marges A4 de `paper.js`. */
+  padding: var(--paper-pad, 2cm 1.8cm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+  font-size: 11pt; line-height: 1.5; color: #111;
+  font-family: var(--font-doc);
+  /* un jeton non résolu ou une valeur longue ne doit jamais déborder la page */
+  overflow-wrap: break-word;
+}
+/* ------------------------------------------------------- zoom et déplacement
+   Trois écrans montrent un contenu plus large que leur colonne — l'organigramme
+   des délégations, la trame, le document en cours de rédaction. `cadreZoom`
+   (src/ui/zoom.js) les traite comme un canvas : le plateau réserve la place du
+   contenu réduit, le cadre défile comme n'importe quelle zone, et la barre
+   flottante règle le cran. L'organisation est décrite dans l'en-tête du module.
+   `.zoom-cadre` enveloppe le cadre pour que la barre ne défile pas avec lui. */
+.zoom-cadre { position: relative; min-width: 0; }
+/* Dans un écran à hauteur fixée (l'éditeur de trame), le cadre doit prendre la
+   place restante et défiler sur place : la chaîne flex lui en donne la hauteur. */
+.zoom-cadre--plein { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.zoom-cadre--plein > .zoom { flex: 1 1 auto; min-height: 0; }
+.zoom { position: relative; min-width: 0; }
+/* Le plateau réserve la place du contenu réduit (`largeur × cran`), écrit par
+   le module ; le contenu, hors flux, est réduit depuis son coin haut-gauche. */
+.zoom__plateau { position: relative; margin: 0 auto; }
+.zoom__contenu { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+/* Un arbre prend sa largeur naturelle, quelle que soit la place offerte : c'est
+   ce qui l'empêche de se replier au lieu de s'étendre. */
+.zoom--canvas .zoom__contenu { width: max-content; }
+/* La gouttière est réservée en permanence : la largeur disponible d'une feuille
+   fluide ne fait ainsi pas danser le papier quand une barre de défilement
+   apparaît (voir `mesurer`, src/ui/zoom.js). */
+.zoom--feuille { scrollbar-gutter: stable; }
+.zoom--canvas { cursor: grab; }
+.zoom--canvas.is-glisse { cursor: grabbing; }
+.zoom__bar {
+  position: absolute; top: 8px; right: 8px; z-index: 4;
+  display: flex; align-items: center; gap: 1px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 2px; box-shadow: 0 1px 4px rgba(0, 0, 0, .14);
+}
+.zoom__btn, .zoom__pct {
+  border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2);
+  border-radius: 999px; padding: 2px 8px; font-size: .78rem; line-height: 1.5;
+}
+.zoom__btn { font-size: .95rem; min-width: 26px; }
+.zoom__btn:hover, .zoom__pct:hover { background: var(--bg-alt); color: var(--brand); }
+.zoom__btn--fit { font-size: .76rem; }
+[data-theme="dark"] .zoom__bar { box-shadow: 0 1px 6px rgba(0, 0, 0, .6); }
+
+/* blocs éditables — `.blk` n'existe que dans l'éditeur de trame. Les blocs sont
+   posés dans un conteneur `.doc` (comme le document compilé), si bien que les
+   règles de `.doc-…` valent aussi ici ; la coquille du bloc (survol, outils,
+   prise) s'écrit, elle, sous `.blk`. */
+.blk { position: relative; border-radius: 2px; }
+.blk:hover { background: rgba(0, 0, 145, .03); }
+.blk--sel { background: rgba(0, 0, 145, .06); box-shadow: inset 2px 0 0 var(--brand); }
+.blk__tools {
+  position: absolute; right: -4px; top: -14px; gap: 2px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  padding: 1px; z-index: 5;
+  /* Toujours là (on ne devine pas un survol), mais effacée : elle s'affirme sur
+     le bloc survolé ou sélectionné — et ne masque jamais le texte au repos. */
+  display: flex; align-items: center; opacity: .3; transition: opacity .12s, background .12s;
+}
+.blk:hover > .blk__tools, .blk--sel > .blk__tools, .blk__tools:hover {
+  opacity: 1; background: var(--bg); border-color: var(--border);
+}
+.blk__tools .fr-btn--icon { min-height: 22px; padding: 2px 4px; }
+
+/* Le bouton « commenter ce bloc » de la barre d'outils, et le repère de marge
+   des blocs commentés (voir ui/annotations.js). Le repère, lui, ne s'efface
+   jamais : c'est lui qui rend un commentaire impossible à manquer. */
+.blk__note { display: inline-flex; align-items: center; gap: 3px; min-height: 22px; padding: 2px 4px;
+  border: 0; border-radius: var(--radius); background: none; color: var(--ink-2); cursor: pointer; }
+.blk__note:hover { color: var(--brand); background: var(--brand-soft); }
+.blk__note.is-on { color: var(--info); }
+.blk__note-count { font-size: .62rem; font-weight: 700; font-family: var(--font-ui); }
+.blk__annot-flag {
+  position: absolute; right: calc(100% + 2px); top: 1px; z-index: 4;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  border: 0; border-radius: 999px; background: var(--info); color: #fff; cursor: pointer;
+  font-family: var(--font-ui); font-size: .62rem; font-weight: 700; line-height: 16px;
+}
+.blk__annot-flag:hover { background: var(--brand); }
+
+.chip {
+  display: inline-block; padding: 0 4px; border-radius: 3px; cursor: default;
+  background: var(--brand-soft); color: var(--brand); font-family: var(--font-mono);
+  font-size: .78em; border: 1px solid rgba(0, 0, 145, .18);
+  /* une pastille courte reste sur une ligne ; une expression longue (condition
+     ternaire, filtre) se replie au lieu de dépasser la largeur de la page */
+  white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere;
+}
+.chip--missing { background: var(--error-bg); color: var(--error); border-style: dashed; }
+.chip--value { background: #e9f7ee; color: #1b5e2c; border-color: rgba(24, 117, 60, .25); }

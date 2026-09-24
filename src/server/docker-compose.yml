@@ -17,6 +17,10 @@
 #
 # L'application répond ensuite sur http://<l'hôte>:${HTTP_PORT:-8080}.
 #
+# SANS MARIADB ? Une variante complète existe — `docker-compose.fichier.yml` —,
+# pour le rangement par FICHIERS (`STOCKAGE=fichier`) : deux services, `api` et
+# `web`, et un seul dossier de données monté. Voir docs/ADMINISTRATION.md.
+#
 # AUCUN FICHIER DE L'HÔTE N'EST MONTÉ DANS LES CONTENEURS. `api` et `web` sont
 # CONSTRUITS (le code, la façade et le schéma entrent dans les images) : le
 # démarrage ne dépend donc ni des droits des fichiers, ni du système de

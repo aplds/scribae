@@ -1,8 +1,8 @@
 import { state, touch, navigate, redrawView, can } from "../state.js";
-import { h, clear, button, icon, toast, modal, badge, textInput } from "../dom.js";
+import { h, clear, button, icon, toast, modal, badge } from "../dom.js";
 import { cadreZoom } from "../zoom.js";
 import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
-import { compile, buildContext, interpolate } from "../../lib/compile.js";
+import { compile, buildContext } from "../../lib/compile.js";
 import { prochainNumeroLibre } from "../../lib/numbering.js";
 import { renderDocument, applyPaper, MARQUE_STYLE } from "../../lib/render.js";
 import { stylesOf } from "../../lib/styles.js";

@@ -10,7 +10,7 @@
 // (`csrf_invalide`). La pastille d'état passait au rouge, et rien ne
 // s'enregistrait sur la base — voir `CHANGELOG.md`, note intermédiaire 1.3.2g.
 //
-//   node --test src/tests/
+//   node --test tests/
 //
 // L'environnement est posé AVANT l'import de la façade : c'est à son chargement
 // que le mode par défaut est lu (`__SCRIBA_SELF_HOSTED__` → « serveur
@@ -84,7 +84,7 @@ async function charger(chemin) {
 const presence = [{ id: "u1", userId: "u1", at: "2026-09-22T10:00:00.000Z" }];
 
 test("sans mode annoncé, l'écriture part avec le jeton et le service la refuse", async (t) => {
-  const db = await charger("../lib/db/index.js");
+  const db = await charger("../src/lib/db/index.js");
   if (!db) return t.skip("module indisponible hors navigateur");
 
   await db.init();
@@ -99,8 +99,8 @@ test("sans mode annoncé, l'écriture part avec le jeton et le service la refuse
 });
 
 test("dès que le service annonce son mode, le pilote passe à la session et l'écriture aboutit", async (t) => {
-  const db = await charger("../lib/db/index.js");
-  const auth = await charger("../lib/auth.js");
+  const db = await charger("../src/lib/db/index.js");
+  const auth = await charger("../src/lib/auth.js");
   if (!db || !auth) return t.skip("module indisponible hors navigateur");
 
   // Ce que fait `chargerModeDeploiement` en lisant GET /v1/auth/config…
@@ -116,7 +116,7 @@ test("dès que le service annonce son mode, le pilote passe à la session et l'�
 });
 
 test("les écritures en attente se rangent, disent pourquoi, et se renvoient", async (t) => {
-  const db = await charger("../lib/db/index.js");
+  const db = await charger("../src/lib/db/index.js");
   if (!db) return t.skip("module indisponible hors navigateur");
 
   // La panne typique : le service répond aux LECTURES, mais la base refuse
@@ -162,7 +162,7 @@ test("les écritures en attente se rangent, disent pourquoi, et se renvoient", a
 });
 
 test("le test de connexion éprouve l'ÉCRITURE, et pas seulement la santé", async (t) => {
-  const db = await charger("../lib/db/index.js");
+  const db = await charger("../src/lib/db/index.js");
   if (!db) return t.skip("module indisponible hors navigateur");
 
   // C'est exactement l'écran qui se contredisait : « Connexion réussie » à côté
@@ -182,8 +182,8 @@ test("le test de connexion éprouve l'ÉCRITURE, et pas seulement la santé", as
 });
 
 test("sans cookie lisible, le jeton rendu avec la session suffit à écrire", async (t) => {
-  const db = await charger("../lib/db/index.js");
-  const motdepasse = await charger("../lib/motdepasse.js");
+  const db = await charger("../src/lib/db/index.js");
+  const motdepasse = await charger("../src/lib/motdepasse.js");
   if (!db || !motdepasse) return t.skip("module indisponible hors navigateur");
 
   // L'application est servie par un hôte, le service par un autre : la page ne
@@ -204,7 +204,7 @@ test("sans cookie lisible, le jeton rendu avec la session suffit à écrire", as
 });
 
 test("un refus « csrf_invalide » est expliqué, et non seulement constaté", async (t) => {
-  const db = await charger("../lib/db/index.js");
+  const db = await charger("../src/lib/db/index.js");
   if (!db) return t.skip("module indisponible hors navigateur");
 
   // `location` est en lecture seule dans un Worker : on pose une propriété à nous
@@ -227,8 +227,8 @@ test("un refus « csrf_invalide » est expliqué, et non seulement constaté", a
 });
 
 test("un pilote bâti sans le mode du service se répare au premier refus", async (t) => {
-  const db = await charger("../lib/db/index.js");
-  const auth = await charger("../lib/auth.js");
+  const db = await charger("../src/lib/db/index.js");
+  const auth = await charger("../src/lib/auth.js");
   if (!db || !auth) return t.skip("module indisponible hors navigateur");
 
   // La page s'est chargée pendant un redémarrage du service : elle n'a jamais
@@ -251,8 +251,8 @@ test("un pilote bâti sans le mode du service se répare au premier refus", asyn
 });
 
 test("une écriture définitivement refusée ne bloque plus les autres collections", async (t) => {
-  const db = await charger("../lib/db/index.js");
-  const auth = await charger("../lib/auth.js");
+  const db = await charger("../src/lib/db/index.js");
+  const auth = await charger("../src/lib/auth.js");
   if (!db || !auth) return t.skip("module indisponible hors navigateur");
 
   auth.setDeploiementAuth({ mode: "password" });

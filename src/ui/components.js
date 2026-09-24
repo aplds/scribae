@@ -1,9 +1,10 @@
-import { h, icon, button, modal, field as frField, textInput, select, toast, clear } from "./dom.js";
+import { h, icon, button, modal, field as frField, select, clear } from "./dom.js";
 import { state, navigate } from "./state.js";
 import { servicesInScope, bureauxInScope, coveredBureaux, serviceById, bureauxOf } from "../lib/scope.js";
 import { FONT_CHOICES, FONT_VALUES } from "../lib/styles.js";
 import { formatDate } from "../lib/util.js";
 import { estAbroge, abrogeParDe, avecArticle } from "../lib/abrogations.js";
+import { mentionAnnexePartDeLaMere, mentionAnnexesRestantes } from "../lib/abrogation-annexes.js";
 
 // Lien discret vers le chapitre du guide correspondant à l'écran courant.
 export function helpLink(chapterId, label = "Aide sur cette page") {
@@ -263,8 +264,21 @@ export const abrogationPhrase = (a) => {
   const m = abrogeParDe(a);
   if (!m) return "";
   const par = [avecArticle(m.designation || "acte"), m.numero ? "n° " + m.numero : "", m.date ? "du " + formatDate(m.date, "date-long") : ""].filter(Boolean).join(" ");
+  // Une annexe sans publication autonome est emportée par l'abrogation de sa
+  // décision mère : on le DIT, parce que le lecteur, lui, ne voit aucune clause
+  // viser cet acte (voir src/lib/abrogation-annexes.js).
+  const annexe = mentionAnnexePartDeLaMere(a);
   if (estAbroge(a)) {
-    return `Cet acte a été abrogé par ${par}${m.article ? `, à l'exception de son article ${m.article}` : ""}${m.dateEntreeEnVigueur ? `, à compter du ${formatDate(m.dateEntreeEnVigueur, "date-long")}` : ""}.`;
+    return `Cet acte a été abrogé par ${par}${m.article ? `, à l'exception de son article ${m.article}` : ""}${m.dateEntreeEnVigueur ? `, à compter du ${formatDate(m.dateEntreeEnVigueur, "date-long")}` : ""}.`
+      + (annexe ? " " + annexe : "");
   }
-  return `Une abrogation de cet acte est prévue par ${par}. Elle prendra effet au jour de l'entrée en vigueur de cet acte.`;
+  return `Une abrogation de cet acte est prévue par ${par}. Elle prendra effet au jour de l'entrée en vigueur de cet acte.`
+    + (annexe ? " " + annexe : "");
 };
+
+// Ce qu'il RESTE à traiter après une abrogation : les annexes publiées à part,
+// que l'abrogation de leur décision d'adoption laisse en vigueur. Elles sont
+// rangées sur l'acte abrogeant (`annexesAutonomesRestantes`, voir
+// ui/abrogations-apply.js). La phrase est vide quand il n'y a rien à signaler —
+// l'immense majorité des actes.
+export const annexesRestantesPhrase = (a) => mentionAnnexesRestantes(a);

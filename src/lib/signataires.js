@@ -194,7 +194,18 @@ export function fileSignature(config, user, actes, trameDe) {
   const aSigner = [];
   const engagee = [];
   const signe = (a) => !!(a.original || a.statut === "signee" || a.statut === "publie" || a.kind === "consolide");
+  // Une ANNEXE ne se signe pas : elle tient son autorité de l'acte qui l'adopte,
+  // et c'est CET acte qui est signé (voir src/lib/annexes.js). Sa chaîne de
+  // signature peut fort bien désigner le même signataire, mais elle ne lui donne
+  // rien à faire ici : la montrer « prête à signer » ferait croire à un geste
+  // qui n'existe pas. On l'écarte de la file, dans les deux temps.
+  const estAnnexe = (a) => {
+    if (a?.nature === "annexe") return true;
+    const t = trameDe ? trameDe(a) : null;
+    return !!t && t.nature === "annexe";
+  };
   for (const a of actes || []) {
+    if (estAnnexe(a)) continue;
     const c = competenceDuCompte(config, user, a, trameDe ? trameDe(a) : null);
     if (!c.ok) continue;
     if (c.effectif && !signe(a)) aSigner.push(a);

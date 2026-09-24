@@ -26,8 +26,31 @@
 // une liste d'actes et rend des enregistrements de publication.
 // ============================================================================
 
+import { niveauDepuisCircuit } from "./qualification-signature.js";
+
 const texte = (v) => String(v == null ? "" : v);
 const cmp = (a, b) => (texte(a) < texte(b) ? -1 : texte(a) > texte(b) ? 1 : 0);
+
+// La signature d'un acte publié, telle que le recueil la présente. La publication
+// du service fait foi quand elle est là ; à défaut — recueil d'une page statique,
+// publication antérieure à la qualification — on la déduit de l'ACTE, qui porte
+// le circuit employé (`signatureSimple`, `externe`, `signatureMode`, `api`).
+function signatureDe(acte, p) {
+  if (p && p.signature) return p.signature;
+  const circuit = acte.signatureSimple || acte.signatureMode === "simple" || (acte.api && acte.api.niveau === "simple") ? "simple"
+    : acte.externe || (acte.publication && acte.publication.originalExterne) ? "externe"
+    : acte.api && acte.api.acteId ? "electronique"
+    : "";
+  const niveau = niveauDepuisCircuit(circuit);
+  if (!niveau) return null;
+  return {
+    niveau,
+    prestataire: null,
+    signataires: acte.signeParNom ? [{ nom: acte.signeParNom, fonction: "" }] : [],
+    signeLe: acte.signeLe || (acte.signatureSimple && acte.signatureSimple.signeLe) || "",
+    algorithme: "",
+  };
+}
 
 // Un acte PORTE une publication : le dépôt a été fait, le service a attribué
 // l'identifiant ELI, et le registre local le dit « publié ». Un acte seulement
@@ -63,6 +86,13 @@ function noticeDe(acte) {
     epingle: p.epingle === true || acte.epingle === true,
     reserve: p.reserve === true,
     transmission: p.transmission || null,
+    // La signature et sa QUALIFICATION : l'enregistrement de publication les
+    // porte (« simple », « avancee », « qualifiee », « externe ») ; un
+    // enregistrement antérieur — ou le recueil d'une page statique, où le
+    // service peut manquer — les déduit de l'ACTE, qui sait par quel circuit il
+    // a été signé. Sans cette reprise, un acte signé « en simple » se
+    // présenterait sans mention, donc comme un acte signé tout court.
+    signature: signatureDe(acte, p),
     versions: [],
     informative: p.informative === true,
     adoption: p.adoption || null,
@@ -139,7 +169,7 @@ export function publicationLocale(actes, cle, { reserveVue = false } = {}) {
   if (rec.reserve && !reserveVue) return null;
   rec.formats = piecesDe(p);
   rec.original = p.original || null;
-  rec.signature = p.signature || null;
+  // (La signature, et sa qualification, viennent de la notice : voir `signatureDe`.)
   rec.versions = publicationsLocales(actes, { reserveVue }).filter((x) => x.eliUri && x.eliUri === rec.eliUri);
   return rec;
 }

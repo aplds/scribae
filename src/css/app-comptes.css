@@ -1,0 +1,343 @@
+/* ============================================================================
+   Scribae — Le compte connecté, la connexion, les comptes et la documentation technique.
+
+   Partie 6/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ============================================================== compte connecté */
+.app-user-wrap { position: relative; }
+.app-user {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 10px 3px 4px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.app-user:hover { background: var(--bg-alt); }
+.app-user__avatar {
+  width: 26px; height: 26px; border-radius: 999px; flex: none;
+  background: var(--brand); color: #fff; font-size: .68rem; font-weight: 700;
+  display: grid; place-items: center; letter-spacing: .02em;
+}
+.app-user__text { display: flex; flex-direction: column; line-height: 1.12; text-align: left; }
+.app-user__name { font-size: .82rem; font-weight: 600; }
+.app-user__role { font-size: .68rem; color: var(--ink-muted); }
+.app-user__menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 264px; z-index: 60;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 14px 34px rgba(16, 18, 35, .18); padding: 6px; text-align: left;
+}
+.app-user__head { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.app-user__headname { font-weight: 700; font-size: .9rem; }
+.app-user__item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; background: none; border-radius: var(--radius);
+  font: inherit; font-size: .85rem; color: var(--ink); cursor: pointer; text-align: left;
+}
+.app-user__item:hover { background: var(--brand-soft); color: var(--brand); }
+.app-user__sep { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+/* Version du logiciel en service — bas du menu du compte (voir lib/version.js). */
+.app-user__version { margin-top: 6px; padding: 7px 10px 3px; border-top: 1px solid var(--border); font-size: .72rem; color: var(--ink-muted); }
+
+/* ================================================================= connexion */
+.connexion { min-height: 100vh; display: flex; flex-direction: column; background: #f2f3f7; position: relative; }
+.connexion__theme { position: absolute; top: 14px; right: 16px; z-index: 5; }
+/* Le bouton d'apparence flotte au-dessus du bandeau de démonstration : on lui
+   réserve sa place, sinon le bouton recouvre la fin du texte sur un écran
+   étroit (le bandeau est le premier élément de l'écran de connexion). */
+.connexion .app-demo { padding-right: 62px; }
+.connexion__stage { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.connexion__card {
+  width: 100%; max-width: 780px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 26px 28px 22px; box-shadow: 0 18px 50px rgba(16, 18, 35, .12);
+  text-align: left; max-height: 94vh; overflow: auto;
+}
+.connexion__brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: var(--ink); }
+.connexion__name { margin: 0; font-weight: 700; font-size: 1rem; }
+.connexion__tag { margin: 2px 0 0; font-size: .74rem; color: var(--ink-muted); }
+.connexion__title { margin: 0 0 4px; font-size: 1.5rem; }
+.connexion__sub { margin: 0 0 18px; font-size: .9rem; color: var(--ink-2); }
+.connexion__group { margin-bottom: 16px; }
+.connexion__grouphead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.connexion__groupsum { font-size: .78rem; color: var(--ink-muted); }
+.connexion__user {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 6px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); font: inherit; color: var(--ink); cursor: pointer; text-align: left;
+}
+.connexion__user:hover { border-color: var(--brand); background: #fbfbff; }
+.connexion__logo { height: 30px; width: auto; border-radius: var(--radius); flex: none; }
+.connexion__initials {
+  width: 30px; height: 30px; border-radius: 999px; flex: none;
+  background: var(--brand-soft); color: var(--brand);
+  display: grid; place-items: center; font-size: .74rem; font-weight: 700;
+}
+.connexion__who { flex: 1 1 auto; display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.connexion__fullname { font-weight: 600; }
+.connexion__meta { font-size: .76rem; color: var(--ink-muted); overflow-wrap: anywhere; }
+.connexion__qualites { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.connexion__id { font-size: .78rem; color: var(--ink-muted); }
+.connexion__go { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 600; color: var(--brand); white-space: nowrap; }
+.connexion__note { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--border); font-size: .76rem; line-height: 1.55; color: var(--ink-muted); }
+
+/* La porte du retour au recueil public. Le recueil EST la page d'accueil du site
+   (voir src/ui/app.js) : l'écran de connexion ne doit donc pas être un cul-de-sac
+   — on revient au recueil d'un clic, sans chercher le bouton « Précédent ». Elle
+   se place sous le sous-titre, au-dessus de la liste des comptes : ainsi elle ne
+   dépend pas du défilement interne de la carte, qui peut être long. */
+.connexion__retour { margin: -8px 0 16px; }
+.connexion__retour-lien { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 600; color: var(--brand); text-decoration: none; }
+.connexion__retour-lien:hover { text-decoration: underline; }
+
+/* ------------------------------------ connexion par mot de passe ---------- */
+/* Les écrans du mode « comptes locaux » (src/ui/mot-de-passe.js). Le champ de
+   mot de passe porte son œil DANS la boîte de saisie : c'est le geste courant,
+   et un bouton posé à côté se cherche. */
+.mdp-connexion { display: flex; flex-direction: column; gap: 12px; }
+.mdp-messages:empty { display: none; }
+.mdp-messages > * { margin-bottom: 10px; }
+.mdp-form { display: flex; flex-direction: column; }
+.mdp-form__actions { display: flex; flex-wrap: wrap; }
+.mdp-form__actions .fr-btn { flex: 0 0 auto; }
+.mdp-champ { position: relative; display: block; }
+.mdp-champ .fr-input { padding-right: 42px; }
+.mdp-champ__oeil {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: var(--radius); background: transparent;
+  color: var(--ink-muted); cursor: pointer;
+}
+.mdp-champ__oeil:hover { background: var(--bg-alt); color: var(--brand); }
+.mdp-champ__oeil.is-on { color: var(--brand); }
+/* Le raccourci de démonstration, quand le déploiement l'a laissé ouvert : une
+   ligne repliée, pour ne pas encombrer l'écran d'un service réel. */
+.mdp-demo { border-top: 1px solid var(--border); padding-top: 10px; }
+.mdp-demo > summary { cursor: pointer; font-size: .82rem; color: var(--ink-2); }
+.mdp-demo > p { margin: 8px 0 10px; }
+.mdp-demo__liste { margin-top: 4px; }
+/* L'administration d'un mot de passe (fenêtre depuis « Comptes et rôles »). */
+.mdp-admin { display: flex; flex-direction: column; }
+.mdp-admin__actions { flex-wrap: wrap; margin-top: 10px; }
+
+/* ------------------------------------------- écran « pas d'accès » --------- */
+/* Compte authentifié mais sans rôle d'application : on explique la situation,
+   on donne le contact du service qui gère l'application, et on ramène le
+   visiteur vers l'espace public. La mise en page reprend celle de l'écran de
+   connexion (même carte centrée) — voir src/ui/views/sans-acces.js. */
+.sans-acces__card { max-width: 640px; }
+.sans-acces__ident {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt);
+}
+.sans-acces__motif { margin: 14px 0 0; font-size: .9rem; color: var(--ink-2); }
+.sans-acces__contact { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--brand); background: var(--brand-soft); }
+.sans-acces__contact p { margin: 5px 0 0; }
+.sans-acces__contact-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: .95rem; }
+.sans-acces__actions { margin-top: 18px; flex-wrap: wrap; }
+
+/* ------------------------------------------------- chats des pages d'erreur */
+/* L'option « chats d'erreur » (Administration › Publication, éteinte par
+   défaut) illustre les pages d'erreur d'une photographie de http.cat : ici les
+   écrans d'accès refusé, et l'alerte d'erreur d'affichage de l'atelier. La
+   figure reste discrète — l'information de la page passe avant l'image. Voir
+   src/ui/chats-erreur.js. */
+.chat-erreur { margin: 18px 0 0; text-align: center; }
+.chat-erreur__img {
+  display: block; margin: 0 auto; max-width: min(320px, 100%); height: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.chat-erreur__legende { margin: 8px 0 0; font-size: .85rem; color: var(--ink-2); }
+.chat-erreur__source { margin: 2px 0 0; font-size: .72rem; }
+
+/* ------------------------------------------- connexion par annuaire (OIDC) */
+.oidc-login { display: flex; flex-direction: column; gap: 12px; }
+.oidc-login__provider { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.oidc-login__url { font-size: .78rem; color: var(--ink-muted); overflow-wrap: anywhere; }
+.oidc-login__cta { justify-content: center; padding: 12px 18px; font-size: 1rem; }
+.oidc-login__messages > * { margin-bottom: 8px; }
+.oidc-login__recovery { border-top: 1px solid var(--border); padding-top: 10px; }
+.oidc-login__recovery summary { cursor: pointer; font-size: .8rem; color: var(--ink-2); }
+.oidc-login__recovery p { margin: 8px 0; }
+
+.oidc-test { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.oidc-test__row {
+  display: grid; grid-template-columns: minmax(170px, 1.3fr) minmax(120px, 1fr) auto;
+  gap: 10px; align-items: center; text-align: left; font: inherit; color: inherit;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; cursor: pointer; min-width: 0;
+}
+.oidc-test__row:hover { border-color: var(--brand); background: var(--bg-alt); }
+.oidc-test__row.is-denied { opacity: .72; }
+.oidc-test__name { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.oidc-test__claims { font-size: .72rem; color: var(--ink-muted); overflow-wrap: anywhere; min-width: 0; }
+.oidc-test__role { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 700px) {
+  .oidc-test__row { grid-template-columns: 1fr; }
+  .oidc-test__role { justify-content: flex-start; }
+}
+
+.oidc-checks th, .oidc-checks td { vertical-align: top; }
+.oidc-sub { margin: 16px 0 6px; font-size: .95rem; }
+.oidc-endpoints { margin-top: 10px; }
+.oidc-rolemap__row { align-items: flex-end; }
+.oidc-rolemap__row .fr-field { flex: 1 1 240px; min-width: 0; }
+.oidc-rolemap__row .fr-btn { flex: none; }
+@media (max-width: 640px) {
+  .oidc-rolemap__row { align-items: stretch; }
+  .oidc-rolemap__row .fr-field { flex: 1 1 100%; }
+  .oidc-rolemap__row .fr-btn { margin-left: auto; }
+}
+.fr-details { margin-top: 10px; }
+.fr-details summary { cursor: pointer; font-size: .85rem; color: var(--ink-2); }
+.fr-details .fr-field:first-of-type { margin-top: 8px; }
+
+/* ================================================================== comptes */
+.compte__who { display: flex; align-items: center; gap: 8px; }
+.compte__initials {
+  width: 26px; height: 26px; border-radius: 999px; flex: none;
+  background: var(--brand-soft); color: var(--brand);
+  display: grid; place-items: center; font-size: .68rem; font-weight: 700;
+}
+.compte__name { display: block; font-weight: 600; }
+.compte__service { display: block; font-size: .74rem; color: var(--ink-muted); }
+.fr-table tr.is-me { background: var(--brand-soft); }
+.perm-matrix { max-width: 720px; }
+.perm-matrix th.perm-matrix__role, .perm-matrix td.perm-matrix__cell { text-align: center; }
+.perm-matrix td.perm-matrix__cell.is-on { background: #f3f8f4; }
+.perm-yes { color: #18753c; font-weight: 700; font-size: .74rem; text-transform: uppercase; letter-spacing: .04em; }
+.perm-no { color: var(--ink-muted); }
+
+/* ---- éditeur de périmètre (Comptes et rôles) */
+.compte-scope { margin-top: 4px; }
+.compte-scope__list { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.compte-scope__svc { font-weight: 600; }
+.compte-scope__bureaux {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 2px 0 4px 22px; padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.compte-scope__hint { margin: 0 0 6px 22px; }
+
+/* ---- rôles cumulés et compétence d'un réviseur */
+.compte__roles { display: flex; flex-wrap: wrap; gap: 4px; }
+.compte-revision__label { display: block; margin-top: 4px; font-size: .72rem; color: var(--ink-muted); }
+.compte-roles__cumuls {
+  display: flex; flex-direction: column; gap: 2px; margin-top: 6px;
+  padding-left: 10px; border-left: 2px solid var(--border);
+}
+.compte-revision { margin-top: 4px; padding: 10px 12px; border-radius: 6px; background: var(--bg-alt); }
+.compte-revision .fr-field:last-child { margin-bottom: 0; }
+
+/* ---- qualité de réviseur portée par un service (Administration › Services) */
+.service-reviseur { margin-top: 10px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+.service-reviseur .fr-field { margin-top: 8px; margin-bottom: 0; }
+
+/* ---- rapport de conformité du réviseur */
+.rev-rapport__groupe { margin-top: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.rev-rapport__groupe summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.rev-rapport__groupe summary::-webkit-details-marker { display: none; }
+.rev-rapport__titre { flex: 1 1 auto; font-weight: 600; font-size: .85rem; }
+.rev-check { display: flex; gap: 8px; padding: 6px 0 4px 6px; border-top: 1px solid var(--border); }
+.rev-rapport__groupe summary + .rev-check { border-top: none; }
+.rev-check__dot {
+  flex: none; width: 18px; height: 18px; border-radius: 999px;
+  display: grid; place-items: center; font-size: .68rem; font-weight: 700;
+  background: var(--bg-alt); color: var(--ink-muted);
+}
+.rev-check--erreur .rev-check__dot { background: var(--error-bg); color: var(--error); }
+.rev-check--attention .rev-check__dot { background: var(--warning-bg); color: var(--warning); }
+.rev-check--info .rev-check__dot { background: var(--info-bg); color: var(--info); }
+.rev-check--ok .rev-check__dot { background: var(--success-bg); color: var(--success); }
+.rev-check__label { margin: 0; font-size: .8rem; }
+.rev-check__detail { margin: 2px 0 0; font-size: .75rem; color: var(--ink-muted); }
+
+@media (max-width: 760px) {
+  .compte-scope__bureaux { margin-left: 12px; }
+  .compte-scope__hint { margin-left: 12px; }
+}
+
+@media (max-width: 760px) {
+  .app-header__ref { display: none; }
+  .app-user__text { display: none; }
+  .app-user { padding: 3px; }
+  .app-demo { padding: 5px 12px; gap: 6px; font-size: .72rem; }
+  .app-demo__tag { font-size: .62rem; padding: 1px 6px; }
+  .app-demo__text { flex-basis: 100%; }
+  .app-vierge { padding: 5px 12px; gap: 6px; font-size: .72rem; }
+  .app-vierge__tag { font-size: .62rem; padding: 1px 6px; }
+  .app-vierge__text { flex-basis: 100%; }
+  .connexion__card { padding: 18px 16px; }
+  .connexion__id { display: none; }
+}
+
+/* ================================================== documentation technique */
+.docs-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.docs-side { position: sticky; top: 12px; }
+.docs-side__group { margin: 12px 0 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.docs-side__group:first-of-type { margin-top: 4px; }
+.docs-side__item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-left: 3px solid transparent;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 7px 10px; font: inherit; color: var(--ink);
+}
+.docs-side__item:hover { background: var(--bg-alt); }
+.docs-side__item.is-on { border-left-color: var(--brand); background: var(--brand-soft); }
+.docs-side__item strong { display: block; font-size: .9rem; }
+.docs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.docs-head__actions { flex: 0 0 auto; }
+.docs-path { margin: 6px 0 0; }
+.docs-path code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .78rem; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 3px; padding: 2px 6px; }
+.docs-view { line-height: 1.6; }
+.docs-loading { display: flex; align-items: center; gap: 8px; }
+/* Attente d'un service (numérotation, etc.) : un mouvement, pour que l'on voie
+   que la demande est en cours et non terminée. */
+.spinner {
+  display: inline-block; width: 13px; height: 13px; flex: none;
+  border: 2px solid var(--border-strong); border-top-color: var(--brand);
+  border-radius: 50%; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.docs-toc { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); padding: 10px 14px; margin-bottom: 18px; font-size: .85rem; }
+.docs-toc strong { display: block; margin-bottom: 6px; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.docs-toc__link { display: block; color: var(--brand); text-decoration: none; padding: 1px 0; }
+.docs-toc__link:hover { text-decoration: underline; }
+.docs-toc__link.is-sub { padding-left: 14px; color: var(--ink-2); }
+
+/* rendu markdown (ui/markdown.js) */
+/* La colonne de lecture est large : on borne la mesure du TEXTE (au-delà d'une
+   centaine de caractères, l'œil perd la ligne) mais on laisse les tableaux et
+   les schémas ASCII utiliser toute la largeur disponible. */
+.md { max-width: none; }
+.md > p, .md > ul, .md > ol, .md > blockquote { max-width: 84ch; }
+.md-h1 { font-size: 1.55rem; margin: 0 0 .6em; }
+.md-h2 { font-size: 1.18rem; margin: 1.8em 0 .5em; padding-bottom: .2em; border-bottom: 1px solid var(--border); scroll-margin-top: 16px; }
+.md-h3 { font-size: 1.02rem; margin: 1.4em 0 .4em; scroll-margin-top: 16px; }
+.md-h4 { font-size: .95rem; margin: 1.2em 0 .3em; scroll-margin-top: 16px; }
+.md p { margin: 0 0 .8em; }
+.md-list { margin: 0 0 1em; padding-left: 1.3em; }
+.md-list li { margin-bottom: .25em; }
+.md-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .86em; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; }
+.md-pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; overflow-x: auto; margin: 0 0 1.1em; }
+.md-pre code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .78rem; line-height: 1.4; white-space: pre; }
+.md-table-wrap { overflow-x: auto; margin: 0 0 1.1em; }
+.md-table { border-collapse: collapse; width: 100%; font-size: .84rem; }
+.md-table th, .md-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; vertical-align: top; }
+.md-table th { background: var(--bg-alt); font-weight: 700; }
+.md-quote { margin: 0 0 1.1em; padding: 8px 14px; border-left: 3px solid var(--border-strong); background: var(--bg-alt); color: var(--ink-2); }
+.md-quote p { margin: 0; }
+.md-hr { border: 0; border-top: 1px solid var(--border); margin: 1.8em 0; }
+
+.guide__tech { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 22px; }
+.guide__tech-text { min-width: 240px; flex: 1 1 auto; }
+
+@media (max-width: 1100px) {
+  .docs-grid { grid-template-columns: minmax(0, 1fr); }
+  .docs-side { position: static; }
+}

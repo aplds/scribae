@@ -7,11 +7,19 @@
 // blanc. Ce contrôle attrape donc la faute de frappe, la parenthèse fermante
 // manquante, la virgule de trop, la chaîne non terminée.
 //
+// CE QU'IL PARCOURT. Le dossier QUI PORTE l'outillage (`scripts/` et `tests/`,
+// à la racine du dépôt livré ; tout l'arbre de l'atelier, où tout voisine sous
+// `src/`) : le code de l'application est donc vu dans les deux dispositions,
+// sans chemin à tenir à jour. Sont écartés `node_modules`, les dossiers
+// commençants par un point (`.git`, `.github`) et `data/` — le rangement par
+// fichiers d'un service auto-hébergé (voir docs/ADMINISTRATION.md), qui ne
+// contient pas de JavaScript.
+//
 // Le dépôt est un dépôt de modules ES (`"type": "module"` à la racine) : les
 // fichiers `.js` sont donc lus dans la syntaxe des modules, comme le fait le
 // navigateur pour le `<script type="module">` de l'application.
 //
-//   npm run syntaxe   (soit : node src/scripts/verifier-syntaxe.mjs)
+//   npm run syntaxe   (soit : node scripts/verifier-syntaxe.mjs)
 //
 // Sortie : une ligne par fichier fautif, et un code de sortie 1 s'il y en a.
 // ============================================================================
@@ -21,7 +29,7 @@ import { extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RACINE = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const IGNORES = new Set(["node_modules", ".git", ".github"]);
+const IGNORES = new Set(["node_modules", ".git", ".github", "data"]);
 const EXTENSIONS = new Set([".js", ".mjs"]);
 
 async function* parcourir(dossier) {
@@ -29,7 +37,7 @@ async function* parcourir(dossier) {
   try { entrees = await readdir(dossier, { withFileTypes: true }); }
   catch { return; }
   for (const entree of entrees) {
-    if (IGNORES.has(entree.name)) continue;
+    if (IGNORES.has(entree.name) || entree.name.startsWith(".")) continue;
     const chemin = resolve(dossier, entree.name);
     if (entree.isDirectory()) yield* parcourir(chemin);
     else if (EXTENSIONS.has(extname(entree.name))) yield chemin;

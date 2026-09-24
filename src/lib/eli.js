@@ -19,6 +19,7 @@ import { formatDate } from "./util.js";
 import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
 import { cleService } from "./cle-service.js";
 import { LICENCE_DEFAUT, CSS_DOCUMENT_WEB } from "./recueil.js";
+import { qualificationSignature } from "./qualification-signature.js";
 
 const ELI_CODES = {
   decision: "dec",
@@ -144,6 +145,25 @@ function transmissionBlock(r) {
   return `<div class="transmis"><strong>Contrôle de légalité</strong>${simule ? "<span class=\"transmis-simule\">simulation</span>" : ""}${esc(mention)}${ref ? "<br>" + ref : ""}</div>`;
 }
 
+// LA QUALIFICATION DE LA SIGNATURE, déposée avec le document publié. Un acte
+// signé « en simple » (dans l'application, avec un compte) n'a pas la valeur
+// d'une signature qualifiée : le dire sur l'acte publié est la seule position
+// tenable tant qu'aucun prestataire qualifié n'est branché (NC-IV-001). La
+// mention est rendue DANS le document — comme le certificat de transmission —,
+// donc elle s'imprime avec lui, au lieu de rester dans une colonne latérale que
+// l'impression écarte.
+function signatureBlock(r) {
+  const sig = r.signature || {};
+  const q = qualificationSignature({
+    niveau: sig.niveau,
+    simule: r.signatureSimulee === true || !!(sig.prestataire && sig.prestataire.demonstration),
+    prestataire: sig.prestataire,
+  });
+  if (!q.mention) return "";
+  return `<div class="signature${q.avertissement ? " signature--avertissement" : ""}">`
+    + `<strong>${esc(q.label || "Signature")}</strong>${esc(q.mention)}</div>`;
+}
+
 // La page publiée : c'est le document déposé sur le service de publication.
 // Autonome (CSS inclus), elle reste lisible même sortie de l'application.
 export function buildWebVersion({ doc, config, record }) {
@@ -250,6 +270,13 @@ ${CSS_DOCUMENT_WEB}
 .transmis strong{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#3a3a3a}
 .transmis .ref{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;color:#5a6472}
 .transmis .transmis-simule{display:inline-block;margin-left:6px;padding:0 6px;border-radius:3px;background:#fdecea;color:#8a1c10;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
+/* La qualification de la signature, portée par l'acte publié lui-même (voir
+   \`signatureBlock\`) : elle s'imprime avec le document, et sa couleur dit
+   qu'elle demande l'attention du lecteur (signature non qualifiée, ou
+   prestataire simulé). */
+.signature{margin-top:1.2em;border-left:4px solid var(--brand);background:#f4f6fb;padding:10px 12px;border-radius:3px;font-size:.84rem}
+.signature strong{display:block;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#3a3a3a}
+.signature--avertissement{border-left-color:#8a6d10;background:#fdf8ea}
 /* Un acte cité par son identifiant ELI : le service résout le lien vers l'acte,
    quand il est publié au recueil ; sinon la mention reste, soulignée de pointillés
    et non cliquable (voir src/server/mysql/actes.mjs, resoudreLiensEli). */
@@ -273,7 +300,7 @@ ${A4_BREAK_CSS}
 </div></div>
 <div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : nonJuridique ? "Documents" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
 <div class="main">${r.reserve ? `<div class="reserve"><strong>Diffusion réservée aux agents</strong>Cet acte est publié au recueil, mais sa diffusion est restreinte : il n'est montré qu'aux personnes connectées. Il ne figure pas dans la liste publique des actes, ni dans les index ouverts (recueil.json, llms.txt, sitemap.xml).</div>` : ""}<div class="grid">
-  <div class="paper doc-web"><div class="doc">${body}</div>${transmissionBlock(r)}</div>
+  <div class="paper doc-web"><div class="doc">${body}</div>${signatureBlock(r)}${transmissionBlock(r)}</div>
   <div class="pub-aside">
     <div class="side">
       <h3>Publication</h3>
@@ -335,6 +362,11 @@ export function publicationJsonLd(record) {
   // les porte dans le vocabulaire Dublin Core, à côté du reste (CRPA art.
   // L. 322-1). À défaut de licence réglée, la Licence Ouverte 2.0 s'applique.
   const licence = r.licence || LICENCE_DEFAUT;
+  const qual = qualificationSignature({
+    niveau: (r.signature || {}).niveau,
+    simule: r.signatureSimulee === true || !!((r.signature || {}).prestataire && (r.signature || {}).prestataire.demonstration),
+    prestataire: (r.signature || {}).prestataire,
+  });
   return JSON.stringify({
     "@context": {
       eli: "http://data.europa.eu/eli/ontology#",
@@ -376,6 +408,11 @@ export function publicationJsonLd(record) {
       "eli:date": r.signature.signeLe || "",
       "eli:algorithm": r.signature.algorithme || "",
       "eli:digest": r.originalSha256 || "",
+      // Le NIVEAU de la signature, et la phrase qui le qualifie : un acte signé
+      // « en simple » ne doit pas se faire passer pour qualifié, même lu par une
+      // machine (voir src/lib/qualification-signature.js, NC-IV-001).
+      "eli:signature_level": qual.niveau || undefined,
+      "dcterms:description": qual.mention || undefined,
     } : undefined,
   }, null, 2);
 }

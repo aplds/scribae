@@ -665,6 +665,13 @@ export const emptyConfig = () => ({
     // restriction est appliquée par le SERVICE, jamais par le navigateur : voir
     // src/server/mysql/atelier.mjs.
     atelier: { ips: "", message: "" },
+    // LES CHATS DES PAGES D'ERREUR (1.6.1). Éteint par défaut : une page
+    // d'erreur n'a pas à être gaie, et surtout l'image est demandée à un TIERS
+    // (http.cat), qui voit alors l'adresse du visiteur. Allumé par
+    // l'administration, il illustre les pages d'erreur — de l'atelier comme du
+    // recueil public — d'une photographie de chat. La règle vit dans
+    // src/server/mysql/chats-erreur.mjs, partagée par les deux.
+    chatsErreur: false,
     // LE BULLETIN (ou Journal) des actes (1.6.0). Le recueil publie ses actes au
     // fil de l'eau ; le bulletin les RASSEMBLE par PÉRIODE et les diffuse — une
     // sous-page du recueil par numéro, un flux RSS/Atom, un courriel aux

@@ -2,17 +2,17 @@
   "name": "scribae",
   "version": "1.6.0",
   "private": true,
-  "description": "Scribae — éditeur de trames et d'actes administratifs. Racine du dépôt : la vérification de syntaxe et les tests qui s'exécutent sans navigateur se lancent d'ici.",
+  "description": "Scribae — éditeur de trames et d'actes administratifs. Manifeste du dépôt : l'outillage vit à la racine (scripts/, tests/), le code de l'application sous src/ — les commandes s'exécutent donc DEPUIS LA RACINE.",
   "license": "GPL-3.0-only",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "lint": "node src/scripts/verifier-syntaxe.mjs && node src/scripts/verifier-style.mjs",
-    "syntaxe": "node src/scripts/verifier-syntaxe.mjs",
-    "style": "node src/scripts/verifier-style.mjs --strict",
-    "test": "node --test src/tests/ src/server/mysql/ src/server/charge/",
-    "verifier": "npm run lint && npm test"
+    "lint": "node scripts/verifier-syntaxe.mjs && node scripts/verifier-style.mjs",
+    "syntaxe": "node scripts/verifier-syntaxe.mjs",
+    "style": "node scripts/verifier-style.mjs --strict",
+    "test": "node --test tests/ src/server/mysql/ src/server/charge/",
+    "verifier": "npm run syntaxe && npm run style && npm test"
   }
 }

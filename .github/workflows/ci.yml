@@ -1,23 +1,29 @@
 # ============================================================================
 # Scribae — intégration continue (GitHub Actions).
 #
-# OÙ VIT CE FICHIER. Le dépôt est servi tel quel (GitHub Pages) : les fichiers
-# du logiciel sont à la racine, avec `main.pjs`, `index.html` et `src/`. Le
-# présent fichier appartient donc à `<racine>/.github/workflows/ci.yml` : à la
-# mise en place du dépôt, copiez-le à cet emplacement (comme `src/docs/GITHUB.md`
-# qui devient `README.md` à la racine). Voir `src/docs/INDUSTRIALISATION.md`.
+# OÙ VIT CE FICHIER. Le dépôt est servi tel quel (GitHub Pages) : sa racine
+# porte le code de l'application (`src/`) et l'outillage (`scripts/`, `tests/`).
+# Le présent fichier est le modèle de `<racine>/.github/workflows/ci.yml`, où
+# l'export le dépose (comme `src/docs/GITHUB.md` devient `README.md`). Voir
+# `src/docs/INDUSTRIALISATION.md`.
 #
 # CE QU'IL FAIT. Rien à installer pour le premier travail : la vérification de
-# syntaxe et les tests des modules purs n'utilisent que Node.
+# syntaxe, le contrôle de style et les tests des modules purs n'utilisent que
+# Node. Les trois étapes sont SÉPARÉES pour qu'un échec dise du premier coup
+# lequel des trois a lâché — une chaîne rouge dont personne ne distingue la
+# cause ne rend pas le service qu'une chaîne rend (audit, NC-I-008).
 #
-#   vérifier   la syntaxe de tout le JavaScript du dépôt, puis les tests purs
-#              (src/tests/) et ceux du domaine du service (src/server/mysql/) ;
-#   service    l'installation des dépendances du service auto-hébergé et ses
-#              tests (aucune base requise).
+#   syntaxe    `node --check` sur tout le JavaScript du dépôt ;
+#   style      le contrôle de style en mode STRICT : les avertissements font
+#              échouer (un import jamais employé, un `console.log` de client) ;
+#   tests      les épreuves des modules purs (`tests/`) et celles du domaine du
+#              service (`src/server/mysql/`, `src/server/charge/`).
 #
-# Le second travail installe `mysql2`. Faute de `package-lock.json` versionné,
-# il utilise `npm install` ; passez à `npm ci` dès que le verrou est commité
-# (voir l'audit, NC-I-002).
+# Le second travail installe `mysql2` : il le fait par `npm ci`, sur le verrou
+# `src/server/mysql/package-lock.json` (chaque paquet épinglé, empreinte SHA-512
+# vérifiée) — c'est ce qui rend deux constructions identiques. `npm ci` exige
+# que le verrou soit à jour vis-à-vis de `package.json` : ajouter une dépendance
+# demande donc un `npm install` local, et le commit du verrou qui va avec.
 # ============================================================================
 name: Intégration continue
 
@@ -30,7 +36,7 @@ permissions:
 
 jobs:
   verifier:
-    name: Syntaxe et tests
+    name: Syntaxe, style et tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -39,7 +45,9 @@ jobs:
         with:
           node-version: "20"
       - name: Vérifier la syntaxe de tout le JavaScript
-        run: npm run lint
+        run: npm run syntaxe
+      - name: Contrôle de style (aucun avertissement toléré)
+        run: npm run style
       - name: Tests (modules purs et domaine du service)
         run: npm test
 
@@ -56,6 +64,6 @@ jobs:
         with:
           node-version: "20"
       - name: Installer les dépendances du service
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Tests du domaine des comptes et de la signature
         run: npm test

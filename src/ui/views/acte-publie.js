@@ -19,6 +19,7 @@ import { formatDate, download, copyText } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
 import { assainirHtml } from "../../lib/sanitize.js";
 import { verifySignedPackage } from "../../lib/signature.js";
+import { qualificationSignature } from "../../lib/qualification-signature.js";
 import { extraireVersion, CSS_DOCUMENT_WEB, lienRecueil, mentionDeTransmission,
   adresseActe, adresseFichier, urlFormat, hrefActe, hrefFormat, hrefFichier, autoHeberge,
   adresseEli, hrefEli, estEliUri, resoudreLiensEli,
@@ -138,6 +139,17 @@ export function notice(rec, v) {
   // recueil, mais ne fait pas droit : sa notice le dit, et n'affiche pas
   // d'entrée en vigueur — il n'en a pas.
   const nonJuridique = rec.juridique === false;
+  // LA QUALIFICATION DE LA SIGNATURE : ce que vaut la signature de cet acte. Un
+  // acte signé « en simple » — dans l'application, avec un compte — ou signé par
+  // un prestataire SIMULÉ ne doit pas se présenter comme qualifié : la notice le
+  // dit, d'une pastille et d'une phrase (voir src/lib/qualification-signature.js
+  // et NC-IV-001). Une publication informative n'est pas signée : rien à dire.
+  const sig = rec.signature || {};
+  const qual = qualificationSignature({
+    niveau: sig.niveau,
+    simule: rec.signatureSimulee === true || !!(sig.prestataire && sig.prestataire.demonstration),
+    prestataire: sig.prestataire,
+  });
   const titre = (v && v.docTitre) || rec.objet || rec.titre || rec.numero || "Acte";
   const theme = themeLabelDePublication(rec);
   const marques = h("div", { class: "recueil-notice__marques" },
@@ -145,6 +157,7 @@ export function notice(rec, v) {
     rec.nature ? h("span", { class: "recueil-badge recueil-badge--nature", text: natureLabel(rec.nature) }) : null,
     h("span", { class: "recueil-badge recueil-badge--version", text: kindLong(rec.kind) }),
     nonJuridique ? h("span", { class: "recueil-badge recueil-badge--note", text: "document, non opposable" }) : null,
+    !informative && qual.avertissement ? h("span", { class: "recueil-badge recueil-badge--note", text: qual.label }) : null,
     h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (informative ? "texte en vigueur" : nonJuridique ? "dernière version" : "version en vigueur") : "version antérieure" }));
 
   const meta = h("dl", { class: "recueil-meta" });
@@ -180,6 +193,9 @@ export function notice(rec, v) {
       : nonJuridique
         ? h("p", { class: "recueil-notice__info", text: "Document publié au recueil pour être porté à la connaissance de tous. Il n'a pas de portée juridique propre : il ne crée ni droits ni obligations, aucune entrée en vigueur ne s'y attache, et aucun délai de recours ne court à compter de sa publication." })
         : null,
+    // La phrase qui qualifie la signature : elle n'apparaît que lorsqu'il y a
+    // quelque chose à dire (signature non qualifiée, prestataire simulé).
+    !informative && qual.avertissement ? h("p", { class: "recueil-notice__info", text: qual.mention }) : null,
     meta);
 }
 

@@ -27,7 +27,8 @@
 // sans réseau : il sert à vérifier le branchement, et il est signalé comme tel
 // (ses jetons ne sont pas vérifiés, il ne s'agit pas d'une authentification).
 // ============================================================================
-import { authConfig, isTestProvider, redirectUriFor, DEFAULT_AUTH } from "./auth.js";
+import { authConfig, isTestProvider, annuaireParLeService, DEFAULT_AUTH } from "./auth.js";
+import { post, bodyOf } from "./remote.js";
 import { newUser, uniqueLogin, rolesOf, estCumulable, setRoles, VISITEUR } from "./users.js";
 
 export class AuthError extends Error {
@@ -90,6 +91,48 @@ function saveFlow(flow) { try { sessionStorage.setItem(FLOW_KEY, JSON.stringify(
 // ------------------------------------------------------------- découverte
 export const discoveredIssuer = (issuer) => String(issuer || "").trim().replace(/\/+$/, "");
 
+// LA DÉCOUVERTE PAR LE SERVICE. Quand le service de la collectivité est le
+// client OIDC (drapeau `annuaireService` de `GET /v1/auth/config`), c'est LUI
+// qui lit `/.well-known/openid-configuration` : l'appel part d'une machine à
+// l'autre, et le fournisseur n'a pas à publier d'en-têtes CORS pour
+// l'application. C'est aussi ce qui fait fonctionner le bouton « Découverte » de
+// l'administration sur un annuaire qui n'ouvre pas le CORS (Keycloak, LemonLDAP,
+// ADFS…) : depuis le navigateur, ces fournisseurs répondaient « Découverte
+// impossible (Failed to fetch) » — un refus du navigateur, pas une adresse
+// fausse. Voir docs/ADMINISTRATION.md § 4.4.
+//
+// `issuer` et `endpoints` ne sont transmis que par l'Administration › Annuaire,
+// pour éprouver une adresse avant de l'enregistrer : le service ne va pas
+// chercher une adresse arbitraire pour le premier venu (voir la route).
+export async function decouvrirParLeService({ issuer = "", endpoints = null } = {}) {
+  const res = await post("/v1/auth/annuaire/decouverte", endpoints ? { issuer, endpoints } : { issuer });
+  const body = bodyOf(res);
+  if (!res.ok) throw new AuthError(body.erreur || "Découverte impossible par le service.", body.code || "discovery_failed");
+  const ep = body.endpoints || {};
+  return {
+    issuer: discoveredIssuer(ep.issuer),
+    authorization_endpoint: ep.authorization_endpoint || "",
+    token_endpoint: ep.token_endpoint || "",
+    jwks_uri: ep.jwks_uri || "",
+    userinfo_endpoint: ep.userinfo_endpoint || "",
+    source: body.source || "découverte",
+  };
+}
+
+// L'ÉCHANGE PAR LE SERVICE. Le navigateur lui remet le code d'autorisation et le
+// vérificateur PKCE (qu'il est seul à détenir, et qui ne quitte l'onglet que
+// pour cette requête, sur la même origine), et reçoit en retour une SESSION DU
+// SERVICE — les mêmes cookies que la connexion par mot de passe. Le jeton
+// d'accès et le jeton d'identité ne traversent jamais le navigateur : le service
+// les reçoit du fournisseur, les vérifie, et ouvre sa session (voir
+// src/server/mysql/annuaire-service.mjs).
+export async function connexionParLeService({ code, verifier, redirectUri, nonce }) {
+  const res = await post("/v1/auth/annuaire", { code, verifier, redirectUri, nonce });
+  const body = bodyOf(res);
+  if (!res.ok) throw new AuthError(body.erreur || "Le service a refusé la connexion par l'annuaire.", body.code || "token_rejected");
+  return { session: body, checks: body.checks || [], warnings: body.warnings || [] };
+}
+
 // Points de terminaison : ceux saisis à la main, sinon ceux publiés par le
 // fournisseur (/.well-known/openid-configuration).
 export async function discover(auth) {
@@ -106,6 +149,11 @@ export async function discover(auth) {
   }
   const base = discoveredIssuer(auth.issuer);
   if (!base) throw new AuthError("Aucune adresse de fournisseur n'est configurée.", "no_issuer");
+  // LE SERVICE D'ABORD, quand c'est lui le client OIDC : aucun appel ne part
+  // alors du navigateur. On ne retombe pas sur un appel direct si le service
+  // échoue : le navigateur serait refusé par le CORS, et l'erreur affichée
+  // (celle du navigateur) désignerait la mauvaise cause.
+  if (annuaireParLeService()) return decouvrirParLeService();
   const url = base + "/.well-known/openid-configuration";
   let doc;
   try {
@@ -301,7 +349,9 @@ async function fetchUserinfo(endpoints, accessToken) {
 }
 
 // Retour du fournisseur : contrôle du state, échange du code, vérification du
-// jeton. Rend les revendications prêtes pour `applyOidcUser`.
+// jeton. Rend les revendications prêtes pour `applyOidcUser` — ou, quand le
+// service est le client OIDC, la SESSION qu'il a ouverte (`{ session }`), que
+// l'appelant adopte telle quelle.
 export async function completeAuthorizationFromUrl(auth, { search, redirectUri }) {
   const params = new URLSearchParams(search || "");
   const error = params.get("error");
@@ -316,6 +366,14 @@ export async function completeAuthorizationFromUrl(auth, { search, redirectUri }
   if (!flow) throw new AuthError("Aucune demande de connexion en cours dans cet onglet : recommencez la connexion.", "no_flow");
   if (params.get("state") !== flow.state) throw new AuthError("Contrôle d'état échoué (state) : la réponse ne correspond pas à la demande de connexion. Recommencez.", "bad_state");
   clearFlow();
+
+  // LE SERVICE EST LE CLIENT OIDC : il échange le code (avec le vérificateur
+  // PKCE que nous venons de relire), vérifie le jeton, attribue le compte et
+  // ouvre SA session. Le navigateur, lui, ne présente plus que ce qu'il est seul
+  // à détenir — et le `state` vient d'être confronté ci-dessus.
+  if (annuaireParLeService()) {
+    return connexionParLeService({ code, verifier: flow.verifier, redirectUri: redirectUri || flow.redirectUri, nonce: flow.nonce });
+  }
 
   const ep = await discover(auth);
   const tokens = await exchangeCode(auth, ep, { code, verifier: flow.verifier, redirectUri: redirectUri || flow.redirectUri });

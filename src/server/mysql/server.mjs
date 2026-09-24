@@ -2,15 +2,20 @@
 // ============================================================================
 // Scribae — service de la collectivité.
 //
-// Un seul processus HTTP, deux familles de ressources, une seule base MySQL :
+// Un seul processus HTTP, deux familles de ressources, un seul RANGEMENT :
 //
 //   /v1/db/…      persistance partagée (référentiel, trames, actes, comptes) —
 //                 synchronisation enregistrement par enregistrement, révisions,
-//                 conflits, colonnes indexées, journal `sb_journal` ;
+//                 conflits, colonnes indexées, journal technique ;
 //   /v1/…         signature et publication (dépôt des actes, circuits de
 //                 signature, notification du prestataire, publication, ELI) —
-//                 le domaine de `actes.mjs`, dont l'état est conservé dans
-//                 `sb_etat`.
+//                 le domaine de `actes.mjs`, dont l'état est conservé à part.
+//
+// LE RANGEMENT est MariaDB PAR DÉFAUT, ou un simple DOSSIER DE FICHIERS
+// (`STOCKAGE=fichier`, `DATA_DIR=./data`) pour une installation sans serveur de
+// base de données. Le CONTRAT des deux est le même (voir magasin.mjs) : le reste
+// du service ne fait aucune différence, et l'application non plus. Voir
+// magasin-mysql.mjs et magasin-fichier.mjs.
 //
 // Les deux familles exigent une autorisation : un **jeton d'API** en mode
 // « demo » (le fonctionnement historique : `Authorization: Bearer`, dont le
@@ -26,7 +31,7 @@
 //      PUIS applique `schema.sql` (les deux gestes sont idempotents ; c'est
 //      exactement ce que fait le service `db-init` de la pile Compose à chaque
 //      démarrage, et c'est ce qui garantit une base utilisable) ;
-//   2. npm install
+//   2. npm ci                           (installe l'arbre verrouillé)
 //   3. node server.mjs --migrate        (schéma seul, si le compte est déjà bon)
 //   4. node server.mjs                  (ou: npm start)
 //
@@ -34,25 +39,23 @@
 // ============================================================================
 
 import http from "node:http";
-import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import mysql from "mysql2/promise";
 import { createActesApi, emptyState } from "./actes.mjs";
 import { createBulletins } from "./bulletins.mjs";
 import * as courriel from "./courriel.mjs";
-import { loadState, saveState } from "./state.mjs";
 import { SERVICE_ID, entetesSurs, ecrireEntetes } from "./entetes.mjs";
 import { amorcerAdministrateur, nomDe, slug } from "./amorcage.mjs";
-import { createComptes, createStoreMysql, normaliserLogin, motDePasseFaible } from "./comptes.mjs";
+import { createComptes, normaliserLogin, motDePasseFaible } from "./comptes.mjs";
 import { lireVariables } from "./variables.mjs";
-import { sqlCompteApplicatif } from "./compte-base.mjs";
+import { annuairePublic } from "./annuaire.mjs";
+import { annuaireAccepte, annuaireEffectif } from "./annuaire-service.mjs";
+import { verifierJws } from "./jws.mjs";
 import { createPrestataire } from "./signature.mjs";
+import { creerMagasinMysql } from "./magasin-mysql.mjs";
+import { creerMagasinFichier } from "./magasin-fichier.mjs";
 import { CLE_IPS, CLE_MESSAGE, etat as etatAtelier, corpsRefus, resume as resumeAtelier, adresseDeLEntete } from "./atelier.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVICE = "Scribae — service de la collectivité";
 const SERVICE_VERSION = "1.0.0";
 // `SERVICE` (tiret cadratin, accents) sert aux journaux et aux corps JSON ;
@@ -195,6 +198,28 @@ const DB = {
   timezone: "Z",
 };
 
+// --- LE RANGEMENT (le « magasin ») -------------------------------------------
+// Deux rangements, un seul contrat (voir magasin.mjs) :
+//
+//   mysql    (le défaut) tout dans MariaDB, comme depuis toujours ;
+//   fichier  tout dans un DOSSIER — `DATA_DIR`, « ./data » par défaut — pour
+//            une installation sans serveur de base de données. Les données y
+//            sont EN CLAIR (sauf les empreintes de mots de passe), lisibles et
+//            copiables ; une sauvegarde est une copie de dossier. Le magasin
+//            FICHIER suppose UN service sur UNE machine (voir son en-tête).
+//
+// Le choix ne change RIEN au reste du service : c'est tout l'intérêt du contrat.
+// Une valeur refusée par le registre (STOCKAGE=nimportequoi) n'est jamais
+// appliquée : on retombe sur `mysql`, et le registre le signale au démarrage.
+const STOCKAGE = String(opt("STOCKAGE") || "mysql").toLowerCase();
+const DATA_DIR = String(opt("DATA_DIR") || "./data");
+const magasin = STOCKAGE === "fichier"
+  ? creerMagasinFichier({
+    dossier: DATA_DIR,
+    journal: (niveau, message) => (niveau === "avertissement" ? console.warn("[magasin] " + message) : console.log("[magasin] " + message)),
+  })
+  : await creerMagasinMysql({ DB });
+
 // Rôles d'une clé d'API. Les quatre premiers forment une hiérarchie ; le
 // `prestataire` est hors hiérarchie (notification de signature seulement).
 const ROLES_CONNUES = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire"];
@@ -235,12 +260,12 @@ const roleAutorise = (role, regle) => {
 
 const sha256 = (s) => createHash("sha256").update(String(s), "utf8").digest("hex");
 
-const pool = mysql.createPool(DB);
-
 // ------------------------------------------------------------------ comptes
-// Le port de cryptographie : c'est ICI, et nulle part ailleurs, que le service
-// touche à `node:crypto`. Le domaine (comptes.mjs) ne connaît que ces six
-// fonctions — ce qui le rend éprouvable sans base ni réseau (comptes.test.mjs).
+// Le port de cryptographie : c'est ICI — et dans `jws.mjs`, où vit la seule
+// opération qui méritait son propre module pour être éprouvée avec de vraies
+// clés — que le service touche à `node:crypto`. Le domaine (comptes.mjs) ne
+// connaît que ces fonctions — ce qui le rend éprouvable sans base ni réseau
+// (comptes.test.mjs).
 const cryptoPort = {
   randomBytes: (n) => randomBytes(n),
   // `maxmem` : scrypt réclame 128·N·r octets ; on laisse de la marge.
@@ -270,16 +295,62 @@ const cryptoPort = {
     if (x.length !== y.length) return false;
     return x.length > 0 && timingSafeEqual(x, y);
   },
+  // LA SIGNATURE D'UN JETON D'IDENTITÉ (voir annuaire-service.mjs, qui s'en
+  // sert pour vérifier le jeton de l'annuaire). Elle est écrite dans `jws.mjs`,
+  // un module à part, afin d'être éprouvée seule avec de vraies clés et de
+  // vraies signatures (jws.test.mjs) — c'est la seule opération cryptographique
+  // du service qui ne soit pas du mot de passe, et la seule dont l'échec serait
+  // silencieux (une signature jamais vérifiée ne se voit nulle part).
+  verifierJws,
 };
 
+// LE RÉSEAU VERS LE FOURNISSEUR D'IDENTITÉ. Un seul endroit du service parle à
+// l'extérieur, et c'est ici : `httpJson(url, init)` → `{ ok, status, body,
+// text }`. Le domaine (annuaire-service.mjs) ne connaît que ce contrat, ce qui
+// le rend éprouvable avec un faux fournisseur, sans réseau.
+//
+// Le DÉLAI est borné : un fournisseur lent ne doit pas retenir une connexion
+// ouverte jusqu'à l'abandon du navigateur — huit secondes, puis on rend la
+// main à l'appelant, qui dit « fournisseur injoignable ». Le corps n'est
+// interprété comme JSON que s'il en a l'air ; le texte brut est toujours
+// rendu, car c'est lui qui porte le message d'erreur d'un fournisseur
+// (`error_description`) et qui finit dans le journal.
+const DELAI_ANNUAIRE_MS = 8 * 1000;
+async function httpJson(url, init = {}) {
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), DELAI_ANNUAIRE_MS);
+  try {
+    const reponse = await fetch(url, { ...init, signal: controleur.signal, redirect: "follow" });
+    const texteBrut = await reponse.text();
+    let corps = null;
+    const type = String(reponse.headers.get("content-type") || "");
+    if (texteBrut && (type.toLowerCase().includes("json") || /^\s*[{[]/.test(texteBrut))) {
+      try { corps = JSON.parse(texteBrut); } catch (e) { corps = null; }
+    }
+    return { ok: reponse.ok, status: reponse.status, body: corps, text: texteBrut };
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
 const comptes = createComptes({
-  store: createStoreMysql(pool),
+  store: magasin.store,
   crypto: cryptoPort,
   sessionJours: SESSION_DAYS,
   mdpMin: MDP_MIN,
   scryptParams: { N: SCRYPT_N, r: 8, p: 1 },
   demoAutorise: DEMO_EFFECTIF,
   sessionRequise: MOT_DE_PASSE,
+  // L'ANNUAIRE DE LA COLLECTIVITÉ (voir annuaire-service.mjs). Le service est le
+  // client OIDC : la découverte, l'échange du code, la vérification du jeton et
+  // l'ouverture de la session se font ici, à l'abri du CORS. Ces trois
+  // fermetures sont PARESSEUSES : les fonctions sont déclarées plus bas
+  // (déclarations hissées), et rien n'est lu tant qu'une connexion d'annuaire
+  // n'est pas tentée — un service qui n'emploie pas l'annuaire ne paie rien.
+  lireAnnuaire: () => annuairePublie(),
+  lireReferentiel: () => magasin.lireConfig().catch(() => null),
+  httpJson,
+  modeDeploiement: AUTH_MODE,
 });
 
 // ------------------------------------------------- le prestataire de signature
@@ -370,16 +441,19 @@ let reessaiBaseAt = 0;
 function noterBase(disponible, message = "", e = null) {
   etatService.baseDisponible = !!disponible;
   etatService.baseMessage = disponible ? "" : String(message || (e && e.message) || "");
-  etatService.baseRemede = disponible ? "" : remedeBase(e && e.code);
+  etatService.baseRemede = disponible ? "" : remedeBase(e && e.code, e);
 }
 
-// Le remède DIT le geste à faire, et dans le bon ordre. Un schéma absent
-// s'applique SANS RIEN EFFACER (`schema.sql` est idempotent — et la pile Compose
-// l'applique d'elle-même au démarrage) ; l'effacement du dossier de données
-// (« docker compose down -v ») n'est proposé que pour les identifiants du compte
-// applicatif, qui, eux, ne se corrigent pas après coup. Confondre les deux
-// ferait perdre les données d'un service en marche.
-function remedeBase(code) {
+// Le remède DIT le geste à faire, et dans le bon ordre — il dépend du RANGEMENT.
+// MariaDB : un schéma absent s'applique SANS RIEN EFFACER (`schema.sql` est
+// idempotent — et la pile Compose l'applique d'elle-même au démarrage) ; l'effacement
+// du dossier de données (« docker compose down -v ») n'est proposé que pour les
+// identifiants du compte applicatif, qui, eux, ne se corrigent pas après coup.
+// FICHIERS : il n'y a ni compte ni schéma — seulement un dossier à rendre
+// accessible en écriture. Confondre les deux ferait perdre les données d'un
+// service en marche.
+function remedeBase(code, e = null) {
+  if (magasin.type === "fichier") return remedeFichier(code);
   if (code === "ER_ACCESS_DENIED_ERROR" || code === "ER_ACCESS_DENIED_NO_PASSWORD_ERROR") {
     return "La base refuse les identifiants du service. Le compte applicatif et son mot de passe sont inscrits au PREMIER démarrage de la base : si DB_PASSWORD a changé depuis, la base garde l'ancien — c'est la cause la plus fréquente. Alignez le compte sur le .env (« docker compose run --rm db-init », ou « node server.mjs --reconcilier ») : ce seul geste remet aussi le SCHÉMA, et le service se rétablit de lui-même, sans être recréé. Si l'alignement échoue à son tour, c'est le mot de passe ROOT qui n'est plus celui du dossier de données — « docker compose logs db-init » le dit ; ne recréez alors le dossier de données (« docker compose down -v ») qu'en dernier recours : il efface les données.";
   }
@@ -393,6 +467,17 @@ function remedeBase(code) {
     return "La base répond, mais le SCHÉMA n'y est pas appliqué : les tables manquent. Le geste qui répare les deux pannes d'un coup : « docker compose run --rm db-init » — il aligne le compte ET applique le schéma — et le service se recharge alors de lui-même, sans être recréé. Sans Docker : « node server.mjs --migrate », puis « docker compose up -d --force-recreate api » (le compte d'administration du .env n'est installé qu'au démarrage, et « docker compose restart » ne relit PAS le .env). Rien n'est effacé.";
   }
   return "Vérifiez la configuration DB_* / MARIADB_* du .env, puis « node server.mjs --migrate » pour appliquer le schéma (cette commande ne supprime rien), ou « docker compose down -v && docker compose up -d --build » pour rejouer schéma et amorçage sur un dossier de données vierge — au prix des données.";
+}
+
+// Le remède du rangement par FICHIERS : ni compte, ni schéma — un dossier.
+// Le geste est de rendre `DATA_DIR` accessible en écriture au compte du service.
+function remedeFichier(code) {
+  if (code === "EACCES" || code === "EPERM") {
+    return `Le service n'a pas le droit d'écrire dans le dossier de données (${DATA_DIR}). Donnez-lui ce droit (propriétaire ou droits du dossier), ou posez DATA_DIR sur un dossier accessible en écriture par le compte du service.`;
+  }
+  if (code === "EROFS") return `Le dossier de données (${DATA_DIR}) est sur un système de fichiers en lecture seule : le service ne peut pas y écrire.`;
+  if (code === "ENOTDIR" || code === "EISDIR") return `DATA_DIR (${DATA_DIR}) ne désigne pas un dossier utilisable. Corrigez la variable dans le .env.`;
+  return `Vérifiez DATA_DIR (${DATA_DIR}) : le dossier de données doit pouvoir être créé, et accessible en écriture par le compte du service. Sous Docker, il est monté par le fichier docker-compose.fichier.yml.`;
 }
 
 // Les erreurs de LIAISON : elles ne se corrigent pas en appliquant le schéma,
@@ -632,8 +717,7 @@ async function ipsAtelierReferentiel() {
   if (atelierRefCache.valeur !== undefined && Date.now() - atelierRefCache.at < ATELIER_CACHE_MS) return atelierRefCache.valeur;
   let liste;
   try {
-    const [rows] = await pool.query("SELECT payload FROM sb_record WHERE collection = 'config' AND id = 'self'");
-    const doc = rows.length ? JSON.parse(rows[0].payload) : null;
+    const doc = await magasin.lireConfig();
     liste = doc && doc.publication && doc.publication.atelier ? doc.publication.atelier.ips : undefined;
   } catch (e) {
     liste = undefined;
@@ -669,53 +753,11 @@ const estRouteAtelier = (pathname) => {
   return false;
 };
 
-// ------------------------------------------------------------------- projections
-// Recopie dans des colonnes indexées les champs utiles aux recherches. Aucune
-// de ces colonnes n'est saisie à la main : elles découlent du document.
-const str = (v) => (v === undefined || v === null || v === "" ? null : String(v).slice(0, 64));
-
-function projections(collection, payload) {
-  const p = payload && typeof payload === "object" ? payload : {};
-  if (collection === "actes") {
-    return { numero: str(p.numero), statut: str(p.statut), service_id: str(p.serviceId), bureau_id: str(p.bureauId), entity_id: str(p.entityId), kind: str(p.nature) };
-  }
-  if (collection === "trames") {
-    return { numero: null, statut: str(p.status), service_id: str(p.serviceId), bureau_id: str(p.bureauId), entity_id: null, kind: str(p.actTypeId) };
-  }
-  if (collection === "users") {
-    const first = Array.isArray(p.memberships) && p.memberships[0] ? p.memberships[0].serviceId : null;
-    return { numero: null, statut: str(p.role), service_id: str(first), bureau_id: null, entity_id: str(p.entityId), kind: null };
-  }
-  return { numero: null, statut: null, service_id: null, bureau_id: null, entity_id: null, kind: null };
-}
-
-// --------------------------------------------------------------------- lectures
-async function currentRecord(conn, collection, id) {
-  const [rows] = await conn.query("SELECT revision, ord, payload FROM sb_record WHERE collection = ? AND id = ?", [collection, id]);
-  if (!rows.length) return null;
-  let value = null;
-  try { value = JSON.parse(rows[0].payload); } catch (e) { value = null; }
-  return { revision: Number(rows[0].revision) || 0, ord: Number(rows[0].ord) || 0, payload: value };
-}
-
-async function listCollection(conn, name) {
-  const [rows] = await conn.query(
-    "SELECT id, revision, ord, payload FROM sb_record WHERE collection = ? ORDER BY ord ASC, id ASC",
-    [name],
-  );
-  return rows.map((r) => {
-    let payload = null;
-    try { payload = JSON.parse(r.payload); } catch (e) { payload = null; }
-    return { id: r.id, rev: Number(r.revision) || 0, ord: Number(r.ord) || 0, payload };
-  });
-}
-
-async function collectionRevision(conn, name) {
-  const [rows] = await conn.query("SELECT revision FROM sb_collection WHERE name = ?", [name]);
-  return rows.length ? Number(rows[0].revision) || 0 : 0;
-}
-
 // ------------------------------------------------------------------ écritures
+// L'écriture d'une collection : contrôle d'autorisation, bornes, puis le
+// MAGASIN (magasin.mjs, `synchroniser`). L'algorithme — révisions, conflits,
+// journal — est commun aux deux rangements ; ce qui reste ICI est ce qui ne
+// dépend pas du rangement : qui a le droit d'écrire quoi.
 async function sync(collection, body, actor, ip, estAdmin = false) {
   const upserts = Array.isArray(body.upserts) ? body.upserts : [];
   const deletes = Array.isArray(body.deletes) ? body.deletes : [];
@@ -728,90 +770,29 @@ async function sync(collection, body, actor, ip, estAdmin = false) {
   if (upserts.length + deletes.length > MAX_SYNC_RECORDS) {
     return { status: 413, body: err(`Trop d'enregistrements dans une même synchronisation (maximum ${MAX_SYNC_RECORDS}).`, { code: "trop_d_enregistrements" }) };
   }
-
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await conn.query("INSERT IGNORE INTO sb_collection (name, revision) VALUES (?, 0)", [collection]);
-    const [[coll]] = await conn.query("SELECT revision FROM sb_collection WHERE name = ? FOR UPDATE", [collection]);
-    let revision = Number(coll.revision) || 0;
-
-    const applied = [];
-    const conflicts = [];
-    const journal = [];
-    const trace = !SILENT_COLLECTIONS.has(collection);
-
-    for (const u of upserts) {
-      if (!u || u.id === undefined || u.id === null) continue;
-      const id = String(u.id).slice(0, 191);
-      const cur = await currentRecord(conn, collection, id);
-      if (!force) {
-        if (cur && cur.revision !== (Number(u.rev) || 0)) { conflicts.push({ id, rev: cur.revision, ord: cur.ord, payload: cur.payload }); continue; }
-        if (!cur && u.rev) { conflicts.push({ id, deleted: true, rev: 0 }); continue; }
-      }
-      revision += 1;
-      const p = projections(collection, u.payload);
-      // `VALUES(colonne)` reprend la valeur proposée à l'INSERT : le procédé est
-      // déprécié par MySQL 8.0.20 (mais toujours accepté) et pleinement supporté
-      // par MariaDB — c'est ce qui rend la même requête valable sur les deux.
-      await conn.query(
-        `INSERT INTO sb_record (collection, id, revision, ord, payload, numero, statut, service_id, bureau_id, entity_id, kind, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE revision = VALUES(revision), ord = VALUES(ord), payload = VALUES(payload),
-           numero = VALUES(numero), statut = VALUES(statut), service_id = VALUES(service_id),
-           bureau_id = VALUES(bureau_id), entity_id = VALUES(entity_id), kind = VALUES(kind), updated_by = VALUES(updated_by)`,
-        [collection, id, revision, Number(u.ord) || 0, JSON.stringify(u.payload === undefined ? null : u.payload),
-         p.numero, p.statut, p.service_id, p.bureau_id, p.entity_id, p.kind, actor],
-      );
-      applied.push({ id, rev: revision });
-      journal.push([collection, id, cur ? (force ? "force" : "update") : "insert", revision, actor, ip]);
-    }
-
-    for (const d of deletes) {
-      if (!d || d.id === undefined || d.id === null) continue;
-      const id = String(d.id).slice(0, 191);
-      const cur = await currentRecord(conn, collection, id);
-      if (!cur) continue;
-      if (!force && cur.revision !== (Number(d.rev) || 0)) { conflicts.push({ id, rev: cur.revision, ord: cur.ord, payload: cur.payload }); continue; }
-      await conn.query("DELETE FROM sb_record WHERE collection = ? AND id = ?", [collection, id]);
-      revision += 1;
-      applied.push({ id, rev: 0, deleted: true });
-      journal.push([collection, id, "delete", revision, actor, ip]);
-    }
-
-    if (applied.length) {
-      // La révision de la collection avance dans tous les cas ; seul le journal
-      // technique est facultatif (collections-flux).
-      await conn.query("UPDATE sb_collection SET revision = ? WHERE name = ?", [revision, collection]);
-      if (trace && journal.length) {
-        await conn.query("INSERT INTO sb_journal (collection, record_id, action, revision, actor, remote_ip) VALUES ?", [journal]);
-      }
-    }
-    await conn.commit();
-    return { status: 200, body: { collection, revision, applied, conflicts } };
-  } catch (e) {
-    try { await conn.rollback(); } catch (e2) { /* rien à faire */ }
-    throw e;
-  } finally {
-    conn.release();
-  }
+  const r = await magasin.synchroniser({
+    collection, upserts, deletes, force, actor, ip,
+    trace: !SILENT_COLLECTIONS.has(collection),
+  });
+  return { status: 200, body: { collection, revision: r.revision, applied: r.applied, conflicts: r.conflicts } };
 }
 
 // --------------------------------------------------------------------- santé
+// « Le rangement est-il joignable ? » — la question est la même pour les deux
+// magasins, la réponse aussi (`sante()` LÈVE si le rangement est injoignable :
+// c'est ici, et chez l'appelant, que l'erreur devient un bandeau et un remède).
 async function health() {
-  const [rows] = await pool.query("SELECT name, revision, enregistrements FROM v_collection");
-  const byName = {};
-  for (const r of rows) byName[r.name] = { records: Number(r.enregistrements) || 0, revision: Number(r.revision) || 0 };
+  const s = await magasin.sante();
+  const byName = s.collections || {};
   for (const name of COLLECTIONS) if (!byName[name]) byName[name] = { records: 0, revision: 0 };
-  const [[{ version }]] = await pool.query("SELECT VERSION() AS version");
   return {
     statut: "ok",
     service: SERVICE,
     version: SERVICE_VERSION,
-    driver: "mysql",
-    partagee: true,
-    base: { hote: DB.host, port: DB.port, schema: DB.database, moteur: version },
-    message: "Base de données MySQL / MariaDB disponible.",
+    driver: magasin.resume.driver,
+    partagee: magasin.resume.partagee,
+    base: { ...magasin.resume.base, moteur: s.moteur },
+    message: magasin.resume.message,
     collections: byName,
   };
 }
@@ -832,8 +813,10 @@ function dbPaths() {
 function authPaths() {
   const gardeSession = { 401: { description: "Session absente ou expirée" } };
   return {
-    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, demoJeu: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application. `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le jeu fictif est installé ; éteint, l'outil est une page vierge (voir src/lib/demo.js). Il porte en outre l'état du déploiement, pour que l'écran de connexion montre un motif au lieu d'« Identifiant ou mot de passe incorrect » : `adminAmorce` (un compte d'administration peut-il se connecter ?), `adminMotif`, `adminPanne` (cet échec est-il une panne de la base, et non un refus de configuration ?), `adminAvertissement`, `baseDisponible`, `baseMessage` et `baseRemede`.", tags: ["Comptes"], responses: { 200: { description: "Mode du service et état du déploiement" } } } },
+    "/v1/auth/config": { get: { operationId: "modeAuthentification", summary: "Mode d'authentification du service", description: "Rend `{ auth: \"demo\" | \"password\", demo: booléen, demoJeu: booléen, motDePasseMin, sessionJours }` — et, quand le raccourci de démonstration est ouvert, la liste `demoComptes` (identifiant, nom, rôle) dont l'écran de connexion a besoin avant toute session. Le navigateur s'en sert au démarrage : c'est le déploiement (`.env`) qui décide, et non le référentiel de l'application. `demoJeu` est LE COMMUTATEUR DE DÉMONSTRATION (`DEMO` du .env) : allumé, le jeu fictif est installé ; éteint, l'outil est une page vierge (voir src/lib/demo.js). Il porte en outre l'état du déploiement, pour que l'écran de connexion montre un motif au lieu d'« Identifiant ou mot de passe incorrect » : `adminAmorce` (un compte d'administration peut-il se connecter ?), `adminMotif`, `adminPanne` (cet échec est-il une panne de la base, et non un refus de configuration ?), `adminAvertissement`, `baseDisponible`, `baseMessage` et `baseRemede`. Il publie enfin les RÉGLAGES DE L'ANNUAIRE (`annuaire`) et le drapeau `annuaireService` : le service sait-il ouvrir une session d'annuaire ? C'est lui, et non le navigateur, qui décide si la seconde porte est proposée (voir `annuaireFermePour`, src/lib/auth.js).", tags: ["Comptes"], responses: { 200: { description: "Mode du service et état du déploiement" } } } },
     "/v1/auth/connexion": { post: { operationId: "connexion", summary: "Ouvrir une session", description: "Vérifie l'identifiant et le mot de passe, puis pose deux cookies : la session (`HttpOnly`) et le jeton anti-CSRF. Message identique pour un identifiant inconnu et un mot de passe faux ; le compte se bloque progressivement après plusieurs échecs (429).", tags: ["Comptes"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["login", "motDePasse"], properties: { login: { type: "string" }, motDePasse: { type: "string", format: "password" } } } } } }, responses: { 200: { description: "Session ouverte" }, 401: { description: "Identifiants invalides" }, 429: { description: "Compte bloqué quelques instants" } } } },
+    "/v1/auth/annuaire": { post: { operationId: "connexionAnnuaire", summary: "Ouvrir une session par l'annuaire de la collectivité", description: "Le SERVICE est le client OIDC : il découvre le fournisseur, échange le code d'autorisation (avec le vérificateur PKCE que le navigateur a gardé), vérifie le jeton d'identité (signature par le JWKS du fournisseur, émetteur, audience, validité, nonce), en tire un compte (groupes → rôle, services et entité), l'écrit au référentiel, puis ouvre SA session — les mêmes cookies que la connexion locale. Aucun appel ne part du navigateur vers le fournisseur : le fournisseur n'a donc pas besoin d'autoriser le CORS, et c'est le remède à « Découverte impossible (Failed to fetch) ». Corps : code, verifier, redirectUri, nonce. Réponses : 200 (session ouverte ; checks et warnings disent ce qui a été vérifié), 401 (code invalide ou fournisseur injoignable), 403 (jeton refusé ou compte inconnu), 404 (annuaire non branché), 503 (le service n'a pas le moyen d'appeler un fournisseur).", tags: ["Comptes"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["code", "verifier"], properties: { code: { type: "string" }, verifier: { type: "string", description: "Le vérificateur PKCE (code_verifier) tiré par le navigateur." }, redirectUri: { type: "string" }, nonce: { type: "string" } } } } } }, responses: { 200: { description: "Session ouverte (le compte est rendu, avec les contrôles effectués)" }, 401: { description: "Code invalide ou fournisseur injoignable" }, 403: { description: "Jeton refusé ou compte inconnu" }, 404: { description: "Aucun annuaire branché sur ce service" }, 503: { description: "Le service n'a pas le moyen d'appeler un fournisseur" } } } },
+    "/v1/auth/annuaire/decouverte": { post: { operationId: "decouvrirAnnuaire", summary: "Éprouver l'annuaire (bouton « Découverte »)", description: "Le SERVICE lit /.well-known/openid-configuration chez le fournisseur et rend les points de terminaison (authorization_endpoint, token_endpoint, jwks_uri, userinfo_endpoint). C'est le bouton « Découverte » de l'administration : l'appel partant du service et non du navigateur, un fournisseur sans en-têtes CORS (Keycloak, LemonLDAP, ADFS…) se branche comme les autres. Un administrateur peut faire éprouver l'adresse qu'il vient de saisir (issuer) et des points de terminaison saisis à la main (endpoints) ; les autres appelants n'obtiennent que ce que le service a déjà enregistré.", tags: ["Comptes"], requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { issuer: { type: "string", description: "Adresse du fournisseur à éprouver (administrateur)." }, endpoints: { type: "object", description: "Points de terminaison saisis à la main (authorization, token, jwks, userinfo) — ils l'emportent sur la découverte." } } } } } }, responses: { 200: { description: "Les points de terminaison retenus, et leur source (découverte ou manuel)" }, 404: { description: "Aucun annuaire branché" }, 502: { description: "Découverte impossible (fournisseur injoignable, document incomplet)" }, 503: { description: "Le service n'a pas le moyen d'appeler un fournisseur" } } } },
     "/v1/auth/session": { get: { operationId: "sessionCourante", summary: "Session courante", description: "Rend le compte de la session ouverte, ou 401.", tags: ["Comptes"], responses: { 200: { description: "Compte de la session" }, ...gardeSession } } },
     "/v1/auth/deconnexion": { post: { operationId: "deconnexion", summary: "Fermer la session", description: "Efface la session en base et les cookies.", tags: ["Comptes"], responses: { 200: { description: "Session fermée" }, ...gardeSession } } },
     "/v1/auth/mot-de-passe": { post: { operationId: "changerMotDePasse", summary: "Changer son mot de passe", description: "Exige le mot de passe actuel. Les autres sessions ne sont pas fermées (aucune session n'est privilégiée par rapport à une autre).", tags: ["Comptes"], responses: { 200: { description: "Mot de passe changé" }, 400: { description: "Mot de passe actuel incorrect" }, 422: { description: "Nouveau mot de passe trop faible" }, ...gardeSession } } },
@@ -894,23 +877,11 @@ async function acteurDe(req) {
 }
 
 // Une trace d'envoi au journal des courriels. Le corps du message n'est PAS
-// conservé : seuls l'événement, les destinataires et le résultat.
-async function journaliserCourriel({ evenement, acteId, cible, destinataires, sujet, envoye, motif, acteur, ip }) {
-  await pool.query(
-    "INSERT INTO sb_courriel (evenement, acte_id, cible, destinataires, sujet, envoye, motif, acteur, remote_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [String(evenement || "courriel").slice(0, 64), acteId || null, cible || null,
-      (destinataires || []).map((d) => (d && d.courriel) || d).filter(Boolean).join(", ").slice(0, 2000) || null,
-      String(sujet || "").slice(0, 255) || null, envoye ? 1 : 0, String(motif || "").slice(0, 500) || null, acteur || null, ip || null],
-  );
-}
-
-async function derniersCourriels(n = 20) {
-  const [rows] = await pool.query(
-    "SELECT evenement, acte_id, cible, destinataires, sujet, envoye, motif, acteur, at FROM sb_courriel ORDER BY at DESC, id DESC LIMIT ?",
-    [Math.max(1, Math.min(100, Number(n) || 20))],
-  );
-  return rows.map((r) => ({ ...r, envoye: r.envoye === 1 || r.envoye === true }));
-}
+// conservé : seuls l'événement, les destinataires et le résultat. C'est le
+// MAGASIN qui range (table `sb_courriel` en MySQL, `courriel.jsonl` en
+// fichiers) — le service ne fait que lui passer les champs.
+const journaliserCourriel = (champs) => magasin.journaliserCourriel(champs);
+const derniersCourriels = (n = 20) => magasin.derniersCourriels(n);
 
 // ------------------------------------------------------- les réglages du Bulletin
 // Le service lit `publication.bulletin` là où l'administration l'écrit (le
@@ -944,8 +915,7 @@ async function reglagesBulletin() {
   if (bulletinRefCache.valeur !== undefined && Date.now() - bulletinRefCache.at < ATELIER_CACHE_MS) return bulletinRefCache.valeur;
   let ref = {};
   try {
-    const [rows] = await pool.query("SELECT payload FROM sb_record WHERE collection = 'config' AND id = 'self'");
-    const doc = rows.length ? JSON.parse(rows[0].payload) : null;
+    const doc = await magasin.lireConfig();
     ref = (doc && doc.publication && doc.publication.bulletin) || {};
   } catch (e) {
     ref = {};
@@ -953,6 +923,55 @@ async function reglagesBulletin() {
   const valeur = { ...ref, ...bulletinDepuisEnv() };
   bulletinRefCache = { valeur, at: Date.now() };
   return valeur;
+}
+
+// --- l'annuaire de la collectivité, publié pour l'écran de connexion ---------
+// Le référentiel porte les réglages de l'annuaire (Administration › Annuaire),
+// mais il n'est lisible QU'AVEC une session : en mode « comptes locaux », et en
+// mode « oidc », l'écran de connexion — qui vient avant la session — ne les
+// verrait jamais. Le service les lit donc pour lui et les publie dans
+// `GET /v1/auth/config`, avec les variables `SCRIBA_ANNUAIRE_*` du `.env`
+// par-dessus : c'est ainsi qu'un parc se branche sans cliquer dans chaque
+// interface (voir src/server/mysql/annuaire.mjs, qui tient la liste blanche —
+// rien de secret n'en sort, l'application étant un client OIDC public).
+//
+// Même garde que pour le Bulletin : dix secondes de copie, oubliée dès que le
+// référentiel est réécrit — un réglage change donc sans redémarrer le service.
+const ANNUAIRE_CACHE_MS = 10 * 1000;
+let annuaireRefCache = { valeur: undefined, at: 0 };
+const oublierAnnuaire = () => { annuaireRefCache = { valeur: undefined, at: 0 }; };
+
+async function annuairePublie() {
+  if (annuaireRefCache.valeur !== undefined && Date.now() - annuaireRefCache.at < ANNUAIRE_CACHE_MS) return annuaireRefCache.valeur;
+  let referentiel = null;
+  try { referentiel = await magasin.lireConfig(); }
+  catch (e) { referentiel = null; }   // base injoignable : on publie ce que le `.env` dit
+  const valeur = annuairePublic({ variables: OPTIONS.valeurs, referentiel });
+  annuaireRefCache = { valeur, at: Date.now() };
+  return valeur;
+}
+
+// Ce que le service a de l'annuaire, défauts du navigateur compris — la même
+// lecture que `annuaireCourant` (comptes.mjs), pour que ce qui est publié ici
+// décrive exactement ce qui se passera à la connexion.
+async function annuaireEffectifDuService() {
+  return annuaireEffectif({ publie: await annuairePublie(), modeDeploiement: AUTH_MODE });
+}
+
+// LE SERVICE SAIT-IL OUVRIR UNE SESSION D'ANNUAIRE ? C'est la question que se
+// pose le navigateur avant de proposer la seconde porte (voir `annuaireFermePour`,
+// src/lib/auth.js) : elle n'est ouverte que si le service sait en faire une
+// session — des comptes locaux ouverts (c'est là que la session vit), un
+// fournisseur RÉEL branché (l'annuaire d'essai ne quitte pas le navigateur), et
+// le moyen de l'appeler. Répondre « oui » à tort fermerait la porte à double
+// tour : l'agent serait redirigé vers un fournisseur, puis refusé au retour.
+async function annuaireParLeService() {
+  if (!COMPTES_LOCAUX || typeof fetch !== "function") return false;
+  try {
+    return annuaireAccepte(await annuaireEffectifDuService());
+  } catch (e) {
+    return false;
+  }
 }
 
 // La trace d'un courriel de Bulletin — abonnement, confirmation, parution — va
@@ -1067,7 +1086,7 @@ async function handle(req, res) {
     const sale = api.takeDirty();
     if (sale) {
       if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
-      try { await saveState(pool, sale); }
+      try { await magasin.ecrireEtat(sale); }
       catch (e) { send(req, res, 500, err("L'écriture de l'état a échoué : " + e.message, { code: "etat_non_ecrit" })); return; }
     }
     send(req, res, out.status, out.body, out.headers || {});
@@ -1123,6 +1142,19 @@ async function handle(req, res) {
         // AVANT toute session (il décide de semer ou non le référentiel), donc il
         // voyage ici, avec le mode. Voir src/lib/demo.js.
         demoJeu: DEMO_JEU,
+        // LES RÉGLAGES DE L'ANNUAIRE (fournisseur, correspondance des groupes,
+        // seconde porte), tels que le service les lit — référentiel relu par
+        // lui, variables `SCRIBA_ANNUAIRE_*` par-dessus. L'écran de connexion en
+        // a besoin AVANT toute session, et c'est la seule route qui les lui
+        // donne en mode « comptes locaux ». Aucun secret (voir annuaire.mjs) ;
+        // `null` quand il n'y a rien à publier.
+        annuaire: await annuairePublie(),
+        // LE SERVICE SAIT-IL OUVRIR UNE SESSION D'ANNUAIRE ? Ce drapeau est la
+        // clé de la seconde porte : sans lui, le navigateur ne peut pas savoir
+        // si l'annuaire qu'on lui publie ci-dessus mène quelque part (voir
+        // `annuaireFermePour`, src/lib/auth.js). Un service qui l'accepte est un
+        // service où l'on peut entrer par l'annuaire ET LIRE les actes.
+        annuaireService: await annuaireParLeService(),
         // Sans objet en mode « demo » (les comptes viennent de la liste).
         adminAmorce: MOT_DE_PASSE ? etatService.adminAmorce : null,
         adminMotif: MOT_DE_PASSE ? etatService.adminMotif : "",
@@ -1189,8 +1221,8 @@ async function handle(req, res) {
       return;
     }
     try {
-      const records = await listCollection(pool, name);
-      const revision = await collectionRevision(pool, name);
+      const records = await magasin.lireCollection(name);
+      const revision = await magasin.lireRevisionCollection(name);
       noterBase(true);
       send(req, res, 200, { collection: name, revision, records });
     } catch (e) { noterBaseSelonErreur(e); send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" })); }
@@ -1255,6 +1287,10 @@ async function handle(req, res) {
       // peut-être dedans. On oublie la copie gardée, pour que le prochain appel
       // relise la règle à jour (voir `ipsAtelierReferentiel`).
       if (name === "config") oublierIpsAtelier();
+      // Les réglages de l'annuaire voyagent aussi par le référentiel : la copie
+      // publiée par `GET /v1/auth/config` doit être oubliée en même temps, sinon
+      // l'écran de connexion ignorerait un branchement pendant dix secondes.
+      if (name === "config") oublierAnnuaire();
       // Les réglages du Bulletin sont dans le même document : ils doivent suivre
       // le même chemin, sinon un réglage changé attendrait dix secondes.
       if (name === "config") oublierBulletin();      send(req, res, out.status, out.body);
@@ -1275,7 +1311,7 @@ async function handle(req, res) {
   // d'accès à l'atelier ne le concerne pas — le recueil public est ouvert à tous.
   if (pathname === "/v1/informations" && req.method === "GET") {
     try {
-      const records = await listCollection(pool, "informations");
+      const records = await magasin.lireCollection("informations");
       const session = MOT_DE_PASSE ? await sessionHTTP(req) : null;
       const peutVoirBrouillons = !autoriser(req, session, { min: "editeur" });
       const liste = records
@@ -1409,7 +1445,7 @@ async function handle(req, res) {
       // Un état VIDE de secours ne s'écrit jamais par-dessus l'état enregistré
       // (voir `refusEtatDegrade`).
       if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
-      try { await saveState(pool, dirty); }
+      try { await magasin.ecrireEtat(dirty); }
       catch (e) {
         console.error("[etat]", e);
         send(req, res, 500, err("L'écriture de l'état a échoué : " + e.message, { code: "etat_non_ecrit" }));
@@ -1455,7 +1491,7 @@ async function handle(req, res) {
       const dirty = api.takeDirty() || (bulletins ? bulletins.takeDirty() : null);
       if (dirty) {
         if (etatDegrade) { send(req, res, 503, refusEtatDegrade()); return; }
-        try { await saveState(pool, dirty); }
+        try { await magasin.ecrireEtat(dirty); }
         catch (e) {
           console.error("[etat]", e);
           send(req, res, 500, err("L'écriture de l'état a échoué : " + e.message, { code: "etat_non_ecrit" }));
@@ -1484,25 +1520,27 @@ const server = http.createServer((req, res) => {
 });
 
 // ------------------------------------------------------------------ migration
-// LE SCHÉMA, appliqué en une fois. `schema.sql` ne contient que des
-// `CREATE TABLE IF NOT EXISTS` et des vues (`CREATE OR REPLACE`) : l'appliquer à
-// une base en service ne détruit rien, et c'est ce qui rend le geste répétable —
-// au démarrage (AUTO_MIGRATE), après une reprise de la base (voir
-// `reevaluerBase`), ou à la main (`--migrate`, et `--reconcilier`, qui l'appelle
-// après avoir aligné le compte).
-async function appliquerSchema(conn) {
-  const sql = await readFile(path.join(HERE, "schema.sql"), "utf8");
-  await conn.query(sql);
-}
-
-async function migrate() {
-  const conn = await mysql.createConnection({ ...DB, multipleStatements: true });
-  try {
-    await appliquerSchema(conn);
-    console.log("Schéma appliqué (schema.sql).");
-  } finally {
-    await conn.end();
-  }
+// LE SCHÉMA, appliqué par MIGRATIONS VERSIONNÉES (voir migrations.mjs). Le socle
+// (`schema.sql`) ne contient que des `CREATE TABLE IF NOT EXISTS` et des vues
+// (`CREATE OR REPLACE`) : l'appliquer à une base en service ne détruit rien, et
+// c'est ce qui rend le geste répétable — au démarrage (AUTO_MIGRATE), après une
+// reprise de la base (voir `reevaluerBase`), ou à la main (`--migrate`, et
+// `--reconcilier`, qui l'appelle après avoir aligné le compte). Chaque migration
+// n'est appliquée qu'UNE fois, et son passage est inscrit dans `sb_migrations` :
+// une base sait donc à quelle version elle se trouve.
+// ------------------------------------------------------------------ préparation
+// LE SCHÉMA (MySQL) OU LE DOSSIER (fichiers), appliqué au démarrage. Les deux
+// magasins savent le faire (`preparer`) : MySQL applique ses migrations
+// versionnées, le magasin FICHIER crée son dossier et y dépose sa version de
+// format. Le geste est répétable et sans effet sur les données, dans les deux
+// cas — c'est ce qui rend une installation neuve utilisable du premier coup.
+async function preparerBase() {
+  const r = await magasin.preparer((niveau, message) => (niveau === "avertissement" ? console.warn("[magasin] " + message) : console.log("[magasin] " + message)));
+  if (!r) return r;
+  console.log(r.appliquees && r.appliquees.length
+    ? `Rangement à jour : ${r.appliquees.length} élément(s) appliqué(s) (version ${r.aJour}/${r.total}).`
+    : `Rangement déjà à jour (version ${r.aJour}/${r.total}).`);
+  return r;
 }
 
 // ------------------------------------------------------- le compte applicatif
@@ -1510,12 +1548,6 @@ async function migrate() {
 // SEUL endroit du logiciel qui parle à la base en ROOT (le mot de passe root est
 // lu ici, et n'est ni journalisé, ni transmis).
 //
-// MariaDB ne crée son compte qu'au PREMIER démarrage d'un dossier de données
-// VIERGE : changer `DB_PASSWORD` ensuite ne change plus rien en base, et le
-// service se voit refuser l'accès (« Access denied for user 'scriba'@… ») alors
-// que le `.env` est correct — c'est la panne d'installation la plus fréquente.
-// On remet donc le compte au mot de passe du `.env` (voir compte-base.mjs pour
-// les ordres SQL, et `docker compose`, service `db-init`, qui l'appelle à chaque
 // démarrage). Rien n'est DÉTRUIT : ni table, ni contenu.
 //
 // LE SCHÉMA SUIT LE COMPTE, dans le même geste. Les deux pannes vont de pair : une
@@ -1530,32 +1562,17 @@ async function migrate() {
 // injoignable), il le DIT et n'empêche rien de démarrer — le service journalise
 // ensuite, à son tour, l'état réel de la base et le remède.
 async function reconcilierCompte() {
-  const motDePasseRoot = env("DB_ROOT_PASSWORD", "");
-  if (!motDePasseRoot) {
-    console.error("Compte applicatif : DB_ROOT_PASSWORD est vide — alignement impossible. Renseignez-le (il est dans le .env du déploiement), ou alignez le compte à la main.");
+  const r = await magasin.reconcilier({ motDePasseRoot: env("DB_ROOT_PASSWORD", "") });
+  if (r.sansObjet) {
+    console.log(r.motif);
     return false;
   }
-  if (!DB.password) {
-    console.error("Compte applicatif : DB_PASSWORD est vide — refus d'inscrire un mot de passe vide sur le compte de la base.");
+  if (!r.fait) {
+    console.error("Compte applicatif : " + r.motif);
     return false;
   }
-  const conn = await mysql.createConnection({
-    host: DB.host, port: DB.port, socketPath: DB.socketPath,
-    user: "root", password: motDePasseRoot,
-    charset: DB.charset, multipleStatements: true, timezone: DB.timezone,
-  });
-  try {
-    await conn.query(sqlCompteApplicatif({ base: DB.database, utilisateur: DB.user, motDePasse: DB.password }));
-    console.log(`Compte applicatif « ${DB.user} » aligné sur le .env (base « ${DB.database} »).`);
-  } finally {
-    await conn.end();
-  }
-  // Le compte vient d'être remis au mot de passe du `.env` : on se connecte avec
-  // LUI, comme le ferait le service, pour que les tables lui appartiennent.
-  try {
-    await migrate();
-  } catch (e) {
-    console.error("Schéma non appliqué :", e.message);
+  console.log(`Compte applicatif « ${DB.user} » aligné sur le .env (base « ${DB.database} »).`);
+  if (!r.schemaApplication) {
     console.error("Le compte est en règle, mais les tables manquent encore. Quand la base répondra : « node server.mjs --migrate », ou « docker compose up -d --force-recreate api » (AUTO_MIGRATE les crée au démarrage de son côté).");
     return false;
   }
@@ -1647,28 +1664,31 @@ async function motDePasseCLI(login) {
 // `reevaluerBase`) : sans cela, un service parti sur un état vide y resterait.
 let etatApp = null;
 // L'état en mémoire est-il un état VIDE de secours, faute d'avoir pu lire le
-// véritable ? C'est ce drapeau qui empêche de l'écrire par-dessus celui de la
-// base (voir les deux `saveState` de `handle`) : ce serait une perte silencieuse.
+// véritable ? C'est ce drapeau qui empêche de l'écrire par-dessus celui du
+// rangement (voir les deux `ecrireEtat` de `handle`) : ce serait une perte
+// silencieuse.
 let etatDegrade = false;
 
-// Charge l'état depuis la base, ou repart d'un état vide EN LE DISANT (voir
-// state.mjs). Démarrage DÉGRADÉ, explicite : si l'état est illisible, on ne sort
-// PAS en `process.exit(1)` (le conteneur redémarrerait en boucle, nginx servirait
-// des 502) et on ne bascule pas en silence sur un état vide — on démarre, on le
-// journalise, et le client l'apprend par `/v1/auth/config`.
+// Charge l'état depuis le rangement, ou repart d'un état vide EN LE DISANT. Le
+// magasin signale lui-même le cas DÉGRADÉ (`degrade: true`) : état illisible,
+// table absente, fichier corrompu. Démarrage DÉGRADÉ, explicite : si l'état est
+// illisible, on ne sort PAS en `process.exit(1)` (le conteneur redémarrerait en
+// boucle, nginx servirait des 502) et on ne bascule pas en silence sur un état
+// vide — on démarre, on le journalise, et le client l'apprend par
+// `/v1/auth/config`.
 async function chargerEtatService() {
   etatDegrade = false;
   try {
-    return await loadState(pool, {
-      onDegrade: (e) => {
-        etatDegrade = true;
-        noterBase(false, "L'état du service est illisible : " + e.message, e);
-        console.error("Démarrage DÉGRADÉ : l'état du service n'a pas pu être chargé. Le registre paraîtra vide tant que la base ne sera pas rétablie.");
-        if (etatService.baseRemede) console.error(etatService.baseRemede);
-      },
-    });
+    const r = await magasin.lireEtat();
+    if (r.degrade) {
+      etatDegrade = true;
+      noterBase(false, "L'état du service est illisible.", null);
+      console.error("Démarrage DÉGRADÉ : l'état du service n'a pas pu être chargé. Le registre paraîtra vide tant que le rangement ne sera pas rétabli.");
+      if (etatService.baseRemede) console.error(etatService.baseRemede);
+    }
+    return r.etat;
   } catch (e) {
-    // `loadState` ne devrait pas lever (il retombe sur un état vide), mais un
+    // Le magasin ne devrait pas lever (il retombe sur un état vide), mais un
     // démarrage ne doit jamais dépendre de cette promesse.
     etatDegrade = true;
     noterBase(false, "L'état du service est illisible : " + e.message, e);
@@ -1744,7 +1764,7 @@ async function reevaluerBase() {
   if (maintenant - reessaiBaseAt < REESSAI_BASE_MS) return;
   reessaiBaseAt = maintenant;
   if (opt("AUTO_MIGRATE") === true) {
-    try { await migrate(); }
+    try { await preparerBase(); }
     catch (e) { console.error("[reprise] Migration automatique impossible :", e.message); }
   }
   let h;
@@ -1757,7 +1777,7 @@ async function reevaluerBase() {
     return;
   }
   noterBase(true);
-  console.log(`[reprise] Base « ${h.base.schema} » de nouveau joignable.`);
+  console.log(`[reprise] ${magasin.type === "fichier" ? "Dossier de données" : "Base"} « ${h.base.schema} » de nouveau joignable.`);
   // L'administrateur du `.env` n'est amorcé qu'au démarrage : si c'est la base qui
   // manquait, il ne l'a jamais été, et personne ne pourrait entrer. On ne le
   // refait que sur une PANNE (`adminPanne`) : un mot de passe refusé pour cause de
@@ -1786,18 +1806,18 @@ async function main() {
       console.error("Alignement du compte applicatif impossible :", e.message);
       console.error("Le compte et son mot de passe sont inscrits au PREMIER démarrage de la base. Si DB_ROOT_PASSWORD n'est plus celui du dossier de données, il n'y a que deux issues : retrouver l'ancien, ou repartir d'un dossier de données vierge (« docker compose down -v && docker compose up -d » — au prix des données).");
     }
-    await pool.end();
+    await magasin.fermer();
     return;
   }
   if (process.argv.includes("--migrate")) {
-    await migrate();
-    await pool.end();
+    await preparerBase();
+    await magasin.fermer();
     return;
   }
   const iMdp = process.argv.indexOf("--mot-de-passe");
   if (iMdp >= 0) {
     await motDePasseCLI(process.argv[iMdp + 1]);
-    await pool.end();
+    await magasin.fermer();
     return;
   }
   // LE SCHÉMA D'ABORD (idempotent) : il rend la base UTILISABLE, et son échec
@@ -1807,13 +1827,13 @@ async function main() {
   // « joignable ».
   let echecSchema = null;
   if (opt("AUTO_MIGRATE") === true) {
-    try { await migrate(); }
+    try { await preparerBase(); }
     catch (e) { echecSchema = e; console.error("Migration automatique impossible :", e.message); }
   }
   try {
     const h = await health();
     noterBase(true);
-    console.log(`Base « ${h.base.schema} » joignable (${h.base.moteur}).`);
+    console.log(`${magasin.type === "fichier" ? "Dossier de données" : "Base"} « ${h.base.schema} » joignable (${h.base.moteur}).`);
   } catch (e) {
     noterBaseSelonErreur(e);
     // Une erreur qui n'est pas une panne de liaison (schéma vide, par exemple)
@@ -1842,7 +1862,7 @@ async function main() {
     try {
       const r = await bulletins.assurer();
       const sale = bulletins.takeDirty();
-      if (sale) await saveState(pool, sale);
+      if (sale) await magasin.ecrireEtat(sale);
       if (r.composees.length) console.log(`[bulletin] ${r.composees.length} numéro(s) composé(s) : ${r.composees.join(", ")}`);
       if (r.envois.total) console.log(`[bulletin] envois de cette passe : ${r.envois.ok} parti(s), ${r.envois.echecs} échec(s).`);
     } catch (e) {
@@ -1904,6 +1924,9 @@ async function main() {
   if (OPTIONS.erreurs.length || OPTIONS_SERVICE.erreurs.length) {
     console.error("  Une valeur refusée n'est jamais appliquée. Si elle ne correspond pas au .env, le conteneur a gardé l'environnement de sa CRÉATION : « docker compose up -d » (qui recrée) applique un .env modifié, « docker compose restart » NON.");
   }
+  console.log(magasin.type === "fichier"
+    ? `Rangement : FICHIERS — dossier « ${DATA_DIR} » (sauvegarde = copie du dossier ; un seul service à la fois).`
+    : "Rangement : base de données MySQL / MariaDB.");
   server.listen(PORT, HOST, () => {
     console.log(`${SERVICE} à l'écoute sur http://${HOST}:${PORT}`);
     console.log(`Collections : ${COLLECTIONS.join(", ")}`);
@@ -1913,7 +1936,7 @@ async function main() {
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     console.log("\nArrêt…");
-    server.close(async () => { try { await pool.end(); } catch (e) {} process.exit(0); });
+    server.close(async () => { try { await magasin.fermer(); } catch (e) {} process.exit(0); });
     setTimeout(() => process.exit(0), 3000);
   });
 }

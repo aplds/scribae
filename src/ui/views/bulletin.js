@@ -20,8 +20,8 @@
 //     désabonné), avec le lien de désabonnement propre à chacun.
 // ============================================================================
 import { state, redrawView, can, navigate, oublierBulletinsRecueil } from "../state.js";
-import { h, button, toast, badge, clear } from "../dom.js";
-import { confirmDialog, emptyState, sectionHeader } from "../components.js";
+import { h, button, toast, badge } from "../dom.js";
+import { confirmDialog, emptyState } from "../components.js";
 import { copyText, formatDate } from "../../lib/util.js";
 import { publicationSettings } from "../../lib/eli.js";
 import {

@@ -67,6 +67,15 @@ export const DEFAULT_ROLE_MAP = [
 
 export const DEFAULT_AUTH = {
   mode: "demo",
+  // LA SECONDE PORTE : l'annuaire de la collectivité est-il proposé À CÔTÉ de la
+  // porte ordinaire ? En mode « oidc », l'annuaire EST la porte ordinaire, et ce
+  // réglage devient sans objet. Mais une installation qui entre par ses comptes
+  // locaux (mode « password ») ou par les comptes de l'application (mode
+  // « demo ») peut vouloir offrir, EN PLUS, la connexion par l'annuaire : c'est
+  // ce que commande ce booléen. Le réglage ne CHANGE PAS la porte ordinaire — il
+  // en ajoute une seconde, que l'écran de connexion propose sous la première.
+  // Voir `annuairePropose` et src/ui/views/connexion.js.
+  annuaire: false,
   // Annuaire d'essai intégré : exerce tout le mécanisme (jetons, revendications,
   // attribution des rôles, désactivation des comptes de démonstration) sans
   // aucun appel réseau, quand aucun fournisseur n'est encore branché.
@@ -151,6 +160,27 @@ export function setDeploiementAuth(source) {
     // l'écran de connexion doit proposer. Voir `accesLocal` et `sessionDeService`.
     comptesLocaux: source.comptesLocaux === undefined ? null : !!source.comptesLocaux,
     session: source.session === undefined ? null : !!source.session,
+    // LES RÉGLAGES DE L'ANNUAIRE, tels que le service les a publiés dans
+    // `GET /v1/auth/config`. Pourquoi le service, et pas le référentiel ? Parce
+    // qu'en mode « mot de passe », le référentiel n'est lisible QU'AVEC une
+    // session : l'écran de connexion, qui vient avant, ne verrait jamais les
+    // réglages de l'annuaire. Le service les publie donc (ils ne portent aucun
+    // secret : un client OIDC public n'en détient pas), et le client les
+    // applique par-dessus le référentiel — voir `authConfig`. `null` quand le
+    // service n'en parle pas (mode « demo », ou service antérieur) : le
+    // référentiel fait alors foi, comme avant.
+    annuaire: source.annuaire && typeof source.annuaire === "object" ? source.annuaire : null,
+    // LE SERVICE SAIT-IL OUVRIR UNE SESSION D'ANNUAIRE ? Depuis la version
+    // 1.6.1p, le service est le CLIENT OIDC : il échange lui-même le code, vérifie
+    // le jeton et ouvre SA session — c'est ce qui fait qu'un agent entré par
+    // l'annuaire lit les actes, et que le fournisseur n'a pas besoin de parler
+    // CORS. Il le publie ici (`annuaireService`), et c'est ce drapeau qui décide
+    // si la seconde porte est proposée quand les données se lisent par une
+    // session (voir `annuairePropose`). `null` = le service n'en parle pas
+    // (version antérieure, aperçu hors ligne) : on garde le comportement d'avant,
+    // où la porte n'était pas proposée.
+    annuaireService: source.annuaireService === undefined || source.annuaireService === null
+      ? null : !!source.annuaireService,
     // ÉTAT DU DÉPLOIEMENT, pour l'écran de connexion (voir mot-de-passe.js) :
     //   baseDisponible  la base répond-elle ? (`null` = pas encore éprouvée)
     //   baseMessage/baseRemede  le motif, et le remède à afficher ;
@@ -194,6 +224,19 @@ export function deploiementDePage() {
 
 export const emptyAuth = () => ({ ...DEFAULT_AUTH, endpoints: { ...DEFAULT_AUTH.endpoints }, roleMap: DEFAULT_ROLE_MAP.map((m) => ({ ...m })) });
 
+// Les champs de l'annuaire qu'un DÉPLOIEMENT peut publier (par le `.env`, ou
+// par le référentiel lu par le service) : tout ce qui décrit le fournisseur, la
+// correspondance des rôles et la seconde porte. Aucun de ces champs ne porte un
+// secret — l'application est un client OIDC public —, et c'est ce que le service
+// a le droit de publier dans `GET /v1/auth/config` (voir src/server/mysql/
+// annuaire.mjs, qui tient la même liste côté service).
+export const ANNUAIRE_CLES = [
+  "annuaire", "test", "issuer", "clientId", "scopes", "redirectUri", "prompt",
+  "roleClaim", "roleMap", "unknownPolicy", "defaultRole",
+  "serviceClaim", "entityClaim", "authoritative", "autoProvision", "useUserinfo",
+  "requireSignature", "disableDemo", "allowRecovery",
+];
+
 // Configuration complète, valeurs par défaut comprises : tout le reste du code
 // lit l'authentification par cette fonction, jamais `config.auth` directement —
 // un référentiel enregistré avant l'introduction de ces réglages n'en a pas.
@@ -213,11 +256,89 @@ export function authConfig(config) {
     // démonstration reste ouvert — le référentiel n'a pas voix au chapitre.
     if (dep.mode === "password") base.demoAccounts = dep.demo !== false;
   }
+  // Les réglages de l'ANNUAIRE publiés par le service (référentiel relu par lui,
+  // et variables `SCRIBA_ANNUAIRE_*` du `.env` par-dessus) : ils recouvrent le
+  // référentiel de la PAGE, qui — en mode mot de passe — n'est pas encore
+  // lisible ici. Sans publication (mode « demo », service antérieur), le
+  // référentiel fait foi, exactement comme avant.
+  if (dep && dep.annuaire) {
+    for (const cle of ANNUAIRE_CLES) {
+      if (dep.annuaire[cle] !== undefined) base[cle] = dep.annuaire[cle];
+    }
+    if (dep.annuaire.endpoints) base.endpoints = { ...base.endpoints, ...dep.annuaire.endpoints };
+  }
   return base;
 }
 
 export const isOidc = (config) => authConfig(config).mode === "oidc";
 export const isPassword = (config) => authConfig(config).mode === "password";
+
+// ----------------------------------------------------------------------------
+// LA SECONDE PORTE — OU L'ANNUAIRE ORDINAIRE.
+//
+// Trois questions, à ne pas confondre :
+//   `isOidc`            l'annuaire est-il la porte ORDINAIRE ? (mode « oidc »)
+//   `annuaireSecondePorte`  a-t-on branché l'annuaire EN PLUS de la porte
+//                       ordinaire ? (mode « password » ou « demo », et
+//                       `auth.annuaire` coché)
+//   `annuairePropose`   l'écran de connexion doit-il PROPOSER l'annuaire ?
+//                       (porte ordinaire, ou seconde porte réellement branchée)
+//
+// Le troisième est le seul que l'écran de connexion consulte. Une seconde porte
+// DEMANDÉE mais pas branchée — la case cochée sans adresse d'émetteur, ou sans
+// identifiant de client — n'est PAS proposée : un déploiement ne doit pas se
+// retrouver avec une porte ouverte sur l'annuaire d'essai (des identités
+// fictives, sans mot de passe) pour avoir coché une case. L'annuaire d'essai
+// reste disponible, mais il faut l'avoir CHOISI (`test`).
+const annuaireDemande = (a) => !!a && (a.mode === "oidc" || a.annuaire === true);
+
+export const annuaireSecondePorte = (config) => {
+  const a = authConfig(config);
+  return a.mode !== "oidc" && a.annuaire === true;
+};
+
+// LE SERVICE FAIT-IL LA CONNEXION D'ANNUAIRE ? (drapeau `annuaireService` de
+// `GET /v1/auth/config`). Quand il la fait, l'agent qui entre par l'annuaire
+// obtient une SESSION DU SERVICE : il lit les actes comme tout le monde, et le
+// fournisseur n'a pas à autoriser l'appel depuis le navigateur (CORS). La
+// seconde porte s'ouvre donc même là où les données se lisent par une session.
+export function annuaireParLeService() {
+  const dep = deploiement || deploiementDePage();
+  return !!(dep && dep.annuaireService === true);
+}
+
+export function annuairePropose(config) {
+  const a = authConfig(config);
+  if (!annuaireDemande(a)) return false;
+  if (a.mode === "oidc") return true;   // porte ordinaire : l'essai prend le relais si rien n'est branché
+  // LA PORTE DES DONNÉES DÉCIDE AUSSI. Si le service de la collectivité ne sert
+  // les données qu'à SES sessions (mode « comptes locaux »), une connexion par
+  // l'annuaire doit ouvrir une session DU SERVICE, sinon l'agent arriverait dans
+  // une application vide et chaque lecture serait refusée (401). C'est ce que
+  // fait un service à jour (`annuaireService`) : il est le client OIDC, échange
+  // le code et ouvre la session. Un service antérieur ne sait pas le faire : la
+  // porte n'est alors pas proposée, et l'Administration › Annuaire dit pourquoi.
+  if (sessionDeService(config) && !annuaireParLeService()) return false;
+  if (a.test === true) return true;     // l'annuaire d'essai est un choix explicite
+  return !!String(a.issuer || "").trim() && !!String(a.clientId || "").trim();
+}
+
+// Pourquoi la seconde porte n'est-elle pas ouverte, alors qu'elle est demandée ?
+// Rend une phrase, ou "" si tout est en ordre — c'est ce que l'Administration ›
+// Annuaire affiche, et ce qu'un exploitant doit lire pour savoir QUOI corriger.
+export function annuaireFermePour(config) {
+  const a = authConfig(config);
+  if (!annuaireDemande(a) || a.mode === "oidc" || annuairePropose(config)) return "";
+  if (sessionDeService(config) && !annuaireParLeService()) {
+    return "Ce déploiement sert les données par une session de service, et ce service ne sait pas encore ouvrir une session "
+      + "à partir de l'annuaire : la connexion par l'annuaire n'ouvrirait qu'une identité, pas l'accès aux actes. "
+      + "Mettez le service à jour (le branchement se fait chez lui depuis la version 1.6.1p — AUTH_MODE=password ou oidc), "
+      + "ou employez l'annuaire devant un service protégé en amont (SSO devant l'application) — voir docs/ADMINISTRATION.md § 4.4.";
+  }
+  if (a.test !== true && !String(a.issuer || "").trim()) return "Adresse du fournisseur (émetteur) manquante.";
+  if (a.test !== true && !String(a.clientId || "").trim()) return "Identifiant du client (client_id) manquant.";
+  return "";
+}
 
 // ----------------------------------------------------------------------------
 // LES DEUX PORTES, QUAND L'ANNUAIRE EST BRANCHÉ.
@@ -270,7 +391,8 @@ export const comptesDuDeploiement = () => ["password", "oidc"].includes(modeDepl
 // L'annuaire branché est l'annuaire d'essai intégré (ou aucun fournisseur n'est
 // encore renseigné : on ne bloque pas l'installation sur un écran de connexion
 // injoignable, l'essai prend le relais jusqu'au branchement du vrai annuaire).
-export const isTestProvider = (auth) => !!auth && auth.mode === "oidc" && (auth.test === true || !String(auth.issuer || "").trim());
+// Vaut pour la porte ordinaire comme pour la seconde porte.
+export const isTestProvider = (auth) => annuaireDemande(auth) && (auth.test === true || !String(auth.issuer || "").trim());
 
 // Les comptes de démonstration sont-ils refusés ? Deux raisons, dans cet ordre :
 // l'annuaire branché (réglage du référentiel, `disableDemo`), ou le déploiement
@@ -303,7 +425,7 @@ export const providerLabel = (auth) => (isTestProvider(auth) ? "Annuaire d'essai
 // l'écran de connexion et dans « Administration › Annuaire ».
 export function providerProblems(auth) {
   const out = [];
-  if (!auth || auth.mode !== "oidc") return out;
+  if (!annuaireDemande(auth)) return out;
   if (isTestProvider(auth)) return out;
   if (!String(auth.issuer || "").trim()) out.push("Adresse du fournisseur (émetteur) manquante.");
   if (!String(auth.clientId || "").trim()) out.push("Identifiant du client manquant.");
@@ -315,6 +437,14 @@ export function providerProblems(auth) {
 // Résumé lisible du mode, pour le bandeau de l'écran de connexion et le guide.
 export function authSummary(config) {
   const a = authConfig(config);
+  // LA SECONDE PORTE, quand elle est réellement proposée : on la dit, sans
+  // effacer ce que la porte ordinaire est déjà.
+  if (annuaireSecondePorte(config) && annuairePropose(config)) {
+    const ordinaire = a.mode === "password"
+      ? "Connexion par un compte local (identifiant et mot de passe)"
+      : "Connexion par les comptes de l'application (démonstration)";
+    return ordinaire + ", ou par l'annuaire " + (isTestProvider(a) ? "d'essai intégré" : issuerLabel(a)) + " : les deux portes sont proposées.";
+  }
   if (a.mode === "password") {
     return a.demoAccounts === false
       ? "Connexion par un compte local (identifiant et mot de passe) : les comptes de démonstration sont désactivés."

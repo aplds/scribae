@@ -23,6 +23,8 @@ import { targetLabel } from "../../lib/scope.js";
 import { etatRevision } from "../../lib/revision.js";
 import { rapportConformite } from "../../lib/conformite.js";
 import { carteRapport, carteDecision, carteDossierRevision } from "../revision-cartes.js";
+import { parcoursDeActe } from "../../lib/parcours.js";
+import { bandeauParcours } from "../parcours.js";
 import { docOfActe } from "./modifier.js";
 import { voirVersionSignee, certifierConformite } from "./signature.js";
 import { formatDate } from "../../lib/util.js";
@@ -154,8 +156,15 @@ function carteCertification(a, doc, paint) {
       button("Voir la version numérique", { variant: "secondary", icon: "note", onClick: () => navigate("acte/" + a.id) }),
       can("actes.rediger") ? button("Ouvrir en rédaction", { variant: "tertiary", size: "sm", icon: "edit", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null)));
 
-  const dl = h("dl", { class: "recueil-dl" });
-  const ligne = (k, v) => { if (v === undefined || v === null || v === "") return; dl.appendChild(h("dt", { text: k })); dl.appendChild(h("dd", { text: String(v) })); };
+  // Le fil de parcours : dans le circuit externe, la certification prend la
+  // place de la révision, APRÈS la signature — le fil le montre, pour que le
+  // réviseur sache que sa décision commande la publication (voir
+  // src/lib/parcours.js).
+  box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
+    bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
+
+  const dl = h("dl", { class: "recueil-dl" });  const ligne = (k, v) => { if (v === undefined || v === null || v === "") return; dl.appendChild(h("dt", { text: k })); dl.appendChild(h("dd", { text: String(v) })); };
   ligne("Fichier signé", sg.nom);
   ligne("Déposé le", sg.deposeLe ? new Date(sg.deposeLe).toLocaleString("fr-FR") : "");
   ligne("Déposé par", sg.deposeParNom);
@@ -223,6 +232,12 @@ function carteActe(a, paint) {
   ));
 
   // ------------------------------------------------ la trace de la révision
+  // Le FIL DE PARCOURS d'abord : il montre où la révision se situe — après le
+  // parapheur, avant la signature (voir src/lib/parcours.js). Le réviseur voit
+  // ainsi ce qui a déjà été franchi, et ce que sa décision va débloquer.
+  box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
+    bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
   box.appendChild(carteDossierRevision(a, etat));
 
   // ------------------------------------------------------- rapport

@@ -1,0 +1,136 @@
+/* ============================================================================
+   Scribae — Le mode sombre de la Chrome de l'application — le complément du socle, qui habille les coques.
+
+   Partie 7/10 de la feuille de style, découpée de l'ancien
+   `app.css` (3 609 lignes) SANS CHANGER UNE SEULE RÈGLE : en CSS l'ordre des
+   feuilles décide entre deux règles de même poids, et `app.css` les importe
+   donc dans l'ordre d'origine, exactement comme le fichier d'autrefois.
+   Ajouter une règle : la choisir par son SUJET (ce fichier ou un autre), et
+   l'écrire ici — `app.css` n'a pas à être touché pour cela.
+   Voir `src/docs/REPRISE.md` (un seul point de vérité par règle).
+   ========================================================================== */
+
+/* ==========================================================================
+   Mode sombre — la Chrome de l'application.
+
+   Les jetons généraux sont dans le bloc `[data-theme="dark"]` en tête de
+   fichier ; ici, ce qui ne passe pas par un jeton : les quelques couleurs
+   écrites en dur (badges, schémas d'illustration, écran de connexion) et les
+   éléments dont le fond est la couleur de marque (bouton principal, avatar).
+   Le papier des documents, lui, reste clair — voir le bloc suivant.
+   ========================================================================== */
+[data-theme="dark"] .fr-btn.fr-btn--primary,
+[data-theme="dark"] .fr-btn.fr-btn--primary:hover:not(:disabled),
+[data-theme="dark"] .app-org__mark,
+[data-theme="dark"] .app-user__avatar,
+[data-theme="dark"] .gstep::before,
+[data-theme="dark"] .gmail__send,
+[data-theme="dark"] .sig-step.is-done .sig-step__dot,
+[data-theme="dark"] .gshot__mark,
+[data-theme="dark"] .gshot__num { color: #101219; }
+[data-theme="dark"] .fr-badge--success { color: var(--success); }
+[data-theme="dark"] .fr-alert--success { background: var(--success-bg); }
+[data-theme="dark"] .gnote--ok { background: var(--success-bg); }
+[data-theme="dark"] .gcard--link:hover { background: var(--bg-alt); }
+[data-theme="dark"] .oppo, [data-theme="dark"] .oppo-preview { background: var(--success-bg); }
+[data-theme="dark"] .api-method--get { background: var(--info-bg); color: var(--info); }
+[data-theme="dark"] .api-method--post { background: var(--success-bg); color: var(--success); }
+[data-theme="dark"] .api-entry--prestataire { border-left-color: #b98ce0; }
+[data-theme="dark"] .api-entry--prestataire .api-svc { background: #2c2138; color: #c79ce8; }
+[data-theme="dark"] .api-entry--legalite { border-left-color: #6cc48a; }
+[data-theme="dark"] .api-entry--legalite .api-svc { background: #1e2f24; color: #8fd6a7; }
+[data-theme="dark"] .api-entry--numerotation { border-left-color: #e0864f; }
+[data-theme="dark"] .api-entry--numerotation .api-svc { background: #35241a; color: #efa173; }
+[data-theme="dark"] .connexion { background: var(--bg-alt); }
+[data-theme="dark"] .connexion__user:hover { background: var(--bg-alt); }
+[data-theme="dark"] .perm-matrix td.perm-matrix__cell.is-on { background: var(--success-bg); }
+[data-theme="dark"] .perm-yes { color: var(--success); }
+[data-theme="dark"] .gshot__box { background: rgba(255, 143, 136, .08); }
+[data-theme="dark"] .app-demo__tag { color: #2a1a0c; }
+[data-theme="dark"] .fr-toast--error { color: #2a0f0d; }
+[data-theme="dark"] .fr-codebox { background: #0c0f15; border: 1px solid var(--border); }
+[data-theme="dark"] .app-demo { border-bottom-color: rgba(245, 177, 131, .25); }
+[data-theme="dark"] .app-demo .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(245, 177, 131, .14); }
+[data-theme="dark"] .app-vierge { border-bottom-color: rgba(157, 188, 255, .28); }
+[data-theme="dark"] .app-vierge__tag { color: #0c1220; }
+[data-theme="dark"] .app-vierge .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(157, 188, 255, .14); }
+/* Les pastilles de rédaction (champs, notes) et les étiquettes de tableau n'ont
+   pas de variante sombre : elles vivent DANS le papier, qui reste clair — les
+   jetons clairs y sont rétablis par le bloc `[data-theme="dark"] .paper`. */
+[data-theme="dark"] .rw-tagmini { background: #fff4d6; color: #7a5000; border-color: #e0a800; }
+[data-theme="dark"] .rw-pop { box-shadow: 0 12px 32px rgba(0, 0, 0, .55); }
+[data-theme="dark"] .app-user__menu { box-shadow: 0 16px 38px rgba(0, 0, 0, .55); }
+[data-theme="dark"] .connexion__card { box-shadow: 0 18px 50px rgba(0, 0, 0, .5); }
+[data-theme="dark"] .paper { box-shadow: 0 1px 4px rgba(0, 0, 0, .6); }
+[data-theme="dark"] .fr-modal-overlay { background: rgba(6, 8, 12, .66); }
+
+/* Le papier reste clair : à l'intérieur d'une feuille, les jetons reprennent
+   leurs valeurs claires — un acte administratif s'imprime sur du papier blanc,
+   et les pastilles de rédaction (champs, notes) doivent rester lisibles sur ce
+   fond. `--brand` reprend la couleur de la collectivité non éclaircie
+   (`--brand-light`, posée par applyBrand). */
+[data-theme="dark"] .paper {
+  --ink: #161616; --ink-2: #3a3a3a; --ink-muted: #666666;
+  --border: #dddddd; --border-strong: #929292;
+  --bg: #ffffff; --bg-alt: #f6f6f6; --bg-contrast: #eeeeee;
+  --brand: var(--brand-light, #000091); --brand-soft: #e3e3fd;
+  --success: #18753c; --success-bg: #b8fec9;
+  --warning: #b34000; --warning-bg: #ffe9e6;
+  --error: #ce0500; --error-bg: #ffdedd;
+  --info: #0063cb; --info-bg: #e8edff;
+  --focus: #0a76f6;
+}
+
+/* ---------------------------------------------------------- bouton de thème */
+.app-theme {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink); cursor: pointer;
+}
+.app-theme:hover { background: var(--bg-alt); border-color: var(--border-strong); }
+.app-theme__pref { font-size: .68rem; color: var(--ink-muted); margin-left: 6px; }
+.app-user__theme { padding: 8px 10px 4px; }
+.app-user__themelabel { display: flex; align-items: center; gap: 6px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
+.app-user__themes { display: flex; gap: 4px; }
+.app-user__themebtn {
+  flex: 1 1 auto; border: 1px solid var(--border); background: var(--bg); color: var(--ink-2);
+  font: inherit; font-size: .78rem; padding: 5px 6px; border-radius: var(--radius); cursor: pointer;
+}
+.app-user__themebtn:hover { border-color: var(--brand); color: var(--brand); }
+.app-user__themebtn.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+
+/* Les assistants : l'agent les masque pour son seul compte (menu du nom). Un
+   assistant éteint reste lisible, mais son icône s'estompe : on voit d'un coup
+   d'œil ce qui s'affiche et ce qui ne s'affiche pas. */
+.app-user__assist { padding: 4px 10px 6px; }
+.app-user__assistlabel { display: flex; align-items: center; gap: 6px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
+.app-user__assists { display: flex; gap: 4px; }
+.app-user__assistbtn {
+  flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--ink-2);
+  font: inherit; font-size: .78rem; padding: 4px 6px; border-radius: var(--radius); cursor: pointer;
+}
+.app-user__assistbtn:hover { border-color: var(--brand); color: var(--brand); }
+.app-user__assistbtn.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.app-user__assistimg { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex: none; }
+.app-user__assistimg.is-off { filter: grayscale(1); opacity: .45; }
+/* Sur un écran étroit, l'en-tête se replie sur plusieurs lignes et le bouton du
+   compte change de place : un menu ancré au bouton sortirait de la fenêtre. On en
+   fait une feuille en bas de l'écran, toujours entièrement visible. */
+@media (max-width: 640px) {
+  .app-user__menu {
+    position: fixed; left: 12px; right: 12px; top: auto; bottom: 12px;
+    width: auto; min-width: 0; max-height: 70vh; overflow-y: auto;
+  }
+}
+
+/* L'écran d'administration des assistants : l'aperçu du nom et de l'icône, mis
+   à jour à la frappe — sans redessiner, pour ne pas perdre le champ de saisie. */
+.assist-admin__apercu { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); }
+.assist-admin__apercu-img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none; }
+.assist-admin__apercu-nom { font-weight: 600; color: var(--ink); }
+
+@media print {
+  [data-theme="dark"] .paper { box-shadow: none; }
+}

@@ -21,7 +21,7 @@
 //     contesté). Voir src/lib/execution-documents.js.
 // ============================================================================
 import {
-  state, touch, navigate, redrawView, can, visibleActes,
+  state, navigate, redrawView, can, visibleActes,
   actePubliable, trameById, alertesDe, journaliser,
 } from "../state.js";
 import { h, button, toast } from "../dom.js";

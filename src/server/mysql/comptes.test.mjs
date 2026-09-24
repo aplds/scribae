@@ -38,6 +38,11 @@ const crypto = {
     const A = Buffer.from(a), B = Buffer.from(b);
     return A.length === B.length && timingSafeEqual(A, B);
   },
+  // La vérification de la signature d'un jeton d'identité (voir jws.mjs pour la
+  // vraie, avec de vraies clés). Ici, la question n'est pas de savoir si une
+  // signature est bonne, mais ce que le domaine en FAIT : on la rend donc telle
+  // qu'on la règle, épreuve par épreuve.
+  verifierJws: () => true,
 };
 
 // Un scrypt plus léger que celui de la production : les tests éprouvent la
@@ -66,6 +71,17 @@ function memoire() {
     async lireCompteParLogin(login) {
       const l = normaliserLogin(login);
       for (const u of users.values()) if (normaliserLogin(u.login) === l) return u;
+      return null;
+    },
+    // La recherche par identité d'annuaire, dans l'ORDRE du service : le `sub`
+    // du fournisseur d'abord (la clé stable), puis l'adresse, puis le nom de
+    // connexion (voir `lireCompteParOidc`, comptes.mjs).
+    async lireCompteParOidc({ sub = "", email = "", login = "" } = {}) {
+      const essais = [];
+      if (String(sub).trim()) essais.push((u) => String(u.oidcSub || "") === String(sub).trim());
+      if (String(email).trim()) essais.push((u) => String(u.email || "").toLowerCase() === String(email).trim().toLowerCase());
+      if (String(login).trim()) essais.push((u) => normaliserLogin(u.login) === normaliserLogin(login));
+      for (const correspond of essais) for (const u of users.values()) if (correspond(u)) return u;
       return null;
     },
     async ecrireCompte(c) { users.set(String(c.id), { ...c }); },
@@ -98,12 +114,21 @@ function memoire() {
 }
 
 // Un banc d'essai : le domaine, son magasin, et une horloge que l'on avance.
-async function banc({ demo = false, mdpMin = MDP_MIN_LONGUEUR } = {}) {
+async function banc({
+  demo = false, mdpMin = MDP_MIN_LONGUEUR,
+  // L'ANNUAIRE (voir annuaire-service.mjs) : ce que le service a publié, le
+  // référentiel (périmètre), et le port réseau. `null` = annuaire non branché.
+  annuaire = null, referentiel = null, httpJson = null, modeDeploiement = "password", cryptoPort = crypto,
+} = {}) {
   const store = memoire();
   let horloge = new Date("2026-03-10T12:00:00.000Z");
   const comptes = createComptes({
-    store, crypto, now: () => horloge, sessionJours: 12, mdpMin,
+    store, crypto: cryptoPort, now: () => horloge, sessionJours: 12, mdpMin,
     scryptParams: SCRYPT_TEST, demoAutorise: demo, sessionRequise: true,
+    lireAnnuaire: async () => annuaire,
+    lireReferentiel: async () => referentiel,
+    httpJson,
+    modeDeploiement,
   });
   const route = (method, path, { body = null, headers = {}, ctx = {} } = {}) =>
     comptes.route({ method, path, headers, body }, { secure: true, ip: "10.0.0.1", ...ctx });
@@ -515,4 +540,256 @@ test("fermer la démonstration referme les sessions de démonstration", async ()
   const cookie = enteteSession(res).cookie;
   assert.equal((await appeler(ouvert, "GET", "/v1/auth/session", { headers: { cookie } })).status, 200);
   assert.equal((await appeler(ferme, "GET", "/v1/auth/session", { headers: { cookie } })).status, 401);
+});
+
+// ============================================================================
+// LA CONNEXION PAR L'ANNUAIRE, VUE DU SERVICE.
+//
+// Le service est le CLIENT OIDC : il découvre le fournisseur, échange le code
+// (avec le vérificateur PKCE que le navigateur a gardé le temps de
+// l'aller-retour), vérifie le jeton d'identité, en tire un compte, l'écrit au
+// référentiel et ouvre SA session. Ces épreuves tiennent les propriétés qui font
+// que la porte mène quelque part : la session ouverte est bien celle du SERVICE
+// (elle sert à lire les actes), le compte est REPRIS plutôt que dupliqué, le jeu
+// de démonstration est désactivé, et rien ne s'ouvre sans jeton vérifié.
+//
+// Le fournisseur est simulé (voir `fournisseur`), et la signature d'un jeton est
+// réglée par l'épreuve : ce qui est éprouvé ici est la DÉCISION du service, pas
+// l'arithmétique cryptographique (celle-là a son fichier : jws.test.mjs).
+// ============================================================================
+const ISSUER = "https://annuaire.maville.fr/realms/agents";
+const EP_TOKEN = ISSUER + "/protocol/openid-connect/token";
+const EP_JWKS = ISSUER + "/protocol/openid-connect/certs";
+const EP_USERINFO = ISSUER + "/protocol/openid-connect/userinfo";
+const JWK_TEST = { kty: "RSA", kid: "k1", n: "un-module", e: "AQAB" };
+const REFERENTIEL = {
+  services: [{ id: "s-urb", code: "urbanisme", name: "Urbanisme" }],
+  entities: [{ id: "e-vsl", code: "VSL" }],
+};
+const ANNUAIRE = {
+  annuaire: true, issuer: ISSUER, clientId: "scribae",
+  roleMap: [{ claim: "scribae-editeurs", role: "editeur" }],
+  serviceClaim: "services", entityClaim: "entity",
+};
+// Le banc avance l'horloge à `2026-03-10T12:00:00Z` : le jeton doit être valide
+// à cet instant-là, et non au moment où l'épreuve s'exécute.
+const T0 = Math.floor(new Date("2026-03-10T12:00:00.000Z").getTime() / 1000);
+const identite = (o = {}) => ({
+  sub: "agent-4711", email: "claire.martin@maville.fr",
+  given_name: "Claire", family_name: "Martin",
+  groups: ["scribae-editeurs"], services: ["urbanisme"], entity: "VSL",
+  iss: ISSUER, aud: "scribae", exp: T0 + 600, iat: T0, nonce: "n-1", ...o,
+});
+
+const b64url = (objet) => {
+  const octets = new TextEncoder().encode(JSON.stringify(objet));
+  let bin = "";
+  for (const o of octets) bin += String.fromCharCode(o);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+
+// Un fournisseur d'identité simulé : il répond comme un vrai, et retient ce
+// qu'on lui a demandé (c'est ainsi qu'on vérifie que le service lui présente bien
+// le code ET le vérificateur PKCE).
+function fournisseur({ claims = identite(), jwks = { keys: [JWK_TEST] }, refus = "", profil = null } = {}) {
+  const appels = [];
+  const json = (body, status = 200) => ({ ok: status < 400, status, body, text: JSON.stringify(body) });
+  return {
+    appels,
+    async httpJson(url, init = {}) {
+      appels.push({ url, init });
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return json({ issuer: ISSUER, authorization_endpoint: ISSUER + "/auth", token_endpoint: EP_TOKEN, jwks_uri: EP_JWKS, userinfo_endpoint: EP_USERINFO });
+      }
+      if (url === EP_TOKEN) {
+        if (refus) return json({ error: refus, error_description: "client refusé" }, 400);
+        return json({ access_token: "jeton-d-acces", id_token: [b64url({ alg: "RS256", kid: "k1" }), b64url(claims), "une-signature"].join(".") });
+      }
+      if (url === EP_JWKS) return json(jwks);
+      if (url === EP_USERINFO) return json(profil || {});
+      throw new Error("appel inattendu : " + url);
+    },
+  };
+}
+
+function bancAnnuaire({ fournisseurOpts = {}, annuaire = {}, ...reste } = {}) {
+  return banc({
+    annuaire: { ...ANNUAIRE, ...annuaire },
+    referentiel: REFERENTIEL,
+    httpJson: fournisseur(fournisseurOpts).httpJson,
+    ...reste,
+  });
+}
+
+const ouvrirParLAnnuaire = (b, corps = {}) =>
+  b.route("POST", "/v1/auth/annuaire", { body: { code: "le-code", verifier: "le-verificateur", redirectUri: "https://actes.maville.fr/", nonce: "n-1", ...corps } });
+
+test("la connexion par l'annuaire ouvre une session DE SERVICE, et écrit le compte", async () => {
+  const b = await bancAnnuaire();
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 200);
+
+  // La session est celle du SERVICE : cookie `HttpOnly`, et le jeton anti-CSRF
+  // qui va avec. C'est elle qui ouvre les actes — ce que l'ancien branchement
+  // (une identité d'application) ne faisait pas.
+  const c = cookies(res);
+  assert.ok(c[COOKIE_SESSION] && c[COOKIE_SESSION].valeur, "la session est posée");
+  assert.ok(c[COOKIE_SESSION].attributs.includes("HttpOnly"), "le cookie de session est HttpOnly");
+  assert.ok(c[COOKIE_CSRF], "le jeton anti-CSRF accompagne la session");
+
+  const u = res.body.utilisateur;
+  assert.equal(u.role, "editeur", "le rôle vient du groupe reconnu");
+  assert.equal(u.oidcSub, "agent-4711");
+  assert.equal(u.source, "oidc");
+  assert.equal(u.login, "claire.martin", "l'identifiant vient de la partie locale de l'adresse");
+  assert.equal(u.email, "claire.martin@maville.fr");
+  assert.equal(u.firstName, "Claire");
+  assert.deepEqual(u.memberships, [{ serviceId: "s-urb", bureaux: null }]);
+  assert.equal(u.entityId, "e-vsl");
+  assert.equal(res.body.created, true);
+  assert.equal(res.body.visiteur, false);
+  assert.equal(res.body.mustChange, false, "un agent de l'annuaire n'a pas de mot de passe à changer");
+  assert.equal(res.body.checks.every((x) => x.ok || x.optional), true, "le contrôle affiché dit ce qui a été vérifié");
+
+  // Le compte est au RÉFÉRENTIEL, pour de bon : il apparaît dans la liste des
+  // comptes de l'application (c'est ce que lit « Comptes et rôles »).
+  const ecrit = await b.store.lireCompteParLogin("claire.martin");
+  assert.equal(ecrit.oidcSub, "agent-4711");
+  assert.equal(ecrit.active, true);
+
+  // …et la session ouvre bien les données, comme celle du mot de passe.
+  const session = await b.route("GET", "/v1/auth/session", { headers: { cookie: enteteSession(res).cookie } });
+  assert.equal(session.status, 200);
+  assert.equal(session.body.utilisateur.id, u.id);
+});
+
+test("le compte est repris, jamais dupliqué — et les qualités cumulables survivent", async () => {
+  const b = await bancAnnuaire();
+  // Le compte existant : rattaché à la même identité, avec une qualité
+  // cumulative (Réviseur) que l'annuaire ne connaît pas.
+  await b.store.ecrireCompte({
+    id: "u-42", login: "c.martin", email: "claire.martin@maville.fr",
+    firstName: "Claire", lastName: "Martin", role: "reviseur", roles: ["reviseur"],
+    source: "oidc", oidcSub: "agent-4711", active: true, createdAt: "2020-01-01T00:00:00.000Z", memberships: [],
+  });
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.created, false);
+  assert.equal(res.body.utilisateur.id, "u-42", "le même compte, pas un second");
+  assert.equal(res.body.utilisateur.login, "c.martin", "l'identifiant de connexion ne change pas");
+  assert.equal(res.body.utilisateur.createdAt, "2020-01-01T00:00:00.000Z");
+  assert.deepEqual(res.body.utilisateur.roles, ["editeur", "reviseur"], "le rôle de l'annuaire devient principal, la qualité reste");
+});
+
+test("l'agent est reconnu par son adresse, sinon par son identifiant de connexion", async () => {
+  // Rattaché par l'ADRESSE : une reprise de référentiel d'identité (le `sub` a
+  // changé) ne doit pas créer un doublon.
+  const b = await bancAnnuaire();
+  await b.store.ecrireCompte({ id: "u-7", login: "c.martin", email: "claire.martin@maville.fr", role: "redacteur", roles: ["redacteur"], source: "oidc", active: true });
+  const repris = await ouvrirParLAnnuaire(b);
+  assert.equal(repris.body.utilisateur.id, "u-7");
+  assert.equal(repris.body.utilisateur.oidcSub, "agent-4711", "le `sub` est désormais noté");
+
+  // Rattaché par son IDENTIFIANT de connexion : c'est le cas du compte
+  // pré-enregistré par un administrateur, qui n'a pas encore d'adresse — sans
+  // cette règle, chaque agent pré-créé serait doublé à sa première connexion.
+  // C'est celle du navigateur (`applyOidcUser`), reprise à l'identique.
+  const c = await bancAnnuaire();
+  await c.store.ecrireCompte({ id: "u-8", login: "claire.martin", role: "redacteur", roles: ["redacteur"], source: "local", active: true });
+  const nouveau = await ouvrirParLAnnuaire(c);
+  assert.equal(nouveau.status, 200);
+  assert.equal(nouveau.body.created, false, "le compte pré-enregistré est repris, pas doublé");
+  assert.equal(nouveau.body.utilisateur.id, "u-8");
+  assert.equal(nouveau.body.utilisateur.login, "claire.martin", "l'identifiant de connexion ne change pas");
+  assert.equal(nouveau.body.utilisateur.email, "claire.martin@maville.fr", "et l'adresse se renseigne");
+});
+
+test("un agent dont aucun groupe n'est reconnu entre, mais sans accès", async () => {
+  const b = await bancAnnuaire({ fournisseurOpts: { claims: identite({ groups: ["invités"] }) } });
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 200, "l'annuaire a reconnu la personne : on ne refuse pas la connexion");
+  assert.equal(res.body.visiteur, true);
+  assert.equal(res.body.role, "visiteur");
+  assert.match(res.body.motif, /invités/, "le motif dit quels groupes ont été reçus");
+});
+
+test("rien ne s'ouvre sans annuaire branché, sans réseau, ni sans code", async () => {
+  const non = await banc();
+  assert.equal((await ouvrirParLAnnuaire(non)).status, 404);
+
+  const sansReseau = await banc({ annuaire: ANNUAIRE, httpJson: null, referentiel: REFERENTIEL });
+  const r = await ouvrirParLAnnuaire(sansReseau);
+  assert.equal(r.status, 503);
+  assert.equal(r.body.code, "reseau_indisponible");
+
+  const sansCode = await bancAnnuaire();
+  const vide = await sansCode.route("POST", "/v1/auth/annuaire", { body: { code: "", verifier: "" } });
+  assert.equal(vide.status, 401);
+  assert.equal(vide.body.code, "code_manquant");
+});
+
+test("un jeton refusé ferme la porte, et rien n'est écrit au référentiel", async () => {
+  const b = await bancAnnuaire({ cryptoPort: { ...crypto, verifierJws: () => false } });
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "jeton_refuse");
+  assert.equal(await b.store.lireCompteParLogin("claire.martin"), null, "aucun compte n'est créé sur un jeton douteux");
+  assert.equal(res.headers["set-cookie"], undefined, "aucune session n'est posée");
+});
+
+test("un échange refusé par le fournisseur est expliqué, PKCE comprise", async () => {
+  const b = await bancAnnuaire({ fournisseurOpts: { refus: "invalid_client" } });
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 401);
+  assert.equal(res.body.code, "echange_refuse");
+  assert.match(res.body.erreur, /invalid_client/);
+  assert.match(res.body.erreur, /PKCE/);
+});
+
+test("la création automatique peut être refusée par le référentiel", async () => {
+  const b = await bancAnnuaire({ annuaire: { autoProvision: false } });
+  const res = await ouvrirParLAnnuaire(b);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "compte_inconnu");
+  assert.equal(await b.store.lireCompteParLogin("claire.martin"), null);
+});
+
+test("l'annuaire branché désactive le jeu de démonstration", async () => {
+  const b = await bancAnnuaire();
+  assert.equal((await b.store.lireCompte("u-demo")).active, true, "le compte de démonstration est actif avant");
+  await ouvrirParLAnnuaire(b);
+  const demo = await b.store.lireCompte("u-demo");
+  assert.equal(demo.active, false, "un jeu fictif resté actif à côté d'un annuaire réel serait une porte dérobée");
+  assert.equal(demo.deactivatedBy, "oidc");
+});
+
+test("l'épreuve de découverte part du service, et n'obéit qu'à un administrateur", async () => {
+  const b = await bancAnnuaire();
+  const libre = await b.route("POST", "/v1/auth/annuaire/decouverte", { body: {} });
+  assert.equal(libre.status, 200, "sans session, le service éprouve ce qu'il a enregistré");
+  assert.equal(libre.body.source, "découverte");
+  assert.equal(libre.body.endpoints.token_endpoint, EP_TOKEN);
+
+  // Un agent ordinaire (rédacteur) ne fait pas éprouver une adresse arbitraire :
+  // le service ne devient pas un relais ouvert.
+  await poserMdp(b, "u-red", MDP_RED);
+  const red = await connecter(b, "p.dubois", MDP_RED);
+  const agent = await b.route("POST", "/v1/auth/annuaire/decouverte", { body: { issuer: "https://ailleurs.exemple.fr" }, headers: { cookie: red.cookie, "x-csrf-token": red.csrf } });
+  assert.equal(agent.status, 200);
+  assert.equal(agent.body.endpoints.issuer, ISSUER, "l'adresse enregistrée, pas celle qu'il demande");
+
+  // Un administrateur, lui, éprouve ce qu'il vient de saisir.
+  await poserMdp(b, "u-admin", MDP_ADMIN);
+  const admin = await connecter(b, "j.mercier", MDP_ADMIN);
+  const eprouve = await b.route("POST", "/v1/auth/annuaire/decouverte", { body: { issuer: "https://ailleurs.exemple.fr" }, headers: { cookie: admin.cookie, "x-csrf-token": admin.csrf } });
+  assert.equal(eprouve.status, 200);
+  assert.equal(eprouve.body.endpoints.issuer, ISSUER);
+
+  // Sans moyen d'appeler un fournisseur, la route le dit.
+  const muet = await banc({ annuaire: ANNUAIRE, httpJson: null });
+  assert.equal((await muet.route("POST", "/v1/auth/annuaire/decouverte", { body: {} })).status, 503);
+
+  // Et sans annuaire branché, il n'y a rien à éprouver.
+  const aucun = await banc();
+  assert.equal((await aucun.route("POST", "/v1/auth/annuaire/decouverte", { body: {} })).status, 404);
 });

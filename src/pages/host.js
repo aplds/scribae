@@ -37,6 +37,19 @@
 // services y sont présents. Poser `window.__SCRIBA_FORCE_STATIC__ = true` avant
 // son exécution force l'inverse — c'est ainsi qu'on relit l'édition statique
 // depuis l'éditeur.
+//
+// PARTAGE ENTRE POSTES. Par défaut, l'édition statique héberge son service, et
+// son état vit donc dans le navigateur de chaque visiteur : deux personnes ne
+// voient pas la même chose. Poser `window.__SCRIBA_SERVICE_URL__` AVANT ce
+// fichier (une ligne dans `index.html`, ou un script de déploiement) branche la
+// page sur un VRAI service — celui de `src/server/`, ou toute installation qui
+// répond au même contrat : le stockage local reste (réglages, session, file
+// d'attente), mais les collections passent par l'API (`/v1/db/…`), servie par
+// ce service. C'est le geste qui donne un « recueil partagé » à un fork servi
+// par GitHub Pages, sans rien changer d'autre : le service doit alors autoriser
+// l'origine de la page (`CORS_ORIGINS`), et la page passe par le domaine du
+// service (cookies de session et HTTP). Un service injoignable ne casse rien :
+// l'application garde ses données locales et le dit par sa pastille d'état.
 // ============================================================================
 (function () {
   "use strict";
@@ -48,6 +61,20 @@
     if (typeof window.generatorPublicId === "string") return;
     if (window.root && window.root.kv && window.root.createServerSocket) return;
   }
+
+  // Service distant : la page n'héberge plus le service, elle l'appelle. Les
+  // services que l'application consulte sont fournis par `hosts.js` : sans
+  // `createServerSocket`, `remote.js` passe par HTTP (voir `useHttp`), et le
+  // pilotage de la base suit l'édition auto-hébergée (`mode: "external"`).
+  var serviceUrl = String(window.__SCRIBA_SERVICE_URL__ || "").replace(/\/+$/, "");
+  var serviceDistant = !!serviceUrl;
+  if (serviceDistant) {
+    window.__SCRIBA_SELF_HOSTED__ = true;
+    window.__SCRIBA_API_BASE__ = serviceUrl;
+  }
+  // Ce que le bandeau de tête doit dire : une page servie en fichiers, mais
+  // reliée à un service commun, n'est pas « sans partage » (voir src/ui/notice.js).
+  window.__SCRIBA_STATIC_SHARED__ = serviceDistant;
 
   window.__SCRIBA_STATIC__ = true;
   // L'application lit les deux services dans `window.__SCRIBA_HOST__` (voir
@@ -297,7 +324,10 @@
     });
   }
 
-  hote.createServerSocket = function () {
+  // Le service embarqué n'est monté que si la page n'est PAS reliée à un service
+  // distant : dans ce second cas, c'est `remote.js` qui appelle l'API par HTTP
+  // (la présence d'un `createServerSocket` l'en empêcherait).
+  hote.createServerSocket = serviceDistant ? null : function () {
     var ouverts = [];
     var fermes = [];
     var sock = {
@@ -334,6 +364,6 @@
   // comme le fait l'hébergement : tout code qui interroge cet objet les trouve.
   if (racineCreee) {
     window.root.kv = hote.kv;
-    window.root.createServerSocket = hote.createServerSocket;
+    if (hote.createServerSocket) window.root.createServerSocket = hote.createServerSocket;
   }
 })();

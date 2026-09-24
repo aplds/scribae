@@ -22,10 +22,33 @@ A4), Word, Markdown.
 > fictive, aucune mention de la collectivité de démonstration nulle part. La page de démonstration
 > publiée ci-dessous, elle, reste **en démonstration**.
 
+## État du projet
+
+| | |
+|---|---|
+| **Version courante** | **1.6.0**, 22 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
+| **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), et épreuves du domaine du service |
+| **Démonstration publiée** | <https://demo.scribae.eu> — GitHub Pages, édition **statique** : référentiel et actes vivent dans le navigateur du visiteur, rien n'est partagé entre collègues |
+| **Démonstration partagée** | aucune instance publique : la pile auto-hébergée (`src/server/`, nginx + Node + MariaDB) se monte en quelques minutes |
+| **Audit** | 3 campagnes, 36 non-conformités recensées : **1 ouverte**, 8 en cours de traitement, 27 levées — synthèse et plan d'action dans `src/audit/README.md` |
+
+> **Ce dépôt est un travail en cours, tenu par ses propres audits.** Les nombres du tableau datent
+> la dernière campagne (23 septembre 2026) ; ils se lisent avec le registre, qui est un document de
+> travail — voir la section *Audit* plus bas. Un voyant rouge sur la chaîne d'intégration veut dire
+> « ne pas livrer », et non « détail ».
+
 ## Essayer, sans rien installer
 
 **<https://demo.scribae.eu>** — la démonstration est publiée par **GitHub Pages** (le dépôt fixe
 cette adresse par un fichier `CNAME` à sa racine).
+
+> **La démonstration n'est pas indexée par les moteurs de recherche**, et c'est voulu. Ses actes
+> sont **fictifs** : une fiche d'arrêté de la mairie de Valmont-sur-Loire lue dans un résultat de
+> recherche se prendrait pour un acte réel. Le logiciel pose donc la balise `<meta name="robots"
+> content="noindex, nofollow">` sur **cette seule adresse** (la règle est dans `index.html`, et ne
+> vaut que pour le domaine de la démonstration du projet — celui du fichier `CNAME`). Une instance
+> **auto-hébergée** reste, elle, parfaitement indexable : son recueil public est fait pour être
+> trouvé, et c'est elle qui publie son `robots.txt` (voir `src/server/README.md`).
 
 L'application s'ouvre sur le **recueil public** — les actes publiés, consultables par tout le monde,
 **sans compte**, avec leur identifiant ELI et leur texte — désormais à la **racine du site**.
@@ -98,21 +121,21 @@ les collectivités, une variante **inspirée de cette charte sans ses éléments
 |---|---|
 | **Trames** | modèles d'actes : structure, champs, règles exécutables, commentaires, import/export JSON |
 | **Éditeur de trame** | plan, page éditable en place, réserve d'éléments à glisser, inspecteur (bloc, questions, contrôles, trame) |
-| **Rédiger** | document éditable en place (WYSIWYG, pastilles de champs), écarts « hors trame » conservés et signalés, contrôles, exports. Un **parcours** affiché en tête rappelle la suite — Rédiger → **Soumettre au circuit** → Révision → Signer → Publier — et le **bouton principal**, sous le document, propose le geste du moment (« Soumettre au circuit », ou « Aller à la signature » une fois l'acte validé) : l'export, qui sert à imprimer ou à transmettre hors de l'application, n'est plus présenté comme l'aboutissement |
+| **Rédiger** | document éditable en place (WYSIWYG, pastilles de champs), écarts « hors trame » conservés et signalés, contrôles, exports. Un **fil de parcours** affiché en tête montre tout le chemin — Rédaction → Parapheur → Révision → Signature → Publication —, la porte en cours mise en avant, **qui** tient chacune, les **étapes du circuit vues de l'intérieur** (nature et porteur) et la position de la révision (« après le parapheur · avant la signature ») ; le **bouton principal**, sous le document, propose le geste du moment (« Soumettre au circuit », ou « Aller à la signature » une fois l'acte validé) : l'export, qui sert à imprimer ou à transmettre hors de l'application, n'est plus présenté comme l'aboutissement |
 | **Actes** | registre : numéro, objet, nature, conformité à la trame, statut, historique des brouillons ; pastille **« abrogé »** / **« abrogation prévue »** ; **corbeille réservée aux brouillons**, les actes signés ou publiés passant par **« Retirer / abroger »** |
 | **Délégations** | **organigramme des délégations de signature**, visible par tous les comptes : les chaînes de signature en arbre (autorité de tête, délégations, sous-délégations) ou en liste ; un clic ouvre la **fiche** d'un acteur (pouvoir, étendue, décision, dates, signature obtenue et visas). Le modifier est réservé aux administrateurs et éditeurs |
 | **Organigramme** | la structure au nom de laquelle les actes sont pris, à trois niveaux — **entité → service → bureau** —, dans la même toile que les délégations : arbre ou liste, fiche de chaque maille. Une entité est **autonome** (elle a sa personnalité morale) ou **rattachée** à une autre : c'est le cas d'une **régie** municipale, sans personnalité morale propre mais avec son directeur, son service et ses actes. Chaque entité peut désigner son **signataire principal**, qui signe ses actes à défaut de signataire dans le modèle. Un **service** peut en outre **dépendre d'un autre service** (ou du bureau d'un autre service) : l'arbre s'en trouve enrichi, et le **périmètre suit la chaîne** — un agent affecté en haut de chaîne voit les actes de toute la chaîne en contrebas. L'organigramme s'édite dès le rôle d'**éditeur** (services et bureaux ; l'ajout ou la suppression d'une **entité** reste à l'administrateur) |
 | **Chrono de numérotation** | **tous les numéros attribués**, avec ce qui explique les trous : les **rangs jamais attribués** et les **numéros annulés** (motif compris). Compteurs, filtres (année, entité, type d'acte, état, source, période, texte), tri par colonne, **export CSV et XLSX** ; portée du chrono — un seul, un par entité ou un par type d'acte —, passage à l'année suivante et annulation d'un rang. Un numéro **n'est jamais attribué deux fois** |
-| **Parapheur** | circuit de validation du référentiel avant signature : **trois natures d'étape** — **Vérification** (le contrôle du dossier, marche du réviseur), **Visa** (le bon pour accord qui engage) et **Signature** (l'accord du signataire, qui achève le circuit) —, chacune appelant un rôle par défaut modifiable — ou pouvant viser une **personne nommée** ou un **service** hors chaîne de décision ; ciblage trame / famille / entité, décisions motivées, empreinte du texte validé ; les circuits se lisent en **récapitulatif**, avec une **sous-vue par circuit** |
-| **Signature & publication** | dépôt par API REST, **réglages de l'API du prestataire** (adresse, identifiant, niveau de signature, adresse de notification, délai et points de terminaison — posés dans l'administration ou dans le `.env` du déploiement, la **clé restant au serveur**), **trois circuits de signature** — électronique (prestataire branché en API), **simple** (le signataire signe **dans Scribae**, avec son compte, après avoir coché la déclaration), **externe** (papier ou outil tiers) —, original signé vérifiable **partagé en deux parts : publique et interne** (les mentions nominatives et la trace des courriels ne sont jamais diffusées), publication au recueil, identifiant ELI, opposabilité ; onglet **« Ma signature »** pour le signataire — qui signe avec son compte, rapproché du compte de l'outil de signature, et ne voit que les actes de son **champ de compétence** |
+| **Parapheur** | circuit de validation du référentiel avant signature : **trois natures d'étape** — **Vérification** (le contrôle du dossier, marche du réviseur), **Visa** (le bon pour accord qui engage) et **Signature** (l'accord du signataire, qui achève le circuit) —, chacune appelant un rôle par défaut modifiable — ou pouvant viser une **personne nommée** ou un **service** hors chaîne de décision ; ciblage trame / famille / entité, décisions motivées, empreinte du texte validé ; les circuits se lisent en **récapitulatif**, avec une **sous-vue par circuit**. Le **fil de parcours** (rédaction, parapheur, révision, signature, publication) situe le circuit dans le chemin de l'acte : il passe **avant** la révision, elle-même **avant** la signature, et ses étapes s'y lisent une à une, avec leur nature et leur porteur |
+| **Signature & publication** | dépôt par API REST, **réglages de l'API du prestataire** (adresse, identifiant, niveau de signature, adresse de notification, délai et points de terminaison — posés dans l'administration ou dans le `.env` du déploiement, la **clé restant au serveur**), **trois circuits de signature** — électronique (prestataire branché en API), **simple** (le signataire signe **dans Scribae**, avec son compte, après avoir coché la déclaration), **externe** (papier ou outil tiers) —, original signé vérifiable **partagé en deux parts : publique et interne** (les mentions nominatives et la trace des courriels ne sont jamais diffusées), publication au recueil, identifiant ELI, opposabilité ; onglet **« Ma signature »** pour le signataire — qui signe avec son compte, rapproché du compte de l'outil de signature, et ne voit que les actes de son **champ de compétence** ; une **annexe** (qui ne se signe pas) y porte l'étiquette « **Annexe — ne se signe pas** » et ne figure **jamais** dans la file du signataire |
 | **Recueil public** | site ouvert à tous, **sans compte**, **à la racine du site** : une page d'accueil moderne (entrée, **renvois et bandeau d'informations**, carrousel des derniers actes, grille des **thèmes** = familles de trames, liste par année), une **recherche** qui efface carrousel et thèmes, et chaque acte présenté comme sur Légifrance — titre, version, métadonnées, texte dans la page (pas de feuille à télécharger), pièces et signature vérifiable — l'adresse à communiquer aux administrés. Les actes s'affichent **dans leur version la plus récente**, avec les cases **« Afficher les versions antérieures »** et **« Afficher les articles abrogés »**. Le pied de page porte un bouton **« Se connecter »**, les **sous-pages** (mentions légales, conditions de réutilisation, accessibilité) et les renvois vers les recueils extérieurs et les sites de référence. Une collectivité peut y poser sa **propre feuille de style** (couleurs, police, largeur — *Administration › Publication › Apparence du site public*). Les actes **réservés aux agents** (circulaires internes, consignes) ne sont, eux, servis qu'aux **personnes connectées** — et, si l'atelier est restreint à un réseau, aux personnes connectées **venant d'une adresse autorisée** |
 | **Informations du recueil** | les **billets** publiés au recueil public — actualités, avis, communications —, comme un blog : titre, résumé, texte **Markdown**, date, auteur, **épinglage** en tête. Ils ne se signent pas et ne reçoivent pas d'identifiant ELI ; ils apparaissent dans leur **rubrique** (une page à part) et, les plus récents, sur la **page d'accueil**. La rubrique se **renomme** (« Actualités », « Communications »…) ou s'**éteint** (*Administration › Publication › Apparence du site public*) |
 | **Bulletin (ou Journal) des actes** | le rendez-vous périodique du recueil : la collectivité **ouvre un bulletin** (*Administration › Bulletin*) et lui donne une **cadence** — quotidienne, hebdomadaire, **bimensuelle** (deux numéros par mois), mensuelle, bimestrielle, trimestrielle, semestrielle, annuelle, ou **personnalisée** (toutes les N unités, ancrée) — et un **jour de parution**. Chaque numéro **rassemble les actes publiés sur sa période**, classés **par entité puis par thématique** ; une période sans publication ne donne **aucun numéro**. Le bulletin se diffuse de trois façons : une **sous-page par numéro** au recueil public (avec ses représentations `.json`, `.md`, `.txt`), un **flux RSS 2.0 et Atom 1.0**, et un **courriel aux abonnés** (abonnement à **double consentement**, désabonnement en un clic). Le service clôt les périodes, compose les numéros et vide sa **file d'envoi** à chaque passe ; un numéro en cours se lit en **aperçu provisoire**, sans adresse publique |
 | **Documents non juridiques** | la collectivité publie aussi ce qui n'est pas un acte : **verbatim d'assemblée**, **déclaration**, **vœu**. Ces documents se signent et se **publient au recueil** (identifiant ELI, table des thèmes, version en ligne), mais **ne font pas droit** : ni opposabilité, ni entrée en vigueur, ni délai de recours — le recueil les présente comme des documents, l'attestation de non-recours dit qu'aucun délai ne court, et les formalités d'exécution (contrôle de légalité, notification) ne s'y appliquent pas |
 | **Exécution & délais** | formalités (contrôle de légalité, publication, notification), date d'exécutoire, délai de recours, **recours introduit** (date d'introduction, nature, auteur) qui ferme le délai, alertes ; **pièces du dossier** en PDF : état des formalités (tout acte), attestation de non-recours (acte définitif non contesté) ; **télétransmission au contrôle de légalité** *(+fonction expérimentale, éteinte par défaut)* : l'étape s'intercale entre le retour signé et la publication, l'accusé de réception de la préfecture (certificat « Transmis au contrôle de légalité le … à … ») est déposé sur le document, puis l'acte est publié |
 | **Modifier un acte** | édition en place de l'acte en vigueur : ajout/retrait de **paragraphe**, de **ligne de liste** ou de **ligne de tableau**, **réattribution de numéro** (numéro libre) ou **« tout renuméroter »** ; acte modificatif + version consolidée, mentions « Modifié/Abrogé/Ajouté par » |
-| **Abroger un acte, ou l'un de ses articles** | prévu **dès la rédaction** (y compris un acte non modificatif) : on vise au référentiel un acte — ou tel article d'un acte — à abroger ; la clause s'ajoute au document et l'abrogation prend effet **à l'entrée en vigueur** de l'acte qui la porte, non à sa publication |
-| **Administration** | tout ce qui est configurable : identité, entités, services et bureaux, personnes (accord en genre de la qualité, décision fondant le pouvoir de signer), rôles, références, numérotation (**séquence interne, ou numéro attribué par un service externe**), circuits (**trois circuits de signature**), **API du prestataire de signature** (adresse, niveau, notification, délai, points de terminaison), **courriel** (six notifications activables, expéditeur, adresse de réponse, copie systématique, état du **serveur SMTP** du déploiement et message d'essai), **publication** (titre du recueil, publication automatique, opposabilité, **apparence du site public** — la feuille de style de la collectivité —, **rubrique Informations**, **bulletin (ou Journal) des actes** — ouverture, cadence, jour de parution, en-tête et pied des courriels —, **accès à l'atelier** restreint à un réseau), **fonctions expérimentales** (la télétransmission au contrôle de légalité), annuaire (OIDC), base de données |
+| **Abroger un acte, ou l'un de ses articles** | prévu **dès la rédaction** (y compris un acte non modificatif) : on vise au référentiel un acte — ou tel article d'un acte — à abroger ; la clause s'ajoute au document et l'abrogation prend effet **à l'entrée en vigueur** de l'acte qui la porte, non à sa publication. Les **annexes** suivent une règle explicite : une annexe **sans publication autonome** (un tableau, une grille tarifaire) fait partie de sa décision mère et s'abroge avec elle ; une annexe **publiée à part** (un règlement) y **survit** et demande un acte autonome pour être retirée ou modifiée — l'application le signale, dès la rédaction puis sur la fiche de l'acte abrogeant |
+| **Administration** | tout ce qui est configurable : identité, entités, services et bureaux, personnes (accord en genre de la qualité, décision fondant le pouvoir de signer), rôles, références, numérotation (**séquence interne, ou numéro attribué par un service externe**), circuits (**trois circuits de signature**), **API du prestataire de signature** (adresse, niveau, notification, délai, points de terminaison), **courriel** (six notifications activables, expéditeur, adresse de réponse, copie systématique, état du **serveur SMTP** du déploiement et message d'essai), **publication** (titre du recueil, publication automatique, opposabilité, **apparence du site public** — la feuille de style de la collectivité —, **rubrique Informations**, **pages d'erreur** (les chats de http.cat, option éteinte par défaut), **bulletin (ou Journal) des actes** — ouverture, cadence, jour de parution, en-tête et pied des courriels —, **accès à l'atelier** restreint à un réseau), **fonctions expérimentales** (la télétransmission au contrôle de légalité), annuaire (OIDC), base de données |
 | **Feuilles de style** | charte graphique des actes : marges, **police** (liste de polices proposées), en-tête, pied, filets, **intitulés encadrés** (côtés au choix), **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; édition directe |
 | **Comptes et rôles** | cinq rôles — dont le **Réviseur** et le **Signataire**, qualités **cumulables** — plus le visiteur, sans accès ; **dix-neuf permissions** ; périmètre par service et par bureau ; **personne du référentiel**, rapprochement du compte de l'outil de signature. Retirer un acte du recueil (dépublier) est réservé à l'administrateur, avec un avertissement en grand et un motif technique exigé ; **épingler** un acte (le mettre à la « une » du recueil public) est ouvert à l'administrateur et à l'éditeur. L'**accès à l'atelier** peut être restreint à un réseau (intranet) — l'espace public, lui, reste ouvert |
 | **API REST** | la **référence complète du service** — toutes les routes, le rôle exigé, les paramètres, les corps, les réponses et les codes d'erreur, avec un exemple de commande par opération — et un **panneau de commande** pour **jouer la requête pour de vrai** depuis l'application (chemin, corps et jeton modifiables ; la réponse s'affiche avec son code et sa durée). Le même contenu est **engendré** dans `docs/API.md`, consultable dans la documentation technique. Les **clés d'API à rôles** — des **comptes de service** remis à un script, un poste ou un outil tiers, invisibles dans « Comptes et rôles » — se créent depuis l'administration, et le service tient un **journal d'audit scellé** (chaîne SHA-256) |
@@ -199,6 +222,16 @@ navigateur est attaché à l'**adresse** du site, une même copie servie sous de
 GitHub et votre domaine) donne **deux installations distinctes** aux yeux du navigateur : servez-la
 sous une seule adresse, celle que vous communiquez.
 
+> **Travailler à plusieurs tout en restant sur GitHub Pages.** Les fichiers de la page peuvent
+> rester servis en statique et les **données** vivre sur un service : installez `src/server/`
+> quelque part (une petite machine, un conteneur), puis posez, **avant** le chargement de
+> `src/pages/host.js`, une ligne dans `index.html` :
+> `<script>window.__SCRIBA_SERVICE_URL__ = "https://mon-service.exemple.fr";</script>`. La page
+> vise alors l'API de ce service (`/v1/db/…`, dépôt, signature, publication) et **tous les postes
+> voient le même référentiel** — le service doit autoriser l'origine de la page (`CORS_ORIGINS`).
+> C'est exactement ce que fait l'édition auto-hébergée ; le bandeau de tête le dit, au lieu de
+> laisser croire que rien n'est partagé. Sans cette ligne, rien ne change.
+
 Les **assistants** (Plume dans l'atelier, Publia au recueil) y fonctionnent **sans moteur de
 langage** : ils ne rédigent pas de réponse, ils **retrouvent** le chapitre du guide ou l'acte
 publié qui répond à la question, et y conduisent par un lien. Pour des réponses rédigées,
@@ -212,6 +245,10 @@ Pour que trames et actes soient partagés par tout un service, deux voies :
 
 - **le service compagnon livré dans ce dépôt** (`src/server/`) : une pile Docker — nginx, service
   Node, base MariaDB — qui s'installe en quelques minutes ;
+- **le même service, sans aucune base de données** : `STOCKAGE=fichier` range tout dans un simple
+  **dossier** (`DATA_DIR`, `./data` par défaut), en clair, et la sauvegarde devient une **copie de
+  dossier** — pour un poste, une petite collectivité, ou une machine où l'on ne veut qu'un logiciel
+  (voir `src/docs/DOCKER.md` § 5.4) ;
 - **la base de données de la collectivité** : si elle exploite déjà MySQL ou MariaDB, l'application
   s'y branche depuis *Administration › Base de données*.
 
@@ -223,11 +260,14 @@ Ces deux documents s'adressent à votre service informatique.
 
 ## Vos données
 
-- **Aucun compte en ligne n'est nécessaire.** En revanche, deux mécanismes peuvent sortir de la
+- **Aucun compte en ligne n'est nécessaire.** En revanche, trois mécanismes peuvent sortir de la
   page : les **assistants** (Plume, Publia), qui transmettent la question — et rien du contenu de
   vos actes — au moteur de langage réglé (un moteur intégré quand il est disponible, ou celui que
-  vous branchez) ; et la **notification par courriel**, quand un service SMTP est configuré sur un
-  déploiement auto-hébergé. Tout le reste travaille en local.
+  vous branchez) ; la **notification par courriel**, quand un service SMTP est configuré sur un
+  déploiement auto-hébergé ; et — **seulement si l'administration l'a allumée** — l'option
+  *Illustrer les pages d'erreur d'un chat*, qui demande une image au site public **http.cat**
+  (éteinte par défaut : ce site verrait alors l'adresse IP du visiteur). Tout le reste travaille en
+  local.
 - Par défaut, tout est enregistré **dans le navigateur** : c'est ce qui rend la démonstration
   immédiate, mais aussi ce qui la rend **propre à un poste**.
 - La **signature électronique** est calculée localement et l'original signé est vérifiable par
@@ -237,11 +277,57 @@ Ces deux documents s'adressent à votre service informatique.
   PDF/A) est disponible à tout moment depuis l'interface : **vous n'êtes jamais prisonnier du
   logiciel**.
 
+## Travailler sur le code
+
+Le dépôt range **l'outillage à la racine** et **le code dans `src/`** :
+
+| | |
+|---|---|
+| `index.html`, `main.pjs` | la page publiée : le gabarit et le code du service de démonstration statique |
+| `src/lib/` | le cœur métier — modules **purs** : compilation, expressions, numérotation, signature, exports, PDF/A |
+| `src/ui/`, `src/css/` | les vues et les feuilles de style |
+| `src/server/` | le service compagnon auto-hébergé (nginx + Node + MariaDB) et le pilote de persistance |
+| `scripts/`, `tests/` | l'outillage : analyse statique, épreuves — **sans aucune dépendance** |
+| `package.json`, `.github/workflows/ci.yml` | les commandes, et la chaîne qui les rejoue à chaque envoi |
+
+Rien à installer pour lire ou vérifier : ce sont des **modules ES**, sans dépendance
+côté application. Depuis la racine du dépôt :
+
+```
+npm run verifier   # tout : syntaxe, style strict, épreuves — c'est ce que rejoue la chaîne
+npm run lint       # contrôle de syntaxe et analyse de style, avis ordinaire
+npm test           # node --test tests/ et le domaine du service
+```
+
+**Un agent** — Claude Code, Mistral Vibe, ou n'importe quel assistant qui lit le
+dépôt — commence par **`AGENTS.md`** : il tient l'arborescence, les commandes, les
+règles du projet (aucune dépendance, métier sans DOM ni réseau, documents engendrés
+à ne pas modifier à la main), les pièges et la licence. **`CLAUDE.md`** y renvoie.
+Le fond vit sous `src/` : `src/README.md` (mode d'emploi du code, doctrine, recettes
+d'exploitation et de livraison), `src/SPEC.md` (spécification), `src/docs/`
+(service, administration, industrialisation), `src/audit/` (registre).
+
+Un fichier ne vit qu'à **un seul endroit** : la table de l'export
+(`src/README.md` § « Exporter le dépôt GitHub ») dit lequel. Le même outillage, dans
+l'atelier de travail, sert à faire tourner l'aperçu — d'où des chemins qui restent
+relatifs dans les deux dispositions.
+
 ## Version
 
 Le logiciel porte un numéro de version, affiché au bas du menu du compte. L'historique détaillé,
 version par version, est dans **`src/CHANGELOG.md`** et se lit aussi dans l'application
 (*Documentation technique › Journal des versions*).
+
+## Audit
+
+Le projet **s'audite** : un cadre (`src/audit/PROMPT-AUDIT-SCRIBAE.md`) tient un **registre
+cumulatif des non-conformités** et des rapports datés, tous appuyés sur des preuves (citation
+`fichier:ligne`, reproduction, source normative rattachée).
+
+> **Ce dossier est un document de travail.** Le registre porte des non-conformités **encore
+> ouvertes** — une fiche lue hors de son cadre, sans son statut ni les propositions qui vont avec,
+> se cite à contresens. Commencez par **`src/audit/README.md`**, puis la **synthèse** et le **plan
+> d'action** du rapport le plus récent ; les fiches se lisent ensuite, une par une.
 
 ## Licence
 
