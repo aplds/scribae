@@ -80,6 +80,63 @@ Réinstaller la démonstration*.
 > retrouve pas ses données : ce sont **deux stockages distincts**. Prenez **<https://demo.scribae.eu>**
 > pour adresse habituelle — c'est celle que le dépôt publie.
 
+---
+
+## Déployer avec Docker
+
+**Image officielle** : `docker.io/aplds/scribae:latest` (ou `docker.io/aplds/scribae:1.6.1q`)
+
+### ✅ Déploiement simplifié (1 conteneur)
+
+**Une seule image** avec tout ce qu'il faut : service Node, nginx, code applicatif.
+**La base de données reste externe** (MariaDB/MySQL à déployer séparément).
+
+```bash
+# Lancer avec une base MariaDB existante
+docker run -d \
+  --name scribae \
+  -p 8080:80 \
+  -e DB_HOST=192.168.1.100 \
+  -e DB_USER=scriba \
+  -e DB_PASSWORD=ton_mot_de_passe \
+  -e DB_NAME=scriba \
+  -e AUTH_MODE=password \
+  docker.io/aplds/scribae:latest
+```
+
+**Accès** : `http://<IP_SERVEUR>:8080`
+
+### 📦 Avec Docker Compose (tout intégré)
+
+Le dépôt fournit aussi une **pile complète** (4 services : db, db-init, api, web) :
+
+```bash
+cd src/server
+cp env.example .env
+# Éditer .env avec vos paramètres (DB_ROOT_PASSWORD, DB_PASSWORD, etc.)
+docker compose up -d --build
+```
+
+**Accès** : `http://localhost:8080`
+
+### 🔄 Mises à jour
+
+```bash
+# Image unique
+docker pull docker.io/aplds/scribae:latest
+docker stop scribae && docker rm scribae
+docker run -d --name scribae ... docker.io/aplds/scribae:latest
+
+# Ou avec Compose
+cd src/server
+git pull origin main
+docker compose down && docker compose up -d --build
+```
+
+> **Pour plus de détails** : `src/server/README.md` (installation complète, configuration, sauvegardes)
+
+---
+
 ## Pourquoi ce logiciel
 
 Un acte administratif n'engage l'administration et ne s'impose aux administrés qu'à partir du

@@ -6,6 +6,7 @@ les données, comment le sécuriser, l'exploiter et le sauvegarder, et comment p
 démonstration (page statique) à une installation de service auto-hébergée.
 
 - Pour **installer** l'application (Docker, base, TLS) : `../server/README.md`.
+  **Image Docker officielle** : `docker.io/aplds/scribae:latest` (voir § 1.1 ci-dessous).
 - Pour **adapter le contenu** (entités, trames, vocabulaire) : guide intégré à l'application
   (« Guide ») et `../SPEC.md`.
 - Pour **utiliser** l'application au quotidien : guide intégré à l'application.
@@ -17,6 +18,35 @@ la version de référence reste celle du dépôt.
 ---
 
 ## 1. Vue d'ensemble
+
+### 1.1 Déploiement rapide avec Docker (image officielle)
+
+**L'image `docker.io/aplds/scribae:latest`** embarque tout ce qu'il faut pour un déploiement
+simplifié : service Node, nginx, code applicatif. **Seule la base de données reste externe**
+(MariaDB/MySQL).
+
+```bash
+# Lancer avec une base existante
+docker run -d \
+  --name scribae \
+  -p 8080:80 \
+  -e DB_HOST=adresse_du_serveur_mysql \
+  -e DB_USER=scriba \
+  -e DB_PASSWORD=mot_de_passe \
+  -e DB_NAME=scriba \
+  -e AUTH_MODE=password \
+  docker.io/aplds/scribae:latest
+```
+
+**Accès** : `http://<IP>:8080`
+
+**Variables obligatoires** : `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+**Toutes les variables** : voir `src/server/env.example` (50+ disponibles)
+
+> **Pour une installation complète avec base intégrée** : utiliser `src/server/docker-compose.yml`
+> (4 services : db, db-init, api, web). Voir `src/server/README.md` § 3.
+
+---
 
 Scribae est un éditeur de **trames** et d'**actes administratifs**. Il est
 structure-agnostique : tout ce qui est propre à la collectivité (entités, services, personnes,

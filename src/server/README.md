@@ -167,8 +167,61 @@ Pour diffuser Scribae sans le dossier du dépôt, `Dockerfile` (à la racine de 
 bâtit une **image unique** contenant le service, nginx et le code de l'application :
 
 ```bash
-docker build -f src/server/Dockerfile -t moncompte/scribae:1.5.2 .
+docker build -f src/server/Dockerfile -t moncompte/scribae:1.6.1q .
 ```
+
+**Image officielle prête à l'emploi** :
+```bash
+# Utiliser l'image publiée sur Docker Hub
+docker pull docker.io/aplds/scribae:latest
+
+# Ou une version spécifique
+docker pull docker.io/aplds/scribae:1.6.1q
+```
+
+### Lancer l'image autonome
+
+**Prérequis** : une base de données MariaDB/MySQL accessible.
+
+```bash
+docker run -d \
+  --name scribae \
+  -p 8080:80 \
+  -e DB_HOST=adresse_de_ta_base \
+  -e DB_PORT=3306 \
+  -e DB_USER=scriba \
+  -e DB_PASSWORD=ton_mot_de_passe \
+  -e DB_NAME=scriba \
+  -e AUTH_MODE=password \
+  docker.io/aplds/scribae:latest
+```
+
+**Accès** : `http://<IP_SERVEUR>:8080`
+
+### Variables d'environnement essentielles
+
+| Variable | Obligatoire | Description | Exemple |
+|---|---|---|---|
+| `DB_HOST` | ✅ | Adresse de la base MariaDB/MySQL | `192.168.1.100` ou `db` |
+| `DB_PORT` | ❌ | Port de la base (défaut: 3306) | `3306` |
+| `DB_USER` | ✅ | Utilisateur de la base | `scriba` |
+| `DB_PASSWORD` | ✅ | Mot de passe | `ton_mot_de_passe` |
+| `DB_NAME` | ✅ | Nom de la base | `scriba` |
+| `AUTH_MODE` | ❌ | Mode d'auth (défaut: `password`) | `password` |
+| `API_TOKEN` | ❌ | Jeton API (pour les écritures) | Généré via `openssl rand -hex 32` |
+
+**Toutes les variables** : voir `env.example` (50+ variables disponibles).
+
+### Avec Docker Compose (pour les tests)
+
+Si tu veux tester avec une base intégrée :
+
+```bash
+# Dans src/server/
+docker compose -f docker-compose.yml up -d --build
+```
+
+Crée 4 services : `db` (MariaDB), `db-init`, `api` (Node), `web` (nginx).
 
 Voir **`../docs/DOCKER.md`** : construction, publication sur un registre (Docker Hub, GHCR),
 multi-architecture, lancement et exploitation.
