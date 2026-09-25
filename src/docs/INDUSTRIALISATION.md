@@ -133,7 +133,8 @@ chargée, et son service.
 
 - **Les parcours** (`tests/parcours.mjs`) traversent l'application : dépôt →
   signature → publication → recueil, repli local (service muet), signature
-  qualifiée, session, contrat du service. Chaque parcours rend son verdict, et
+  qualifiée, session, contrat du service, **saisie qui garde le curseur** et
+  **écran de connexion soumis par Entrée**. Chaque parcours rend son verdict, et
   `lancerParcours(ctx)` les exécute tous (ou un seul, par `seulement`).
 
 **Comment les lancer.** Ils s'exécutent dans la console du navigateur, sur la page
@@ -208,7 +209,9 @@ qu'ils ne peuvent pas être produits hors de l'environnement d'installation :
 ## 5. Version et livraison
 
 - Le numéro de version vit dans **`src/lib/version.js`** (`APP_VERSION`) : c'est
-  la source unique. Le `version` de `package.json` le suit.
+  la source unique, et elle peut porter la **lettre** d'une note intermédiaire
+  livrée telle quelle. Le champ `version` de `package.json` n'est qu'un repère
+  d'outillage — npm veut là un numéro sémantique — c'est `APP_VERSION` qui fait foi.
 - L'historique se tient dans **`src/CHANGELOG.md`** : une section **Non publié**
   décrit le travail en cours ; au moment de figer une version, on l'incrémente et
   on ouvre l'entrée datée.

@@ -13,14 +13,19 @@
 //
 // Le texte est écrit ICI, une seule fois : les trois pieds de page le lisent
 // d'ici, et ne peuvent donc pas diverger.
+//
+// La licence et l'adresse de la documentation, elles, appartiennent à l'identité
+// du logiciel (`src/lib/logiciel.js`) : la bannière de démarrage du service les
+// affiche aussi, et un exploitant ne doit pas lire deux adresses différentes
+// selon qu'il regarde le journal du conteneur ou le bas d'une page.
 // ============================================================================
 import { h } from "./dom.js";
 import { state } from "./state.js";
-import { APP_NAME } from "./brand.js";
+import { APP_NAME, LICENCE, DOCUMENTATION } from "../lib/logiciel.js";
 
-// Où l'on explique le logiciel, et sous quelle licence il est publié.
-export const DOCUMENTATION = "https://doc.scribae.eu";
-export const LICENCE = "GPLv3";
+// Réexportés : les pieds de page, et la documentation du projet, les nomment par
+// ce module.
+export { LICENCE, DOCUMENTATION };
 
 // Le réglage vit dans le référentiel (il suit donc les données exportées et
 // importées), et vaut « affichée » tant qu'il n'a pas été éteint : une

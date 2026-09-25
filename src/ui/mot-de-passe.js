@@ -117,7 +117,11 @@ export function panneauMotDePasse({ demoUsers = [] } = {}) {
 
   const ident = h("input", { class: "fr-input", type: "text", autocomplete: "username", spellcheck: "false" });
   const mdp = champMotDePasse("Mot de passe", { help: null });
-  const valider = button("Se connecter", { variant: "primary" });
+  // `type: "submit"` — c'est ce qui fait qu'« Entrée », dans l'identifiant ou le
+  // mot de passe, ouvre la session. Sans bouton de soumission, un formulaire qui
+  // porte plusieurs champs de saisie n'est PAS soumis implicitement par le
+  // navigateur : la touche Entrée n'y faisait rien du tout.
+  const valider = button("Se connecter", { variant: "primary", type: "submit" });
   let enCours = false;
 
   async function soumettre() {
@@ -157,7 +161,8 @@ export function panneauMotDePasse({ demoUsers = [] } = {}) {
     messages.appendChild(alert("error", "Connexion refusée", r.message));
     mdp.input.focus();
   }
-  valider.addEventListener("click", soumettre);
+  // La soumission passe par le FORMULAIRE (voir son `submit` ci-dessous) : c'est
+  // le même chemin pour le bouton et pour la touche Entrée.
 
   const form = h("form", {
     class: "mdp-form",

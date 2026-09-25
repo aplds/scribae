@@ -93,6 +93,19 @@ export const APPELS = [
     attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
   },
 
+  // ------------------------------- la reprise d'un acte ancien (sans signature)
+  {
+    id: "publication-reprise",
+    methode: "POST", chemin: "/v1/actes/inconnu/publication",
+    corps: {
+      html: "x", akn: "<akn/>", eliUri: "eli:/fr/reg/1998/042/iam",
+      dateDocument: "1998-06-12", datePublication: "1998-06-12",
+      kind: "reprise", informative: true, reprise: true,
+    },
+    pourquoi: "une reprise d'acte ancien se publie SANS signature, à titre informatif : les DEUX services doivent connaître cette route et le drapeau « reprise » (le refus d'un acte inconnu est légitime, l'ignorance de la route ne l'est pas)",
+    attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
+  },
+
   // ------------------------------------ les frontières d'autorisation
   {
     id: "ecriture-sans-cle",

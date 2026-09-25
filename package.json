@@ -1,6 +1,6 @@
 {
   "name": "scribae",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
   "description": "Scribae — éditeur de trames et d'actes administratifs. Manifeste du dépôt : l'outillage vit à la racine (scripts/, tests/), le code de l'application sous src/ — les commandes s'exécutent donc DEPUIS LA RACINE.",
   "license": "GPL-3.0-only",

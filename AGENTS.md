@@ -19,7 +19,7 @@ Ce fichier s'adresse à un agent (Claude Code, Mistral Vibe…) qui reprend le d
 | `src/README.md` | **à lire en premier** : architecture, conventions de code, pièges connus, et le flux de travail atelier ↔ dépôt |
 | `src/SPEC.md` | la spécification fonctionnelle complète |
 | `src/TODO.md` | les chantiers ouverts (et ceux faits) |
-| `src/CHANGELOG.md` | le journal des versions — la première entrée datée **sans lettre** donne `APP_VERSION` |
+| `src/CHANGELOG.md` | le journal des versions — son premier titre daté donne `APP_VERSION` |
 | `src/docs/REPRISE.md` | le kit de reprise : points d'entrée, « un seul point de vérité par règle », recettes de livraison |
 | `src/audit/REGISTRE-NON-CONFORMITES.md` | les non-conformités connues, avec statut et preuves — **à lire avant de promettre** |
 | `tests/README.md` | ce que tient chaque épreuve |
@@ -32,6 +32,7 @@ Ce fichier s'adresse à un agent (Claude Code, Mistral Vibe…) qui reprend le d
 ```
 /                       README.md, AGENTS.md, CLAUDE.md, package.json, LICENSE, CNAME, .nojekyll
                         index.html, main.pjs             la page publiée (GitHub Pages) et son code
+compose-exemple/        L'EXEMPLE DE PREMIER DÉPLOIEMENT : MariaDB + l'image publiée, deux services
 scripts/                L'OUTILLAGE : vérifications, analyse statique, générateurs de documents
 tests/                  LES ÉPREUVES transverses (le service éprouve, lui, à côté de son code)
 src/                    LE CODE, servi tel quel par le navigateur
@@ -43,10 +44,11 @@ src/                    LE CODE, servi tel quel par le navigateur
 ```
 
 > **Restes d'une disposition antérieure.** Si vous trouvez `src/scripts/`, `src/tests/`,
-> `src/github/`, `src/package.json`, `src/docs/GITHUB.md`, `src/AGENTS.md` ou `src/CLAUDE.md`
-> dans `src/`, ce sont des **doublons** d'une version précédente (l'outillage vivait sous
-> `src/`) : supprimez-les (`git rm -r …`). L'export ne les produit plus, et un doublon fait
-> corriger le fichier que personne ne lit.
+> `src/compose-exemple/`, `src/github/`, `src/package.json`, `src/docs/GITHUB.md`,
+> `src/AGENTS.md` ou `src/CLAUDE.md` dans `src/`, ce sont des **doublons** d'une version
+> précédente (l'outillage et l'exemple de déploiement vivent à la racine) : supprimez-les
+> (`git rm -r …`). L'export ne les produit plus, et un doublon fait corriger le fichier que
+> personne ne lit.
 
 ## Vérifier — c'est tout ce qui compte
 
@@ -79,17 +81,22 @@ dans la console de la page de l'application (voir `src/docs/INDUSTRIALISATION.md
   seule implémentation** ; quand deux existent (le service de démonstration dans `index.html` et
   le service auto-hébergé dans `src/server/mysql/`), une **épreuve de concordance** les tient
   ensemble (`tests/conformite-service.mjs`).
-- **Deux documents sont ENGENDRÉS** — ne les modifiez jamais à la main :
-  `src/docs/VARIABLES.md` (`node scripts/generer-variables.mjs`) et `src/docs/API.md`
-  (`node scripts/generer-api.mjs`). Corrigez la source (le registre, la description), puis
-  régénérez.
+- **Deux documents et un module sont ENGENDRÉS** — ne les modifiez jamais à la main :
+  `src/docs/VARIABLES.md` (`node scripts/generer-variables.mjs`), `src/docs/API.md`
+  (`node scripts/generer-api.mjs`) et `src/server/mysql/logiciel-engendre.mjs`
+  (`node scripts/generer-logiciel.mjs`). Ce dernier est le **miroir d'identité** du service : son
+  image ne contient que `src/server/mysql/`, elle ne peut donc pas lire `src/lib/version.js` — la
+  bannière de démarrage lit ce miroir, et son épreuve (`logiciel-engendre.test.mjs`) refuse un
+  miroir périmé. Corrigez la source (le registre, la description, `src/lib/version.js`,
+  `src/lib/logiciel.js`), puis régénérez.
 - **Toute variable de déploiement décrite** doit avoir sa ligne dans `src/server/env.example`
   (et `src/server/mysql/env.example`) — c'est éprouvé par `src/server/mysql/variables.test.mjs`.
 - **Tout est en français** : libellés, commentaires, documents, messages d'erreur ; les
   commentaires disent le **pourquoi**, jamais le commentaire inutile.
-- **Une livraison laisse une trace** : `APP_VERSION` dans `src/lib/version.js`, une entrée datée
-  dans `src/CHANGELOG.md`, et les documents que le changement rend faux. Entre deux livraisons,
-  une **note intermédiaire** (`1.6.1q`) suffit et ne touche pas `APP_VERSION`.
+- **Une livraison laisse une trace** : le titre de la première entrée datée du changelog (son
+  numéro, **lettre comprise** s'il s'agit d'une note intermédiaire), `APP_VERSION` dans
+  `src/lib/version.js` — les deux doivent dire la même chose —, et les documents que le
+  changement rend faux.
 - Le **registre d'audit** (`src/audit/REGISTRE-NON-CONFORMITES.md`) se met à jour quand une
   non-conformité est levée — avec la preuve, pas avec une intention.
 

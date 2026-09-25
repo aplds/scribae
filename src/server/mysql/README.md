@@ -97,6 +97,14 @@ cp env.example .env        # mots de passe, jetons
 docker compose up -d --build
 ```
 
+Le service **ouvre son journal sur sa bannière** : la marque du logiciel, son nom, et sous lui la
+**version**, la **licence** et l'adresse de sa documentation. C'est la première chose qu'on
+cherche dans `docker compose logs api` (ou `docker logs`) devant une installation qui se comporte
+mal, et elle est écrite en caractères d'imprimante — lisible dans un terminal étroit, copiable
+dans un rapport de panne. Elle ne paraît **que sur le démarrage du service** : les commandes
+d'administration (`--reconcilier`, `--migrate`, `--mot-de-passe`) gardent un journal qui n'est que
+la trace du geste qu'on y a fait.
+
 ## 3. Le jeton d'API
 
 Le service ne reconnaît que des **empreintes SHA-256**. Pour créer un jeton :
@@ -231,6 +239,16 @@ SELECT acte_id, numero, objet FROM v_acte WHERE service_id = 'svc-regie';
   s'écrasent donc pas en silence.
 - **Synchronisation par différences.** L'application n'envoie que les enregistrements qui ont
   changé (comparaison JSON canonique). L'écriture d'un acte ne réécrit pas le référentiel.
+- **Écritures concurrentes : file par collection, et reprise sur heurt.** La ligne de
+  `sb_collection` est créée par `INSERT … ON DUPLICATE KEY UPDATE revision = revision` — un
+  **verrou exclusif pris d'emblée**, là où `INSERT IGNORE` commençait par un verrou partagé qu'un
+  `SELECT … FOR UPDATE` devait élever (deux écritures simultanées de la même collection se
+  heurtaient alors : `ER_LOCK_DEADLOCK`, et une rafale d'attentes qui saturait le pool). Les
+  écritures d'une collection passent en outre par une **file** dans le service, et une transaction
+  heurtée par la base est **rejouée en entier** (quatre tentatives, pause courte et hasardée) — un
+  contretemps, jamais une écriture perdue. La file est PAR collection : deux collections distinctes
+  écrivent en parallèle. Voir `magasin-mysql.mjs` et `magasin-mysql.test.mjs`, joué sur la base en
+  mémoire (`charge/faux-mysql.mjs`).
 - **État du service en base.** L'état de signature et de publication est un document JSON
   unique (`sb_etat`, une ligne) réécrit à chaque dépôt, signature ou publication : il suit les
   mêmes sauvegardes et la même réplication que les données, et survit au remplacement d'un
@@ -255,6 +273,15 @@ SELECT acte_id, numero, objet FROM v_acte WHERE service_id = 'svc-regie';
   la part **interne** (`originalInterne`) — mentions nominatives du signataire et trace des
   courriels — est conservée avec l'acte et ne se sert que par `GET /v1/actes/{id}/dossier-signature`,
   protégée par le jeton.
+- **La bannière dit la version RÉELLE, et rien d'autre.** `banniere.mjs` est un module **pur** :
+  il compose une chaîne, ne l'écrit nulle part (c'est `server.mjs` qui l'imprime), et ne touche ni
+  au réseau, ni à la base, ni à la console — il s'éprouve donc seul (`banniere.test.mjs`, cadre
+  fermé, largeur constante, ASCII pur, version jamais écrite en dur). Ce qu'il annonce vient du
+  **miroir engendré** `logiciel-engendre.mjs` : l'image du service ne contient que ce dossier et
+  ne peut pas lire `src/lib/version.js`, qui reste la seule source du numéro. Le miroir est écrit
+  par `node scripts/generer-logiciel.mjs` — **jamais à la main** — et
+  `logiciel-engendre.test.mjs` refuse un miroir périmé : un journal qui annoncerait une version
+  que le logiciel n'est pas serait pire qu'un journal muet.
 
 ## 8. Le courriel (serveur SMTP)
 

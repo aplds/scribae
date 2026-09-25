@@ -150,3 +150,46 @@ test("publications locales : la signature est qualifiée, ou reprise de l'acte",
   const muet = actePublie({ id: "s3" });
   assert.equal(mod.publicationLocale([muet], muet.publication.cle).signature, null);
 });
+
+test("une reprise d'acte ancien : le drapeau voyage, et il n'y a AUCUNE signature", async (t) => {
+  const mod = await charger("../src/lib/publications-locales.js");
+  if (!mod) return t.skip("module indisponible hors navigateur");
+
+  // Une reprise publiée, telle que le registre local la garde : elle n'a pas de
+  // paquet signé, son original est la pièce jointe, et sa date est ancienne.
+  const reprise = {
+    id: "reprise-1", kind: "reprise", statut: "publie",
+    auteur: "Yann Dubois", provenance: "Registre des délibérations, 1998",
+    publication: {
+      cle: "reg-1998-042-vsl@1998-06-12-reprise", eliUri: "eli:/fr/reg/1998/042/vsl",
+      kind: "reprise", reprise: true, informative: true,
+      numero: "1998-042", objet: "Règlement intérieur",
+      dateDocument: "1998-06-12", datePublication: "1998-06-12",
+      publieeLe: "2026-09-20T10:00:00.000Z", auteur: "Yann Dubois",
+      provenance: "Registre des délibérations, 1998",
+      originalExterne: { url: "https://exemple.fr/1998-042.pdf", sha256: "abc", nom: "1998-042.pdf" },
+      formats: { html: "<p>texte</p>", akn: "<akn/>", jsonld: "{}", md: "# texte", texte: "texte" },
+    },
+  };
+
+  const liste = mod.publicationsLocales([reprise]);
+  assert.equal(liste.length, 1);
+  assert.equal(liste[0].reprise, true);
+  // Le piège : une reprise PORTE un `originalExterne`, comme un acte du circuit
+  // externe — on ne doit pas en déduire une signature.
+  assert.equal(liste[0].signature, null, "une reprise ne reçoit aucune qualification de signature");
+
+  const rec = mod.publicationLocale([reprise], reprise.publication.cle);
+  assert.equal(rec.reprise, true);
+  assert.equal(rec.provenance, "Registre des délibérations, 1998");
+  assert.equal(rec.originalExterne.url, "https://exemple.fr/1998-042.pdf");
+  assert.equal(rec.kind, "reprise");
+
+  // Un enregistrement ANTÉRIEUR (ou une réponse de dépôt qui ne portait pas
+  // `kind`) : le genre se lit alors sur la reprise elle-même — la présenter
+  // comme une « version initiale » serait faux.
+  const sansKind = { ...reprise, publication: { ...reprise.publication, kind: undefined } };
+  const n = mod.publicationsLocales([sansKind])[0];
+  assert.equal(n.kind, "reprise");
+  assert.equal(n.reprise, true);
+});

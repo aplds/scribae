@@ -15,6 +15,7 @@ node --test tests/            # ce dossier seul
 | `purs.test.mjs` | les modules purs : expressions, assainissement, numérotation, version, comptes, signature… et la **concordance** entre le client et le service (OIDC, champs d'API) |
 | `abrogation-annexes.test.mjs` | les annexes d'abrogation |
 | `amorcage-demo.test.mjs` | l'amorçage du jeu de démonstration |
+| `competence-signature.test.mjs` | **qui signe** (le titulaire de la chaîne, porteur de la qualité), **qui est dans la file** (à signer, suivis, et l'acte sans signataire explicite), et **qui accède** (les qualités cumulées d'un visiteur) |
 | `qualification-signature.test.mjs` | la qualification affichée d'une signature (NC-IV-001) |
 | `publications-locales.test.mjs` | le repli local du recueil public |
 | `pilote-persistance.test.mjs` | la persistance du pilote (base locale et base distante) |

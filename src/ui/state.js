@@ -1,7 +1,7 @@
-import { bootstrap, saveConfig, saveTrames, saveActes, saveUsers, saveSession, saveInformations, initStorage } from "../lib/store.js";
+import { bootstrap, saveConfig, saveTrames, saveActes, saveReprises, saveUsers, saveSession, saveInformations, initStorage } from "../lib/store.js";
 import * as db from "../lib/db/index.js";
 import { seedConfigVierge } from "../lib/seed.js";
-import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur } from "../lib/users.js";
+import { can as userCan, seedUsers, accountUsable, syncDemoAccounts, fullName, hasRole, rolesOf, roleLabel, estVisiteur, estCumulable, VISITEUR } from "../lib/users.js";
 import { demoAccountsDisabled, isOidc, sessionDeService, setDeploiementAuth } from "../lib/auth.js";
 import { setDeploiementConfig, appliquerOptions } from "../lib/deploiement-config.js";
 import * as motdepasse from "../lib/motdepasse.js";
@@ -28,6 +28,11 @@ export const state = {
   config: null,
   trames: [],
   actes: [],
+  // Les REPRISES D'ACTES ANCIENS (voir src/lib/reprise.js) : des actes
+  // antérieurs au recueil, écrits à la main et publiés à titre informatif. Elles
+  // vivent hors du registre des actes — leur collection propre les tient à
+  // l'écart des listes, du chrono et de la recherche.
+  reprises: [],
   users: [],
   // Les INFORMATIONS publiées au recueil public (les billets de
   // l'administration) : elles vivent hors du registre des actes (voir
@@ -80,12 +85,14 @@ export function redrawView() {
 const persistConfig = debounce(() => saveConfig(state.config), 400);
 const persistTrames = debounce(() => saveTrames(state.trames), 400);
 const persistActes = debounce(() => saveActes(state.actes), 400);
+const persistReprises = debounce(() => saveReprises(state.reprises), 400);
 const persistInformations = debounce(() => saveInformations(state.informations), 400);
 
 export function touch(what = "config", { rerender = true } = {}) {
   if (what === "config") persistConfig();
   if (what === "trames") persistTrames();
   if (what === "actes") persistActes();
+  if (what === "reprises") persistReprises();
   if (what === "informations") persistInformations();
   if (rerender) emit();
 }
@@ -169,10 +176,11 @@ function appliquerMarqueDeploiement(config) {
 
 // Charge les données du registre et rouvre la session enregistrée sur ce poste.
 async function chargeDonnees() {
-  const { config, trames, actes, users, session, informations, firstRun } = await bootstrap();
+  const { config, trames, actes, reprises, users, session, informations, firstRun } = await bootstrap();
   state.config = config;
   state.trames = trames;
   state.actes = actes;
+  state.reprises = reprises || [];
   state.users = users;
   state.informations = informations || [];
   const fromSession = session?.userId ? users.find((u) => u.id === session.userId) : null;
@@ -417,6 +425,15 @@ export const competenceDeSignature = (acte) =>
 export function visibleActes() {
   const tous = can("actes.tous");
   const me = state.user;
+  // Un compte qui ne porte QUE des qualités (et, au besoin, le profil
+  // « Visiteur ») n'a pas d'atelier au sens ordinaire : il n'a que son CHAMP DE
+  // COMPÉTENCE — le champ de signature. C'est le cas du signataire extérieur :
+  // sa qualité lui ouvre l'écran de signature, et il n'y voit que les actes dont
+  // sa signature relève. Le périmètre par service ne le concerne pas : il ne
+  // verrait, sinon, tout ce qui est « transverse » (les actes sans service),
+  // c'est-à-dire rien de ce qui le regarde.
+  const qualitesSeules = !rolesOf(me).length
+    || rolesOf(me).every((r) => estCumulable(r) || r === VISITEUR);
   return state.actes.filter((a) => {
     if (estCorbeille(a)) return false;
     // Un acte SOUMIS À RÉVISION est visible par les réviseurs compétents pour
@@ -432,8 +449,18 @@ export function visibleActes() {
     const parCertification = !!(versionSigneeDe(a) && a.statut !== "publie")
       && peutReviser(state.config, me, { trame: trameById(a.trameId), acte: a });
     // Un acte dont MA signature relève m'est ouvert de la même façon : ma
-    // personne figure dans sa chaîne de signature.
-    const parSignature = !tous && !!a.values?.signataire && competenceDeSignature(a).ok;
+    // personne figure dans sa chaîne de signature. Le signataire EFFECTIF de
+    // l'acte est celui que l'acte désigne (`values.signataire`) — ou, à défaut,
+    // le SIGNATAIRE PRINCIPAL de l'entité (Administration › Entités). La
+    // compétence les couvre tous deux : c'est elle qui décide, et non la
+    // présence d'un `values.signataire` (un acte pris sans signataire explicite
+    // a bel et bien un signataire : l'autorité de son entité).
+    const parSignature = !tous && competenceDeSignature(a).ok;
+    // Un compte à qualités seules n'a pas d'atelier : il n'a que les CHAMPS de
+    // ses qualités — celui de la signature, et celui de la révision quand il est
+    // aussi réviseur. Le périmètre ordinaire (par service) ne s'applique pas :
+    // il ouvrirait au signataire extérieur des actes qui ne le regardent pas.
+    if (qualitesSeules) return parRevision || parCertification || parSignature;
     if (!tous && a.createdBy && a.createdBy !== me?.id && !parRevision && !parSignature && !parCertification) return false;
     if (parRevision || parSignature || parCertification) return true;
     return inScope(state.config, me, a);

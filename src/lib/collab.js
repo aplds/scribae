@@ -171,9 +171,21 @@ async function ecrirePresence(payload) {
   }
 }
 
-export async function battre() {
-  if (!moi) return;
-  await ecrirePresence({
+// Le battement de cœur, FUSIONNÉ. `battre()` est appelé par l'intervalle de
+// 25 s, par le retour de visibilité de l'onglet, par un changement d'écran et
+// par l'ouverture d'un brouillon — autant de sources qui, rapprochées, lançaient
+// plusieurs écritures de `presence` coup sur coup. Chacune relit la collection
+// avant d'écrire (voir `ecrirePresence`) : deux battements concurrents se
+// relisaient et se réécrivaient l'un l'autre pour rien, et chaque écriture
+// supplémentaire allait charger la ligne `presence` du service. Un battement à
+// la fois suffit : si un second est demandé pendant qu'un battement est en vol,
+// on NOTE qu'il en faudra un après (l'écran ou l'acte a changé entre-temps), et
+// la boucle le refait — une seule fois de plus, jamais une pile.
+let battementEnVol = false;
+let battementAttendu = false;
+
+function presenceDuPoste() {
+  return {
     id: moi.id,
     userId: moi.id,
     byName: moi.name,
@@ -183,7 +195,22 @@ export async function battre() {
     acteId: vue.acteId || "",
     acteLabel: vue.acteLabel || "",
     ecran: vue.ecran || "",
-  });
+  };
+}
+
+export async function battre() {
+  if (!moi) return;
+  if (battementEnVol) { battementAttendu = true; return; }
+  battementEnVol = true;
+  try {
+    do {
+      battementAttendu = false;
+      if (!moi) break;
+      await ecrirePresence(presenceDuPoste());
+    } while (battementAttendu);
+  } finally {
+    battementEnVol = false;
+  }
   avertir();
   prevenir();
 }

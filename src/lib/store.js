@@ -636,6 +636,14 @@ export const loadTrames = () => db.read("trames");
 export const saveTrames = (t) => db.write("trames", t);
 export const loadActes = () => db.read("actes");
 export const saveActes = (a) => db.write("actes", a);
+// LES REPRISES D'ACTES ANCIENS : des actes antérieurs au recueil, écrits à la
+// main par un rédacteur et publiés à titre informatif (voir src/lib/reprise.js).
+// Elles vivent dans leur propre collection : une reprise ne suit ni le
+// parapheur, ni la signature, ni la numérotation courante, et ne doit donc pas
+// se mêler au registre des actes — ni à ses listes, ni à son chrono, ni à sa
+// recherche.
+export const loadReprises = () => db.read("reprises");
+export const saveReprises = (l) => db.write("reprises", l);
 // Les INFORMATIONS publiées au recueil : des billets (actualités, avis,
 // communications) que l'administration écrit et publie, à côté des actes. Elles
 // vivent dans leur propre collection — elles ne sont ni des actes ni des trames,
@@ -652,6 +660,7 @@ export async function bootstrap() {
   let config = await loadConfig();
   let trames = await loadTrames();
   let actes = await loadActes();
+  let reprises = await loadReprises();
   let informations = await loadInformations();
   let users = await loadUsers();
   const session = await loadSession();
@@ -684,6 +693,10 @@ export async function bootstrap() {
     }
   }
   if (!actes) { actes = []; await saveActes(actes); }
+  // Les REPRISES : même règle que les actes — une liste absente est semée VIDE.
+  // Aucune reprise de démonstration : un acte ancien ne se fabrique pas, et le
+  // jeu fictif n'a pas à en inventer.
+  if (!reprises) { reprises = []; await saveReprises(reprises); }
 
   // Les INFORMATIONS du recueil public — les billets de l'administration. Comme
   // les trames et les actes, elles suivent le jeu de démonstration : semées à
@@ -839,7 +852,7 @@ export async function bootstrap() {
   // donc persisté ici : retirer une variable du `.env` la fait disparaître au
   // démarrage suivant.
   appliquerOptions(config);
-  return { config, trames, actes, users, session, informations, firstRun };
+  return { config, trames, actes, reprises, users, session, informations, firstRun };
 }
 
 // Remise à zéro de toutes les collections. `garderComptes` épargne la collection

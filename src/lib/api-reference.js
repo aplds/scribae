@@ -248,8 +248,8 @@ export const API_REFERENCE = [
     id: "db-lire", groupe: "persistance", methode: "GET", chemin: "/v1/db/collections/{collection}", auth: "lecteur",
     resume: "Lire une collection",
     service: "auto-heberge",
-    description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision. Les collections sont `config`, `trames`, `actes`, `users`, `meta`, `journal`, `presence`. En mode « password » ou « oidc », la lecture exige une session ouverte.",
-    params: [{ nom: "collection", type: "string", description: "config | trames | actes | users | meta | journal | presence" }],
+    description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision. Les collections sont `config`, `trames`, `actes`, `reprises`, `users`, `meta`, `journal`, `presence`, `informations`. En mode « password » ou « oidc », la lecture exige une session ouverte.",
+    params: [{ nom: "collection", type: "string", description: "config | trames | actes | reprises | users | meta | journal | presence | informations" }],
     reponses: [{ code: 200, description: "Les enregistrements de la collection" }, { code: 401, description: "Session absente" }, { code: 404, description: "Collection inconnue" }],
   },
   {
@@ -272,13 +272,14 @@ export const API_REFERENCE = [
   {
     id: "actes-deposer", groupe: "actes", methode: "POST", chemin: "/v1/actes", auth: "redacteur",
     resume: "Déposer un acte finalisé",
-    description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable: false` rend la publication impossible, même après signature : c'est le cas d'un acte individuel.",
-    corps: { akn: "<akomaNtoso>…</akomaNtoso>", numero: "2026-412-VSL", objet: "Tarifs de la restauration scolaire", nature: "arrete", entityId: "ent-vsl", entityName: "Ville de Valmont-sur-Loire", dateSignature: "2026-09-22", trameId: "trame-tarifs", publishable: true, controleLegalite: false },
+    description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable: false` rend la publication impossible, même après signature : c'est le cas d'un acte individuel. Le champ `reprise: true` déclare le dépôt comme la REPRISE d'un acte ancien : il autorise sa publication sans signature (voir « Publier un acte au recueil »).",
+    corps: { akn: "<akomaNtoso>…</akomaNtoso>", numero: "1998-042", objet: "Création du service de restauration scolaire", nature: "arrete", entityId: "ent-vsl", entityName: "Ville de Valmont-sur-Loire", dateSignature: "2026-09-22", trameId: "trame-tarifs", publishable: true, controleLegalite: false },
     reponses: [{ code: 201, description: "Acte déposé" }, { code: 200, description: "Dépôt identique déjà en circuit (idempotent)" }, { code: 413, description: "Document trop volumineux" }],
     champs: [
       { cle: "akn", type: "string", description: "Le document Akoma Ntoso 3.0 (obligatoire)" },
       { cle: "publishable", type: "booléen", description: "false : acte individuel, jamais publié au recueil" },
       { cle: "controleLegalite", type: "booléen", description: "true : la publication attendra la transmission" },
+      { cle: "reprise", type: "booléen", description: "true : reprise d'un acte ancien, publiable sans signature" },
     ],
   },
   {
@@ -385,9 +386,9 @@ export const API_REFERENCE = [
   {
     id: "publier", groupe: "publication", methode: "POST", chemin: "/v1/actes/{id}/publication", auth: "redacteur",
     resume: "Publier un acte au recueil",
-    description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée tant que l'acte n'est pas signé (chaîne d'intégrité), si l'acte a été déclaré non publiable (acte_non_publiable), s'il était soumis au contrôle de légalité et n'a pas été transmis (transmission_absente), et si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon. Le champ `juridique: false` publie un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) : le service n'inscrit alors aucune date d'opposabilité — il l'impose vide —, et le recueil le présente comme un document, sans opposabilité.",
+    description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée tant que l'acte n'est pas signé (chaîne d'intégrité), si l'acte a été déclaré non publiable (acte_non_publiable), s'il était soumis au contrôle de légalité et n'a pas été transmis (transmission_absente), et si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon. Le champ `juridique: false` publie un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) : le service n'inscrit alors aucune date d'opposabilité — il l'impose vide —, et le recueil le présente comme un document, sans opposabilité. Les champs `informative: true` et `reprise: true` publient la REPRISE d'un acte ancien : la publication est alors acceptée sans signature, à condition que le dépôt ait lui-même porté `reprise: true` (sinon `acte_non_reprise`), elle ne rend rien opposable, et l'original conservé voyage dans `originalExterne` (le service le garde comme la pièce qui fait foi).",
     params: [{ nom: "id", type: "string", description: "Identifiant de l'acte déposé" }],
-    corps: { html: "<article>…</article>", akn: "…", original: { document: { akn: "…" }, signatures: [] }, datePublication: "2026-09-22", recueil: "", themeId: "fam-tarifs", themeLabel: "Tarifs" },
+    corps: { html: "<article>…</article>", akn: "…", original: { document: { akn: "…" }, signatures: [] }, datePublication: "1998-06-12", recueil: "", themeId: "fam-tarifs", themeLabel: "Tarifs", reprise: true, informative: true, originalExterne: { url: "https://…/original.pdf", sha256: "…", nom: "original.pdf" }, provenance: "Registre des délibérations, 1998" },
     reponses: [{ code: 200, description: "Publication déposée" }, { code: 409, description: "Chaîne d'intégrité rompue" }, { code: 422, description: "Date de publication antérieure à la signature" }],
   },
   {

@@ -2,7 +2,7 @@
 titre: Registre des non-conformités — Scribae
 version: 3
 cree_le: 2026-09-21
-mis_a_jour: 2026-09-23 (second traitement du plan d'action de la 3e campagne — livraisons 1.6.1e à 1.6.1q)
+mis_a_jour: 2026-09-29 (1.6.1r et 1.6.1s : NC-II-014 ouverte et levée aussitôt ; 1.6.1t et 1.6.1u : aucune fiche ouverte ; 1.6.1v : aucune fiche ouverte — le deadlock des écritures est corrigé et couvert par des épreuves ; 1.6.1w : aucune fiche nouvelle — la porte de signature de NC-II-006 est renforcée (le titulaire seul, porteur de la qualité) et son parcours complet est rejoué)
 cadre: src/audit/PROMPT-AUDIT-SCRIBAE.md
 ---
 
@@ -37,10 +37,10 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Cote | Nombre | Ouvertes | En cours | Levées |
 |---|---|---|---|---|
 | Bloquante | 3 | 0 | 0 | 3 |
-| Majeure | 10 | 0 | 3 | 7 |
+| Majeure | 11 | 0 | 3 | 8 |
 | Mineure | 11 | 0 | 3 | 8 |
 | Observation | 12 | 1 | 2 | 9 |
-| **Total** | **36** | **1** | **8** | **27** |
+| **Total** | **37** | **1** | **8** | **28** |
 
 > Les nombres de cette synthèse sont **recalculés sur les fiches** à chaque campagne *et* à chaque
 > traitement d'une proposition du plan d'action. Le premier traitement du 2026-09-23 (livraison
@@ -122,6 +122,25 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 > Le parc passe à **346 épreuves sur 28 fichiers**
 > (11 sautées là où le dépôt n'est pas lisible ou `node:crypto` est incomplet), et `comptes.test.mjs`
 > passe de 27 à **39 épreuves**.
+
+> La livraison **1.6.1r** (un **exemple de déploiement** à la racine du dépôt : `compose-exemple/`,
+> deux services et trois commandes, rien à construire) n'a **changé aucun statut** : elle ne touche à
+> aucun des constats de la 3e campagne.
+
+> La livraison **1.6.1s** — la **reprise des actes anciens** — ouvre **une fiche, NC-II-014**, et la
+> porte aussitôt en « **Levée** ». Le défaut n'est pas venu de la campagne mais du travail lui-même :
+> en ajoutant la collection `reprises` au magasin **local** du navigateur (`src/lib/db/local.js`), il
+> est apparu que la table des dossiers ne déclarait **pas** `informations` (présente depuis la
+> 1.5.3) : le proxy de stockage range une collection sous le nom de sa propriété, si bien que toute
+> collection non déclarée écrivait dans le **même dossier partagé** (`undefined`). `informations` y
+> vivait donc, et `reprises` aurait écrit **par-dessus**. Le dossier de chacune est désormais déclaré,
+> `dossierDe()` ne renvoie plus d'alias pour une collection inconnue (repli en mémoire seulement), et
+> les données héritées sont reprises une fois, sans perte. La fiche porte le constat, la preuve et la
+> recommandation — c'est un écart de **fiabilité** (intégrité des données locales) qu'un audit aurait
+> relevé tôt ou tard, et il est désormais tenu par une épreuve. Le parc de tests passe à **358
+> épreuves sur 29 fichiers** (11 sautées là où le dépôt n'est pas lisible), chacune verte, chaque
+> fichier éprouvé isolément — dont `src/tests/reprise.test.mjs` (9 épreuves) et deux épreuves de plus
+> pour le service (`src/server/mysql/actes.test.mjs`).
 
 ## Historique des audits
 
@@ -392,7 +411,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Très haute |
 | Échéance | 30–90 jours |
-| Statut | **Levée** (2026-09-21b) — porte de compétence posée sur les trois chemins de signature (`src/ui/views/signature.js:1150`, `:1264`, `:2187`), opérateur tracé dans le dossier interne. Parcours complet non rejoué (aucun acte en attente de signature au jeu de démonstration) : le refus est établi par les messages et la lecture de code. |
+| Statut | **Levée** (2026-09-21b) — porte de compétence posée sur les trois chemins de signature (`src/ui/views/signature.js:1150`, `:1264`, `:2187`), opérateur tracé dans le dossier interne. Parcours complet non rejoué (aucun acte en attente de signature au jeu de démonstration) : le refus est établi par les messages et la lecture de code. **Renforcée (1.6.1w)** — la porte ne se contentait pas d'« être dans la chaîne » : elle exige désormais d'être le **titulaire** (dernier étage) **et** de porter la qualité de signataire (`peutSignerEffectivement`, `src/lib/signataires.js`), et l'outil du prestataire comme la fenêtre de signature simple ne s'ouvrent que pour lui. Le parcours complet est cette fois **rejoué dans l'aperçu** : un administrateur lié à l'autorité de tête, et un délégant, se voient **refuser** la signature de l'acte d'un autre (journal `essai` de séance) ; un acte validé par son réviseur part bien en signature, et le titulaire la donne. |
 | Origine | Audit 2026-09-21 (confirme et qualifie le point d'entrée « usurpation du signataire » du prompt §4.2) |
 
 ### NC-II-007 — Injection HTML stockée dans le recueil public (XSS)
@@ -506,6 +525,22 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Échéance | 0–30 jours |
 | Statut | **Levée** (2026-09-23) — le chapeau « **document de travail** » ouvre le présent registre, `src/audit/README.md` et chacun des trois rapports ; `docs/GITHUB.md` (le README du dépôt) porte une section **Audit** qui renvoie à `src/audit/README.md`, à la **synthèse** et au **plan d'action** du rapport le plus récent, en avertissant qu'une fiche lue hors de son cadre se cite à contresens. Dater l'état de la chaîne dans la fiche de tête du dépôt reste à faire : c'est la proposition P-38, échéance 30–90 jours. |
 | Origine | Audit 2026-09-23 (3e campagne) |
+
+### NC-II-014 — Le magasin local range plusieurs collections dans un même dossier
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | II.1 — Cartographie et classification des données ; II.5 — Intégrité des données |
+| Constat | Le pilote de persistance **local** (IndexedDB) range chaque collection dans son propre dossier, par une table écrite à la main. Cette table ne déclarait ni `informations` (collection ajoutée en 1.5.3) ni `reprises` : le proxy de stockage range une collection sous le **nom de sa propriété**, donc `FOLDERS[name]` valant `undefined`, **toutes les collections non déclarées écrivaient dans le même dossier partagé** (clé `undefined`). Les billets du recueil public vivaient donc dans ce dossier commun, et la nouvelle collection `reprises` y aurait écrit **par-dessus** — la perte n'a pas été observée dans la version livrée (`informations` était la seule collection non déclarée en usage), mais elle était ouverte à la première collection ajoutée sans toucher la table. |
+| Exigence de référence | ISO/IEC 25010 (fiabilité, intégrité) ; ISO/IEC 27002 (protection des données) ; RGPD (exactitude). |
+| Preuve | `src/lib/db/local.js` (table `FOLDERS`, `dossierDe`) ; relevé dans l'aperçu de l'atelier : `kv["undefined"]` contenait les quatre billets de démonstration (`info-demo-*`) et `kv["actesReprises"]` était vide — après correction, `informations` est migré une fois vers `actesInformations` et `reprises` vit dans `actesReprises`, sans perte. |
+| Recommandation | Déclarer **chaque** collection de `contract.js` dans la table des dossiers ; faire échouer `dossierDe` **sans aliasing** pour une collection inconnue (repli en mémoire, et non écriture dans un dossier partagé) ; reprendre une fois les données héritées du dossier commun, en les marquant pour ne pas les confondre. Tenu par une épreuve (`src/tests/reprise.test.mjs`). |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | Faite |
+| Statut | **Levée** (2026-09-25, livraison 1.6.1s) — les dossiers `informations` et `reprises` sont déclarés, `dossierDe` ne renvoie plus d'alias pour une collection inconnue, et les données héritées du dossier commun sont reprises une fois (`HERITAGE`, `reprendreHeritage`). |
+| Origine | Constat de développement (ajout de la collection `reprises`), hors campagne |
 
 ## Chapitre III — Qualité, accessibilité et expérience (qualiticien)
 

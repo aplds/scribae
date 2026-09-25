@@ -165,6 +165,12 @@ insensible à la latence de la base — et c'est un choix à préserver.
 | `src/server/charge/statistiques.mjs` | le minimum et le maximum d'un seau se calculent **en boucle**, jamais par `Math.min(…valeurs)` | la saturation range des dizaines de milliers de durées dans un même seau ; l'étalement d'un tel tableau en arguments fait sauter la pile |
 | `src/server/charge/faux-mysql.mjs` | la latence simulée **compte dans le temps passé dans la base** | sans quoi un rapport sur base distante annonçait « 0,1 % du temps » alors que l'aller-retour est précisément ce qu'on mesure |
 | `src/server/charge/client.mjs` | chaque poste porte sa propre adresse (`x-forwarded-for`) | ne pas faire accuser le limiteur de débit d'avoir refusé des gestes normaux |
+| `src/server/mysql/magasin-mysql.mjs` | la ligne de collection est créée par `INSERT … ON DUPLICATE KEY UPDATE revision = revision` (verrou **exclusif** d'emblée) ; les écritures d'une collection passent par une **file**, et une transaction heurtée est **rejouée** | `INSERT IGNORE` prenait un verrou **partagé** qu'il fallait ensuite élever en exclusif : deux écritures simultanées de la même collection se heurtaient (`ER_LOCK_DEADLOCK`), saturaient le pool de connexions et faisaient paraître le service **figé** |
+| `src/server/mysql/comptes.mjs` | même idiome à l'écriture d'un compte | la même élévation de verrou y guettait |
+| `src/lib/db/index.js` | les écritures d'une **même collection** se suivent, une à la fois | deux écritures concurrentes partaient du même index connu, calculaient le même delta et se rejouaient l'une l'autre |
+| `src/lib/collab.js` | les battements de cœur de présence sont **fusionnés** (un en vol, un seul rattrapage) | l'intervalle, le retour de visibilité, le changement d'écran et l'ouverture d'un brouillon écrivaient `presence` à répétition |
+| `src/server/charge/faux-mysql.mjs` | la base en mémoire connaît `sb_migrations` (création, insertion, lecture par version) | `migrations.mjs` interroge cette table depuis que les migrations sont versionnées : `--sans-base` échouait à l'application du schéma, et aucune campagne ne pouvait se jouer |
+| `src/server/charge/charge.test.mjs` | une épreuve tient l'interprétation de `sb_migrations` | qu'un ajout de migration ne la casse pas en silence |
 
 ## 5. Les réglages qui en découlent
 

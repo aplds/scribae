@@ -254,7 +254,13 @@ export function createStoreMysql(pool) {
     // La révision suit celle de la collection, comme le fait `sync` : le client
     // qui lira la collection ensuite verra un enregistrement cohérent.
     async ecrireCompte(compte) {
-      await pool.query("INSERT IGNORE INTO sb_collection (name, revision) VALUES ('users', 0)");
+      // MÊME IDIOME QUE LE MAGASIN (voir magasin-mysql.mjs) : `ON DUPLICATE KEY
+      // UPDATE` prend d'emblée le verrou EXCLUSIF sur la ligne de la collection,
+      // là où `INSERT IGNORE` commençait par un verrou PARTAGÉ qu'un `UPDATE`
+      // devait ensuite élever — deux écritures simultanées se heurtaient alors
+      // (`ER_LOCK_DEADLOCK`). `revision = revision` ne change rien : c'est le
+      // no-op qui ne sert qu'à prendre le verrou.
+      await pool.query("INSERT INTO sb_collection (name, revision) VALUES ('users', 0) ON DUPLICATE KEY UPDATE revision = revision");
       const [[coll]] = await pool.query("SELECT revision FROM sb_collection WHERE name = 'users'");
       const revision = (Number(coll?.revision) || 0) + 1;
       await pool.query(

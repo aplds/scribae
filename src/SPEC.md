@@ -742,6 +742,87 @@ Rien n'est codé pour un document en particulier : la nature est une **donnée**
 c'est elle — non le logiciel — qui décide de la portée. Une collectivité qui publie ses verbatims au
 recueil n'a donc rien à paramétrer : elle choisit la nature, et le reste suit.
 
+#### 2.2.4 quinquies La reprise d'un acte ancien (avant l'informatique)
+
+Une installation neuve n'a pas un recueil vide : la collectivité a derrière elle des décennies
+d'actes, signés sur papier, publiés à l'affichage ou dans un bulletin qu'on ne trouve plus. La
+**REPRISE** les fait entrer au recueil public pour qu'on les **trouve** et qu'on les **lise** — sans
+les faire passer pour ce qu'ils ne sont pas. Ses règles pures vivent dans **`src/lib/reprise.js`**,
+son écran dans **`src/ui/views/reprises.js`**, sa collection dans **`state.reprises`** (collection
+`reprises` au service).
+
+**Trois règles, et elles tiennent ensemble.**
+
+1. **C'est le RÉDACTEUR qui reprend l'acte, et il écrit son texte LIBREMENT** (`analyserTexteLibre`).
+   Un acte de 1998 n'a pas été composé dans une trame d'aujourd'hui : on ne l'enferme pas dans un
+   formulaire qui n'existait pas. Le texte se saisit, avec trois repères — une ligne blanche sépare
+   les blocs, une ligne qui est **exactement** un intitulé d'article (« Article 3 », « Article 3 —
+   Objet ») ouvre un article, « `#` », « `##` », « `###` » ouvrent une division, « `-` », « `*` »,
+   « `•` » font une liste. Tout le reste est un paragraphe, et les lignes consécutives s'y
+   replient : le texte d'un acte se **colle** sans être réécrit.
+2. **La DATE DE PUBLICATION se règle À LA MAIN, et elle est nécessairement ANTÉRIEURE au jour**
+   (`dateMaxReprise` = la veille, `dateRepriseValide`). On ne republie pas un acte de 1998 à la date
+   d'aujourd'hui : le recueil mentirait sur sa chronologie, et ferait courir des délais de recours à
+   compter du jour. La règle est tenue par `validerReprise`, qui refuse le geste — et l'écran la
+   montre sous le champ, avec la borne (`max`) dans le champ de date lui-même.
+3. **L'ORIGINAL SIGNÉ est joint à la main** : le PDF, ou le scan de la pièce papier
+   (`carteOriginal`). L'application en calcule l'**empreinte SHA-256** (`crypto.subtle`) et le
+   dépose par `upload-plugin` ; l'écran en montre le fichier, la taille, l'empreinte, et permet de
+   l'ouvrir ou de le retirer. Ce qui fait foi, c'est cette pièce — la reprise ne signe rien, elle
+   **conserve la preuve de ce qui a été signé**.
+
+**Ce qui s'ensuit : la publication est IMMÉDIATE, et INFORMATIVE.** `publier` fait deux appels, dans
+la foulée du bouton — le **dépôt** (`POST /v1/actes`, avec `reprise: true`, sans circuit de
+signature) puis la **publication** (`POST /v1/actes/{id}/publication`, avec `informative: true`,
+`reprise: true`, et `originalExterne` qui porte la pièce conservée). Le service accepte la
+publication **sans signature** parce que le dépôt s'est déclaré reprise ; un client qui prétendrait
+publier une reprise sur un acte déposé autrement est refusé (`acte_non_reprise`, 409) — le service
+ne croit pas le client sur ce point. La publication **ne touche ni à l'opposabilité ni à l'état de
+l'acte déposé** : `dateOpposabilite` reste vide, aucun délai ne court.
+
+**L'identifiant ELI est daté de l'acte, non du jour.** `numeroPourEli` garde le numéro d'origine tel
+quel (« 1998-042 ») ; `anneeDuNumero` en prend l'**année** — 1998, pas 2026 —, et c'est elle qui
+donne à l'acte son adresse de recueil (`eli:/fr/arr/1998/0042/vsl`). Un numéro qui ne porte pas
+d'année se voit recomposer une séquence stable (les chiffres restants, ou une empreinte FNV-1a du
+numéro et du titre) : deux reprises ne se disputent jamais la même adresse. Le **numéro est donc
+requis** (c'est lui qui bâtit l'ELI), avec le titre, le texte, la date et l'original.
+
+**Un TEXTE AUTONOME est une reprise de genre « annexe »** (`annexe: true`) : un règlement intérieur,
+une charte, un texte qui se consulte **pour lui-même**. `actTypeEli` lui donne alors le type
+`reglement`, et son adresse est celle d'un règlement (`eli:/fr/reg/1996/0001/vsl`). C'est ce qui
+distingue une reprise d'une **annexe ordinaire** (§ 2.2.4 ter, § 2.2.4) : celle-ci est adoptée par
+un acte **vivant dans l'application**, tandis qu'un texte ancien repris n'a, ici, **aucun acte
+d'adoption** — d'où sa place au recueil, à titre informatif.
+
+**La mention de bas de page est l'exigence centrale.** Une reprise se publie **à titre informatif
+uniquement**, parce qu'il s'agit de la reprise d'un acte antérieur. `MENTION_REPRISE`
+(`src/lib/reprise.js`) est la **phrase unique** que le lecteur trouve en bas de la page publiée
+(`buildWebVersion`, `.foot`), et `MENTION_REPRISE_COURTE` la variante courte des vignettes et du
+**JSON-LD** (`rdfs:comment`). Le recueil la reprend telle quelle dans un encadré en fin d'article
+(`blocMentionReprise`, `src/ui/views/acte-publie.js`), avec la provenance de l'original :
+« *Acte publié à titre informatif uniquement… seul l'original signé, conservé par la collectivité et
+joint à cette page, fait foi.* »
+
+**Ce que le recueil en montre.** La notice d'une reprise (`notice`) est celle d'un acte, augmentée de
+ce qui dit qu'elle en est une : les marques « Reprise d'un acte ancien », « texte informatif » et
+« reprise publiée », la **date de publication d'origine**, la date d'entrée au recueil, la
+**provenance**, qui a fait la reprise, et la **phrase de mise en garde** ; rien de la **signature**
+(l'acte ancien a été signé hors de l'application) ni de l'**entrée en vigueur** (aucun délai ne
+court). Le fil d'Ariane la classe sous « Reprises d'actes anciens » (page publiée **et** recueil), le
+panneau « Original signé » mène à la pièce conservée, et la **liste du recueil** la signale d'une
+marque « reprise » — sa date est ancienne, et sans ce repère elle passerait pour un acte du jour.
+`signatureDe` (`src/lib/publications-locales.js`) rend **nul** pour une reprise : sa pièce jointe
+n'est pas une signature « externe ».
+
+**Ce qu'une reprise n'est pas.** Elle ne suit **aucun circuit** : ni parapheur, ni révision, ni
+signature, ni transmission au contrôle de légalité. Elle ne se **modifie** pas (pas d'acte
+modificatif) et ne s'**abroge** pas ; une reprise publiée se **retire** (dépublication, réservée à
+l'administration) et se reprend. Elle vit dans sa **propre collection**, et ne se mêle donc ni aux
+listes d'actes, ni au chrono, ni à la recherche des actes en cours. Enfin, le geste est **réservé
+aux rédacteurs** : permission **`actes.reprendre`** (rôles de `actes.rediger` — administrateur,
+éditeur, réviseur, rédacteur), et un rédacteur ne voit que **ses** reprises (`reprisesVisibles`,
+`can("actes.tous")`).
+
 #### 2.2.5 Commentaires : annoter un article, citer un passage
 
 Un commentaire (`Note`) est posé sur un **bloc** de la trame — un article, un paragraphe, un
@@ -1323,11 +1404,15 @@ avec le **compte** du signataire — sans prestataire, sans papier. C'est la ré
 ordinaire d'une collectivité qui n'a ni API de signature branchée, ni envie de faire circuler
 des pièces.
 
-**Le geste.** Depuis « Ma signature » (« **Vérifier et signer** ») comme depuis le circuit de
-l'acte, `engagerSignatureSimple` franchit les mêmes portes que le circuit électronique
+**Le geste, en deux temps.** Depuis « Ma signature » (« **Vérifier et signer** ») comme depuis le
+circuit de l'acte, `engagerSignatureSimple` franchit les mêmes portes que le circuit électronique
 (parapheur, puis révision), **dépose** l'acte au service (`POST /v1/actes`, `signatureMode:
-"simple"`), **ouvre** le circuit (`POST /v1/actes/{id}/signature`, `niveau: "simple"`), puis
-ouvre la **fenêtre de signature** (`fenetreSignatureSimple`) : le document sous les yeux,
+"simple"`) et **ouvre** le circuit (`POST /v1/actes/{id}/signature`, `niveau: "simple"`). Envoyer
+et signer sont deux choses : l'**envoi** est un geste de la **rédaction** — c'est par lui que le
+réviseur, en validant l'acte, le fait partir ; la **signature** n'appartient qu'au **titulaire** de
+l'étape, porteur de la qualité (`peutSignerEffectivement`, `src/lib/signataires.js`). La **fenêtre
+de signature** (`fenetreSignatureSimple`) ne s'ouvre donc que pour lui — pour tout autre compte,
+l'acte est envoyé, le titulaire est prévenu, et l'application le dit. Elle montre : le document sous les yeux,
 l'identité du signataire (nom, fonction, adresse électronique, compte), l'empreinte du texte, et
 une **déclaration à cocher** — « Je déclare avoir vérifié le document ci-dessus et j'engage ma
 signature sur son contenu. » Le bouton de signature reste **désactivé** tant que la déclaration
@@ -2278,8 +2363,11 @@ compétence se lit dans la **chaîne de signature** de l'acte (`chaineDeSignatur
 d'acte, date de signature — une délégation limitée à un autre service ou à une autre famille ne
 s'y invite pas) :
 
-- `etapesDeSignature(config, acte, trame)` — la chaîne de l'acte (le signataire désigné, lu sur
-  `acte.values.signataire`) ;
+- `signataireEffectif(config, acte, trame)` — le signataire de l'acte : celui que la rédaction a
+  désigné (`acte.values.signataire`), ou, à défaut, le **signataire principal de l'entité** de
+  l'acte (`signatairePrincipal`, `src/lib/organigramme.js`). Un acte pris sans désignation a donc
+  bel et bien un signataire, et il entre dans sa file ;
+- `etapesDeSignature(config, acte, trame)` — la chaîne de l'acte, lue sur ce signataire effectif ;
 - `competenceDeSignature(config, acte, trame, personId)` — `{ ok, effectif, rang, etapes }` :
   `effectif` dit que la personne est le **dernier étage** (c'est sa signature que l'acte attend),
   `rang` sa place depuis la tête ;
@@ -2294,6 +2382,25 @@ s'y invite pas) :
 - `placeDansChaine` (« autorité de tête », « par délégation », « par subdélégation ») et
   `situationDeSignature` (ce que la personne signe en général : en son nom, et/ou au titre de ses
   délégations).
+
+**Qui SIGNE, et qui ENVOIE.** La compétence dit qui **voit** l'acte — toute la chaîne, car on suit
+les signatures qu'on a données ; elle ne dit pas qui **apposera** la signature. Le contrôle unique
+de la signature est `peutSignerEffectivement(config, user, acte, trame)` (`src/lib/signataires.js`),
+qui exige les deux pièces :
+
+- être le **titulaire** — le **dernier étage** de la chaîne (`effectif`), celui que l'acte attend.
+  Un **délégant** figure dans la chaîne (c'est de lui que le pouvoir descend) sans être le
+  titulaire : il ne signe pas à sa place ;
+- porter la **qualité** de signataire (`ROLE_SIGNATAIRE`). Un compte qui ne l'a pas peut **envoyer**
+  l'acte en signature (`actes.signer`, permission partagée avec les rédacteurs, les éditeurs et les
+  réviseurs), non l'engager.
+
+Les trois gestes de signature — simple (`engagerSignatureSimple`), électronique
+(`envoyerEnSignatureElectronique`), dépôt d'une version signée — le traversent, et l'outil du
+prestataire comme la fenêtre de signature simple ne s'ouvrent que pour le titulaire : tout autre
+compte est **prévenu** que l'acte est parti et attend la signature de son titulaire. C'est la
+distinction, invisible mais décisive, entre **envoyer** et **signer** : sans elle, un compte
+habilité à envoyer l'acte, ou un délégant, apposait sa signature au nom d'un autre.
 
 **Le fil de parcours.** Le chemin d'un acte — ses **portes**, leur **ordre**, et **qui** les
 tient — se lit une seule fois pour toutes dans `parcoursDeActe(acte, { config, trames, users,
@@ -2392,10 +2499,20 @@ session** :
 **Un compte authentifié dont aucun rôle d'application n'est reconnu est un visiteur.** L'identité
 est vérifiée — l'annuaire a reconnu la personne — mais l'application ne lui ouvre **rien** :
 `estVisiteur(user)` (`lib/users.js`) est vrai quand le compte n'a aucun rôle, ou porte le rôle
-`visiteur`. Ses permissions sont **vides par construction** : `can()` refuse tout dès que le
-compte porte `visiteur`, quel que soit le reste — une qualité résiduelle (un réviseur dont le
-groupe a disparu) ne doit pas lui rouvrir un accès, et l'annuaire qui ne reconnaît aucun groupe
-**efface** les qualités cumulables qu'il portait (`applyOidcUser`, `lib/oidc.js`).
+`visiteur`. Ses permissions sont **vides par construction** : `can()` refuse tout ce que les
+profils ordinaires ouvriraient dès que le compte porte `visiteur`.
+
+**Une exception, et une seule : les QUALITÉS cumulées** (signataire, réviseur). Une qualité ne dit
+pas ce qu'un agent fait de sa journée, elle ajoute un pouvoir — et c'est précisément ce qu'on peut
+attendre d'un compte extérieur, comme un élu dont la signature engage l'acte. `can()` laisse donc
+une qualité cumulée ouvrir ce qu'elle ouvre (`permissionsDeQualites`), et `estVisiteur` tient pour
+non-visiteur un compte dont une qualité ouvre quelque chose : un compte marqué « Visiteur » et
+porteur de la qualité de signataire accède à l'écran **Signature & publication** (onglets
+« Ma signature » et « Circuit de signature »), sans rien voir de l'atelier par ailleurs — son champ
+de compétence au sens strict (`visibleActes`, `src/ui/state.js`). Côté annuaire, l'annuaire qui ne
+reconnaît aucun groupe **efface** les qualités cumulables qu'il portait (`applyOidcUser`,
+`lib/oidc.js`) : un visiteur venu de l'annuaire reste donc sans accès. C'est le compte **local**
+auquel on donne explicitement une qualité qui entre.
 
 Le rôle ne se contente pas d'être un état : il est **attribuable**. Un administrateur peut donner
 le profil « Visiteur » à un compte (Comptes et rôles), et la politique d'annuaire « agent sans
@@ -3113,6 +3230,16 @@ conteneur (`db-init`) le remet au mot de passe du `.env` **et applique le schém
 service ne se connecte (`server/mysql/compte-base.mjs`, `node server.mjs --reconcilier`) — le seul
 moment où le service parle à la base en root, et le remède aux deux pannes d'installation les plus
 fréquentes (`Access denied for user 'scriba'@…`, et la table absente qui suit).
+
+**Le journal du service s'ouvre sur sa bannière** : la marque et le nom du logiciel dessinés en
+caractères d'imprimante, puis sa **version**, sa **licence** et l'adresse de sa **documentation**
+(`server/mysql/banniere.mjs`) — c'est la première chose qu'un exploitant lit dans `docker logs`, et
+la seule qui dise quelle version tourne. La version annoncée n'est pas recopiée dans le service :
+l'image ne contient que son dossier, et un **miroir engendré** (`server/mysql/logiciel-engendre.mjs`,
+écrit par `node scripts/generer-logiciel.mjs` depuis `src/lib/version.js` et `src/lib/logiciel.js`)
+le lui apporte — une épreuve (`logiciel-engendre.test.mjs`) refuse un miroir périmé. La bannière ne
+paraît que sur le **démarrage du service** : les commandes d'administration (`--reconcilier`,
+`--migrate`, `--mot-de-passe`) gardent un journal qui n'est que la trace du geste qu'on y a fait.
 
 La coquille de cette édition est `server/web/index.html` : l'`index.html` et le `main.pjs`
 d'origine ne servent qu'à l'édition en ligne. En auto-hébergement, le mode de persistance par

@@ -3,6 +3,163 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Restes à trancher
+
+- [ ] **Les doublons périmés sous `src/server/`** : `index.html`, `main.pjs`, `package.json`,
+      `.gitignore` et `.nojekyll` y sont restés d'une disposition antérieure. Le `package.json`
+      pointe encore vers `node src/scripts/verifier-syntaxe.mjs`, qui n'existe plus ; les deux
+      premiers sont d'anciennes copies de la page (112 200 octets contre 178 213 pour
+      `index.html`). **Rien ne les référence** — ni un `COPY` des `Dockerfile`, ni un document.
+      À retirer du dépôt :
+      `git rm src/server/index.html src/server/main.pjs src/server/package.json
+      src/server/.gitignore src/server/.nojekyll`.
+- [ ] **`src/server/build-and-push.sh`** : le `docker login` automatique décide qu'on est déjà
+      connecté d'après `docker info | grep "Username:"` — sortie qui dépend de la version de
+      Docker. À reprendre (tenter le push, ou lire `~/.docker/config.json`).
+
+## Correctif 1.6.1w — qui signe, et qui accède (livré)
+
+Demande : « les visiteurs qui ont la qualité de signataire devraient pouvoir accéder aux onglets
+signature. aussi un gros bug, j'essaie l'outil de signature locale, je crée un compte pour l'autorité
+de tête, mais l'acte n'arrive jamais à la signature de l'autorité de tête. aussi, un admin peut
+signer à la place du compte de l'autorité de tête, cela ne devrait jamais arriver »
+
+- [x] **Le visiteur signataire entre** (`lib/users.js`) : `can` laisse une qualité cumulée ouvrir ce
+      qu'elle ouvre au lieu de tout fermer sous le profil « Visiteur » ; `estVisiteur` ne tient pour
+      visiteur qu'un compte dont AUCUNE qualité n'ouvre quelque chose. Il accède à l'écran
+      « Signature & publication » (onglets « Ma signature » et « Circuit de signature »).
+- [x] **Les gestes de signature se séparent de l'envoi** (`ui/views/signature.js`) : l'envoi (dépôt,
+      ouverture du circuit, notification) n'exige plus la compétence de signer — c'est ce qui
+      bloquait la validation du réviseur, et l'acte restait « prêt » pour toujours. La fenêtre de
+      signature ne s'ouvre que pour le titulaire ; les autres sont prévenus que l'acte attend sa
+      signature.
+- [x] **La file suit la chaîne, non le champ** (`ui/state.js`) : un acte pris sans signataire
+      explicite relève du signataire principal de son entité — il entre donc dans sa file, au lieu
+      d'être invisible faute de `values.signataire`.
+- [x] **Un seul contrôle de qui peut signer** (`lib/signataires.js`, `peutSignerEffectivement`) :
+      être le DERNIER étage de la chaîne **et** porter la qualité de signataire. Un délégant, un
+      réviseur, un administrateur ne signent plus à la place du titulaire ; les trois gestes de
+      signature le traversent, et l'outil du prestataire ne s'ouvre plus que pour lui.
+- [x] **La file engagée ne contient que des actes signés** (`lib/signataires.js`) : ce qu'un délégant
+      suit, et non ce qu'attend son délégataire.
+- [x] **Le champ des qualités seules** (`ui/state.js`) : un compte sans profil ordinaire ne voit que
+      les champs de ses qualités — signature, et révision s'il est réviseur —, sans le périmètre par
+      service.
+- [x] **Épreuves** : `tests/competence-signature.test.mjs` (quatre épreuves pures) ; les trois
+      reproductions rejouées dans l'aperçu.
+
+## Correctif 1.6.1v — le gel des écritures (le deadlock) (livré)
+
+Demande : « des freezes surviennent » — journal à l'appui, `ER_LOCK_DEADLOCK` sur
+`SELECT revision FROM sb_collection WHERE name = 'presence' FOR UPDATE`, survenant en sélectionnant
+`signataire.fonction` dans l'éditeur de trame, et finissant par un crash (SIGILL) qu'un rechargement
+de page rétablissait.
+
+- [x] **La cause** : `INSERT IGNORE` prenait un verrou **partagé** sur la ligne de `sb_collection`
+      (son contrôle d'unicité), que le `SELECT … FOR UPDATE` devait élever en **exclusif** ; deux
+      écritures simultanées de la même collection s'attendaient l'une l'autre. La clé étrangère
+      `sb_record → sb_collection` ajoutait des verrous partagés sur la même ligne. Les attentes
+      saturaient le pool (`DB_POOL`, 8) : c'est le « freeze », et le SIGILL en est le symptôme —
+      pas une panne distincte.
+- [x] **Verrou exclusif d'emblée** : `INSERT … ON DUPLICATE KEY UPDATE revision = revision` remplace
+      `INSERT IGNORE`, au magasin (`magasin-mysql.mjs`) comme à l'écriture d'un compte
+      (`comptes.mjs`).
+- [x] **Reprise sur heurt** : une transaction heurtée est rejouée en entier, jusqu'à quatre fois,
+      après une pause courte et hasardée ; seuls `ER_LOCK_DEADLOCK` et `ER_LOCK_WAIT_TIMEOUT` sont
+      rejoués.
+- [x] **File d'écriture par collection** au service (`magasin-mysql.mjs`) et dans la page
+      (`lib/db/index.js`) : deux écritures concurrentes de la même collection ne partent plus du
+      même index.
+- [x] **Battements de présence fusionnés** (`lib/collab.js`) : un seul battement en vol, un unique
+      rattrapage si l'écran a changé.
+- [x] **Épreuves** (`server/mysql/magasin-mysql.test.mjs`, jouées sur la base en mémoire) et une note
+      de conception dans `docs/PERFORMANCE.md`.
+- [x] **Le banc de charge redémarre** : `charge/faux-mysql.mjs` connaît `sb_migrations` (création,
+      insertion, lecture par version), que `migrations.mjs` interroge depuis les migrations
+      versionnées — sans quoi `--sans-base` ne pouvait plus appliquer le schéma.
+- [ ] **Réglage d'exploitation** — `DB_POOL` (8 par défaut) : à porter si une collectivité observe
+      encore des attentes sous forte affluence ; c'est un curseur d'exploitation, pas un correctif.
+
+## Correctifs 1.6.1u — la saisie et la touche Entrée (livrés)
+
+Demande : « compléter certains champs (ex. Nouvelle entité) fait déselectionner le champ à chaque
+entrée clavier. aussi, sur l'écran de connection, appuyer sur Entrée ne connecte pas
+automatiquement »
+
+- [x] **La frappe ne perd plus le champ** : la reprise du curseur (`ui/focus.js`, `avecCurseur`)
+      enveloppe désormais la saisie elle-même, dans la fabrique de champs (`ui/components.js` :
+      `textField`, `fontField`). Une fiche qui se redessine à chaque lettre — l'en-tête de
+      « Nouvelle entité » suit le nom qu'on écrit — rend le champ à l'agent, avec sa sélection et
+      son curseur.
+- [x] **« Entrée » soumet l'écran de connexion** : le bouton « Se connecter » est devenu le bouton
+      de soumission de son formulaire (`type="submit"`, `ui/mot-de-passe.js`). Un formulaire qui
+      porte plusieurs champs de saisie et **aucun** bouton de soumission n'est pas soumis
+      implicitement par le navigateur : la touche Entrée n'y faisait rien.
+- [x] **Le motif d'annulation d'un rang du chrono est conservé** : la fenêtre lisait
+      `conteneur.value` — la valeur du conteneur du champ, et non celle de la saisie. Elle retient
+      maintenant le motif à la frappe (`views/chrono.js`).
+- [x] **Deux parcours de non-régression** (`tests/parcours.mjs`), joués dans le navigateur contre
+      l'application vivante : la fiche qui garde le curseur pendant la saisie, et le formulaire de
+      connexion qui se soumet par son `submit` (ce que fait la touche Entrée).
+
+## Demande 1.6.1t — la bannière de démarrage (livrée)
+
+Demande : « j'aimerais que dans le log docker, il s'affiche un ASCII Art avec un encadré qui
+contient à gauche le logo de Scribae, à droite le nom "Scribae" (en titre), en dessous : le numéro
+de version - GPLv3 - doc.scribae.eu »
+
+- [x] **L'encadré** (`mysql/banniere.mjs`) : la marque à gauche (le document au chevron, dessiné
+      en caractères d'imprimante), le titre à droite, et sous lui la version, la licence et
+      l'adresse de la documentation — 74 colonnes, ASCII pur, sans couleur ni tabulation.
+- [x] **Il paraît au démarrage du service** (`docker logs`, `docker compose logs -f api`), et
+      **là seulement** : les chemins d'administration (`--reconcilier`, `--migrate`,
+      `--mot-de-passe`) gardent un journal qui n'est que la trace du geste qu'on y a fait.
+- [x] **La version annoncée est la vraie** : l'image du service ne contient que son dossier et ne
+      peut pas lire `src/lib/version.js` — un **miroir engendré**
+      (`mysql/logiciel-engendre.mjs`, `scripts/generer-logiciel.mjs`) le lui apporte, et une
+      épreuve refuse un miroir périmé. Le nom, la licence et la documentation vivent désormais
+      une seule fois, dans `src/lib/logiciel.js`.
+
+## Demandes 1.6.1s — la reprise d'actes anciens (livrées)
+
+Demande : « ajouter la possibilité (pour les rédacteurs uniquement) d'importer d'anciens actes. La
+rédaction de ces actes est libre, et le rédacteur règle manuellement la date de publication
+(nécessairement antérieure à la date du jour). L'original signé est joint manuellement. L'acte est
+publié immédiatement en appuyant sur publier. Un message en bas de page informe le lecteur que
+l'acte est publié à titre informationnel uniquement car il s'agit d'une reprise. Il est possible de
+publier des annexes autonomes (règlement intérieur, etc.). »
+
+- [x] **L'écran « Reprises d'actes anciens »** (`views/reprises.js`) : liste, atelier, aperçu du
+      document publié, carte de l'original signé, publication d'un seul geste — dans sa **propre
+      collection** `reprises`, hors du registre des actes, du chrono et de la recherche.
+- [x] **La rédaction est libre** : le texte se compose sans trame (`analyserTexteLibre` — ligne
+      d'article, division en « # », liste en « - », le reste en paragraphes).
+- [x] **La date de publication d'origine se règle à la main, et reste antérieure au jour**
+      (`dateMaxReprise`, `dateRepriseValide`, borne `max` du champ) : le recueil ne date pas un acte
+      de 1998 du jour de sa reprise.
+- [x] **L'original signé est joint à la main** : dépôt par `upload-plugin`, empreinte SHA-256
+      calculée sur le poste, pièce conservée sur la reprise et **montrée au recueil** comme
+      l'original qui fait foi.
+- [x] **La publication est immédiate** : dépôt puis publication dans la foulée du bouton, sans
+      circuit de signature (le service accepte la publication d'une reprise déclarée telle au
+      dépôt ; `acte_non_reprise` sinon), et **informative** (`dateOpposabilite` vide, aucun délai).
+- [x] **Le message de bas de page** (`MENTION_REPRISE`) sur la page publiée et au recueil, plus la
+      marque « reprise » dans la liste et les pastilles de la notice.
+- [x] **Les annexes autonomes** : un texte repris comme règlement intérieur ou charte reçoit
+      l'identifiant ELI d'un règlement (`eli:/fr/reg/…`).
+- [x] **Réservé aux rédacteurs** : permission `actes.reprendre` (rôles de `actes.rediger`).
+- [x] Guide (chapitre « Reprendre un acte ancien »), SPEC § 2.2.4 quinquies, README, API (§ reprises
+      et champs `reprise` / `informative`).
+
+Reste ouvert (petits chantiers, non demandés) :
+
+- [ ] **Rattacher une reprise à une trame** : aujourd'hui le texte se saisit librement et le
+      document n'a ni visas ni formule d'autorité. Une collectivité qui veut retrouver la mise en
+      forme d'un acte ancien sans la réécrire aimerait peut-être importer un `.docx`/`.odt`
+      (l'outil existe déjà : `src/lib/doc-import.js`) plutôt que coller le texte.
+- [ ] **Reprendre un acte en série** : déposer dix scans d'un même registre et les faire entrer
+      l'un après l'autre, sans rouvrir l'écran dix fois.
+
 ## Demandes 1.6.1 (livrées en 1.6.1m)
 
 - [x] **Les annexes ne sont plus « prêtes à signer ».** L'onglet Signature leur donne l'étiquette

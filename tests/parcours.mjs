@@ -250,6 +250,96 @@ declarer({
   },
 });
 
+// ------------------------------------------- 8. la saisie garde le curseur
+declarer({
+  id: "saisie-garde-le-focus",
+  nom: "Une fiche garde le curseur pendant la saisie",
+  pourquoi: "la fiche d'une entité se redessine à chaque frappe — son en-tête reprend le nom qu'on écrit — et sans reprise du curseur le champ était reconstruit : la saisie perdait le focus, et la sélection, dès la première lettre (1.6.1u)",
+  async jouer(ctx) {
+    const { state, navigate } = ctx.modules();
+    const dom = ctx.dom();
+    if (!state.ready || !state.user) return "";             // parcours sans objet
+    const { can } = await import(RACINE_CODE + "ui/state.js");
+    if (!can("referentiel.gerer")) return "";               // l'écriture du référentiel n'est pas ouverte à ce compte
+    const avant = ctx.route();
+    try {
+      navigate("organigramme");
+      if (!(await jusqua(() => dom.querySelector(".page-head__title"), { essais: 40, pause: 150 }))) {
+        return "l'organigramme ne s'est pas affiché";
+      }
+      const bouton = [...dom.querySelectorAll("button")].find((b) => /Nouvelle entit/.test(b.textContent || ""));
+      if (!bouton) return "le bouton « Nouvelle entité » est absent de l'organigramme";
+      bouton.click();
+      const fiche = await jusqua(() => dom.querySelector(".fr-modal .org-fiche"), { essais: 40, pause: 100 });
+      if (!fiche) return "la fiche « Nouvelle entité » ne s'est pas ouverte";
+      // Le champ « Nom » — celui dont la frappe fait redessiner l'en-tête.
+      const champNom = () => [...fiche.querySelectorAll("input")].find((el) => {
+        const f = el.closest(".fr-field");
+        return f && /^Nom\b/.test((f.querySelector("label") || {}).textContent || "");
+      });
+      const premier = champNom();
+      if (!premier) return "la fiche ne porte pas de champ « Nom »";
+      premier.focus();
+      premier.value = "";
+      premier.dispatchEvent(new dom.defaultView.Event("input", { bubbles: true }));
+      for (const lettre of "Régie") {
+        const champ = champNom();               // le champ a pu être reconstruit
+        if (!champ) return "le champ « Nom » a disparu du formulaire en cours de saisie";
+        const attendu = (champ.value || "") + lettre;
+        champ.value = attendu;
+        champ.dispatchEvent(new dom.defaultView.Event("input", { bubbles: true }));
+        const actif = dom.activeElement;
+        if (actif !== champNom()) return `le champ perd le curseur après « ${lettre} » : la saisie s'arrête au premier caractère`;
+        if ((actif.value || "") !== attendu) return `le champ porte « ${actif.value} » au lieu de « ${attendu} »`;
+        if (actif.selectionStart !== attendu.length) return "le curseur n'est pas resté en fin de saisie";
+      }
+      return "";
+    } finally {
+      // Rien n'est créé : la fiche est refermée, sans écrire au référentiel.
+      const fermer = dom.querySelector(".fr-modal-overlay .fr-modal__header button, .fr-modal-overlay .fr-modal__footer button");
+      if (fermer) fermer.click();
+      else dom.querySelectorAll(".fr-modal-overlay").forEach((o) => o.remove());
+      await ctx.revenir(avant);
+    }
+  },
+});
+
+// --------------------------------- 9. l'écran de connexion se soumet par Entrée
+declarer({
+  id: "connexion-entree",
+  nom: "L'écran de connexion se soumet à la touche Entrée",
+  pourquoi: "un formulaire qui porte plusieurs champs de saisie n'est PAS soumis implicitement par le navigateur s'il n'a pas de bouton de soumission : la touche Entrée, dans l'identifiant ou le mot de passe, ne connectait pas (1.6.1u)",
+  async jouer(ctx) {
+    const dom = ctx.dom();
+    const { panneauMotDePasse } = await import(RACINE_CODE + "ui/mot-de-passe.js");
+    // Le panneau est monté pour lui-même : l'aperçu de démonstration ne le
+    // présente pas (l'authentification y est simulée), et un parcours qui
+    // dépendrait du mode du déploiement ne dirait rien sur les autres.
+    const hote = dom.createElement("div");
+    dom.body.appendChild(hote);
+    try {
+      hote.appendChild(panneauMotDePasse({}));
+      const form = hote.querySelector("form.mdp-form");
+      if (!form) return "le panneau de connexion ne présente pas de formulaire";
+      const bouton = form.querySelector("button[type=submit]");
+      if (!bouton) return "le formulaire de connexion n'a pas de bouton de soumission : la touche Entrée ne le soumettra pas";
+      if (bouton.form !== form) return "le bouton de soumission n'appartient pas au formulaire de connexion";
+      // La touche Entrée produit l'événement `submit` du formulaire : on le joue,
+      // les champs vides, et l'on attend le refus du panneau lui-même. Aucun essai
+      // de connexion n'est tenté — le service n'est pas atteint.
+      form.dispatchEvent(new dom.defaultView.Event("submit", { bubbles: true, cancelable: true }));
+      const refus = await jusqua(() => {
+        const t = hote.querySelector(".mdp-messages .fr-alert__title");
+        return t && /incomplet/i.test(t.textContent || "") ? t : null;
+      }, { essais: 20, pause: 50 });
+      if (!refus) return "la soumission du formulaire n'a produit aucune validation du panneau : « Entrée » reste sans effet";
+      return "";
+    } finally {
+      hote.remove();
+    }
+  },
+});
+
 // --------------------------------------------------------------------------- run
 //
 // Le contexte (`ctx`) est fourni par l'appelant : c'est lui qui sait manœuvrer

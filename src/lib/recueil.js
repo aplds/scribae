@@ -1052,6 +1052,13 @@ export function jsonDePublication(rec, config) {
     natureDoc: r.natureDoc || undefined,
     kind: r.kind || "originale",
     enVigueur: r.latest !== false,
+    // Les natures PARTICULIÈRES du document, telles que le recueil les lit sur
+    // lui : une publication informative (règlement consolidé), ou une reprise
+    // d'acte ancien — publiée à titre informatif uniquement (voir
+    // src/lib/reprise.js). `provenance` dit d'où vient l'original d'une reprise.
+    informative: r.informative === true || undefined,
+    reprise: r.reprise === true || undefined,
+    provenance: r.provenance || "",
     // Mis en avant sur la page d'accueil du recueil (bande « À la une ») : le
     // drapeau suit l'ACTE — l'identifiant ELI — et non la version déposée.
     epingle: r.epingle === true,

@@ -677,7 +677,7 @@ function resumeSignature(s) {
   return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
 }
 
 // Les publications RÉSERVÉES AUX AGENTS : publiées (ELI, original, versions),
@@ -737,7 +737,7 @@ function openapi() {
     "/v1/auth/cles/{id}/revoquer": { post: { operationId: "revoquerCle", summary: "Révoquer une clé d'API", description: "Retire une clé. Le service refuse de révoquer la DERNIÈRE clé d'administration (409 `derniere_cle_admin`) : il ne peut pas se retrouver sans moyen d'être administré.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Clé révoquée" }, 403: { description: "Rôle administrateur requis" }, 404: { description: "Clé inconnue (code `cle_inconnue`)" }, 409: { description: "Dernière clé d'administration (code `derniere_cle_admin`)" } } } },
     "/v1/journal": { get: { operationId: "lireJournal", summary: "Lire le journal d'audit du service", description: "Journal APPEND-ONLY tenu par le service (et non par le poste client) : chaque geste sensible — dépôt, ouverture de signature, notification, transmission, publication, retrait, épinglage, provisionnement et gestion des clés — y laisse une ligne. Chaque ligne scelle la précédente par son empreinte SHA-256 : modifier une ligne rompt la chaîne, ce que le champ `scelle` révèle. Route d'administration.", security: [{ bearerAuth: [] }], tags: ["Autorisation"], responses: { 200: { description: "Les dernières entrées, et l'état du scellement" }, 403: { description: "Rôle administrateur requis" } } } },
     "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
-    "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "users", "meta", "journal", "presence", "informations"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
+    "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: "Renvoie tous les enregistrements d'une collection, chacun avec sa révision.", tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: ["config", "trames", "actes", "reprises", "users", "meta", "journal", "presence", "informations"] } }], responses: { 200: { description: "Les enregistrements de la collection" }, 404: { description: "Collection inconnue" } } } },
     "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: "Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé.", security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, ord: { type: "integer" }, rev: { type: "integer", nullable: true }, payload: {} } } }, deletes: { type: "array", items: { type: "object", properties: { id: { type: "string" }, rev: { type: "integer", nullable: true } } } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données). Réservé au rôle `administrateur` : toute autre clé reçoit 403 `force_reserve_admin`. Chaque appel est journalisé." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide, ou `force` demandé sans le rôle administrateur (code `force_reserve_admin`)" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
     "/v1/actes": {
       get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
@@ -1114,6 +1114,11 @@ function hDeposerActe(ctx) {
     // publication.
     signatureMode: b.signatureMode === "externe" ? "externe" : "electronique",
     certificationRequise: b.certificationRequise === true,
+    // REPRISE d'un acte ancien : le dépôt le déclare, et la publication s'en
+    // servira pour autoriser la publication SANS signature (voir hPublier). Un
+    // acte ancien a déjà été signé : c'est son original qui est joint, non un
+    // circuit qu'on rouvrirait.
+    reprise: b.reprise === true,
     statut: "depose", deposeLe: nowIso(),
   };
   db.actes[id] = acte;
@@ -1349,7 +1354,17 @@ function hPublier(ctx) {
       return err(409, "La conformité de la version signée doit être certifiée par le réviseur avant la publication.", { code: "conformite_non_certifiee", statut: acte.statut, certification: acte.certification || null });
     }
   }
-  if (acte.statut !== "signee" && acte.statut !== "publie") {
+  const b = ctx.body || {};
+  // REPRISE D'UN ACTE ANCIEN : le rédacteur en a écrit le texte, joint l'original
+  // signé conservé par la collectivité, et la reprise se publie D'UN SEUL GESTE,
+  // sans signature ni circuit — l'acte ancien a déjà été signé. Le client DIT
+  // que le dépôt était une reprise : un acte qui ne l'a pas été déposé comme tel
+  // ne se publie pas sans signature, et la réponse le dit.
+  const reprise = b.reprise === true && acte.reprise === true;
+  if (b.reprise === true && acte.reprise !== true) {
+    return err(409, "Cet acte n'a pas été déposé comme une reprise : il ne peut pas être publié sans signature.", { code: "acte_non_reprise", statut: acte.statut });
+  }
+  if (!reprise && acte.statut !== "signee" && acte.statut !== "publie") {
     return err(409, "Un acte ne peut être publié qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
   }
   // Acte individuel : la trame dont il est issu est déclarée non publiable au
@@ -1365,7 +1380,6 @@ function hPublier(ctx) {
   if (acte.controleLegalite === true && !acte.transmission) {
     return err(409, "Cet acte doit être transmis au contrôle de légalité avant sa publication.", { code: "transmission_absente", statut: acte.statut, controleLegalite: true });
   }
-  const b = ctx.body || {};
   // PUBLICATION INFORMATIVE : le texte consolidé d'un RÈGLEMENT annexé, publié
   // pour lui-même à titre d'information (voir SPEC § 2.2.4 ter). Elle n'est ni
   // signée ni opposable : elle n'a pas d'original, et ne touche pas à l'état de
@@ -1396,6 +1410,18 @@ function hPublier(ctx) {
   const origExt = acte.signatureMode === "externe" && acte.originalExterne
     ? { ...acte.originalExterne, certification: acte.certification || null }
     : null;
+  // La pièce jointe d'une REPRISE : l'original signé conservé, déposé par le
+  // client AVEC la publication (le service ne l'a pas reçu au dépôt — une
+  // reprise ne passe par aucun circuit de signature).
+  const origReprise = reprise && b.originalExterne && b.originalExterne.url
+    ? {
+      url: b.originalExterne.url, sha256: b.originalExterne.sha256 || "",
+      nom: b.originalExterne.nom || "", taille: b.originalExterne.taille || 0,
+      type: b.originalExterne.type || "", deposeLe: b.originalExterne.deposeLe || nowIso(),
+      deposePar: b.originalExterne.deposePar || "", deposeParNom: b.originalExterne.deposeParNom || "",
+      certification: null,
+    }
+    : null;
 
   const rec = {
     cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
@@ -1416,6 +1442,10 @@ function hPublier(ctx) {
     // toute publication, l'acte qui l'adopte s'il y en a un : le recueil s'en
     // sert pour rattacher le règlement à sa décision d'adoption.
     informative: informative || undefined,
+    // Une REPRISE d'acte ancien (voir src/lib/reprise.js) : le drapeau voyage
+    // avec la publication, et `provenance` dit d'où vient l'original conservé.
+    reprise: reprise || undefined,
+    provenance: b.provenance || "",
     adoption: b.adoption || null,
     // L'ÉPINGLAGE suit l'ACTE (son identifiant ELI), non la version déposée :
     // une version publiée plus tard hérite donc du drapeau déjà posé — un
@@ -1442,7 +1472,7 @@ function hPublier(ctx) {
     // Circuit externe : la pièce signée déposée (un PDF) et la certification du
     // réviseur. Absent pour un acte du circuit électronique, et pour une
     // publication informative (la pièce signée est celle de l'acte d'adoption).
-    originalExterne: informative ? null : origExt,
+    originalExterne: (informative && !reprise) ? null : (reprise ? origReprise : origExt),
     // La part INTERNE de l'original : mentions nominatives du signataire et
     // trace des courriels. Conservée au registre, jamais servie publiquement.
     originalInterne: b.originalInterne || ((b.original && b.original.interne) ? b.original : null) || acte.originalInterne || null,
@@ -1489,6 +1519,11 @@ function hPublier(ctx) {
     epingle: rec.epingle === true,
     reserve: rec.reserve === true,
     informative: rec.informative === true,
+    reprise: rec.reprise === true,
+    provenance: rec.provenance || "",
+    kind: rec.kind,
+    publieeLe: rec.publieeLe,
+    auteur: rec.auteur || "",
     juridique: rec.juridique === false ? false : undefined,
     natureDoc: rec.natureDoc || undefined,
     adoption: rec.adoption || null,
@@ -1607,7 +1642,7 @@ function hResoudreEli(ctx) {
 // écriture porte la révision que le client connaissait ; si le serveur en a une
 // autre, il refuse et renvoie sa version (conflit), que le client affiche au
 // lieu de l'écraser silencieusement.
-const DBC = { config: 1, trames: 1, actes: 1, users: 1, meta: 1, journal: 1, presence: 1, informations: 1 };
+const DBC = { config: 1, trames: 1, actes: 1, reprises: 1, users: 1, meta: 1, journal: 1, presence: 1, informations: 1 };
 const MAX_SYNC_RECORDS = 4000;
 
 // Sensibilité des collections. `null` = lecture PUBLIQUE (documents de travail
@@ -1620,6 +1655,9 @@ const DBC_LECTURE = {
   config: { min: "lecteur" },
   trames: null,
   actes: { min: "lecteur" },
+  // Les REPRISES d'actes anciens (voir src/lib/reprise.js) : elles sont des
+  // brouillons de travail, lus par un poste identifié comme les actes.
+  reprises: { min: "lecteur" },
   users: { min: "administrateur" },
   meta: null,
   journal: { min: "lecteur" },
@@ -1636,6 +1674,9 @@ const DBC_ECRITURE = {
   config: { min: "administrateur" },
   trames: { min: "editeur" },
   actes: { min: "redacteur" },
+  // Une reprise est le geste d'un RÉDACTEUR (permission « actes.reprendre »,
+  // src/lib/users.js) : c'est le même seuil que l'écriture d'un acte.
+  reprises: { min: "redacteur" },
   users: { min: "administrateur" },
   meta: { min: "editeur" },
   journal: { min: "redacteur" },

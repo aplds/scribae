@@ -112,10 +112,10 @@ test("numbering : gabarit et jetons inconnus", async (t) => {
 });
 
 // ------------------------------------------------------------------ version
-test("version : numéro sémantique et libellés", async (t) => {
+test("version : numéro (lettre intermédiaire admise) et libellés", async (t) => {
   const v = await charger("../src/lib/version.js");
   if (!v) return t.skip("module indisponible hors navigateur");
-  assert.match(v.APP_VERSION, /^\d+\.\d+\.\d+$/);
+  assert.match(v.APP_VERSION, /^\d+\.\d+\.\d+[a-z]?$/);
   assert.equal(v.versionLabel("1.2.3"), "v1.2.3");
   assert.equal(v.releasedLabel("2026-09-21"), "21/09/2026");
 });

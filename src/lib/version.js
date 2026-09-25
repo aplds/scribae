@@ -13,22 +13,20 @@
 // Perchance ↔ GitHub » dans `src/README.md`) :
 //
 //   • une version n'existe qu'une fois FIGÉE — c'est-à-dire déposée sur GitHub.
-//     On incrémente `APP_VERSION` et on date l'entrée du changelog à ce
-//     moment-là, jamais avant ;
-//   • entre deux livraisons GitHub, le travail achevé reçoit une NOTE
-//     INTERMÉDIAIRE dans le changelog (`1.3.1a`, `1.3.1b`…) : un numéro de
-//     correctif suivi d'une lettre, daté. Ces notes ne sont pas des
-//     publications : elles ne touchent PAS `APP_VERSION`, et la livraison
-//     suivante les reprend sous sa propre entrée, sans les lettres ;
-//   • la version courante doit correspondre à la première entrée datée SANS
-//     lettre du changelog. Si les deux divergent, c'est le changelog qui dit la
-//     vérité, et il faut corriger `APP_VERSION`.
+//     On ouvre et on date l'entrée du changelog à ce moment-là, jamais avant ;
+//   • entre deux livraisons, le travail achevé reçoit une NOTE INTERMÉDIAIRE
+//     dans le changelog (`1.3.1a`, `1.3.1b`…) : un numéro de correctif suivi
+//     d'une lettre, daté. Une note n'est pas forcément un brouillon : elle peut
+//     être publiée à son tour, et elle EST alors la version courante ;
+//   • `APP_VERSION` reproduit donc le titre de la PREMIÈRE entrée datée du
+//     changelog, lettre comprise. Si les deux divergent, c'est le changelog qui
+//     dit la vérité, et il faut corriger `APP_VERSION`.
 // ============================================================================
 
-export const APP_VERSION = "1.6.1q";
+export const APP_VERSION = "1.6.1w";
 
 // Date de la version courante (ISO, AAAA-MM-JJ).
-export const APP_RELEASED = "2026-09-23";
+export const APP_RELEASED = "2026-09-29";
 
 // Le changelog est un fichier du dépôt, pas une donnée recopiée dans le code :
 // l'écran « Documentation technique » le lit tel quel (comme README/SPEC/TODO).

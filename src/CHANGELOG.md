@@ -7,18 +7,17 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 ## Comment ce fichier fonctionne
 
 - **Une version n'existe qu'une fois figée**, c'est-à-dire déposée sur GitHub. On
-  incrémente le numéro et on ouvre l'entrée datée **au moment de livrer**, pas avant.
-- **Entre deux livraisons GitHub**, chaque correction achevée reçoit une **note de
-  version intermédiaire** : le correctif du moment, suivi d'une **lettre** — `1.3.1a`,
-  `1.3.1b`, … — et datée. Ce ne sont pas des publications : elles ne touchent pas
-  `APP_VERSION`, et la livraison GitHub suivante les reprend sous sa propre entrée,
-  sans les lettres.
-- Le travail en cours se décrit sous **Non publié** tant qu'il n'a pas reçu sa note
-  intermédiaire ; cette section est vide le reste du temps.
+  ouvre et on date l'entrée **au moment de livrer**, pas avant.
+- **Entre deux livraisons**, chaque correction achevée reçoit une **note de version
+  intermédiaire** : le correctif du moment, suivi d'une **lettre** — `1.3.1a`,
+  `1.3.1b`, … — et datée. Un lot peut aussi être livré **sous une note
+  intermédiaire** : elle est alors la version courante, et `APP_VERSION` la suit.
+- Le travail en cours se décrit sous **Non publié** tant qu'il n'a pas reçu son
+  numéro ; cette section est vide le reste du temps.
 - Le numéro courant est celui de `APP_VERSION` dans `src/lib/version.js` — c'est la
-  source unique du numéro. **La première entrée datée SANS lettre de ce fichier doit
-  lui correspondre** ; en cas de divergence, c'est ce fichier qui dit la vérité. Les
-  entrées intermédiaires, plus récentes, viennent au-dessus d'elle.
+  source unique du numéro. **Le titre de la première entrée datée de ce fichier doit
+  lui correspondre**, lettre comprise s'il y en a une ; en cas de divergence, c'est ce
+  fichier qui dit la vérité. Les entrées plus anciennes viennent en dessous.
 - Rubriques : `Ajouté`, `Modifié`, `Corrigé`, `Retiré`, `Sécurité`. Une entrée ne
   garde que les rubriques qu'elle utilise.
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
@@ -27,6 +26,345 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 ## [Non publié]
 
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
+
+
+## [1.6.1w] — 2026-09-29 — Qui signe, et qui accède
+
+Trois défauts d'un même genre : l'application confondait **figurer dans la chaîne de signature** et
+**être le titulaire de la signature**, et elle refermait l'atelier sur un compte dont une qualité
+ouvrait pourtant l'écran qu'on attendait de lui.
+
+**Un signataire extérieur ne pouvait pas entrer.** Un compte marqué « Visiteur » — un élu, le
+président d'une association partenaire, un agent d'une autre collectivité — auquel on donnait la
+qualité de signataire était renvoyé à l'écran « Votre compte n'a pas accès à l'application » : sa
+qualité ne lui ouvrait rien, alors qu'elle est précisément ce qu'on attend de lui. Les qualités
+cumulées (signataire, réviseur) l'emportent désormais sur le profil « Visiteur » : elles rouvrent
+l'écran qu'elles commandent — la signature, la révision — et rien de plus.
+
+**L'acte n'arrivait jamais à la signature de l'autorité de tête.** Dans le circuit simple (la
+signature donnée dans l'application), deux verrous se fermaient :
+
+- la file du signataire ne retenait que les actes portant un signataire *explicite* : un acte pris
+  sans que la rédaction ait désigné personne — celui dont le signataire est le **signataire principal
+  de son entité** (Administration › Entités) — n'apparaissait donc jamais dans la file de cette
+  personne, ni dans sa file d'attente, ni dans ce qu'elle voit ;
+- l'**envoi** en signature exigeait de celui qui le déclenche la compétence de *signer* : le réviseur
+  qui validait l'acte ne le faisait donc jamais partir, et l'acte restait « prêt » indéfiniment.
+
+L'envoi et la signature sont désormais deux gestes distincts : envoyer appartient à la rédaction
+(rédacteur, éditeur, réviseur, administration), signer n'appartient qu'au titulaire.
+
+**Un administrateur pouvait signer à la place du signataire désigné.** La seule question posée était
+« ce compte figure-t-il dans la chaîne de signature ? » — or la chaîne contient tous les étages dont
+le pouvoir descend, pas seulement celui qui signe. Un compte habilité à envoyer un acte, ou un
+délégant, apposait donc sa signature au nom d'un autre. La signature est maintenant réservée au
+**titulaire** — le dernier étage de la chaîne, celui que l'acte désigne — *et* au porteur de la
+qualité de signataire. C'est le contrôle unique que les trois gestes de signature traversent, et
+l'outil du prestataire comme la fenêtre de signature simple ne s'ouvrent plus que pour lui.
+
+### Corrigé
+
+- **Un compte à qualités cumulées n'est plus renvoyé à l'écran « pas d'accès »** (`src/lib/users.js`) :
+  `can` laisse une qualité cumulée (signataire, réviseur) ouvrir ce qu'elle ouvre, et `estVisiteur`
+  tient pour non-visiteur un compte dont une qualité ouvre quelque chose. Un compte marqué
+  « Visiteur » et porteur de la qualité de signataire accède à l'écran « Signature & publication »
+  (onglets « Ma signature » et « Circuit de signature »), sans rien voir de l'atelier par ailleurs.
+- **Les actes sans signataire explicite entrent dans la file de leur signataire** (`src/ui/state.js`) :
+  la visibilité d'un signataire se lit sur la **chaîne de signature** de l'acte, et non sur la
+  présence d'un `values.signataire` — un acte pris sans désignation a bel et bien un signataire,
+  l'autorité de son entité.
+- **Valider une révision envoie vraiment l'acte en signature** (`src/ui/views/signature.js`) : l'envoi
+  (dépôt, ouverture du circuit, notification) n'est plus subordonné à la compétence de signer. La
+  fenêtre de signature, elle, ne s'ouvre que pour le titulaire ; un autre compte est prévenu que
+  l'acte est parti et attend la signature de son titulaire.
+- **Seul le titulaire de la signature, porteur de la qualité de signataire, peut signer**
+  (`src/lib/signataires.js`, `src/ui/views/signature.js`) : la compétence du compte disait « vous
+  êtes dans la chaîne », elle ne dit pas « vous signez ». Un contrôle unique réunit désormais les
+  deux conditions — être le dernier étage, et porter la qualité — et les trois gestes de signature
+  (simple, électronique, dépôt d'une version signée) le traversent. L'outil du prestataire et la
+  fenêtre de signature simple ne s'ouvrent plus pour un autre que le titulaire.
+- **La file du signataire ne mélange plus ce qu'il a à signer et ce qu'il suit**
+  (`src/lib/signataires.js`) : « engagée » ne contient que les actes **signés** au titre de sa
+  délégation ; un délégant n'y voit plus « prêt à signer » ce qu'attend son délégataire.
+- **Un compte à qualités seules garde le champ de ses qualités** (`src/ui/state.js`) : le signataire
+  extérieur ne voit que les actes où sa signature est engagée — pas les actes « transverses » que le
+  périmètre par service lui ouvrirait —, mais un réviseur qui n'a aucun profil ordinaire garde, lui,
+  les actes qu'il a à réviser.
+- **Le choix du signataire signale le compte sans qualité de signataire** (`src/ui/signer-picker.js`,
+  `src/ui/views/signature.js`) : désigner une personne dont le compte ne porte pas la qualité est dit
+  au moment où on la désigne, comme le compte manquant et l'adresse manquante.
+
+### Ajouté
+
+- **`src/tests/competence-signature.test.mjs`** : quatre épreuves qui tiennent « qui signe » (le
+  titulaire et lui seul, avec la qualité, un compte hors chaîne ou sans personne rattachée étant
+  refusés), « qui est dans la file » (à signer, suivis, et l'acte sans signataire explicite), et
+  « qui accède » (les qualités cumulées d'un visiteur, et ce qu'elles n'ouvrent pas).
+
+
+## [1.6.1v] — 2026-09-28 — Le deadlock des écritures
+
+Deux écritures d'une **même collection** parties en même temps — deux postes, ou le battement de
+cœur d'un poste pendant qu'il renvoie sa file d'attente — se disputaient la ligne de la collection
+en base. `INSERT IGNORE` y prenait un verrou **partagé** (son contrôle d'unicité), que le
+`SELECT … FOR UPDATE` qui suit devait élever en **exclusif** : deux transactions qui montaient en
+même temps s'attendaient l'une l'autre, et MySQL tuait l'une des deux (`ER_LOCK_DEADLOCK`, errno
+1213). La rafale saturait le pool de connexions (`DB_POOL`), et le service **paraissait figé** —
+jusqu'à ce qu'un rechargement de page reparte d'un état propre. Le journal le montrait sur
+`presence`, atteint dès qu'on ouvrait un brouillon ou choisissait un jeton dans l'éditeur de trame.
+
+### Corrigé
+
+- **La ligne de collection est créée par le geste qui prend le verrou EXCLUSIF d'emblée**
+  (`src/server/mysql/magasin-mysql.mjs`, `src/server/mysql/comptes.mjs`) : `INSERT … ON DUPLICATE KEY
+  UPDATE revision = revision` remplace `INSERT IGNORE`. Il n'y a plus d'élévation de verrou
+  partagé→exclusif, donc plus de heurt possible entre deux écritures simultanées.
+- **Un heurt de verrou est rejoué, au lieu d'être perdu** (`src/server/mysql/magasin-mysql.mjs`) :
+  la transaction est reprise ENTIÈRE (connexion, `beginTransaction`, synchronisation, `commit`)
+  après une pause courte et hasardée, jusqu'à quatre fois. Un `ER_LOCK_DEADLOCK` ou un
+  `ER_LOCK_WAIT_TIMEOUT` devient un contretemps ; toute autre erreur remonte sans être rejouée.
+- **Les écritures d'une même collection se suivent, une à la fois** — au service
+  (`magasin-mysql.mjs`, une file **par collection** qui laisse deux collections distinctes écrire en
+  parallèle) comme dans la page (`src/lib/db/index.js`) : deux écritures concurrentes partaient du
+  même index connu, calculaient le même delta et se rejouaient l'une l'autre ; la seconde voit
+  désormais l'index déjà avancé par la première.
+- **Les battements de cœur de présence sont fusionnés** (`src/lib/collab.js`) : un seul battement à
+  la fois, doublé d'un unique rattrapage si l'écran ou l'acte a changé pendant qu'il était en vol —
+  au lieu d'une écriture de `presence` par source rapprochée (intervalle de 25 s, retour de
+  visibilité, changement d'écran, ouverture d'un brouillon).
+- **Le banc de charge redémarre** (`src/server/charge/faux-mysql.mjs`) : sa base en mémoire connaît
+  désormais `sb_migrations` — création, insertion et lecture par version —, que `migrations.mjs`
+  interroge depuis que les migrations sont versionnées. Sans cela, `--sans-base` échouait à
+  l'application du schéma, et aucune campagne ne pouvait se jouer.
+
+### Ajouté
+
+- **`src/server/mysql/magasin-mysql.test.mjs`** : six épreuves qui tiennent la sérialisation (une
+  seule transaction à la fois par collection, deux collections en parallèle), la reprise sur heurt,
+  le refus de rejouer une erreur étrangère, et l'idiome SQL de prise de verrou — jouées sur la base
+  en mémoire de `src/server/charge/faux-mysql.mjs`, sans serveur de base de données.
+
+
+## [1.6.1u] — 2026-09-27 — La saisie, et la touche Entrée
+
+Deux gestes du quotidien butaient sur le même genre de détail : invisible tant qu'on ne le vit pas,
+et qui fait perdre du travail.
+
+**Une fiche se redessine pendant qu'on la remplit.** L'en-tête de la fiche d'une entité — et celui
+de la fiche d'un service — **suit le nom qu'on écrit** : chaque lettre reconstruit donc le
+formulaire. Le champ « Nom » était remplacé dès le premier caractère, et la saisie **perdait le
+focus et la sélection** — on tapait « Valmont » et il ne restait que « V », sans plus rien pouvoir
+ajouter. La reprise du curseur existait déjà pour les redessins de vue (`ui/focus.js`,
+`avecCurseur`) ; elle s'applique désormais à **toute frappe**, depuis la fabrique de champs
+(`ui/components.js`, `textField`) : un champ reconstruit sous les doigts de l'agent lui est rendu,
+avec sa sélection.
+
+**« Entrée » ne connectait pas.** Sur l'écran de connexion, la touche Entrée ne faisait rien : le
+formulaire portait **deux champs de saisie et aucun bouton de soumission**, et un navigateur ne
+soumet pas implicitement un tel formulaire. Le bouton « Se connecter » est devenu un vrai bouton de
+soumission (`type="submit"`) : la touche Entrée et le clic empruntent désormais le même chemin.
+
+### Corrigé
+
+- **La saisie garde le focus et le curseur** quand la frappe redessine la fiche ou le formulaire
+  qui porte le champ (`ui/components.js` : `textField`, `fontField`). Le défaut se voyait sur
+  « Nouvelle entité », dont l'en-tête reprend le nom à chaque lettre.
+- **L'écran de connexion se soumet à la touche Entrée** (`ui/mot-de-passe.js`) : le bouton « Se
+  connecter » est le bouton de soumission de son formulaire — « Entrée », depuis l'identifiant ou
+  le mot de passe, ouvre donc la session.
+- **Le motif d'annulation d'un rang du chrono est enfin enregistré** (`views/chrono.js`) : la
+  fenêtre « Annuler un rang » lisait la valeur du CONTENEUR du champ au lieu de la saisie — le
+  motif tapé n'était jamais conservé, et chaque frappe levait une erreur dans la console.
+
+### Ajouté
+
+- **Deux parcours de plus** (`tests/parcours.mjs`, joués dans le navigateur contre l'application
+  vivante) : « Une fiche garde le curseur pendant la saisie » et « L'écran de connexion se soumet à
+  la touche Entrée ». Chacun échoue sur le code d'avant la correction — c'est ce qui les rend utiles.
+
+### Documentation
+
+- `src/README.md` (conventions de code et pièges connus : la reprise du curseur vaut aussi pour la
+  frappe), `src/docs/INDUSTRIALISATION.md` (§ 2, la liste des parcours), `src/TODO.md`.
+
+
+## [1.6.1t] — 2026-09-26 — La bannière de démarrage
+
+Un exploitant qui ouvre le journal de son conteneur — `docker compose logs -f api` — lisait une
+suite de messages d'état, sans y trouver la première chose qu'on cherche devant une installation
+qui se comporte mal : **quelle version tourne**. Le service ouvre désormais son journal sur une
+**bannière encadrée** : la marque du logiciel en caractères d'imprimante, son nom en titre, et,
+sous lui, la **version**, la **licence** et l'adresse de sa **documentation**.
+
+```
++------------------------------------------------------------------------+
+|                                                                        |
+|   ____________                                                         |
+|  |            \     ____                   _   _                       |
+|  |             \   / ___|    ___    _ __  (_) | |__     __ _    ___    |
+|  |     /\      |   \___ \   / __|  | '__| | | | '_ \   / _` |  / _ \   |
+|  |    // \\    |    ___) | | (__   | |    | | | |_) | | (_| | |  __/   |
+|  |   //   \\   |   |____/   \___|  |_|    |_| |_.__/   \__,_|  \___|   |
+|  |  //     \\  |                                                       |
+|  |             |   v1.6.1t — GPLv3 — doc.scribae.eu                    |
+|  |_____________|                                                       |
+|                                                                        |
++------------------------------------------------------------------------+
+```
+
+Elle paraît au **démarrage du service** seulement — pas sur les chemins d'administration
+(`--reconcilier`, `--migrate`, `--mot-de-passe`), dont le journal doit rester la trace du seul
+geste qu'on y a fait. Cadre, marque et titre sont en **ASCII pur**, sans couleur ni tabulation :
+un journal se lit dans un terminal étroit, se copie dans un rapport de panne et se relit dans un
+fichier où les séquences ANSI ne sont plus interprétées. Elle tient sur 74 colonnes.
+
+**La version qu'elle annonce n'est pas recopiée dans le service.** L'image du service se construit
+sur le seul dossier `src/server/mysql/` : elle ne peut donc pas lire `src/lib/version.js`, qui
+reste la seule source du numéro. Un **miroir engendré** — `src/server/mysql/logiciel-engendre.mjs`,
+écrit par `node scripts/generer-logiciel.mjs` — le lui apporte, et une épreuve **refuse** un miroir
+qui aurait divergé : la bannière ne peut pas annoncer une version que le logiciel n'est pas.
+
+Le **nom**, la **licence** et l'**adresse de la documentation** sont par la même occasion écrits
+une seule fois, dans **`src/lib/logiciel.js`** : les pieds de page de l'application, la marque et
+la bannière du service les lisent d'ici.
+
+### Ajouté
+
+- **La bannière de démarrage** (`src/server/mysql/banniere.mjs`), imprimée en tête du journal du
+  service : marque et nom dessinés, puis version, licence et documentation. Elle est composée par
+  un module **pur**, éprouvé sur ce dont dépend sa lisibilité — cadre fermé, largeur constante,
+  ASCII pur hors la mention, version jamais écrite en dur.
+- **`src/lib/logiciel.js`** : le nom, la licence et l'adresse de la documentation du logiciel —
+  une seule déclaration, sans aucune dépendance.
+- **`scripts/generer-logiciel.mjs`** et **`src/server/mysql/logiciel-engendre.mjs`** : le miroir
+  engendré que l'image du service peut lire, tenu par son épreuve (`logiciel-engendre.test.mjs`).
+
+### Modifié
+
+- `src/ui/brand.js` et `src/ui/mention.js` lisent désormais l'identité du logiciel dans
+  `src/lib/logiciel.js` — le nom, la licence et la documentation n'y sont plus écrits deux fois.
+  Ils continuent de les réexporter : l'interface n'a qu'un module d'identité à connaître.
+- `src/server/mysql/server.mjs` : le nom affiché du service (« Scribae — service de la
+  collectivité ») vient de l'identité du logiciel, et la bannière ouvre le journal.
+
+### Documentation
+
+- `src/README.md` (identité du logiciel, arborescence), `src/AGENTS.md` (documents engendrés),
+  `src/server/README.md` et `src/server/mysql/README.md` (fichiers, journal de démarrage),
+  `src/docs/DOCKER.md` et `src/docs/ADMINISTRATION.md` (ce que le journal montre au démarrage).
+
+
+## [1.6.1s] — 2026-09-25 — La reprise des actes anciens
+
+Une collectivité qui installe Scribae ne part pas d'un recueil vide : elle a derrière elle des
+décennies d'actes, signés sur papier, publiés à l'affichage ou dans un bulletin qu'on ne trouve
+plus. Le nouvel écran **Reprises d'actes anciens** les fait entrer au recueil public, où ils se
+cherchent et se lisent comme les actes récents — sans les faire passer pour ce qu'ils ne sont pas.
+
+Le geste est celui du rédacteur, et il est **d'un seul tenant** : il écrit le texte **librement**
+(trois repères suffisent à lui donner sa structure : la ligne d'article, la division en « # », la
+liste en « - »), règle **à la main** la **date de publication d'origine** — nécessairement
+antérieure au jour, sans quoi le recueil daterait d'aujourd'hui un acte de 1998 et rouvrirait des
+délais de recours —, joint **l'original signé** (PDF ou scan, empreinté SHA-256, conservé comme la
+pièce qui fait foi), et appuie sur **Publier au recueil**. Pas de parapheur, pas de révision, pas de
+signature : l'acte a déjà été signé, la reprise en conserve la preuve.
+
+Elle est publiée **immédiatement**, sous son propre identifiant ELI — daté de l'**année du numéro
+d'origine** (`eli:/fr/arr/1998/0042/vsl`) —, et **à titre informatif**. La page publiée porte, en
+bas de page, la mention qui l'explique (la version en ligne n'a pas de valeur juridique propre et
+n'ouvre aucun délai de recours ; seul l'original joint fait foi), la notice donne la date
+d'origine, la provenance et qui a fait la reprise, et la liste du recueil signale l'acte d'une
+marque **« reprise »**. Un **texte autonome** — un règlement intérieur, une charte — se reprend de
+la même façon, avec l'identifiant ELI d'un **règlement** (`eli:/fr/reg/…`) : c'est ainsi qu'une
+annexe qui n'a plus d'acte d'adoption dans l'application peut tout de même se consulter pour
+elle-même.
+
+Les reprises vivent dans leur **propre registre** : elles ne se mêlent ni aux listes d'actes, ni au
+chrono, ni à la recherche des actes en cours, et ne suivent ni le parapheur ni la numérotation
+courante. Le geste demande la permission **« Reprendre un acte ancien »** (`actes.reprendre`,
+celle des rédacteurs), et un rédacteur ne voit que ses reprises.
+
+### Ajouté
+
+- **L'écran « Reprises d'actes anciens »** (menu, groupe *Produire*) et la collection `reprises` :
+  le formulaire (intitulé, genre, nature, numéro d'origine, date de publication d'origine, entité,
+  thème, provenance, texte), l'**aperçu** de la version en ligne tel que le recueil la montrera,
+  la **carte de l'original** (dépôt par `upload-plugin`, empreinte SHA-256, ouverture, retrait), et
+  la **publication d'un seul geste**.
+- **La mention de reprise au bas de la page publiée** (`MENTION_REPRISE`, une seule phrase pour
+  toutes les faces : la page en ligne, le recueil, et le JSON-LD qui la transporte en
+  `rdfs:comment`), les pastilles de la notice (*Reprise d'un acte ancien*, *texte informatif*,
+  *reprise publiée*), le panneau « Original signé » et la marque **« reprise »** dans la liste du
+  recueil.
+- **Les textes autonomes** (genre « Texte autonome (annexe) ») : un règlement intérieur, une
+  charte, un texte qu'on veut consulter pour lui-même, publié sous l'identifiant ELI d'un
+  règlement.
+- **Côté service** : le dépôt porte `reprise: true` (il autorise la publication sans signature), la
+  publication porte `informative` et `reprise` (et `originalExterne` pour la pièce conservée), et
+  une publication déclarée telle sur un acte non déposé comme reprise est refusée
+  (`acte_non_reprise`). La collection `reprises` rejoint les collections partagées, en écriture
+  pour le rédacteur.
+- **Le chapitre du guide** « Reprendre un acte ancien (avant l'informatique) », et le renvoi de
+  l'écran vers lui.
+
+### Corrigé
+
+- **Un dossier de stockage partagé par toutes les collections non déclarées.** Le magasin local
+  (IndexedDB) range chaque collection dans son propre dossier ; celles qui n'y figuraient pas
+  tombaient dans un dossier commun (`undefined`). Les **informations** du recueil public y vivaient
+  depuis la 1.5.3, et la nouvelle collection `reprises` aurait écrit **par-dessus**. Les deux ont
+  désormais leur dossier, et les données héritées du dossier commun sont reprises une fois, sans
+  perte.
+
+
+## [1.6.1r] — 2026-09-25 — Un exemple de déploiement à la racine du dépôt
+
+Un administrateur qui veut essayer Scribae sur son serveur devait jusqu'ici lire
+`src/docs/DOCKER.md` et recopier des commandes, ou cloner le dépôt pour bâtir la pile Compose.
+Il trouve désormais, **à la racine du dépôt**, un dossier **`compose-exemple/`** : MariaDB et
+l'image publiée `docker.io/aplds/scribae` — deux services, **rien à construire**, trois
+commandes.
+
+```
+cd compose-exemple
+cp env.example .env      # DB_ROOT_PASSWORD, DB_PASSWORD, ADMIN_PASSWORD
+docker compose up -d
+```
+
+Le compte d'administration est créé au premier démarrage, le compte applicatif de la base est
+aligné sur le `.env` et le schéma appliqué — l'amorçage de l'image le fait dès que le mot de
+passe root lui est fourni, donc sans qu'aucune commande ne soit lancée dans le conteneur.
+
+**Ce que l'exemple ne fait pas, et il le dit** : il publie le port en clair, sans TLS ni
+sauvegarde. C'est un point de départ, et la mise en service renvoie à `src/docs/ADMINISTRATION.md`
+et `src/docs/DOCKER.md`. La pile complète du dépôt (quatre services, tout construite) reste dans
+`src/server/docker-compose.yml` : les deux répondent à deux besoins différents.
+
+Le **`env.example` ne contient que ce qu'un premier démarrage exige** : les deux mots de passe de
+la base, celui du premier compte, le port publié, le mode d'authentification, le cookie de session
+— à `false` le temps d'un essai en clair, car le service est à `true` par défaut et le navigateur
+refuse alors le cookie —, et le commutateur de démonstration. L'identité, le vocabulaire, la
+numérotation et le reste se règlent dans l'application et se lisent dans `src/docs/VARIABLES.md` :
+rien à écrire d'avance.
+
+### Ajouté
+
+- **`compose-exemple/`** (racine du dépôt) : `docker-compose.yml` — MariaDB épinglée par
+  empreinte, l'image publiée, le volume des données, le réseau interne, l'attente de la base par
+  son `healthcheck` —, `env.example`, et `README.md` (les trois commandes, ce qui se règle
+  ensuite, TLS, sauvegardes, mise à jour).
+- La **table de l'export** range cette source comme les autres : `src/compose-exemple/**` →
+  `compose-exemple/**`.
+
+### Documentation
+
+- **`README.md`** (racine) : une sous-section « L'exemple prêt à l'emploi » dans la partie
+  Docker, entre le conteneur unique et la pile du dépôt.
+- `src/docs/ADMINISTRATION.md` (§ 1.1) et `src/docs/DOCKER.md` (§ 5) y renvoient ; l'arbre
+  d'architecture de `src/README.md` et `AGENTS.md` nomment le dossier.
+- `src/README.md` : la copie du `.gitignore` qu'il porte était restée à la version d'avant les
+  réglages locaux des assistants de code — remise d'aplomb avec `src/github/gitignore`, qui en
+  est la source.
 
 
 ## [1.6.1q] — 2026-09-23 — L'outillage prend ses quartiers à la racine du dépôt
@@ -45,6 +383,20 @@ dit à qui ouvre une épreuve ce qu'elle tient et pourquoi ses imports disent `.
 L'outillage **constate** la racine du code au lieu de la supposer (`scripts/racine-code.mjs`) :
 il fonctionne donc dans les deux dispositions — celle du dépôt, où le code est sous `src/`, et
 celle de l'atelier, où tout voisine sous `src/`.
+
+**Repris du dépôt** (envois `c297df6` à `39e6287`, faits depuis GitHub) : la livraison est
+publiée avec vos ajouts — `src/server/build-and-push.sh` (construction et publication de l'image
+autonome) et la documentation du déploiement Docker (section « Déployer avec Docker » du
+`README.md`, `src/server/README.md`, `src/docs/ADMINISTRATION.md` § 1.1). **`APP_VERSION` y
+passe à `1.6.1q`** : une note intermédiaire publiée *est* une version. La règle de versionnement
+disait l'inverse en trois endroits — le commentaire de `src/lib/version.js`, l'épreuve de
+`tests/purs.test.mjs`, la documentation — et c'est désormais l'inverse qui est écrit partout :
+`APP_VERSION` reproduit le titre de la première entrée datée du changelog, **lettre comprise**.
+
+### Ajouté
+
+- **`src/server/build-and-push.sh`** : construction et publication de l'image autonome (registre
+  au choix, étiquette `latest` facultative, `docker login` par variables d'environnement).
 
 ### Modifié
 
@@ -87,6 +439,14 @@ celle de l'atelier, où tout voisine sous `src/`.
 - **`.gitignore`** : les réglages **locaux** des assistants de code (`.claude/settings.local.json`,
   `.vibe/`) ne sont pas versionnés ; les instructions partagées (`AGENTS.md`, `CLAUDE.md`), elles,
   le sont.
+- **La règle de versionnement** est réécrite là où elle était fausse : commentaire de
+  `src/lib/version.js`, en-tête de ce journal, `src/README.md` (§ « Flux de travail :
+  Perchance ↔ GitHub »), `src/docs/INDUSTRIALISATION.md` et `AGENTS.md`. Un lot publié sous une
+  note intermédiaire devient la version courante, `APP_VERSION` comprise — et le champ `version`
+  de `package.json` reste, lui, un repère d'outillage : npm y veut un numéro sémantique, il porte
+  donc le numéro **sans la lettre**.
+- **`src/docs/ADMINISTRATION.md`** : le renvoi à `env.example` (§ 1.1) est rendu **relatif au
+  fichier** (`../server/env.example`), comme le reste du document.
 
 
 ## [1.6.1p] — 2026-09-23 — La connexion par l'annuaire passe par le service (fini le « Failed to fetch »)

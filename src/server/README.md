@@ -233,6 +233,33 @@ docker compose up -d --build
 docker compose logs -f api        # doit finir par : « … à l'écoute sur http://0.0.0.0:8080 »
 ```
 
+Le journal s'ouvre sur la **bannière de démarrage** — la marque du logiciel, son nom, et sous lui
+la **version**, la **licence** et l'adresse de sa documentation :
+
+```
++------------------------------------------------------------------------+
+|   ____________                                                         |
+|  |            \     ____                   _   _                       |
+|  |             \   / ___|    ___    _ __  (_) | |__     __ _    ___    |
+|  |     /\      |   \___ \   / __|  | '__| | | | '_ \   / _` |  / _ \   |
+|  |    // \\    |    ___) | | (__   | |    | | | |_) | | (_| | |  __/   |
+|  |   //   \\   |   |____/   \___|  |_|    |_| |_.__/   \__,_|  \___|   |
+|  |  //     \\  |                                                       |
+|  |             |   v1.6.1w — GPLv3 — doc.scribae.eu                    |
+|  |_____________|                                                       |
++------------------------------------------------------------------------+
+```
+
+La version qu'elle annonce n'est pas écrite dans le service : l'image ne contient que
+`mysql/`, et l'identité du logiciel vit dans `src/lib/`. Un **miroir engendré** —
+[`mysql/logiciel-engendre.mjs`](mysql/logiciel-engendre.mjs), écrit par
+`node scripts/generer-logiciel.mjs` — le lui apporte, et l'épreuve
+`mysql/logiciel-engendre.test.mjs` refuse un miroir périmé. **Le journal du conteneur dit donc
+toujours la version qui tourne** — c'est la première chose qu'on lui demande devant une
+installation qui se comporte mal. La bannière ne paraît que sur le **démarrage du service** :
+les commandes d'administration (`--reconcilier`, `--migrate`, `--mot-de-passe`) gardent un
+journal qui n'est que la trace du geste qu'on y a fait.
+
 Un service de plus apparaît dans `docker compose ps` : **`db-init`**, « exited (0) ». C'est normal,
 et c'est voulu : il travaille quelques secondes puis s'arrête (voir plus bas). L'ordre est
 `db` → `db-init` → `api` → `web`.

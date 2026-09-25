@@ -1,4 +1,5 @@
 import { h, icon, button, modal, field as frField, select, clear } from "./dom.js";
+import { avecCurseur } from "./focus.js";
 import { state, navigate } from "./state.js";
 import { servicesInScope, bureauxInScope, coveredBureaux, serviceById, bureauxOf } from "../lib/scope.js";
 import { FONT_CHOICES, FONT_VALUES } from "../lib/styles.js";
@@ -14,10 +15,21 @@ export function helpLink(chapterId, label = "Aide sur cette page") {
   }, icon("info", 14), h("span", { text: label }));
 }
 
+// Un champ de saisie dont la FRAPPE peut redessiner ce qui le porte : une fiche
+// dont l'en-tête reprend le nom qu'on écrit, un bloc qui se recalcule, un
+// formulaire qui se reconstruit. Le nœud est alors remplacé, et la saisie
+// perdrait le focus — et la sélection — dès la première lettre. `avecCurseur`
+// le rend à sa place une fois le redessin fait : c'est le même remède que pour
+// les redessins de vue (voir src/ui/focus.js).
+const surSaisie = (onChange) => (e) => {
+  if (typeof onChange !== "function") return;
+  avecCurseur(() => onChange(e.target.value));
+};
+
 export function textField({ label, value, onChange, help, placeholder, required, type = "text", rows }) {
   const input = rows
-    ? h("textarea", { class: "fr-textarea", rows, placeholder: placeholder || "", on: { input: (e) => onChange(e.target.value) } })
-    : h("input", { class: "fr-input", type, value: value ?? "", placeholder: placeholder || "", on: { input: (e) => onChange(e.target.value) } });
+    ? h("textarea", { class: "fr-textarea", rows, placeholder: placeholder || "", on: { input: surSaisie(onChange) } })
+    : h("input", { class: "fr-input", type, value: value ?? "", placeholder: placeholder || "", on: { input: surSaisie(onChange) } });
   if (rows) input.value = value ?? "";
   return frField(label, input, { help, required });
 }
@@ -48,7 +60,7 @@ export function fontField({ label, value, onChange, help, required, inherit = fa
   const input = h("input", {
     class: "fr-input", value: current, spellcheck: "false",
     placeholder: "'Nom de la police', Arial, sans-serif",
-    on: { input: (e) => onChange(e.target.value) },
+    on: { input: surSaisie(onChange) },
   });
   const extra = h("div", { class: "styles-font__custom", hidden: !custom }, input);
 

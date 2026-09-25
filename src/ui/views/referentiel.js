@@ -481,7 +481,7 @@ export function renderReferentiel(root) {
         button("Importer un fichier", { variant: "secondary", icon: "upload", onClick: importAll }),
       ),
       h("hr", { class: "fr-sep" }),
-      h("p", { class: "fr-small fr-muted", text: `Actuellement : ${c.entities.length} entités · ${(c.services || []).length} services · ${c.people.length} personnes · ${c.refs.length} références · ${state.trames.length} trames · ${state.actes.length} actes · ${state.users.length} comptes.` }),
+      h("p", { class: "fr-small fr-muted", text: `Actuellement : ${c.entities.length} entités · ${(c.services || []).length} services · ${c.people.length} personnes · ${c.refs.length} références · ${state.trames.length} trames · ${state.actes.length} actes · ${(state.reprises || []).length} reprises · ${state.users.length} comptes.` }),
       h("div", { class: "fr-row" },
         button("Vider le référentiel", { variant: "secondary", danger: true, onClick: resetConfig }),
         button("Réinstaller le jeu de démonstration", { variant: "tertiary", onClick: resetAll }),
@@ -772,7 +772,7 @@ function databasePanel() {
 
   const counts = h("p", { class: "fr-small fr-muted" });
   const c = state.config;
-  counts.textContent = `À l'écran : ${c.entities.length} entités · ${(c.services || []).length} services · ${state.trames.length} trames · ${state.actes.length} actes · ${state.users.length} comptes.`;
+  counts.textContent = `À l'écran : ${c.entities.length} entités · ${(c.services || []).length} services · ${state.trames.length} trames · ${state.actes.length} actes · ${(state.reprises || []).length} reprises · ${state.users.length} comptes.`;
 
   const report = h("div", { class: "fr-small" });
   const showReport = (rows, verb) => {
@@ -785,7 +785,7 @@ function databasePanel() {
     button(db.isShared() ? "Envoyer les données à la base" : "Copier vers le stockage local", {
       variant: "secondary", icon: "upload",
       onClick: async () => {
-        const rows = await db.push({ config: state.config, trames: state.trames, actes: state.actes, users: state.users });
+        const rows = await db.push({ config: state.config, trames: state.trames, actes: state.actes, reprises: state.reprises, users: state.users });
         const bad = rows.filter((r) => !r.ok);
         if (bad.length) { showReport(rows, "Envoi"); toast("Envoi partiel — voir le détail", "error"); }
         else { clear(report); report.appendChild(h("p", { class: "fr-small", text: "Envoi terminé : le référentiel, les trames, les actes et les comptes ont été écrits dans la base." })); toast("Données envoyées à la base", "success"); }
@@ -804,6 +804,7 @@ function databasePanel() {
         if (res.config?.ok) { state.config = res.config.value; applyBrand(); }
         if (res.trames?.ok) state.trames = res.trames.value || [];
         if (res.actes?.ok) state.actes = res.actes.value || [];
+        if (res.reprises?.ok) state.reprises = res.reprises.value || [];
         if (res.users?.ok) { state.users = res.users.value || []; await setUsers(state.users); }
         toast("Données récupérées depuis la base", "success");
         redrawView();
@@ -1174,7 +1175,7 @@ function exportAll() {
   download(`referentiel-actes-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({
     kind: "actes-app", version: 1,
     exportedAt: new Date().toISOString(),
-    config: state.config, trames: state.trames, actes: state.actes, users: state.users,
+    config: state.config, trames: state.trames, actes: state.actes, reprises: state.reprises, users: state.users,
   }, null, 2));
 }
 
@@ -1186,7 +1187,8 @@ async function importAll() {
     if (d.config) { state.config = d.config; await saveConfig(state.config); applyBrand(); }
     if (Array.isArray(d.trames)) state.trames = d.trames;
     if (Array.isArray(d.actes)) state.actes = d.actes;
-    touch("trames"); touch("actes");
+    if (Array.isArray(d.reprises)) state.reprises = d.reprises;
+    touch("trames"); touch("actes"); touch("reprises");
     if (Array.isArray(d.users) && d.users.length) await setUsers(d.users);
     // Le référentiel importé peut changer le mode d'authentification (annuaire
     // ou comptes de l'application) : on réapplique, sinon les comptes de
@@ -1214,7 +1216,8 @@ async function resetAll() {
   state.config = seedConfig();
   state.trames = seedTrames();
   state.actes = [];
-  touch("config"); touch("trames"); touch("actes");
+  state.reprises = [];
+  touch("config"); touch("trames"); touch("actes"); touch("reprises");
   await resetDemoUsers();
   applyBrand();
   toast("Jeu de démonstration réinstallé", "success");

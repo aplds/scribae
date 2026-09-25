@@ -563,14 +563,14 @@ curl -X GET 'https://api.exemple.fr/v1/db/health' \
 
 ### `GET /v1/db/collections/{collection}` — Lire une collection
 
-Renvoie tous les enregistrements d'une collection, chacun avec sa révision. Les collections sont `config`, `trames`, `actes`, `users`, `meta`, `journal`, `presence`. En mode « password » ou « oidc », la lecture exige une session ouverte.
+Renvoie tous les enregistrements d'une collection, chacun avec sa révision. Les collections sont `config`, `trames`, `actes`, `reprises`, `users`, `meta`, `journal`, `presence`, `informations`. En mode « password » ou « oidc », la lecture exige une session ouverte.
 
 - **Authentification** : lecteur
 - **Service** : auto-hébergé
 
 | Paramètre | Type | Description |
 |---|---|---|
-| collection | string | config \| trames \| actes \| users \| meta \| journal \| presence |
+| collection | string | config \| trames \| actes \| reprises \| users \| meta \| journal \| presence \| informations |
 
 **Exemple**
 
@@ -657,7 +657,7 @@ curl -X GET 'https://api.exemple.fr/v1/actes' \
 
 ### `POST /v1/actes` — Déposer un acte finalisé
 
-Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable: false` rend la publication impossible, même après signature : c'est le cas d'un acte individuel.
+Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable: false` rend la publication impossible, même après signature : c'est le cas d'un acte individuel. Le champ `reprise: true` déclare le dépôt comme la REPRISE d'un acte ancien : il autorise sa publication sans signature (voir « Publier un acte au recueil »).
 
 - **Authentification** : redacteur
 - **Service** : les deux
@@ -667,8 +667,8 @@ Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Re
 ```json
 {
   "akn": "<akomaNtoso>…</akomaNtoso>",
-  "numero": "2026-412-VSL",
-  "objet": "Tarifs de la restauration scolaire",
+  "numero": "1998-042",
+  "objet": "Création du service de restauration scolaire",
   "nature": "arrete",
   "entityId": "ent-vsl",
   "entityName": "Ville de Valmont-sur-Loire",
@@ -686,7 +686,7 @@ curl -X POST 'https://api.exemple.fr/v1/actes' \
   -H 'accept: application/json' \
   -H 'authorization: Bearer VOTRE_JETON' \
   -H 'content-type: application/json' \
-  -d '{"akn":"<akomaNtoso>…</akomaNtoso>","numero":"2026-412-VSL","objet":"Tarifs de la restauration scolaire","nature":"arrete","entityId":"ent-vsl","entityName":"Ville de Valmont-sur-Loire","dateSignature":"2026-09-22","trameId":"trame-tarifs","publishable":true,"controleLegalite":false}'
+  -d '{"akn":"<akomaNtoso>…</akomaNtoso>","numero":"1998-042","objet":"Création du service de restauration scolaire","nature":"arrete","entityId":"ent-vsl","entityName":"Ville de Valmont-sur-Loire","dateSignature":"2026-09-22","trameId":"trame-tarifs","publishable":true,"controleLegalite":false}'
 ```
 
 | Code | Signification |
@@ -700,6 +700,7 @@ curl -X POST 'https://api.exemple.fr/v1/actes' \
 | akn | string | Le document Akoma Ntoso 3.0 (obligatoire) |
 | publishable | booléen | false : acte individuel, jamais publié au recueil |
 | controleLegalite | booléen | true : la publication attendra la transmission |
+| reprise | booléen | true : reprise d'un acte ancien, publiable sans signature |
 
 ### `GET /v1/actes/{id}` — Lire un acte déposé
 
@@ -1071,7 +1072,7 @@ Recueil public, identifiants persistants, retrait et épinglage.
 
 ### `POST /v1/actes/{id}/publication` — Publier un acte au recueil
 
-Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée tant que l'acte n'est pas signé (chaîne d'intégrité), si l'acte a été déclaré non publiable (acte_non_publiable), s'il était soumis au contrôle de légalité et n'a pas été transmis (transmission_absente), et si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon. Le champ `juridique: false` publie un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) : le service n'inscrit alors aucune date d'opposabilité — il l'impose vide —, et le recueil le présente comme un document, sans opposabilité.
+Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée tant que l'acte n'est pas signé (chaîne d'intégrité), si l'acte a été déclaré non publiable (acte_non_publiable), s'il était soumis au contrôle de légalité et n'a pas été transmis (transmission_absente), et si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon. Le champ `juridique: false` publie un DOCUMENT NON JURIDIQUE (verbatim de séance, déclaration, vœu) : le service n'inscrit alors aucune date d'opposabilité — il l'impose vide —, et le recueil le présente comme un document, sans opposabilité. Les champs `informative: true` et `reprise: true` publient la REPRISE d'un acte ancien : la publication est alors acceptée sans signature, à condition que le dépôt ait lui-même porté `reprise: true` (sinon `acte_non_reprise`), elle ne rend rien opposable, et l'original conservé voyage dans `originalExterne` (le service le garde comme la pièce qui fait foi).
 
 - **Authentification** : redacteur
 - **Service** : les deux
@@ -1092,10 +1093,18 @@ Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publica
     },
     "signatures": []
   },
-  "datePublication": "2026-09-22",
+  "datePublication": "1998-06-12",
   "recueil": "",
   "themeId": "fam-tarifs",
-  "themeLabel": "Tarifs"
+  "themeLabel": "Tarifs",
+  "reprise": true,
+  "informative": true,
+  "originalExterne": {
+    "url": "https://…/original.pdf",
+    "sha256": "…",
+    "nom": "original.pdf"
+  },
+  "provenance": "Registre des délibérations, 1998"
 }
 ```
 
@@ -1106,7 +1115,7 @@ curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/publication' \
   -H 'accept: application/json' \
   -H 'authorization: Bearer VOTRE_JETON' \
   -H 'content-type: application/json' \
-  -d '{"html":"<article>…</article>","akn":"…","original":{"document":{"akn":"…"},"signatures":[]},"datePublication":"2026-09-22","recueil":"","themeId":"fam-tarifs","themeLabel":"Tarifs"}'
+  -d '{"html":"<article>…</article>","akn":"…","original":{"document":{"akn":"…"},"signatures":[]},"datePublication":"1998-06-12","recueil":"","themeId":"fam-tarifs","themeLabel":"Tarifs","reprise":true,"informative":true,"originalExterne":{"url":"https://…/original.pdf","sha256":"…","nom":"original.pdf"},"provenance":"Registre des délibérations, 1998"}'
 ```
 
 | Code | Signification |

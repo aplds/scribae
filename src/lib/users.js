@@ -72,9 +72,12 @@ export const ROLES = {
   // Aucune permission : le visiteur est authentifié (son identité est vérifiée),
   // mais l'application ne lui ouvre rien. Il est accueilli par un écran qui le
   // lui explique et le renvoie vers l'espace public, qu'il consulte sans compte.
+  // Une réserve : les QUALITÉS cumulées qu'il porterait restent (voir `can`) —
+  // le cas du signataire extérieur, dont la signature engage un acte sans qu'il
+  // ait rien à faire dans l'atelier.
   visiteur: {
     id: "visiteur", label: "Visiteur", rank: 0, badge: "warning",
-    summary: "Compte authentifié sans accès à l'application : aucun écran de l'atelier ne lui est ouvert. Il ne lui reste que le recueil public, qu'il consulte sans compte. C'est l'état d'un agent de l'annuaire dont aucun groupe ne correspond à un rôle.",
+    summary: "Compte authentifié sans accès à l'application : aucun écran de l'atelier ne lui est ouvert. Il ne lui reste que le recueil public, qu'il consulte sans compte. C'est l'état d'un agent de l'annuaire dont aucun groupe ne correspond à un rôle. Une qualité cumulée (signataire) lui rouvre le seul écran qu'elle commande.",
   },
 };
 
@@ -105,9 +108,22 @@ export const hasRole = (user, role) => rolesOf(user).includes(role);
 // Un compte sans rôle d'application — ou dont le rôle est « Visiteur » — est un
 // visiteur : authentifié, mais sans accès. C'est la question que pose
 // l'application AVANT d'ouvrir l'atelier (voir src/ui/app.js).
+//
+// UNE EXCEPTION, et une seule : les QUALITÉS cumulées (voir
+// `permissionsDeQualites`). Le profil « Visiteur » décrit un compte qui n'est
+// pas un agent de l'atelier ; or une qualité peut précisément être ce qu'on
+// attend d'un compte extérieur. Le cas qui l'impose est celui du SIGNATAIRE :
+// une personne qui n'a aucune raison d'entrer dans l'atelier — un élu, le
+// président d'une association partenaire, un agent d'une autre collectivité —
+// mais dont la signature engage l'acte. Lui refuser l'atelier entier, c'est lui
+// refuser les onglets de signature, c'est-à-dire la seule chose qu'on lui
+// demande. Un visiteur qui porte une qualité qui ouvre quelque chose n'est donc
+// pas renvoyé à l'écran « pas d'accès ».
 export function estVisiteur(user) {
   if (!user) return false;
-  return hasRole(user, VISITEUR) || rolesOf(user).length === 0;
+  if (!rolesOf(user).length) return true;
+  if (!hasRole(user, VISITEUR)) return false;
+  return !permissionsDeQualites(user).length;
 }
 
 // Rôle principal : le rang le plus élevé, départagé par l'ordre de référence
@@ -155,6 +171,11 @@ export const PERMS = [
   { key: "trames.gerer", label: "Créer, modifier, dupliquer et commenter les trames (éditeur de trame)", roles: ["administrateur", "editeur"] },
   { key: "trames.styles", label: "Modifier les feuilles de style des actes (charte graphique)", roles: ["administrateur", "editeur"] },
   { key: "actes.rediger", label: "Rédiger un acte", roles: ["administrateur", "editeur", "reviseur", "redacteur"] },
+  // La REPRISE d'actes anciens (voir src/lib/reprise.js) : faire entrer au
+  // recueil des actes antérieurs à sa mise en service, écrits à la main et
+  // publiés à titre informatif. C'est un geste de la RÉDACTION — les mêmes rôles
+  // que la rédaction d'un acte, et pas les lecteurs du recueil.
+  { key: "actes.reprendre", label: "Reprendre un acte ancien (import au recueil, publication informative)", roles: ["administrateur", "editeur", "reviseur", "redacteur"] },
   { key: "actes.gerer", label: "Modifier, supprimer et importer des actes (modificatif, consolidation)", roles: ["administrateur", "editeur"] },
   { key: "actes.tous", label: "Voir et rouvrir les actes de tous les agents", roles: ["administrateur", "editeur"] },
   { key: "actes.valider", label: "Porter une étape du parapheur : bon pour accord, avis, renvoi, refus", roles: ["administrateur", "editeur"] },
@@ -195,6 +216,14 @@ export const ROLE_KEYS = ROLE_ORDER.slice();
 
 const BY_KEY = new Map(PERMS.map((p) => [p.key, p]));
 
+// Les permissions qu'un compte tient de ses QUALITÉS cumulées (réviseur,
+// signataire), et non de son profil principal. Une qualité ne dit pas ce qu'un
+// agent fait de sa journée : elle AJOUTE un pouvoir. C'est ce pouvoir-là qui
+// survit au profil « Visiteur » — le profil ferme l'atelier, la qualité ouvre ce
+// qu'elle ouvre (voir `can` et `estVisiteur`).
+export const permissionsDeQualites = (user) =>
+  PERMS.filter((p) => rolesOf(user).some((r) => estCumulable(r) && p.roles.includes(r))).map((p) => p.key);
+
 export const roleOf = (user) => ROLES[primaryRoleId(user)] || null;
 export const roleLabel = (user) => rolesOf(user).map((r) => ROLES[r].label).join(" + ") || "—";
 export const roleBadge = (user) => roleOf(user)?.badge || "info";
@@ -203,13 +232,16 @@ export const badgesOf = (user) => normalizeRoles(rolesOf(user)).map((r) => ROLES
 
 export function can(user, perm) {
   if (!user || user.active === false) return false;
-  // Un visiteur n'a aucun accès, quoi que porte son compte par ailleurs : le
-  // rôle « Visiteur » prime sur toute qualité résiduelle (un réviseur dont le
-  // groupe a disparu ne doit pas garder la révision).
-  if (hasRole(user, VISITEUR)) return false;
   const p = BY_KEY.get(perm);
   if (!p) return false;
-  return rolesOf(user).some((r) => p.roles.includes(r));
+  const roles = rolesOf(user);
+  // Le profil « Visiteur » ferme l'atelier : il prime sur le PROFIL et sur tout
+  // rôle ordinaire résiduel. Les QUALITÉS cumulées, elles, restent : elles ne
+  // disent pas ce qu'on fait de sa journée, elles ajoutent un pouvoir (voir
+  // `permissionsDeQualites`). Un compte extérieur dont la signature engage un
+  // acte garde donc `actes.signer`, et rien d'autre.
+  if (hasRole(user, VISITEUR)) return roles.some((r) => estCumulable(r) && p.roles.includes(r));
+  return roles.some((r) => p.roles.includes(r));
 }
 
 export const permsOf = (role) => PERMS.filter((p) => p.roles.includes(role)).map((p) => p.key);

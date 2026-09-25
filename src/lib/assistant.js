@@ -329,6 +329,7 @@ const CHAPITRES_ECRAN = {
   signature: ["signature", "signature-externe", "parapheur"],
   publications: ["publication"],
   publication: ["publication"],
+  reprises: ["reprises", "publication"],
   execution: ["execution"],
   revision: ["revision", "signature-externe"],
   parapheur: ["parapheur"],

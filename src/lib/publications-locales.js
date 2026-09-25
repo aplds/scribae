@@ -36,6 +36,11 @@ const cmp = (a, b) => (texte(a) < texte(b) ? -1 : texte(a) > texte(b) ? 1 : 0);
 // publication antérieure à la qualification — on la déduit de l'ACTE, qui porte
 // le circuit employé (`signatureSimple`, `externe`, `signatureMode`, `api`).
 function signatureDe(acte, p) {
+  // Une REPRISE n'a pas été signée par l'application : elle n'a donc AUCUNE
+  // signature à présenter (son « originalExterne » est la pièce ancienne jointe,
+  // non une version signée déposée par le circuit externe).
+  if (p && p.reprise === true) return null;
+  if (acte && acte.reprise === true) return null;
   if (p && p.signature) return p.signature;
   const circuit = acte.signatureSimple || acte.signatureMode === "simple" || (acte.api && acte.api.niveau === "simple") ? "simple"
     : acte.externe || (acte.publication && acte.publication.originalExterne) ? "externe"
@@ -79,7 +84,11 @@ function noticeDe(acte) {
     dateDocument: texte(p.dateDocument || acte.dateSignature),
     datePublication: texte(p.datePublication || acte.datePublication),
     dateOpposabilite: texte(p.dateOpposabilite || acte.dateOpposabilite),
-    kind: texte(p.kind) || "originale",
+    // Le genre de la publication. Le service le rend (`kind`) ; un enregistrement
+    // plus ancien, qui ne le portait pas, se lit à défaut sur l'acte lui-même —
+    // une reprise déposée par l'écran des reprises est « reprise », et la
+    // présenter comme une « version initiale » serait faux.
+    kind: texte(p.kind) || (p.reprise === true || acte.reprise === true ? "reprise" : "originale"),
     recueil: texte(p.recueil),
     publieeLe: texte(p.publieeLe),
     latest: true,
@@ -95,6 +104,11 @@ function noticeDe(acte) {
     signature: signatureDe(acte, p),
     versions: [],
     informative: p.informative === true,
+    // Une REPRISE d'acte ancien (voir src/lib/reprise.js) : le recueil en a
+    // besoin pour l'appeler par son nom et porter la mention informative.
+    reprise: p.reprise === true || acte.reprise === true,
+    provenance: texte(p.provenance || acte.provenance),
+    auteur: texte(p.auteur || acte.auteur),
     adoption: p.adoption || null,
     ...(p.juridique === false ? { juridique: false } : {}),
     ...(p.natureDoc ? { natureDoc: p.natureDoc } : {}),

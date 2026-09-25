@@ -387,3 +387,43 @@ test("les chats des pages d'erreur : éteints par défaut, allumés par la publi
   const apres = (await call("GET", "/recueil/acte-qui-nexiste-pas", null, recueil));
   assert.equal(String(apres.body).includes("http.cat"), false, "la plus récente qui porte le réglage l'emporte");
 });
+
+test("une reprise d'acte ancien se publie SANS signature, avec son original joint", async () => {
+  const { call } = banc();
+  const akn = "<akomaNtoso><body>Délibération n°1998-042 du 12 juin 1998</body></akomaNtoso>";
+  // Le dépôt DÉCLARE la reprise : c'est ce qui autorise le service à la publier
+  // sans signature. La date d'origine (1998) reste antérieure au jour.
+  const a = (await call("POST", "/v1/actes", { akn, numero: "1998-042", dateSignature: "1998-06-12", reprise: true }, { authorization: JETON })).body;
+  const corps = {
+    html: "<html>reprise</html>", akn, eliUri: "eli:/fr/delib/1998/042/iam",
+    dateDocument: "1998-06-12", datePublication: "1998-06-12",
+    kind: "reprise", informative: true, reprise: true, auteur: "Yann Dubois",
+    provenance: "Registre des délibérations, 1998",
+    originalExterne: { url: "https://exemple.fr/1998-042.pdf", sha256: "abc", nom: "1998-042.pdf", taille: 1234, type: "application/pdf" },
+  };
+  const publie = (await call("POST", `/v1/actes/${a.id}/publication`, corps, { authorization: JETON }));
+  assert.equal(publie.status, 201);
+  assert.equal(publie.body.reprise, true);
+  assert.equal(publie.body.provenance, "Registre des délibérations, 1998");
+
+  const rec = (await call("GET", `/v1/publications/${encodeURIComponent(publie.body.cle)}`)).body;
+  assert.equal(rec.reprise, true);
+  assert.equal(rec.kind, "reprise");
+  assert.equal(rec.originalExterne.url, "https://exemple.fr/1998-042.pdf", "l'original joint est conservé comme la pièce qui fait foi");
+  assert.equal(rec.original, null, "une reprise n'a pas de paquet signé");
+  assert.equal(rec.signature, null, "une reprise n'a pas de signature à présenter");
+  // La liste du recueil la nomme et la marque, sans avoir à relire la fiche.
+  const notice = (await call("GET", "/v1/publications")).body.publications.find((p) => p.cle === publie.body.cle);
+  assert.equal(notice.reprise, true);
+  assert.equal(notice.provenance, "Registre des délibérations, 1998");
+});
+
+test("un acte qui n'a pas été déposé comme reprise ne se publie pas sans signature", async () => {
+  const { call } = banc();
+  const a = (await call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON })).body;
+  const res = (await call("POST", `/v1/actes/${a.id}/publication`, {
+    html: "x", akn: AKN, eliUri: "eli:/fr/arr/2026/0401/iam", informative: true, reprise: true,
+  }, { authorization: JETON }));
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "acte_non_reprise");
+});

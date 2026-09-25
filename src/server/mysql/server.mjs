@@ -42,6 +42,8 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { createActesApi, emptyState } from "./actes.mjs";
+import { APP_NAME } from "./logiciel-engendre.mjs";
+import { banniere } from "./banniere.mjs";
 import { createBulletins } from "./bulletins.mjs";
 import * as courriel from "./courriel.mjs";
 import { SERVICE_ID, entetesSurs, ecrireEntetes } from "./entetes.mjs";
@@ -56,7 +58,10 @@ import { creerMagasinMysql } from "./magasin-mysql.mjs";
 import { creerMagasinFichier } from "./magasin-fichier.mjs";
 import { CLE_IPS, CLE_MESSAGE, etat as etatAtelier, corpsRefus, resume as resumeAtelier, adresseDeLEntete } from "./atelier.mjs";
 
-const SERVICE = "Scribae — service de la collectivité";
+// Le NOM vient de l'identité du logiciel (`src/lib/logiciel.js`, par le miroir
+// engendré) : celui qui renomme le logiciel n'a pas à le retrouver ici, et le
+// journal du conteneur ne peut pas annoncer un autre nom que la bannière.
+const SERVICE = APP_NAME + " — service de la collectivité";
 const SERVICE_VERSION = "1.0.0";
 // `SERVICE` (tiret cadratin, accents) sert aux journaux et aux corps JSON ;
 // `SERVICE_ID` (« scribae », ASCII) est le seul employé en en-tête HTTP. La
@@ -174,7 +179,7 @@ const COLLECTIONS_ADMIN = new Set(["users", "config"]);
 const COLLECTIONS_EDITEUR = new Set(["informations"]);
 
 
-const COLLECTIONS = ["config", "trames", "actes", "users", "meta", "journal", "presence", "informations"];
+const COLLECTIONS = ["config", "trames", "actes", "reprises", "users", "meta", "journal", "presence", "informations"];
 // Collections qui ne sont pas recopiées dans le journal technique : elles sont
 // elles-mêmes un flux (présence des postes, journal d'audit de l'application).
 // Les y inscrire produirait un bruit continu sans valeur d'audit.
@@ -1820,6 +1825,14 @@ async function main() {
     await magasin.fermer();
     return;
   }
+  // LA BANNIÈRE OUVRE LE JOURNAL. Un exploitant qui ouvre `docker logs` doit lire
+  // d'abord ce que le service EST — sa version, sa licence, sa documentation —,
+  // avant les messages d'état : c'est la première question qu'on se pose devant
+  // un conteneur qui ne se comporte pas comme prévu. Elle ne paraît PAS sur les
+  // chemins d'administration (`--reconcilier`, `--migrate`, `--mot-de-passe`),
+  // qui rendent la main d'eux-mêmes : leur journal doit rester la trace du seul
+  // geste qu'on y a fait.
+  console.log(banniere());
   // LE SCHÉMA D'ABORD (idempotent) : il rend la base UTILISABLE, et son échec
   // porte le remède le plus juste (compte refusé, base absente, schéma refusé).
   // On GARDE son erreur : le verdict est reposé APRÈS l'épreuve de santé, pour

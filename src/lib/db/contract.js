@@ -5,6 +5,11 @@
 //   • `config`   — le référentiel (objet unique)
 //   • `trames`   — les trames (liste d'objets identifiés par `id`)
 //   • `actes`    — les actes (liste)
+//   • `reprises` — les reprises d'actes anciens (liste) : des actes antérieurs
+//                  au recueil, écrits à la main et publiés à titre informatif
+//                  (voir src/lib/reprise.js). Ils vivent à part des actes : une
+//                  reprise ne suit ni le parapheur, ni la signature, ni la
+//                  numérotation courante.
 //   • `users`    — les comptes (liste)
 //   • `informations` — les billets publiés au recueil public (liste)
 //   • `journal`  — le registre des faits (qui a fait quoi) et la source des
@@ -27,6 +32,7 @@ export const COLLECTIONS = {
   config: { kind: SINGLETON, label: "Référentiel", table: "referentiel" },
   trames: { kind: LIST, label: "Trames", table: "trame" },
   actes: { kind: LIST, label: "Actes", table: "acte" },
+  reprises: { kind: LIST, label: "Reprises d'actes anciens", table: "reprise" },
   users: { kind: LIST, label: "Comptes", table: "compte" },
   informations: { kind: LIST, label: "Informations", table: "information" },
   journal: { kind: LIST, label: "Journal", table: "journal" },
@@ -45,7 +51,7 @@ export const SILENT_COLLECTIONS = new Set(["journal", "presence"]);
 export const SHARED_COLLECTIONS = Object.keys(COLLECTIONS).filter((n) => !COLLECTIONS[n].local);
 
 // Collections écrites automatiquement par l'application au démarrage.
-export const DOCUMENT_COLLECTIONS = ["config", "trames", "actes", "users", "informations"];
+export const DOCUMENT_COLLECTIONS = ["config", "trames", "actes", "reprises", "users", "informations"];
 
 export const isSingleton = (name) => COLLECTIONS[name]?.kind === SINGLETON;
 export const isLocalOnly = (name) => !!COLLECTIONS[name]?.local;

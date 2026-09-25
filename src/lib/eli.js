@@ -20,6 +20,7 @@ import { A4_WIDTH, A4_HEIGHT, A4_MARGIN, A4_BREAK_CSS } from "./paper.js";
 import { cleService } from "./cle-service.js";
 import { LICENCE_DEFAUT, CSS_DOCUMENT_WEB } from "./recueil.js";
 import { qualificationSignature } from "./qualification-signature.js";
+import { MENTION_REPRISE, MENTION_REPRISE_COURTE } from "./reprise.js";
 
 const ELI_CODES = {
   decision: "dec",
@@ -170,11 +171,21 @@ export function buildWebVersion({ doc, config, record }) {
   const settings = publicationSettings(config);
   const brand = config.brand || {};
   const r = record || {};
+  // REPRISE D'UN ACTE ANCIEN : la page d'une reprise n'est pas celle d'un acte
+  // ordinaire. Son texte a été écrit à la main, sa date de publication est
+  // ANTÉRIEURE au recueil, il n'a pas été signé par l'application, et son
+  // original est la pièce signée conservée par la collectivité. La page le dit —
+  // en tête (le fil d'Ariane), dans ses encarts, et surtout EN BAS DE PAGE, où
+  // la mention complète avertit le lecteur (voir `MENTION_REPRISE`).
+  const reprise = r.reprise === true;
   // Publication INFORMATIVE : le texte consolidé d'un RÈGLEMENT, publié pour
   // lui-même à titre d'information. Sa page autonome ne se présente donc pas
   // comme celle d'un acte : pas d'opposabilité, pas de « publié le », pas de
   // renvoi à un original signé — c'est la décision d'adoption qui fait foi.
-  const info = r.informative === true;
+  // La reprise est elle aussi DÉCLARÉE informative au service (elle partage le
+  // même régime : ni signature, ni opposabilité) : on la distingue ici, sans
+  // quoi elle prendrait le visage d'un règlement adopté.
+  const info = r.informative === true && !reprise;
   // DOCUMENT NON JURIDIQUE (verbatim d'assemblée, déclaration, vœu) : publié au
   // recueil, mais sans portée juridique propre — donc sans opposabilité, sans
   // entrée en vigueur et sans délai de recours. La page le dit à sa place, au
@@ -248,6 +259,11 @@ a{color:var(--brand)}
 /* Un document non juridique (verbatim, déclaration, vœu) : publié, mais sans
    opposabilité. Le bandeau reste, sa couleur dit qu'il n'y a rien à exécuter. */
 .oppo--doc{border-left-color:#5a6472;background:#f7f8fa}
+/* Une REPRISE d'acte ancien : publiée à titre informatif, elle n'est ni signée
+   par l'application ni opposable, et sa date est antérieure au recueil. Le
+   bandeau le dit, et la mention complète ferme la page (voir MENTION_REPRISE,
+   src/lib/reprise.js). */
+.oppo--reprise{border-left-color:#8a6d10;background:#fdf8ea}
 .formats{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .formats span{border:1px solid #c7cfdb;border-radius:3px;padding:2px 7px;font-size:.76rem;color:#3a3a3a}
 /* Le corps de l'acte porte la FEUILLE DE STYLE WEB de la version en ligne : la
@@ -298,14 +314,17 @@ ${A4_BREAK_CSS}
   <span class="badge">${esc(r.nature || "Acte")} ${esc(r.numero || "")}</span>
   ${r.reserve ? `<span class="badge badge--reserve">Diffusion réservée aux agents</span>` : ""}
 </div></div>
-<div class="crumb">Accueil &rsaquo; ${info ? "Règlements" : nonJuridique ? "Documents" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
+<div class="crumb">Accueil &rsaquo; ${reprise ? "Reprises d'actes anciens" : info ? "Règlements" : nonJuridique ? "Documents" : "Actes administratifs"} &rsaquo; ${esc(r.themeLabel || "")}${r.themeLabel ? " &rsaquo; " : ""}${esc(r.nature || "")}${r.numero ? " &rsaquo; " + esc(r.numero) : ""} <span class="eli">(${esc(r.eliUri || "")})</span></div>
 <div class="main">${r.reserve ? `<div class="reserve"><strong>Diffusion réservée aux agents</strong>Cet acte est publié au recueil, mais sa diffusion est restreinte : il n'est montré qu'aux personnes connectées. Il ne figure pas dans la liste publique des actes, ni dans les index ouverts (recueil.json, llms.txt, sitemap.xml).</div>` : ""}<div class="grid">
   <div class="paper doc-web"><div class="doc">${body}</div>${signatureBlock(r)}${transmissionBlock(r)}</div>
   <div class="pub-aside">
     <div class="side">
       <h3>Publication</h3>
       <dl>
-        ${info ? `<dt>Texte</dt><dd>${esc(r.nature || "Règlement")}</dd>
+        ${reprise ? `<dt>Recueil</dt><dd>${esc(r.recueil || settings.recueil)}</dd>
+        <dt>Date de publication d'origine</dt><dd>${esc(dlong(r.datePublication))}</dd>
+        ${r.provenance ? `<dt>Provenance</dt><dd>${esc(r.provenance)}</dd>` : ""}
+        <dt>Reprise par</dt><dd>${esc(r.auteur || "")}</dd>` : info ? `<dt>Texte</dt><dd>${esc(r.nature || "Règlement")}</dd>
         <dt>Adopté par</dt><dd>${esc([r.adoption && r.adoption.designation, r.adoption && r.adoption.numero ? "n° " + r.adoption.numero : "", r.adoption && r.adoption.date ? "du " + dlong(r.adoption.date) : ""].filter(Boolean).join(" ") || "—")}</dd>
         <dt>Date du texte</dt><dd>${esc(dlong(r.dateDocument))}</dd>` : `<dt>Recueil</dt><dd>${esc(r.recueil || settings.recueil)}</dd>
         <dt>Publié le</dt><dd>${esc(dlong(r.datePublication))}</dd>
@@ -316,7 +335,10 @@ ${A4_BREAK_CSS}
       </dl>
       <div class="formats">${formatLinks.map(([l]) => `<span>${esc(l)}</span>`).join("")}</div>
     </div>
-    ${info ? `<div class="side"><h3>Texte informatif</h3>
+    ${reprise ? `<div class="oppo oppo--reprise">
+      <strong>Reprise d'un acte antérieur</strong>
+      Cet acte est antérieur à la mise en service du recueil. Il y est publié à titre informatif uniquement : le texte de cette page en est une lecture pratique, sans valeur juridique propre et sans qu'aucun délai de recours ne coure à compter de sa parution. Seul l'original signé, conservé par la collectivité et joint à cette page, fait foi.
+    </div>` : info ? `<div class="side"><h3>Texte informatif</h3>
       <p style="margin:0">Ce texte est publié A TITRE INFORMATIF. Il n'est pas signé et ne se publie pas pour lui-même : il tient son autorité de la décision qui l'adopte, dont l'original signé est suivi de son texte. Seule cette décision fait foi.</p>
     </div>` : nonJuridique ? `<div class="oppo oppo--doc">
       <strong>Document non opposable</strong>
@@ -339,8 +361,10 @@ ${A4_BREAK_CSS}
       </ul>
     </div>` : ""}
     <div class="side">
-      <h3>${info ? "Texte informatif" : r.kind === "consolidee" ? "Version consolidée" : (r.originalExterne && r.originalExterne.url ? "Original signé (version signée)" : "Original")}</h3>
-      <p style="margin:0">${info
+      <h3>${reprise ? "Original signé" : info ? "Texte informatif" : r.kind === "consolidee" ? "Version consolidée" : (r.originalExterne && r.originalExterne.url ? "Original signé (version signée)" : "Original")}</h3>
+      <p style="margin:0">${reprise
+        ? `L'original signé de cet acte ancien est joint à cette page, tel qu'il a été conservé : <a href="${esc((r.originalExterne || {}).url || "")}" target="_blank" rel="noopener">Ouvrir l'original (PDF ou scan)</a>. C'est lui qui fait foi ; le texte en ligne n'en est qu'une lecture pratique.`
+        : info
         ? `Ce texte n'a pas d'original signé à lui : il tient son autorité de la décision qui l'adopte, dont l'original signé est suivi de son texte. Seule cette décision fait foi.`
         : r.originalExterne && r.originalExterne.url
         ? `L'acte a été signé hors de l'application. <a href="${esc(r.originalExterne.url)}" target="_blank" rel="noopener">Ouvrir la version signée (PDF)</a> — c'est elle qui fait foi, telle qu'elle a été mise en ligne.${r.originalExterne.certification && r.originalExterne.certification.statut === "conforme" ? `<br><span style="font-size:.84rem">Conformité certifiée${r.originalExterne.certification.parNom ? " par " + esc(r.originalExterne.certification.parNom) : ""}${r.originalExterne.certification.le ? " le " + esc(dlong(r.originalExterne.certification.le)) : ""}.</span>` : ""}`
@@ -350,7 +374,7 @@ ${A4_BREAK_CSS}
     </div>
   </div>
 </div></div>
-<div class="foot">${info ? "Texte publié à titre informatif. Il n'est pas signé : seule la décision qui l'adopte fait foi, et son original signé est suivi de son texte." : "Version en ligne générée depuis l'acte signé. Seul l'original signé fait foi ; cette version est diffusée à titre informatif."}</div>
+<div class="foot">${reprise ? esc(MENTION_REPRISE) : info ? "Texte publié à titre informatif. Il n'est pas signé : seule la décision qui l'adopte fait foi, et son original signé est suivi de son texte." : "Version en ligne générée depuis l'acte signé. Seul l'original signé fait foi ; cette version est diffusée à titre informatif."}</div>
 </body></html>`;
 }
 
@@ -395,10 +419,18 @@ export function publicationJsonLd(record) {
     "eli:is_realized_by": [
       { "@type": "eli:Format", "eli:format": "text/html", "eli:language": "fra" },
       { "@type": "eli:Format", "eli:format": "application/akn+xml", "eli:language": "fra" },
-      { "@type": "eli:Format", "eli:format": "application/vnd.actes.original-signe+json", "eli:language": "fra" },
+      // Une REPRISE n'a pas de paquet signé : sa manifestation « original » est
+      // la pièce jointe (PDF, ou scan), conservée par la collectivité.
+      r.reprise && r.originalExterne && r.originalExterne.url
+        ? { "@type": "eli:Format", "eli:format": r.originalExterne.type || "application/pdf", "eli:uri": r.originalExterne.url }
+        : { "@type": "eli:Format", "eli:format": "application/vnd.actes.original-signe+json", "eli:language": "fra" },
     ],
     "eli:related_to": (r.versions || []).map((v) => ({ "@id": v.eliUri || undefined, "eli:date_document": v.dateDocument, "dcterms:description": v.label })),
     "dcterms:description": r.objet || "",
+    // Une reprise est publiée à titre INFORMATIF (voir `MENTION_REPRISE`) : la
+    // nature de l'information voyage avec la donnée, pour qui la lit sans lire
+    // la page.
+    "rdfs:comment": r.reprise ? MENTION_REPRISE_COURTE : undefined,
     "dcterms:subject": r.themeLabel ? { "dcterms:title": r.themeLabel } : undefined,
     "dcterms:creator": { "@type": "schema:Organization", "schema:name": r.brandName || "" },
     "dcterms:license": { "@id": licence.url, "dcterms:title": licence.nom, "rdfs:comment": licence.mention },

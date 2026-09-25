@@ -24,8 +24,11 @@
 //
 // CONSÉQUENCE À NE PAS OUBLIER quand on lit un rapport : avec une vraie base,
 // deux écritures simultanées sur la même collection se SÉRIALISENT (MySQL prend
-// un verrou sur la ligne de `sb_collection`). Les temps mesurés ici sont donc un
-// PLANCHER : ils disent le coût du service, pas celui du serveur de base.
+// un verrou sur la ligne de `sb_collection`). Le SERVICE les sérialise lui aussi,
+// désormais, par une file PAR COLLECTION (voir magasin-mysql.mjs) : le banc et la
+// production disent donc la même chose sur ce point. Les temps mesurés ici
+// restent un PLANCHER pour le reste : ils disent le coût du service, pas celui du
+// serveur de base.
 // `--latence` ajoute un délai par ordre, pour éprouver un service posé sur une
 // base distante.
 //
@@ -35,7 +38,7 @@
 const ER_ACCESS_DENIED = "ER_ACCESS_DENIED_ERROR";
 const ER_NO_SUCH_TABLE = "ER_NO_SUCH_TABLE";
 
-const TABLES = ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel"];
+const TABLES = ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel", "sb_migrations"];
 const VUES = ["v_acte", "v_trame", "v_collection"];
 
 const err = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
@@ -218,9 +221,10 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
       const doc = {};
       colonnes.forEach((c, i) => { doc[c] = ligne[i] === undefined ? null : ligne[i]; });
       const cleLigne = doc.token_hash !== undefined ? doc.token_hash
-        : doc.name !== undefined ? doc.name
-          : doc.user_id !== undefined ? doc.user_id
-            : doc.collection !== undefined ? cle(doc.collection, doc.id) : null;
+        : doc.version !== undefined ? doc.version
+          : doc.name !== undefined ? doc.name
+            : doc.user_id !== undefined ? doc.user_id
+              : doc.collection !== undefined ? cle(doc.collection, doc.id) : null;
       const table2 = tables.get(table);
       const existe = cleLigne != null && table2.has(cleLigne);
       if (existe && maj) {
@@ -236,6 +240,15 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
           if (mPlus) { row[col] = (Number(row[sansAccents(mPlus[1])]) || 0) + Number(mPlus[2]); continue; }
           const mMoins = /^([\w]+) - (\d+)$/i.exec(droit);
           if (mMoins) { row[col] = (Number(row[sansAccents(mMoins[1])]) || 0) - Number(mMoins[2]); continue; }
+          // `col = col` : l'affectation de NO-OP, celle dont MySQL et MariaDB se
+          // servent pour prendre le verrou EXCLUSIF sans rien changer (voir
+          // magasin-mysql.mjs). Sans cette reconnaissance, le repli ci-dessous
+          // écrirait la CHAÎNE « col » — la révision de la collection
+          // deviendrait un texte, et tout ce qui la lit un nombre. Le test porte
+          // sur l'EXISTENCE de la colonne dans la ligne : `NULL`, `0` et les
+          // littéraux continuent donc par le repli.
+          const mRef = /^([A-Za-z_]\w*)$/i.exec(droit);
+          if (mRef && sansAccents(mRef[1]) in row) { row[col] = row[sansAccents(mRef[1])]; continue; }
           row[col] = litteralOuParam(droit, [], { i: 0 }).valeur;
         }
         affectees += 1;
@@ -278,7 +291,7 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
     exigerTable(sql);
 
     // --- écritures -----------------------------------------------------------
-    for (const t of ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel"]) {
+    for (const t of ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel", "sb_migrations"]) {
       if (!new RegExp(`^INSERT [^]*?INTO ${t} `, "i").test(sql)) continue;
       // Le journal arrive en LOT : `INSERT INTO sb_journal (…) VALUES ?`.
       const mLot = /^INSERT INTO sb_journal \(([^)]*)\) VALUES \?$/is.exec(sql);
@@ -359,6 +372,14 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
         for (const r of tables.get("sb_record").values()) if (r.collection === nom) n++;
         lignes.push({ name: nom, revision: Number(row.revision) || 0, enregistrements: n });
       }
+      return [lignes, []];
+    }
+    // Les migrations appliquées (voir migrations.mjs) : la clé est la VERSION de
+    // la migration, pas un identifiant d'enregistrement.
+    if (/^SELECT version, nom, checksum FROM sb_migrations$/i.test(sql)) {
+      const lignes = [...tables.get("sb_migrations").values()]
+        .map((r) => ({ version: Number(r.version) || 0, nom: r.nom, checksum: r.checksum }))
+        .sort((a, b) => a.version - b.version);
       return [lignes, []];
     }
     m = /^SELECT payload FROM sb_etat WHERE name = \?$/i.exec(sql);

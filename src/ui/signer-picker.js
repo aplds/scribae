@@ -24,7 +24,8 @@ import {
   fonctionsDeSignature, personnesAyantQualite, fonctionParCle, fonctionPourPersonne,
   libelleFonction, qualiteDeFonction, roleDeFonction,
 } from "../lib/fonctions.js";
-import { compteDePersonne, etatRapprochement } from "../lib/signataires.js";
+import { compteDePersonne, etatRapprochement, ROLE_SIGNATAIRE } from "../lib/signataires.js";
+import { hasRole } from "../lib/users.js";
 
 const option = (value, label, selected, title) => {
   const o = h("option", { value, text: label });
@@ -153,12 +154,19 @@ export function signerPicker({
 
     // Un signataire sans compte ne peut pas signer : le dire au moment où on le
     // désigne vaut mieux que le découvrir au dépôt (voir src/lib/signataires.js).
+    // Il faut les DEUX pièces : le compte, et la QUALITÉ de signataire —
+    // autrement, l'acte partirait en signature sans que personne puisse
+    // l'apposer (la qualité s'attribue en désignant la personne dans les
+    // Délégations, ou sur son compte, Comptes et rôles).
     if (personne) {
       const p = personneParId(personne);
       const compte = compteDePersonne(state.users, personne);
       if (p && (!compte || compte.active === false)) {
         corps.appendChild(h("p", { class: "fr-hint signer__info signer__info--warn",
           text: "Cette personne n'a pas de compte : elle ne pourra pas signer cet acte. Rapprochez-la de son compte dans « Comptes et rôles »." }));
+      } else if (p && !hasRole(compte, ROLE_SIGNATAIRE)) {
+        corps.appendChild(h("p", { class: "fr-hint signer__info signer__info--warn",
+          text: "Le compte de cette personne ne porte pas la qualité de signataire : elle ne pourra pas signer cet acte. Cochez « Signataire » sur son compte (« Comptes et rôles »), ou désignez-la dans l'organigramme des Délégations." }));
       } else if (p) {
         const etat = etatRapprochement(config, state.users, personne);
         if (!etat.ok) corps.appendChild(h("p", { class: "fr-hint signer__info signer__info--warn",

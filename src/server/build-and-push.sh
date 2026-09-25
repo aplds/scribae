@@ -6,22 +6,23 @@
 # La base de données reste EXTERNE (MariaDB/MySQL à déployer séparément).
 #
 # USAGE
-#   ./build-and-push.sh [registry/] [version] [latest]
+#   ./build-and-push.sh [image-name] [version] [latest]
+#
+# Le registre n'est PAS un argument : il se donne par `DOCKER_REGISTRY`.
 #
 # EXEMPLES
-#   ./build-and-push.sh                          # Build local uniquement
-#   ./build-and-push.sh ghcr.io/ toncompte        # Build + push vers ghcr.io/toncompte
-#   ./build-and-push.sh docker.io/ scribae v1.0  # Push vers docker.io/scribae:v1.0
-#   ./build-and-push.sh myregistry/ scribae 1.6.1q true  # Avec tag latest
+#   ./build-and-push.sh                          # Build local uniquement (scribae:1.6.1w)
+#   ./build-and-push.sh moncompte 1.6.1w true     # Build + tag :latest
+#   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte 1.6.1w   # Build + push
 #
 # ENVIRONNEMENT
-#   DOCKER_REGISTRY   Registry alternatif (ex: ghcr.io, docker.io)
+#   DOCKER_REGISTRY   Registre de destination (ex: ghcr.io/, docker.io/) ; vide = pas de push
 #   DOCKER_USER       Utilisateur (pour le login)
 #   DOCKER_PASSWORD    Mot de passe/token (pour le login)
 #
 # PRÉ-REQUIS
 #   - Docker installé
-#   - Être positionné à la RACINE du dépôt (pas dans src/server/)
+#   - L'arborescence du dépôt intacte : le script retrouve la racine tout seul, où qu'on le lance
 # ============================================================================
 
 set -euo pipefail
@@ -34,7 +35,7 @@ REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"  # Racine du dépôt
 # Valeurs par défaut (peuvent être écrasées par les arguments)
 REGISTRY="${DOCKER_REGISTRY:-}"          # Ex: ghcr.io/, docker.io/, ou vide pour local
 IMAGE_NAME="${1:-scribae}"               # Nom de l'image
-IMAGE_VERSION="${2:-1.6.1q}"            # Version (tag)
+IMAGE_VERSION="${2:-1.6.1w}"            # Version (tag)
 PUSH_LATEST="${3:-false}"               # Ajouter un tag :latest ? (true/false)
 
 # Chemins
@@ -43,12 +44,14 @@ CONTEXT_DIR="$REPO_ROOT"                # Contexte = racine du dépôt (inclut s
 
 # --- Fonctions ---------------------------------------------------------------
 usage() {
-  echo "Usage: $0 [registry/] [image-name] [version] [push-latest]"
+  echo "Usage: $0 [image-name] [version] [push-latest]"
+  echo ""
+  echo "Le registre se donne par DOCKER_REGISTRY (vide : build local seulement)."
   echo ""
   echo "Exemples:"
-  echo "  $0                                    # Build local (scribae:1.6.1q)"
-  echo "  $0 myregistry/ myapp 1.6.1q true      # Build + push avec :latest"
-  echo "  $0 ghcr.io/ scribae 1.6.1q            # Push vers ghcr.io/scribae:1.6.1q"
+  echo "  $0                                    # Build local (scribae:1.6.1w)"
+  echo "  $0 moncompte 1.6.1w true              # Build + tag :latest"
+  echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte 1.6.1w   # Build + push"
   exit 1
 }
 
@@ -60,7 +63,6 @@ check_prerequisites() {
   
   if [ ! -f "$DOCKERFILE" ]; then
     echo "❌ ERREUR : Dockerfile non trouvé à $DOCKERFILE"
-    echo "   Exécutez ce script depuis la racine du dépôt."
     exit 1
   fi
   

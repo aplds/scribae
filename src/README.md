@@ -51,16 +51,15 @@ et l'édition web de l'application.
      moitié : c'est le dépôt qui fait foi, on le reporte tel quel.
    - En cas de doute sur la fraîcheur, **demander** plutôt que d'écraser : une version Perchance
      plus avancée qui écrase le dépôt fait perdre du travail.
-4. **Chaque livraison laisse une trace** : incrémenter `APP_VERSION` (`src/lib/version.js`),
-   ouvrir une entrée datée dans **`src/CHANGELOG.md`** (rubriques `Ajouté` / `Modifié` /
-   `Corrigé` / `Retiré`), et vérifier que la première entrée datée **sans lettre** correspond
-   bien à `APP_VERSION`. Le changelog est lisible dans l'application — **Documentation
-   technique › Journal des versions** — et dans le dépôt.
+4. **Chaque livraison laisse une trace** : ouvrir une entrée datée dans
+   **`src/CHANGELOG.md`** (rubriques `Ajouté` / `Modifié` / `Corrigé` / `Retiré`) et vérifier
+   que `APP_VERSION` (`src/lib/version.js`) correspond **au titre de la première entrée datée**,
+   lettre comprise. Le changelog est lisible dans l'application — **Documentation technique ›
+   Journal des versions** — et dans le dépôt.
    **Entre deux livraisons**, le travail achevé ne reste pas sans trace : chaque correction
    reçoit une **note de version intermédiaire** dans le changelog — un numéro de correctif
-   suivi d'une lettre (`1.3.1a`, `1.3.1b`…), datée. Ces notes ne touchent **pas**
-   `APP_VERSION` (réservé aux livraisons GitHub) et sont reprises, sans les lettres, sous
-   l'entrée de la livraison suivante.
+   suivi d'une lettre (`1.3.1a`, `1.3.1b`…), datée. Un lot **publié sous une note
+   intermédiaire** est une version comme une autre : `APP_VERSION` la porte alors telle quelle.
 5. **Ne jamais livrer deux fois le même numéro.** Si le dépôt a déjà le numéro d'ici, c'est
    qu'une livraison a eu lieu : incrémenter avant de figer, jamais réutiliser.
 
@@ -89,6 +88,7 @@ attendue**, et le code de l'application sous `src/`.
 |---|---|---|
 | `src/scripts/**` | `scripts/**` | l'outillage se lance depuis la racine (`npm run lint`, `npm test`) |
 | `src/tests/**` | `tests/**` | les épreuves transverses (voir `tests/README.md`) |
+| `src/compose-exemple/**` | `compose-exemple/**` | l'exemple de premier déploiement, que l'administrateur cherche à la racine |
 | `src/package.json` | `package.json` | le manifeste, lu par npm et par la forge |
 | `src/github/ci.yml` | `.github/workflows/ci.yml` | la chaîne d'intégration |
 | `src/github/gitignore` | `.gitignore` | |
@@ -102,10 +102,11 @@ attendue**, et le code de l'application sous `src/`.
 **Un fichier, un seul exemplaire.** Une source recopiée à la racine **ne reste pas** dans
 `src/` : le dépôt ne porte ni deux `package.json` ni deux outils — un doublon ferait corriger
 le mauvais fichier en silence. L'export **exclut** donc de l'arbre `src/` tout ce qu'il déplace
-(`scripts/`, `tests/`, `package.json`, `github/`, `AGENTS.md`, `CLAUDE.md`, `docs/GITHUB.md`).
-Conséquence pour une mise à jour : ce qui a changé de place doit être **supprimé** du dépôt
-(`git rm -r src/scripts src/tests src/github src/package.json src/docs/GITHUB.md`) avant de
-décompresser le zip par-dessus — sinon les anciens chemins demeurent, et l'on corrige un
+(`scripts/`, `tests/`, `compose-exemple/`, `package.json`, `github/`, `AGENTS.md`, `CLAUDE.md`,
+`docs/GITHUB.md`). Conséquence pour une mise à jour : ce qui a changé de place doit être
+**supprimé** du dépôt
+(`git rm -r src/scripts src/tests src/compose-exemple src/github src/package.json src/docs/GITHUB.md`)
+avant de décompresser le zip par-dessus — sinon les anciens chemins demeurent, et l'on corrige un
 fichier que personne ne lit.
 
 **Dans l'atelier, l'outillage vit sous `src/`** (`src/scripts/`, `src/tests/`) : c'est le seul
@@ -160,6 +161,12 @@ data/
 .DS_Store
 Thumbs.db
 *~
+
+# Réglages LOCAUX des assistants de code (Claude Code, Mistral Vibe) : ils
+# dépendent du poste et de la session. Les instructions PARTAGÉES, elles, sont
+# versionnées : AGENTS.md (lu par les deux) et CLAUDE.md.
+.claude/settings.local.json
+.vibe/
 ```
 
 Le `CNAME` ajouté à la racine vaut ceci — **une ligne**, sans schéma ni barre oblique. C'est
@@ -205,19 +212,29 @@ destinée à l'éditeur du générateur reste dans ce fichier-ci.**
 ## Identité du logiciel (nom + marque)
 
 Le logiciel s'appelle **Scribae** (pluriel latin de *scriba* : les rédacteurs d'actes).
-Tout ce qui porte l'identité est regroupé dans **`src/ui/brand.js`** :
+Tout ce qui porte l'identité s'écrit dans **deux modules**, et deux seulement :
 
-- `APP_NAME`, `APP_TAGLINE` — nom et devise, affichés dans l'en-tête (`app.js`) et en tête du
-  guide (`views/aide.js`) ;
-- `markSvg(size)` / `markEl(size)` — la marque : une **forme pleine** (un document à coin
+- **`src/lib/logiciel.js`** — ce que le logiciel dit de lui-même : le **nom** (`APP_NAME`), la
+  **licence** (`LICENCE`) et l'**adresse de sa documentation** (`DOCUMENTATION`). Le module est
+  *pur*, sans aucune dépendance : c'est ce qui permet au **service** de le lire aussi — sa
+  bannière de démarrage annonce les trois mêmes valeurs (voir `src/server/README.md`) ;
+- **`src/ui/brand.js`** — la **devise** (`APP_TAGLINE`, affichée dans l'en-tête `app.js` et en
+  tête du guide `views/aide.js`) et la **marque** :
+  - `markSvg(size)` / `markEl(size)` — la marque : une **forme pleine** (un document à coin
   coupé) dont le chevron est une **découpe**, en `currentColor`, donc *une seule teinte* qui
   tient sur fond clair comme sur fond sombre (en-tête : noir du texte ; guide : bleu) ;
-- `markDataUrl()` — la même marque en data URL à teinte fixe (favicon).
+  - `markDataUrl()` — la même marque en data URL à teinte fixe (favicon).
+
+Le nom est **réexporté** par `src/ui/brand.js`, la licence et la documentation par
+`src/ui/mention.js` : l'interface n'a donc qu'un module d'identité à connaître, et les trois pieds
+de page ne peuvent pas diverger de la bannière du service.
 
 À quoi d'autre toucher si le nom change : `$meta.title` / `description` (`main.pjs`), le
 `<link rel="icon">` de `index.html`, le nom des autorités de certification de la
 démonstration (`src/lib/signature.js`), et les captures du guide (leur en-tête montre le
-nom — voir plus bas).
+nom — voir plus bas). Et **régénérer le miroir du service** (`node scripts/generer-logiciel.mjs`,
+voir `src/server/README.md`) : sans quoi le journal du conteneur continuerait d'annoncer l'ancien
+nom.
 
 > **Registre à ne pas confondre** : `brand` dans le référentiel (`seed.js`) est la
 > **structure qui utilise l'outil** (la mairie de démonstration) : son nom, son logo, ses
@@ -303,6 +320,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Règlements** (une annexe déclarée **Règlement** sur sa trame est en outre publiée **à part au recueil, à titre informatif** : texte normatif qu'on consulte pour lui-même, comme un **code**, sous son propre identifiant stable `eli:/fr/reg/…` — les publications successives en sont les **versions**, la dernière déposée étant en vigueur ; page sans opposabilité ni original, mais avec l'acte qui l'adopte ; il se cherche et se classe par thème au recueil) | ✅ (démonstration) |
 | **Parapheur** (circuit de validation du référentiel : étapes séquentielles à **trois natures** — vérification, visa, signature —, chacune confiée à un rôle, ciblage trame/famille/entité, décisions motivées, empreinte du texte validé, reprise de circuit ; file « à valider par moi ») | ✅ |
 | **Documents non juridiques** (verbatim d'assemblée, déclaration, vœu : signés et **publiés au recueil** sous identifiant ELI, mais **sans opposabilité, sans entrée en vigueur et sans délai de recours** — le recueil les présente comme des documents) | ✅ |
+| **Reprises d'actes anciens** (les actes antérieurs à la mise en service du recueil : texte écrit **librement**, **date de publication d'origine nécessairement antérieure au jour**, **original signé joint** à la main — PDF ou scan, empreinte SHA-256 —, et **publication d'un seul geste**, sans circuit de signature, **à titre informatif** ; **mention au bas de la page publiée** disant que seul l'original conservé fait foi ; identifiant ELI daté de l'**année du numéro d'origine** ; **textes autonomes** — règlement intérieur, charte — repris sous l'identifiant d'un règlement ; registre **à part** des actes ; permission `actes.reprendre`, rédacteurs seulement) | ✅ |
 | **Révision** — rôle « Réviseur » **cumulable** : contrôle de l'acte entre l'envoi à signature décidé par le rédacteur et l'envoi effectif (rapport de conformité, correction, validation — elle déclenche l'envoi — ou rejet motivé, l'acte revenant en brouillon) ; **compétence** par compte ou portée par un service (ou certains de ses bureaux), ciblée services/familles/trames/types d'actes/entités ; empreinte du texte révisé ; porte de signature (client et service) | ✅ |
 | **Exécution & délais** (échéancier des formalités : transmission au contrôle de légalité, publication, notification ; **recours introduit** et sa date d'introduction ; date d'exécutoire, délai de recours, alertes de retard ; **pièces du dossier** : état des formalités, attestation de non-recours) | ✅ |
 | **Recherche globale** (Ctrl+K ou « / » : actes, trames, personnes, services, références, comptes, guide) | ✅ |
@@ -338,7 +356,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Base de données** (pilotes local / service partagé / **serveur MySQL-MariaDB** externe, synchronisation par enregistrement, conflits, file hors ligne) | ✅ |
 | **Auto-hébergement** (pile Docker nginx + service Node + MySQL/MariaDB, édition web de l'application, transport HTTP) | ✅ |
 | **Bibliothèque de trames partagée / multi-poste** | ✅ (mode partagé ; export/import JSON toujours disponible) |
-| **Guide** (wiki intégré : 29 chapitres — dont le chrono de numérotation, l'organigramme, l'API REST et les informations du recueil —, glossaire, dépannage, fiche mémo, impression) | ✅ |
+| **Guide** (wiki intégré : 30 chapitres — dont le chrono de numérotation, l'organigramme, l'API REST, les informations du recueil et les reprises d'actes anciens —, glossaire, dépannage, fiche mémo, impression) | ✅ |
 | **Export PDF/A** (PDF/A-2b et PDF/A-1b : mise en page réelle par l'application — marges, police, filets, tableaux, annexes, signature —, **polices et profil sRGB embarqués**, langue, métadonnées et identifiant ELI ; la conformité reste à valider par `veraPDF` sur un déploiement) | ✅ |
 | Bordereau SEDA | ⏳ |
 
@@ -366,7 +384,7 @@ Cinq rôles d'application — dont **deux qualités cumulables** (Réviseur, Sig
 | **Rédacteur** | 1 | rédiger un acte et mener les actions associées (enregistrer, signer) — **uniquement ses actes** ; choisit son modèle dans « Rédiger un acte » (pas d'accès au registre des trames) |
 | **Réviseur** | 2 | **cumulable** (il ne remplace pas un profil) : contrôler les actes avant leur signature — rapport de conformité, correction, validation, rejet motivé (voir « La révision ») |
 | **Signataire** | 2 | **cumulable** (il ne remplace pas un profil) : la **qualité de signer** (voir « Le signataire »). L'onglet **« Ma signature »**, les actes de son **champ de compétence** dans l'atelier. Il **découle d'une désignation** dans l'organigramme des délégations |
-| **Visiteur** | 0 | **aucun accès** : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public**. C'est l'état d'un compte authentifié dont aucun rôle n'est reconnu (voir « L'identité reconnue sans rôle ») |
+| **Visiteur** | 0 | **aucun accès** : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public**. C'est l'état d'un compte authentifié dont aucun rôle n'est reconnu (voir « L'identité reconnue sans rôle »). Une **qualité cumulée** (signataire, réviseur) l'emporte sur ce profil : elle lui rouvre le seul écran qu'elle commande, et rien d'autre |
 
 **Les qualités `Réviseur` et `Signataire` se cumulent.** Un compte porte une **liste** de rôles
 (`user.roles`) dont le premier est le **rôle principal** (celui qui s'affiche et que lisent
@@ -387,8 +405,12 @@ et ce compte est **rapproché du compte de l'outil de signature** (`etatRapproch
 `rapprocher`, `deRapprocher`, `compteOutilDeSignature` — le rapprochement s'écrit sur la
 personne : `personne.signature`). Enfin, son **champ de compétence** : il ne voit, dans l'atelier,
 que les actes dont la signature relève de lui — les siens et ceux de ses **délégataires**
-(`competenceDeSignature`, `competenceDuCompte`, `fileSignature`, `placeDansChaine`). Signer
-(`actes.signer`) est une permission **distincte** de la publication (`signature.gerer`).
+(`competenceDeSignature`, `competenceDuCompte`, `fileSignature`, `placeDansChaine`). **Signer n'est
+pas envoyer** : `envoyerEnSignature` (permission `actes.signer`, partagée avec les rédacteurs, les
+éditeurs et les réviseurs) dépose l'acte et ouvre le circuit ; la signature, elle, est apposée par le
+**titulaire** de l'étape — le dernier étage de la chaîne — **et** seulement s'il porte la qualité
+(`peutSignerEffectivement`, le contrôle unique des trois gestes de signature). Signer (`actes.signer`)
+est aussi une permission **distincte** de la publication (`signature.gerer`).
 
 Les dix-neuf permissions (`PERMS`, `src/lib/users.js`) sont la **source unique** du contrôle
 d'accès *et* de la matrice affichée dans « Comptes et rôles » : `can(user, perm)` est appelée
@@ -517,7 +539,18 @@ agent ordinaire :
   `signatairesPourActe`, `fileSignature`, `placeDansChaine`, `situationDeSignature` lisent la
   **chaîne de signature** de l'acte : un signataire ne voit que les actes dont sa signature relève
   — les siens et ceux de ses délégataires. `visibleActes()` en tient compte, et `fileSignature()`
-  alimente l'onglet **« Ma signature »**.
+  alimente l'onglet **« Ma signature »**. Le signataire EFFECTIF d'un acte est celui que l'acte
+  désigne (`values.signataire`), ou, à défaut, le **signataire principal de son entité** — un acte
+  pris sans désignation a donc bel et bien un signataire, et il entre dans sa file.
+- **Qui signe, et qui envoie.** `peutSignerEffectivement(config, user, acte, trame)` est le
+  **contrôle unique** de la signature : il exige d'être le **titulaire** (le dernier étage de la
+  chaîne, `effectif`) **et** de porter la **qualité** (`ROLE_SIGNATAIRE`). Un délégant figure dans
+  la chaîne sans être le titulaire ; un réviseur, un éditeur, un administrateur peuvent ENVOYER
+  l'acte (`envoyerEnSignature`), non l'engager. Les trois gestes de signature — simple,
+  électronique, dépôt d'une version signée — le traversent, et l'outil du prestataire comme la
+  fenêtre de signature simple ne s'ouvrent que pour le titulaire. `fileSignature` distingue ce qu'il
+  a **à signer** (`aSigner` : il est titulaire, l'acte n'est pas signé) de ce qu'il **suit**
+  (`engagee` : les actes signés au titre de sa délégation).
 
 ### Qualités du signataire et délégations de signature
 
@@ -637,6 +670,10 @@ identifiant. Il est annoncé au navigateur par `GET /v1/auth/config` (`src/lib/m
 - l'écran de connexion est `panneauMotDePasse()` (`src/ui/mot-de-passe.js`) ; les comptes de
   démonstration, quand le déploiement les laisse ouverts, sont **annoncés par le service**
   (`demoComptes`), puisque le référentiel est hors d'atteinte ;
+- le formulaire de connexion est un vrai `<form>` et « Se connecter » en est le **bouton de
+  soumission** : la touche Entrée, depuis l'identifiant comme depuis le mot de passe, emprunte le
+  même chemin que le clic (un formulaire à plusieurs champs et **sans** bouton de soumission n'est
+  pas soumis implicitement par le navigateur) ;
 - les écritures portent le jeton anti-CSRF (`enteteCsrf()`, cookie `scribae_csrf`) et les appels se
   font en `credentials: "include"` (`src/lib/db/service.js`, `src/lib/remote.js`) ;
 - l'écran **Comptes et rôles** gagne une colonne « Mot de passe » et la fenêtre d'administration des
@@ -719,10 +756,15 @@ Quand l'annuaire **authentifie** un agent mais qu'**aucun** de ses groupes ne co
 rôle (`mapRole`, `src/lib/oidc.js`), la session s'ouvre quand même : le compte prend le rôle
 **`visiteur`** (ou le rôle de repli, selon la politique « Agent sans groupe reconnu » de
 Administration › Annuaire — les deux valeurs y sont désormais « Aucun accès (rôle Visiteur) » et
-« Attribuer le rôle de repli »). `visiteur` ne porte **aucune permission**, et `can()` refuse
-tout dès qu'un compte le porte — une qualité cumulée résiduelle (un réviseur dont le groupe a
-disparu) ne rouvre pas l'accès, et `applyOidcUser` **efface** ces qualités quand l'annuaire ne
-reconnaît aucun rôle.
+« Attribuer le rôle de repli »). `visiteur` ne porte **aucune permission** : `can()` refuse tout
+ce que les profils ordinaires ouvriraient dès qu'un compte le porte. **Une exception, et une
+seule** : les **qualités cumulées** (signataire, réviseur). Elles ne disent pas ce qu'un agent fait
+de sa journée, elles ajoutent un pouvoir — et c'est précisément ce qu'on peut attendre d'un compte
+extérieur, comme un élu dont la signature engage l'acte. Elles rouvrent donc le seul écran qu'elles
+commandent (`permissionsDeQualites`, `estVisiteur`), et rien d'autre. Côté annuaire, `applyOidcUser`
+**efface** ces qualités quand aucun groupe n'est reconnu : un visiteur venu de l'annuaire reste sans
+accès. Un compte **local** marqué « Visiteur » auquel on donne explicitement la qualité de
+signataire, lui, entre — et ne voit que les actes où sa signature est engagée.
 
 `estVisiteur(user)` (`lib/users.js`) est la question posée **avant** d'ouvrir l'atelier
 (`app.js`, `renderRoot`) : la coquille n'est pas construite, et `views/sans-acces.js` prend sa
@@ -1655,6 +1697,76 @@ c'est elle qui décide de la portée. Publier ses verbatims au recueil ne demand
 paramétrage : on choisit la nature, le reste suit. Le jeu de démonstration en montre trois (voir
 « Actes de démonstration »).
 
+### La reprise d'un acte ancien
+
+Une installation neuve n'a pas un recueil vide : la collectivité a derrière elle des décennies
+d'actes — délibérations, arrêtés, règlements — signés sur papier, publiés à l'affichage ou dans un
+bulletin qu'on ne trouve plus. L'écran **Reprises d'actes anciens** les fait entrer au recueil
+public, pour qu'on les **trouve** et qu'on les **lise** — sans les faire passer pour ce qu'ils ne
+sont pas. Ses règles pures sont dans **`src/lib/reprise.js`**, son écran dans
+**`src/ui/views/reprises.js`**, ses reprises dans la collection **`reprises`** (jamais dans
+`state.actes`).
+
+**Trois règles, et elles tiennent ensemble.**
+
+1. **C'est le rédacteur qui reprend l'acte, et il écrit son texte LIBREMENT.** Un acte de 1998 n'a
+   pas été composé dans une trame d'aujourd'hui : on ne l'enferme pas dans un formulaire qui
+   n'existait pas. `analyserTexteLibre` n'attend que trois repères — une ligne blanche sépare les
+   blocs, une ligne qui est **exactement** un intitulé d'article (« Article 3 », « Article 3 —
+   Objet ») ouvre un article, « `#` » / « `##` » / « `###` » ouvrent une division, « `-` » / « `*` »
+   / « `•` » font une liste. Tout le reste est un paragraphe : le texte d'un acte se **colle** sans
+   être réécrit.
+2. **La date de publication d'origine se règle à la main, et reste nécessairement antérieure au
+   jour.** `dateMaxReprise` est la veille, `dateRepriseValide` la vérifie, `validerReprise` refuse
+   le geste. On ne republie pas un acte de 1998 à la date d'aujourd'hui : le recueil mentirait sur
+   sa chronologie, et ferait courir des délais de recours à compter du jour. Le champ de date porte
+   la borne (`max`) et l'aperçu dit ce qui manque.
+3. **L'original signé est joint à la main.** `carteOriginal` calcule l'empreinte **SHA-256** du
+   fichier (`crypto.subtle`) et le dépose par `upload-plugin` ; la pièce est gardée sur la reprise
+   (adresse, empreinte, taille, qui l'a déposée). C'est elle qui **fait foi** — la reprise ne signe
+   rien, elle conserve la preuve de ce qui a été signé.
+
+**La publication est immédiate, et informative.** `publier` fait le **dépôt** (`POST /v1/actes`,
+avec `reprise: true`) puis la **publication** (`POST /v1/actes/{id}/publication`, avec
+`informative: true`, `reprise: true`, et `originalExterne` qui porte la pièce conservée), dans la
+foulée du bouton. Le service accepte la publication **sans signature** sur un acte **déclaré
+reprise** au dépôt ; un client qui prétendrait publier une reprise sur un acte déposé autrement est
+refusé (`acte_non_reprise`, 409). Aucune opposabilité, aucun délai : `dateOpposabilite` reste vide,
+et l'état de l'acte déposé n'est pas touché.
+
+**L'identifiant ELI est daté de l'acte, non du jour.** `numeroPourEli` garde le numéro d'origine
+(« 1998-042 »), `anneeDuNumero` en prend l'année, et c'est elle qui bâtit l'adresse de recueil
+(`eli:/fr/arr/1998/0042/vsl`). Un numéro sans année se voit recomposer une séquence stable (les
+chiffres restants, ou une empreinte FNV-1a du numéro et du titre) : deux reprises ne se disputent
+jamais la même adresse. Le **numéro d'origine est donc requis**, avec l'intitulé, le texte, la date
+et l'original.
+
+**Un texte autonome se reprend aussi** (`annexe: true`) : un règlement intérieur, une charte, un
+texte qui se consulte **pour lui-même**. `actTypeEli` lui donne le type `reglement`, et son
+identifiant est celui d'un règlement (`eli:/fr/reg/1996/0001/vsl`). C'est ce qui distingue une
+reprise d'une **annexe ordinaire** : celle-ci est adoptée par un acte **vivant dans l'application**,
+tandis qu'un texte ancien repris n'a, ici, aucun acte d'adoption.
+
+**La mention de bas de page est l'exigence centrale.** `MENTION_REPRISE` est la phrase unique que le
+lecteur trouve **au bas de la page publiée** (`buildWebVersion`, `.foot`) et que le recueil reprend
+dans un encadré en fin d'article (`blocMentionReprise`) ; `MENTION_REPRISE_COURTE` en est la variante
+des vignettes et du **JSON-LD** (`rdfs:comment`). La notice, elle, est celle d'un acte augmentée de
+ce qui dit qu'il en est une — marques « Reprise d'un acte ancien », « texte informatif »,
+« reprise publiée », **date de publication d'origine**, date d'entrée au recueil, **provenance**,
+qui a fait la reprise, et la phrase de mise en garde —, sans rien de la **signature** (l'acte ancien
+a été signé hors de l'application) ni de l'**entrée en vigueur**. Le fil d'Ariane la classe sous
+« Reprises d'actes anciens » (page publiée **et** recueil), le panneau « Original signé » mène à la
+pièce conservée, et la **liste du recueil** la signale d'une marque « reprise ». `signatureDe`
+(`src/lib/publications-locales.js`) rend **nul** pour une reprise : sa pièce jointe n'est pas une
+signature « externe ».
+
+**Ce qu'une reprise n'est pas.** Elle ne suit aucun circuit — ni parapheur, ni révision, ni
+signature, ni transmission au contrôle de légalité —, elle ne se **modifie** pas et ne s'**abroge**
+pas (une reprise publiée se **retire** et se reprend), et elle vit dans sa **propre collection** :
+elle ne se mêle ni aux listes d'actes, ni au chrono, ni à la recherche des actes en cours. Le geste
+est **réservé aux rédacteurs** : permission **`actes.reprendre`** (rôles de `actes.rediger`), et un
+rédacteur ne voit que **ses** reprises (`reprisesVisibles`).
+
 ### Identifier une annexe : pas de numéro propre
 
 Une annexe n'a **pas de numéro**. Elle n'occupe aucune place au recueil (elle n'y est pas déposée),
@@ -1888,7 +2000,12 @@ navigateur, horodatage signé), et le service vérifie l'empreinte de la même f
 nominatives et la trace des courriels vont dans la part **interne** de l'original, jamais dans la
 publication. Le circuit se règle comme les autres (`config.signature.mode = "simple"`, ou
 `trame.signature` : `simple_impose`, `simple_autorise`), et `circuitsDisponibles()` dit ce que le
-rédacteur peut réellement trancher.
+rédacteur peut réellement trancher. Le geste s'y sépare en **deux temps** : **envoyer** en
+signature — déposer l'acte, ouvrir le circuit, prévenir le signataire — appartient à la
+**rédaction** (c'est par lui que le réviseur, en validant l'acte, le fait partir) ; **signer**
+n'appartient qu'au **titulaire** de l'étape, porteur de la qualité de signataire
+(`peutSignerEffectivement`, `lib/signataires.js`). La fenêtre de signature ne s'ouvre que pour lui :
+tout autre compte est prévenu que l'acte est parti et attend la signature de son titulaire.
 
 **L'original signé se partage en deux.** `partiePublique(pack)` (pure, `src/lib/signature.js`)
 retire d'un paquet signé ce qui n'a pas à être diffusé : la part **interne** (`interne`) et, dans
@@ -2714,9 +2831,10 @@ teste la connexion, et assure le transfert (envoyer / récupérer).
 
 ### Le modèle : collections et enregistrements
 
-L'application manipule six **collections** (`contract.js`) : `config`
-(singleton), `trames`, `actes`, `users` (listes d'objets identifiés par `id`),
-`journal` et `presence` (listes — l'audit et la présence des postes),
+L'application manipule ces **collections** (`contract.js`) : `config`
+(singleton), `trames`, `actes`, `reprises` (les actes anciens repris — voir « La
+reprise d'un acte ancien »), `users`, `informations` (listes d'objets identifiés
+par `id`), `journal` et `presence` (listes — l'audit et la présence des postes),
 `meta` (singleton) et `session` (**local seulement** — jamais transmise).
 
 Un **enregistrement** est l'unité d'échange : un objet de liste, ou l'objet
@@ -2735,6 +2853,14 @@ Le serveur refuse un enregistrement dont la révision ne correspond plus
 **conflit**. L'application reprend alors la version de la base — en la signalant
 — plutôt que d'écraser en silence le travail d'un autre poste. Deux postes qui
 touchent des éléments *différents* ne se gênent jamais.
+
+Les écritures d'une **même collection** se suivent, une à la fois : la façade
+sérialise par collection (`db/index.js`), et le service fait de même de son côté
+(`server/mysql/magasin-mysql.mjs`). Sans cela, deux écritures parties ensemble —
+le battement de cœur et une action de l'agent, la reprise automatique pendant une
+saisie — lisaient le même index connu, calculaient le même delta et se
+rejouaient l'une l'autre ; chacune ne voyait pas ce que l'autre venait d'écrire.
+Deux collections distinctes, elles, continuent d'écrire en parallèle.
 
 ### Hors ligne
 
@@ -2925,6 +3051,7 @@ src/css/app-*.css         les parties de la feuille, découpées par sujet (socl
 src/lib/
   util.js                 utilitaires (dates françaises, montants, téléchargements, copie, choix d'un fichier texte ou binaire…)
   version.js              VERSION DU LOGICIEL (source unique du numéro) + chemin du changelog
+  logiciel.js             IDENTITÉ DU LOGICIEL : son nom, sa licence et l'adresse de sa documentation — la seule déclaration ; les pieds de page, la marque et la bannière de démarrage du service la lisent (module pur)
   expr.js                 langage d'expression sûr (parseur + évaluateur, sans eval)
   schema.js               types de nœuds/champs/règles + fabriques (dont `newTrame`, `publishable`, le nœud `division` et l'échelle des divisions `NIVEAUX_DEFAUT` / `ladderOf` / `numeroNiveau`, la nature de document `natureDe`, la disponibilité d'une trame `trameDisponible`)
   trame-format.js         format de fichier des trames : exemple documenté + lecture/normalisation à l'import
@@ -2965,6 +3092,7 @@ src/lib/
   parcours.js             LE PARCOURS D'UN ACTE : les phases de son chemin dans leur ORDRE RÉEL (rédaction → parapheur → révision → signature → publication ; dans le circuit externe, certification de conformité après la signature), le titulaire de chacune, les étapes du circuit vues de l'intérieur, et la position de la révision (« après le parapheur, avant la signature ») — le fil que dessinent les écrans (module pur)
   chats-erreur.js         LES CHATS DES PAGES D'ERREUR : ré-exporte la règle du service (`server/mysql/chats-erreur.mjs` — quel code illustre quel code, l'adresse de l'image, le repli par classe) et ajoute la LECTURE DU RÉGLAGE (`chatsErreurActifs(config)` sur `config.publication.chatsErreur`, éteint par défaut) — l'application et le service ne peuvent donc pas diverger (module pur)
   informations.js         LES INFORMATIONS DU RECUEIL PUBLIC (les billets : actualités, avis, communications) : le modèle d'un billet, les DEUX ordres — celui du SITE (`informationsPubliees`/`informationsOrdonnees` : épinglés d'abord, brouillons exclus) et celui de l'ATELIER (`informationsDeLAtelier` : tous, brouillons compris, sinon le filtre « Brouillons » n'aurait rien à filtrer) —, le résumé, le temps de lecture, ce qu'il faut pour publier (`manquePourPublier`), les réglages de la rubrique, la PORTÉE du CSS de la collectivité et les variables que le recueil honore (module pur)
+  reprise.js              LA REPRISE D'UN ACTE ANCIEN : le genre (un acte, ou un texte AUTONOME — un règlement intérieur, une charte), la DATE DE PUBLICATION D'ORIGINE (nécessairement antérieure au jour — `dateMaxReprise` est la veille), ce qui empêche de publier (`validerReprise`), le numéro d'origine et son ANNÉE qui datent l'identifiant ELI (`numeroPourEli`), la lecture du TEXTE LIBRE (articles, divisions, listes — `analyserTexteLibre`), le document d'aperçu, et la MENTION portée au bas de la page publiée (`MENTION_REPRISE` — module pur)
   bulletins.js            LE BULLETIN (ou Journal) DES ACTES, VU DU POSTE : le vocabulaire des CADENCES (nommées, plus « personnalisée » : toutes les N unités, ancrée), les réglages (`bulletinReglages`, titre, sous-titre, jour de parution, en-tête et pied des courriels), les adresses publiques (les mêmes que le service sert) et les libellés de période
   bulletins-formats.js    LES REPRÉSENTATIONS D'UN NUMÉRO côté poste : texte, Markdown, JSON et FLUX (RSS 2.0 et Atom 1.0) — MIROIR de ce que le service compose (`server/mysql/bulletins.mjs`) et justifié en tête de fichier : sur un déploiement auto-hébergé, c'est le SERVICE qui sert ces octets ; ici, la page les compose, faute de serveur
   bulletins-service.js    LE BULLETIN VU DU SERVICE : `chargerPublic` (l'état public — cadence, prochaine parution, numéros parus, ouverture de l'abonnement), `chargerTableau` (le tableau de bord), les gestes d'administration (`generer`, `envoyer`, `retirerAbonne`) et `chargerNumeros` (les numéros EN ENTIER, pour composer le flux). Un service absent n'est pas une erreur : le module le DIT (`etat.disponible === false`) et les écrans s'en passent
@@ -2975,7 +3103,7 @@ src/lib/
   execution-documents.js  PIÈCES DE L'EXÉCUTION : état des formalités (tout acte), attestation de non-recours (acte définitif non contesté)
   historique-brouillons.js HISTORIQUE DES BROUILLONS : versions successives d'un acte, restauration
   search.js               INDEX ET RECHERCHE : index en mémoire (actes, trames, personnes, services…), requête normalisée
-  collab.js               COLLABORATION : présence des postes, verrou souple de rédaction, journal d'audit, notifications
+  collab.js               COLLABORATION : présence des postes (battements FUSIONNÉS — un seul en vol, un unique rattrapage si l'écran a changé), verrou souple de rédaction, journal d'audit, notifications
   store.js                AMORÇAGE + migrations additives ; passe par lib/db (aucun accès direct au stockage)
   db/
     index.js              façade de persistance : pilote actif, différences, miroir, file hors ligne, état
@@ -3021,6 +3149,10 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
                           /docker-entrypoint.d/40-scriba-web.sh)
   mysql/                  LE SERVICE (Node + mysql2, hors application cliente)
     server.mjs            API : /v1/db/… (données) et /v1/… (signature, publication) + porte /v1/auth/… (comptes)
+    banniere.mjs          LA BANNIÈRE DE DÉMARRAGE : marque et nom dessinés en caractères d'imprimante, puis version, licence et adresse de la documentation — lue par server.mjs, composée par un module pur
+    banniere.test.mjs     banc d'essai de la bannière : cadre fermé et de largeur constante, ASCII pur hors la mention, version jamais écrite en dur (npm test)
+    logiciel-engendre.mjs MIROIR ENGENDRÉ de l'identité du logiciel (nom, version, licence, documentation) — `node scripts/generer-logiciel.mjs` : l'image du service ne contient que ce dossier, elle ne peut donc pas lire `src/lib/logiciel.js`. NE PAS MODIFIER À LA MAIN
+    logiciel-engendre.test.mjs  épreuve du miroir : il doit dire exactement ce que disent `src/lib/version.js` et `src/lib/logiciel.js` (npm test)
     actes.mjs             domaine signature/publication (pur, sans dépendance à Node)
     atelier.mjs           ACCÈS À L'ATELIER : la liste d'adresses autorisées (déploiement puis référentiel), l'état rendu à l'application (`etat` : `actif`, `autorise`, `regle`, `erreurs`, `connue`, `source`), le corps du refus (403 `atelier_hors_reseau`) et la ligne du journal de démarrage — une liste DEMANDÉE mais illisible FERME l'atelier (module pur)
     atelier.test.mjs      banc d'essai de l'accès à l'atelier (npm test)
@@ -3029,9 +3161,10 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     comptes.mjs           domaine des comptes locaux : mot de passe scrypt, sessions, anti-CSRF (pur, crypto injectée)
     comptes.test.mjs      banc d'essai du domaine des comptes (npm test)
     magasin.mjs           LE MAGASIN — LE CONTRAT DE STOCKAGE DU SERVICE ET L'ALGORITHME COMMUN : le protocole est le MÊME pour les deux rangements (collections, révisions, conflits, journal), seule l'ÉCRITURE change — `synchroniser(t, {…})` vit donc ici, une fois, piloté par les primitives de la transaction `t` ; porte aussi `str`/`projections` (les colonnes indexées) (module pur)
-    magasin-mysql.mjs     LE RANGEMENT MARIADB : l'adaptateur du magasin (import dynamique de `mysql2/promise`, pool, transaction SQL, `INSERT IGNORE`, schéma et migrations, `reconcilierCompte`) — c'est le rangement PAR DÉFAUT
+    magasin-mysql.mjs     LE RANGEMENT MARIADB : l'adaptateur du magasin (import dynamique de `mysql2/promise` — le pilote est INJECTABLE pour les épreuves, pool, transaction SQL, schéma et migrations, `reconcilierCompte`) — c'est le rangement PAR DÉFAUT ; les écritures d'une collection passent par une file PAR COLLECTION, la ligne de collection est créée par `INSERT … ON DUPLICATE KEY UPDATE revision = revision` (verrou EXCLUSIF pris d'emblée), et une transaction heurtée (`ER_LOCK_DEADLOCK`, `ER_LOCK_WAIT_TIMEOUT`) est rejouée en entier
     magasin-fichier.mjs   LE RANGEMENT PAR FICHIERS (`STOCKAGE=fichier`) : tout dans un dossier (`DATA_DIR`, `./data` par défaut), EN CLAIR — état, collections, journal, courriels, secrets ; écriture atomique (temporaire + renommage) et SÉRIALISÉE par une file interne ; disque injecté (`io`) pour s'éprouver en mémoire ; mime les FORMES du magasin SQL (comme `createStoreMysql`) pour que le domaine ne voie aucune différence
     magasin-fichier.test.mjs  banc d'essai du rangement par fichiers, entièrement en mémoire — insert, conflit de révision, `force`, suppression, ordre, état, comptes, mots de passe et sessions, santé, écritures concurrentes (npm test)
+    magasin-mysql.test.mjs  banc d'essai du rangement MySQL sur la base EN MÉMOIRE (`charge/faux-mysql.mjs`) — sérialisation par collection, collections distinctes en parallèle, reprise sur `ER_LOCK_DEADLOCK`, refus de rejouer une erreur étrangère, idiome SQL de prise de verrou exclusive (npm test)
     chats-erreur.mjs      LES CHATS DES PAGES D'ERREUR (http.cat), LA RÈGLE ÉCRITE UNE FOIS : le catalogue des codes réellement publiés, le repli par classe (`codeChat`), l'adresse (`urlChat`) et ce qu'une page doit dire (`chatPour` → code, url, alt, légende) — partagé par le service (`actes.mjs`) et le navigateur (`lib/chats-erreur.js`) ; l'option est éteinte par défaut (module pur)
     chats-erreur.test.mjs banc d'essai de la règle des chats d'erreur : bornes, repli par classe, adresses, légendes (npm test)
     state.mjs             état du service en base (table sb_etat)
@@ -3059,7 +3192,7 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     statistiques.mjs      centiles, agrégat, alertes, rapport Markdown (pur, éprouvable)
     client.mjs            client HTTP : un pot à cookies par poste, session, anti-CSRF, une adresse par poste
     semence.mjs           la matière : trames, actes, informations, publications par les routes réelles
-    faux-mysql.mjs        MySQL EN MÉMOIRE : exécute le schéma, compte les ordres, simule une latence
+    faux-mysql.mjs        MySQL EN MÉMOIRE : exécute le schéma et les MIGRATIONS (`sb_migrations`), compte les ordres, simule une latence
     mysql-bouchon.mjs     présente cette base mémoire sous le contrat de `mysql2/promise`
     crochets.mjs          substitue `mysql2/promise` au chargement (mode --sans-base)
     charge.test.mjs       l'outil éprouvé lui-même (npm test)
@@ -3073,7 +3206,7 @@ src/ui/
   assistant.js            LES DEUX PASTILLES D'ASSISTANCE (Plume dans l'atelier, Publia sur le recueil) : personnage, bulle d'invitation, panneau de conversation, réponse en flux, liens des réponses suivis dans l'application, questions de l'acte consulté, et le bloc « Assistants » du menu du compte (masquer pour soi)
   pdfa.js                 LE BOUTON DE L'EXPORT PDF/A : montre son attente, fabrique le fichier (lib/pdfa.js), le télécharge et le dit — posé à côté de « Imprimer / PDF » dans les écrans d'export, deux niveaux (PDF/A-2b, PDF/A-1b)
   dnd.js                  GLISSER-DÉPOSER : primitives partagées sur les POINTER EVENTS (glissable, deposable, conversion d'un point de dépôt en position de curseur) — souris, doigt et stylet d'un seul chemin
-  brand.js                nom et marque du logiciel (SVG en ligne, currentColor)
+  brand.js                devise et marque du logiciel (SVG en ligne, currentColor) — le nom vient de lib/logiciel.js, dont il est réexporté
   chats-erreur.js         LES CHATS DES PAGES D'ERREUR, VUS DE L'ATELIER : `chatErreurEl(code)` rend la figure (image de http.cat + légende + source) si l'administration a allumé l'option (`config.publication.chatsErreur`), `null` sinon — les vues n'ont donc qu'à dire QUEL code illustre leur panne (module de rendu, voir lib/chats-erreur.js)
   notice.js               bandeaux de tête : « Démonstration » (si le déploiement l'allume) et « Référentiel vierge » (démonstration éteinte et référentiel vide), dans l'atelier comme sur le recueil public
   state.js                état global, routeur (sans toucher au hash), persistance différée, corbeille et mise à disposition d'une trame (gestes journalisés)
@@ -3097,6 +3230,7 @@ src/ui/
   views/signature.js      SIGNATURE & PUBLICATION : onglet « Ma signature » (le signataire : son compte, le rapprochement, sa file), les DEUX circuits (électronique ; externe — document prêt à signer téléchargé, version signée PDF déposée, certification de conformité du réviseur) + publication ; api-console.js : OpenAPI & journal
   views/publications.js   registre de l'administration et consultation d'une publication (texte rendu dans la page)
   views/informations.js   INFORMATIONS DU RECUEIL (atelier) : liste des billets (recherche, filtre publié/brouillon) et billet ouvert — titre, date, auteur, résumé, texte en Markdown, aperçu au rendu réel, publier / dépublier / supprimer (permission `informations.gerer`)
+  views/reprises.js       REPRISES D'ACTES ANCIENS (permission `actes.reprendre` — rédacteurs) : la liste des reprises (numéro, intitulé, genre, date d'origine, état), l'atelier d'une reprise (intitulé, genre acte/texte autonome, nature, numéro d'origine, date de publication d'origine, entité, thème, provenance, texte libre), l'APERÇU de la version en ligne tel que le recueil la montrera, la mention portée au bas de la page, la carte de l'ORIGINAL SIGNÉ (dépôt, empreinte SHA-256, ouverture, retrait) et la PUBLICATION D'UN SEUL GESTE — dépôt puis publication, sans circuit de signature
   views/bulletin.js       LE BULLETIN (atelier, permission `bulletin.gerer`) : l'état du service en six chiffres (cadence, période en cours, prochaine parution, numéros parus, abonnés, envois en file), les TROIS ADRESSES publiques (page, flux RSS, flux Atom — copiables), les gestes (« Composer les numéros échus », « Voir un aperçu du numéro en cours »), le tableau des numéros (période, actes, envoi, formats `.json .md .txt`, « Adresser aux abonnés »), la liste des abonnés (confirmés, en attente, retirés) et l'état du serveur de courriel
   views/hors-reseau.js    ÉCRAN « ATELIER HORS RÉSEAU » : l'accès à l'atelier est restreint, et l'adresse d'où l'on vient n'est pas dans la liste — l'écran le dit, rappelle que le recueil public reste ouvert, et donne le message réglé par la collectivité
   views/recueil-public.js RECUEIL PUBLIC : site sans compte, à la RACINE du site (accueil — bande des informations publiées, bande « À la une » des actes épinglés, carrousel des derniers actes publiés, thèmes par lesquels on parcourt les actes —, recherche et filtres dont le thème, liste par année, texte de l'acte), SOUS-PAGES (mentions légales, conditions de réutilisation, accessibilité, informations) avec leur adresse, métadonnées de page (titre, canonical, alternate, JSON-LD), FEUILLE DE STYLE DE LA COLLECTIVITÉ (posée avant le premier rendu, à la fin du corps) et représentations pour les moteurs et les agents
@@ -3124,7 +3258,7 @@ src/tests/                TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR — dans le dé
   publications-locales.test.mjs  tests du repli local du recueil public : seuls les actes publiés entrent au recueil, les versions d'un même ELI sont rangées (la plus récente porte `latest`), un acte réservé reste caché, et les pièces se lisent aussi bien dans `formats` qu'à plat
   conformite-service.mjs  LE JEU D'APPELS COMMUN aux deux services (démonstration et auto-hébergé) — le contrat, pas une épreuve ; conformite-service.test.mjs l'exécute contre la démonstration et le compare à une installation réelle (`SCRIBA_CONFORMITE_URL`)
   parcours.mjs            LES PARCOURS joués dans le NAVIGATEUR, contre l'application vivante (`lancerParcours()`) — voir docs/INDUSTRIALISATION.md § 2
-  parcours.test.mjs  abrogation-annexes.test.mjs  amorcage-demo.test.mjs  qualification-signature.test.mjs  original-signe.test.mjs  pilote-persistance.test.mjs
+  parcours.test.mjs  abrogation-annexes.test.mjs  amorcage-demo.test.mjs  qualification-signature.test.mjs  original-signe.test.mjs  pilote-persistance.test.mjs  reprise.test.mjs
 src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
   verifier-syntaxe.mjs    `npm run syntaxe` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance ; parcourt le dossier qui porte l'outillage (la racine du dépôt, ou tout l'arbre dans l'atelier)
   verifier-style.mjs      `npm run lint` (avertissements tolérés) et `npm run style` (`--strict` : ils font échouer) : analyse sans dépendance — REFUSE `debugger` hors outillage, SIGNALE `var` et `console.log` dans le code client, ET les imports jamais employés (partout, via `analyse-imports.mjs`) ; les exemptions sont écrites relativement à la RACINE DU CODE, ce qui les rend justes dans les deux dispositions
@@ -3132,6 +3266,8 @@ src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
   racine-code.mjs         OÙ VIT LE CODE (`RACINE_CODE`, `RACINE_OUTILLAGE`) : le dossier qui porte `lib/version.js` — CONSTATÉ, jamais supposé (il est `src/` dans le dépôt, et la racine de l'outillage dans l'atelier)
   generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`src/server/mysql/variables.mjs`)
   generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`src/lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
+  generer-logiciel.mjs    engendre `src/server/mysql/logiciel-engendre.mjs` depuis `src/lib/version.js` et `src/lib/logiciel.js` : l'image du service, qui ne contient que son dossier, peut ainsi annoncer la version RÉELLE dans sa bannière de démarrage
+src/compose-exemple/      EXEMPLE DE PREMIER DÉPLOIEMENT — dans le dépôt livré : `compose-exemple/` : MariaDB et l'image publiée `aplds/scribae`, deux services, rien à construire (docker-compose.yml, env.example, README.md)
 src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export les recopie, ils ne restent pas sous src/) :
   ci.yml                  → `<racine>/.github/workflows/ci.yml` : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
   gitignore               → `<racine>/.gitignore` : dépendances, secrets de déploiement (`.env*`) et dossier de données `data/` — voir la section « Exporter le dépôt GitHub »
@@ -3399,6 +3535,9 @@ distantes) — c'est ce qui sert à produire le fichier à diffuser.
   `renderRoot`) et la vue (`drawView`) passent par `avecCurseur()` (`ui/focus.js`), qui
   reprend le champ, la sélection et le défilement après coup — sauf changement d'écran,
   où la clé de route a changé et où rien n'est repris.
+  La **frappe** aussi : `textField` (`ui/components.js`) enveloppe sa saisie dans
+  `avecCurseur()`, parce qu'un formulaire peut se redessiner à chaque lettre — l'en-tête de
+  la fiche « Nouvelle entité » suit le nom qu'on écrit.
 - **L'état de la persistance ne refait pas l'écran** : `db.onStatus` ne remplace que la
   pastille de l'en-tête (`rafraichirPastilleBase`, `ui/app.js`). Un écran qui l'affiche en
   clair s'y abonne lui-même (voir `views/referentiel.js`).
@@ -3492,11 +3631,11 @@ faux.
   moved in a 'blur' event handler?`. `clear()` s'appuie sur `replaceChildren()` et
   `redrawView()` diffère/coalesce le rendu.
 - **Redessin et curseur** : un conteneur reconstruit pendant une saisie perd le champ et
-  la position du curseur. C'est repris par `avecCurseur()` (`ui/focus.js`), mais
-  **seulement** sur les chemins de rendu qui passent par lui (`renderRoot`, `drawView`).
-  Un `clear()` fait à la main — le `.paper` de l'éditeur de trame, par exemple
-  (`refreshPaper`, `views/editor.js`) — n'en bénéficie pas : n'y reconstruisez pas la zone
-  où l'agent écrit.
+  la position du curseur. C'est repris par `avecCurseur()` (`ui/focus.js`) sur les chemins
+  de rendu qui passent par lui (`renderRoot`, `drawView`) — et, depuis 1.6.1u, sur la
+  **saisie elle-même**, que `textField` (`ui/components.js`) enveloppe. Un `clear()` fait à
+  la main — le `.paper` de l'éditeur de trame, par exemple (`refreshPaper`,
+  `views/editor.js`) — n'en bénéficie pas : n'y reconstruisez pas la zone où l'agent écrit.
 - **L'état d'une base est un CONSTAT DATÉ** : `db.status()` dit ce que le dernier geste a
   répondu, rien de plus — rien ne le recalcule en boucle. Un écran qui l'affiche doit donc
   l'éprouver lui-même (`db.health()` à l'ouverture, et après un essai réussi), sinon il

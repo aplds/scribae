@@ -52,7 +52,7 @@ import { appliquerAbrogations, emporterAnnexes } from "../abrogations-apply.js";
 import { hasRole, fullName } from "../../lib/users.js";
 import {
   ROLE_SIGNATAIRE, personneDeCompte, etatRapprochement, rapprocher,
-  placeDansChaine, competenceDuCompte,
+  placeDansChaine, peutSignerEffectivement,
 } from "../../lib/signataires.js";
 import { fileSignature as fileSignatureDe } from "../state.js";
 
@@ -605,9 +605,14 @@ function renderCircuit(root, ctx) {
       }));
     }
     if (acte.api?.acteId) {
-      row.appendChild(button("Ouvrir l'outil de signature", {
-        variant: "secondary", icon: "lock", onClick: () => ouvrirOutil(acte, doc, { docs, paint }),
-      }));
+      // L'outil du prestataire ne s'ouvre que pour le TITULAIRE de la signature :
+      // les autres suivent le circuit (relève du statut), ils ne signent pas à
+      // sa place (voir `peutSignerEffectivement`, src/lib/signataires.js).
+      if (peutSignerEffectivement(state.config, state.user, acte, trameById(acte.trameId)).ok) {
+        row.appendChild(button("Ouvrir l'outil de signature", {
+          variant: "secondary", icon: "lock", onClick: () => ouvrirOutil(acte, doc, { docs, paint }),
+        }));
+      }
       row.appendChild(button("Relever le statut", {
         variant: "tertiary", icon: "refresh", onClick: () => releverStatut(acte, { paint }),
       }));
@@ -1180,31 +1185,46 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
 }
 
 // Les actions du circuit simple : le geste de signature, et le choix du circuit
-// quand la trame en ouvre plusieurs.
+// quand la trame en ouvre plusieurs. Le libellé dit le geste RÉEL de
+// l'opérateur : « Vérifier et signer » pour le titulaire, « Envoyer en
+// signature » pour qui n'est pas lui — la fenêtre de signature ne s'ouvrira pas
+// (voir `peutSignerEffectivement`, src/lib/signataires.js).
 function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur }) {
   const pret = !blocking.length && para.ok;
   const ctx = { docs: new Map([[acte.id, doc]]), paint };
   const auteur = auteurDe(acte, doc);
+  const signataire = peutSignerEffectivement(state.config, state.user, acte, trame).ok;
   actions.appendChild(h("p", { class: "fr-small", text: "Signature électronique simple : l'acte est signé DANS l'application, par le signataire désigné, avec son compte. La signature est horodatée et vérifiable par empreinte. Les mentions nominatives (adresse électronique, compte, moyen d'authentification) restent dans l'ORIGINAL INTERNE : le recueil public ne montre que le nom, la fonction et la date." }));
+  if (!signataire) {
+    actions.appendChild(h("p", { class: "fr-small fr-muted", text: "Vous n'êtes pas le titulaire de cette signature : vous pouvez envoyer l'acte, non l'engager. Une fois envoyé, il attend la signature de son titulaire, qui la donne depuis son onglet « Ma signature »." }));
+  }
 
-  if (!auteur.courriel) {
-    // L'adresse ne vit PAS sur la personne du référentiel (elle n'y a pas de
-    // champ) : elle vit sur le COMPTE du signataire (Comptes et rôles), ou vient
-    // de l'annuaire. Le message dit donc où aller — et ce qui manque au juste :
-    // le compte, son courriel, ou le rapprochement.
+  // Le signataire est-il PRÊT à signer ? Trois pièces doivent être en place :
+  // son COMPTE (rattaché à sa personne), son ADRESSE (la trace nominative), et
+  // la QUALITÉ de signataire (le droit d'apposer la signature — voir
+  // src/lib/users.js). Ce qui manque est nommé, avec l'écran où le régler.
+  {
     const etat = auteur.personId ? etatRapprochement(state.config, state.users, auteur.personId) : null;
     const compte = etat?.compte || null;
+    const qualite = !!compte && hasRole(compte, ROLE_SIGNATAIRE);
     const qui = auteur.nom || "ce signataire";
-    const texte = !compte
+    const manque = !compte
       ? `Aucun compte de l'application n'est rattaché à ${qui} : un signataire signe avec son compte. Dans « Comptes et rôles », ouvrez son compte (ou créez-le), rattachez-le à sa personne du référentiel, puis renseignez son courriel — c'est cette adresse qui identifie le signataire.`
-      : `Le compte de ${qui} (${compte.login || compte.id}) n'a pas de courriel : sa trace nominative serait incomplète. Renseignez-le dans « Comptes et rôles », puis rapprochez le compte depuis « Ma signature ».`;
-    actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
-      h("p", { class: "fr-alert__title", text: "Signataire sans adresse" }),
-      h("p", { class: "fr-small", text: texte }),
-      h("div", { class: "fr-row", style: { marginTop: "6px" } },
-        can("comptes.gerer")
-          ? button("Ouvrir « Comptes et rôles »", { variant: "secondary", size: "sm", icon: "lock", onClick: () => navigate("comptes") })
-          : h("p", { class: "fr-small fr-muted", text: "Demandez à un administrateur de renseigner ce courriel (Administration › Comptes et rôles)." }))));
+      : !auteur.courriel
+        ? `Le compte de ${qui} (${compte.login || compte.id}) n'a pas de courriel : sa trace nominative serait incomplète. Renseignez-le dans « Comptes et rôles », puis rapprochez le compte depuis « Ma signature ».`
+        : !qualite
+          ? `Le compte de ${qui} (${compte.login || compte.id}) ne porte pas la qualité de signataire : il peut envoyer l'acte en signature, non l'engager. Cochez « Signataire » sur ce compte, dans « Comptes et rôles » — ou désignez la personne dans l'organigramme des Délégations, qui l'attribue d'elle-même.`
+          : "";
+    const titre = !compte ? "Signataire sans compte" : !auteur.courriel ? "Signataire sans adresse" : "Signataire sans qualité";
+    if (manque) {
+      actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+        h("p", { class: "fr-alert__title", text: titre }),
+        h("p", { class: "fr-small", text: manque }),
+        h("div", { class: "fr-row", style: { marginTop: "6px" } },
+          can("comptes.gerer")
+            ? button("Ouvrir « Comptes et rôles »", { variant: "secondary", size: "sm", icon: "lock", onClick: () => navigate("comptes") })
+            : h("p", { class: "fr-small fr-muted", text: "Demandez à un administrateur de mettre ce compte en état (Administration › Comptes et rôles)." }))));
+    }
   }
   if (auteur.nom) {
     actions.appendChild(h("div", { class: "sig-cert" },
@@ -1219,16 +1239,17 @@ function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, bloc
     const dispo = circuitsDisponibles(state.config, trame);
     actions.appendChild(h("p", { class: "fr-small", text: "La trame ouvre plusieurs circuits : choisissez celui de cet acte." }));
     for (const m of dispo) {
-      row.appendChild(button(libelleCourt(m), {
+      const libelle = m === "simple" && !signataire ? "Envoyer en signature (signature simple)" : libelleCourt(m);
+      row.appendChild(button(libelle, {
         variant: m === "simple" ? "primary" : "secondary", icon: "lock", disabled: !pret,
         title: pret ? libelleCourt(m) : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
         onClick: async () => { acte.signatureMode = m; if (m !== "simple") await envoyerEnSignature(acte, ctx); else await engagerSignatureSimple(acte, doc, ctx); },
       }));
     }
   } else {
-    row.appendChild(button("Vérifier et signer", {
+    row.appendChild(button(signataire ? "Vérifier et signer" : "Envoyer en signature", {
       variant: "primary", icon: "lock", disabled: !pret,
-      title: pret ? "Vérifier le document, puis le signer avec votre compte" : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
+      title: pret ? (signataire ? "Vérifier le document, puis le signer avec votre compte" : "Déposer l'acte et ouvrir le circuit : il attendra la signature de son titulaire") : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
       onClick: () => engagerSignatureSimple(acte, doc, ctx),
     }));
   }
@@ -1276,8 +1297,18 @@ function corpsDepot(acte, doc, { signatureMode }) {
   };
 }
 
-// Le geste d'entrée dans le circuit simple : les portes (parapheur, révision),
-// puis le dépôt et l'ouverture du circuit — et la fenêtre de signature s'ouvre.
+// Le geste d'entrée dans le circuit simple, en DEUX temps — et c'est la
+// distinction qui compte : ENVOYER en signature (déposer l'acte et ouvrir le
+// circuit) n'est pas SIGNER.
+//
+// L'envoi est un geste de la RÉDACTION : il est ouvert à qui peut envoyer un
+// acte en signature (permission `actes.signer`, que partagent les rédacteurs,
+// les éditeurs, les réviseurs et l'administration). C'est par lui que le
+// réviseur, en validant l'acte, le fait partir. La fenêtre de signature, elle,
+// ne s'ouvre QUE pour le TITULAIRE (voir `peutSignerEffectivement`,
+// src/lib/signataires.js) : sans cette séparation, l'acte validé par son
+// réviseur ne partait jamais en signature — le geste d'envoi exigeait de lui la
+// compétence de signer, et l'acte restait « prêt » pour toujours.
 async function engagerSignatureSimple(acte, doc, ctx) {
   const config = state.config;
   const parapheur = parapheurActif();
@@ -1289,16 +1320,10 @@ async function engagerSignatureSimple(acte, doc, ctx) {
     await soumettreARevision(acte, { paint: ctx.paint });
     return;
   }
-  // PORTE DE COMPÉTENCE. La signature simple est apposée au nom du SIGNATAIRE
-  // DÉSIGNÉ par l'acte : l'opérateur doit donc être lui-même ce signataire, ou
-  // un délégataire en vigueur dans la chaîne de signature de l'acte (voir
-  // src/lib/signataires.js). Sans cette porte, n'importe quel compte porteur de
-  // la permission de signer apposait la signature au nom d'un autre.
-  const competence = competenceDuCompte(config, state.user, acte, trameById(acte.trameId));
-  if (!competence.ok) {
-    toast("Votre compte n'est pas dans la chaîne de signature de cet acte : vous ne pouvez pas signer à la place du signataire désigné. Faites-vous désigner, ou attendez une délégation en vigueur.", "error");
-    return;
-  }
+  // Qui peut signer CETTE signature : le titulaire de l'étape, et lui seul. On
+  // le sait AVANT d'envoyer, pour ne pas ouvrir la fenêtre à quelqu'un d'autre —
+  // la signature simple est apposée au nom du signataire désigné par l'acte.
+  const competence = peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId));
   const auteur = auteurDe(acte, doc);
   if (!auteur.courriel) { toast("Le signataire n'a pas d'adresse électronique : sa trace nominative serait incomplète.", "warning"); return; }
   const settings = publicationSettings(config);
@@ -1334,6 +1359,13 @@ async function engagerSignatureSimple(acte, doc, ctx) {
     complement: `L'acte ${acte.numero ? "n° " + acte.numero : ""} « ${acte.objet || ""} » vous est présenté pour signature. Ouvrez Scribae, vérifiez le document, puis signez-le avec votre compte.`,
   });
   ctx.paint();
+  if (!competence.ok) {
+    // L'envoi est fait : l'acte est déposé, le circuit est ouvert, le titulaire
+    // est prévenu. On n'ouvre PAS la fenêtre de signature — elle engagerait la
+    // signature de quelqu'un d'autre —, et l'on dit où l'acte en est.
+    toast(competence.motif + " L'acte est envoyé en signature : il attend la signature de son titulaire.", "info");
+    return;
+  }
   fenetreSignatureSimple(acte, doc, ctx);
 }
 
@@ -1406,10 +1438,11 @@ function fenetreSignatureSimple(acte, doc, ctx) {
 async function signerSimple(acte, doc, ctx) {
   const config = state.config;
   if (!acte.api?.signatureId) { toast("Aucun circuit ouvert pour cet acte.", "error"); return false; }
-  // Le contrôle de compétence est rejoué ici : `signerSimple` est aussi
-  // atteignable sans passer par `engagerSignatureSimple`.
-  if (!competenceDuCompte(config, state.user, acte, trameById(acte.trameId)).ok) {
-    toast("Votre compte n'est pas dans la chaîne de signature de cet acte : signature refusée.", "error");
+  // Le contrôle est rejoué ici : `signerSimple` est aussi atteignable sans
+  // passer par `engagerSignatureSimple`. Seul le TITULAIRE de l'étape, porteur
+  // de la qualité de signataire, peut apposer la signature.
+  if (!peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId)).ok) {
+    toast("Seul le titulaire de la signature peut signer cet acte, et il faut la qualité de signataire : signature refusée.", "error");
     return false;
   }
   const flow = beginFlow(`Signature simple — ${acte.numero || acte.id}`);
@@ -2245,7 +2278,14 @@ async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } 
       });
     }
     ctx.paint();
-    if (ouvrir) await ouvrirOutil(acte, doc, ctx, true);
+    // L'outil de signature ne s'ouvre QUE pour le TITULAIRE de la signature. Un
+    // compte qui ne fait qu'ENVOYER l'acte — un rédacteur, un réviseur, un
+    // administrateur — n'a pas à se voir proposer de signer à la place du
+    // signataire désigné : on le lui dit, plutôt que d'ouvrir un outil dont le
+    // bouton de signature refusera le geste (voir `peutSignerEffectivement`).
+    const competence = peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId));
+    if (ouvrir && competence.ok) await ouvrirOutil(acte, doc, ctx, true);
+    else if (ouvrir) dire(competence.motif + " L'acte est envoyé en signature : il attend la signature de son titulaire.", "info");
   } catch (e) {
     toast(String((e && e.message) || e), "error");
   }
@@ -2396,11 +2436,11 @@ async function refuser(acte, ctx) {
 
 async function signer(acte, doc, ctx) {
   const config = state.config;
-  // Même porte de compétence que la signature simple : le circuit externe
-  // (prestataire) est ouvert au nom du signataire désigné, pas du premier
-  // compte venu (voir src/lib/signataires.js).
-  if (!competenceDuCompte(config, state.user, acte, trameById(acte.trameId)).ok) {
-    toast("Votre compte n'est pas dans la chaîne de signature de cet acte : signature refusée.", "error");
+  // Même porte que la signature simple : le circuit électronique est signé au
+  // nom du signataire désigné — par son TITULAIRE, porteur de la qualité, et
+  // non par le premier compte venu (voir src/lib/signataires.js).
+  if (!peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId)).ok) {
+    toast("Seul le titulaire de la signature peut signer cet acte, et il faut la qualité de signataire : signature refusée.", "error");
     return;
   }
   const flow = beginFlow(`Signature — ${acte.numero || acte.id}`);

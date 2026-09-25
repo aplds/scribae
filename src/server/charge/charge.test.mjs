@@ -158,7 +158,27 @@ test("base en mémoire : les ordres sont comptés par table et par genre", async
   assert.equal(s.parGenre.lecture, 2);
 });
 
-// ----------------------------------------------------------------- les profils
+test("base en mémoire : les migrations s'inscrivent et se relisent (clé = version)", async (t) => {
+  const base = await basePrete();
+  const pool = base.createPool({ user: "scriba", password: "" });
+  await pool.query("CREATE TABLE IF NOT EXISTS sb_migrations (version INT UNSIGNED NOT NULL, nom VARCHAR(191) NOT NULL, checksum CHAR(64) NOT NULL, PRIMARY KEY (version))");
+  await pool.query("INSERT INTO sb_migrations (version, nom, checksum) VALUES (?, ?, ?)", [1, "socle", "a".repeat(64)]);
+  await pool.query("INSERT INTO sb_migrations (version, nom, checksum) VALUES (?, ?, ?)", [2, "ajout", "b".repeat(64)]);
+  const [lignes] = await pool.query("SELECT version, nom, checksum FROM sb_migrations");
+  assert.equal(lignes.length, 2);
+  assert.deepEqual(lignes.map((l) => l.version), [1, 2]);
+  assert.equal(lignes[1].nom, "ajout");
+  // Sans schéma, la table est signalée manquante — comme sur un vrai serveur.
+  const vide = creerBase();
+  const poolVide = vide.createPool({ user: "scriba", password: "" });
+  let echec = null;
+  try { await poolVide.query("SELECT version, nom, checksum FROM sb_migrations"); }
+  catch (e) { echec = e; }
+  assert.ok(echec);
+  assert.equal(echec.code, "ER_NO_SUCH_TABLE");
+});
+
+
 test("profils : un plan de charge se lit et se compte", (t) => {
   const plan = planDepuisSpec("public=40,redacteur=8,administrateur=2");
   assert.equal(plan.length, 3);

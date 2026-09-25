@@ -25,6 +25,7 @@ import { extraireVersion, CSS_DOCUMENT_WEB, lienRecueil, mentionDeTransmission,
   adresseEli, hrefEli, estEliUri, resoudreLiensEli,
   themeLabel,
   FORMATS_OUVERTS, FICHIERS_OUVERTS, texteDePublication, markdownDePublication } from "../../lib/recueil.js";
+import { MENTION_REPRISE, MENTION_REPRISE_COURTE } from "../../lib/reprise.js";
 
 // -------------------------------------------------------- les identifiants ELI
 // Un document publié cite un autre acte par son identifiant ELI (voir
@@ -63,6 +64,7 @@ function lierEli(box) {
 
 export const kindLong = (kind) => (kind === "consolidee" ? "Version consolidée"
   : kind === "modificative" ? "Version modificative"
+  : kind === "reprise" ? "Reprise d'un acte ancien"
   : kind === "informative" ? "Texte informatif"
   : "Version initiale");
 
@@ -134,7 +136,11 @@ export function themeLabelDePublication(rec) {
 // rattache à sa décision d'adoption : sa nature, son identifiant, sa date, et
 // l'acte qui l'adopte.
 export function notice(rec, v) {
-  const informative = rec.informative === true;
+  // Une REPRISE d'acte ancien est DÉCLARÉE informative au service (même régime :
+  // ni signature, ni opposabilité), mais elle n'est pas un règlement adopté :
+  // sa notice est donc celle d'un acte, plus ce qui dit qu'elle est une reprise.
+  const reprise = rec.reprise === true;
+  const informative = rec.informative === true && !reprise;
   // Un DOCUMENT NON JURIDIQUE (verbatim, déclaration, vœu) est publié au
   // recueil, mais ne fait pas droit : sa notice le dit, et n'affiche pas
   // d'entrée en vigueur — il n'en a pas.
@@ -156,9 +162,12 @@ export function notice(rec, v) {
     theme ? h("span", { class: "recueil-badge recueil-badge--theme", "data-theme-id": themeDePublication(rec), text: theme }) : null,
     rec.nature ? h("span", { class: "recueil-badge recueil-badge--nature", text: natureLabel(rec.nature) }) : null,
     h("span", { class: "recueil-badge recueil-badge--version", text: kindLong(rec.kind) }),
+    // Une REPRISE est publiée à titre informatif : plutôt que de laisser croire
+    // à un acte opposable, la pastille le dit d'emblée.
+    reprise ? h("span", { class: "recueil-badge recueil-badge--note", text: "texte informatif" }) : null,
     nonJuridique ? h("span", { class: "recueil-badge recueil-badge--note", text: "document, non opposable" }) : null,
     !informative && qual.avertissement ? h("span", { class: "recueil-badge recueil-badge--note", text: qual.label }) : null,
-    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (informative ? "texte en vigueur" : nonJuridique ? "dernière version" : "version en vigueur") : "version antérieure" }));
+    h("span", { class: "recueil-badge recueil-badge--" + (rec.latest ? "ok" : "note"), text: rec.latest ? (reprise ? "reprise publiée" : informative ? "texte en vigueur" : nonJuridique ? "dernière version" : "version en vigueur") : "version antérieure" }));
 
   const meta = h("dl", { class: "recueil-meta" });
   const champ = (label, valeur, cls) => {
@@ -170,7 +179,16 @@ export function notice(rec, v) {
   champ("Numéro", rec.numero);
   champ("Identifiant ELI", rec.eliUri ? h("code", { text: rec.eliUri }) : "", "recueil-meta__eli");
   champ("Nature", natureLabel(rec.nature));
-  if (informative) {
+  if (reprise) {
+    // La notice d'une reprise : sa date d'origine, sa provenance, et qui l'a
+    // reprise. Rien de la SIGNATURE (l'acte ancien a été signé hors de
+    // l'application) ni de l'ENTRÉE EN VIGUEUR (aucun délai ne court).
+    champ("Date de publication d'origine", formatDate(rec.datePublication));
+    champ("Publié au recueil le", formatDate(String(rec.publieeLe || "").slice(0, 10)));
+    champ("Provenance", rec.provenance);
+    champ("Reprise par", rec.auteur);
+    champ("Recueil", rec.recueil);
+  } else if (informative) {
     // Le règlement n'a pas de « publication » à lui : il n'a qu'une ADOPTION.
     const a = rec.adoption || {};
     champ("Texte adopté par", [a.designation, a.numero ? "n° " + a.numero : "", a.date ? "du " + formatDate(a.date) : ""].filter(Boolean).join(" "));
@@ -188,8 +206,10 @@ export function notice(rec, v) {
     h("h1", { class: "recueil-notice__titre", text: titre }),
     [rec.entityName, informative ? "" : rec.auteur].filter(Boolean).join(" · ")
       ? h("p", { class: "recueil-notice__sous", text: [rec.entityName, informative ? "" : rec.auteur].filter(Boolean).join(" · ") }) : null,
-    informative
-      ? h("p", { class: "recueil-notice__info", text: "Texte publié à titre informatif. Il n'est pas signé et ne se publie pas pour lui-même : seule la décision qui l'adopte fait foi, et son texte suit l'original signé de cette décision." })
+    reprise
+      ? h("p", { class: "recueil-notice__info", text: MENTION_REPRISE_COURTE + " Le texte en ligne en est une lecture pratique ; seul l'original signé, conservé par la collectivité et joint à cette page, fait foi." })
+      : informative
+        ? h("p", { class: "recueil-notice__info", text: "Texte publié à titre informatif. Il n'est pas signé et ne se publie pas pour lui-même : seule la décision qui l'adopte fait foi, et son texte suit l'original signé de cette décision." })
       : nonJuridique
         ? h("p", { class: "recueil-notice__info", text: "Document publié au recueil pour être porté à la connaissance de tous. Il n'a pas de portée juridique propre : il ne crée ni droits ni obligations, aucune entrée en vigueur ne s'y attache, et aucun délai de recours ne court à compter de sa publication." })
         : null,
@@ -262,8 +282,9 @@ export function blocPieces(rec, { admin = false } = {}) {
   ajouter("Texte seul (.txt)", "download", () => download(nomFichier(rec) + ".txt", texteDePublication(rec), "text/plain"));
   if (rec.originalExterne && rec.originalExterne.url) {
     const ext = rec.originalExterne;
-    box.appendChild(h("a", { class: "fr-btn fr-btn--secondary", href: ext.url, target: "_blank", rel: "noopener" }, "Version signée (PDF)"));
-    ajouter("Télécharger la version signée", "download", () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); });
+    const reprise = rec.reprise === true;
+    box.appendChild(h("a", { class: "fr-btn fr-btn--secondary", href: ext.url, target: "_blank", rel: "noopener" }, reprise ? "Original signé (PDF)" : "Version signée (PDF)"));
+    ajouter(reprise ? "Télécharger l'original" : "Télécharger la version signée", "download", () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); });
   }
   if (rec.original) {
     ajouter("Original signé (JSON)", "lock", () => download(nomFichier(rec) + "-original-signe.json",
@@ -357,24 +378,31 @@ export function blocOriginal(rec) {
 function blocOriginalExterne(rec, ext) {
   const cert = ext.certification || {};
   const conforme = cert.statut === "conforme";
-  return bloc("Original signé — version signée (PDF)",
-    h("p", { class: "recueil-side__note", text: "Cet acte a été signé hors de l'application (signature manuscrite, ou outil tiers). Le document ci-dessous est la VERSION SIGNÉE telle qu'elle a été déposée et mise en ligne : c'est elle qui fait foi. La version en ligne lue ci-dessus n'en est qu'une lecture pratique." }),
+  // Une REPRISE n'a pas suivi le circuit de signature externe : son original est
+  // la pièce signée ANCIENNE, conservée par la collectivité. Le bloc dit ce que
+  // le lecteur doit en savoir, plutôt que de parler d'un circuit qu'elle n'a pas
+  // suivi.
+  const reprise = rec.reprise === true;
+  return bloc(reprise ? "Original signé (pièce conservée)" : "Original signé — version signée (PDF)",
+    h("p", { class: "recueil-side__note", text: reprise
+      ? "Cet acte est antérieur à la mise en service du recueil. Le document ci-dessous est l'ORIGINAL SIGNÉ tel qu'il a été conservé par la collectivité : c'est lui qui fait foi. Le texte en ligne lu ci-dessus n'en est qu'une lecture pratique, publiée à titre informatif."
+      : "Cet acte a été signé hors de l'application (signature manuscrite, ou outil tiers). Le document ci-dessous est la VERSION SIGNÉE telle qu'elle a été déposée et mise en ligne : c'est elle qui fait foi. La version en ligne lue ci-dessus n'en est qu'une lecture pratique." }),
     conforme
       ? h("p", { class: "recueil-verif is-ok", text: "✓ Conformité certifiée par le réviseur" + (cert.parNom ? " (" + cert.parNom + ")" : "") + (cert.le ? " le " + formatDate(String(cert.le).slice(0, 10)) : "") + " : la pièce signée est conforme à la version numérique publiée." })
       : null,
     h("div", { class: "recueil-pdf" },
-      h("iframe", { class: "recueil-pdf__frame", src: ext.url, title: "Version signée (PDF)" }),
+      h("iframe", { class: "recueil-pdf__frame", src: ext.url, title: reprise ? "Original signé" : "Version signée (PDF)" }),
       h("p", { class: "recueil-side__note" },
         h("a", { class: "recueil-lien", href: ext.url, target: "_blank", rel: "noopener" }, "Ouvrir le PDF dans un onglet"),
         h("span", { text: " — si le document ne s'affiche pas ici, c'est qu'il est à télécharger." }))),
     h("dl", { class: "recueil-dl" },
-      h("dt", { text: "Fichier" }), h("dd", { text: ext.nom || "version signée.pdf" }),
-      ext.deposeLe ? h("dt", { text: "Déposé le" }) : null, ext.deposeLe ? h("dd", { text: new Date(ext.deposeLe).toLocaleString("fr-FR") }) : null,
+      h("dt", { text: "Fichier" }), h("dd", { text: ext.nom || (reprise ? "original.pdf" : "version signée.pdf") }),
+      ext.deposeLe ? h("dt", { text: reprise ? "Joint le" : "Déposé le" }) : null, ext.deposeLe ? h("dd", { text: new Date(ext.deposeLe).toLocaleString("fr-FR") }) : null,
       ext.sha256 ? h("dt", { text: "Empreinte SHA-256" }) : null, ext.sha256 ? h("dd", { class: "fr-mono", text: ext.sha256 }) : null,
       conforme && cert.empreinte ? h("dt", { text: "Empreinte du texte (version numérique)" }) : null,
       conforme && cert.empreinte ? h("dd", { class: "fr-mono", text: cert.empreinte }) : null),
     h("div", { class: "recueil-pieces" },
-      button("Télécharger la version signée", { variant: "secondary", icon: "download", onClick: () => { const a = h("a", { href: ext.url, download: ext.nom || "acte-signe.pdf" }); document.body.appendChild(a); a.click(); a.remove(); } })));
+      button(reprise ? "Télécharger l'original" : "Télécharger la version signée", { variant: "secondary", icon: "download", onClick: () => { const a = h("a", { href: ext.url, download: ext.nom || (reprise ? "original.pdf" : "acte-signe.pdf") }); document.body.appendChild(a); a.click(); a.remove(); } })));
 }
 
 // L'original signé se consulte dans une fenêtre : le document garde sa page A4,
@@ -391,6 +419,18 @@ function ouvrirOriginalSigne(html, numero) {
       button("Fermer", { variant: "secondary", onClick: close }),
     ],
   });
+}
+
+// LA MENTION DE REPRISE — le message que le lecteur doit trouver EN BAS DE PAGE.
+// C'est une exigence du recueil : une reprise est publiée À TITRE INFORMATIF
+// UNIQUEMENT, parce qu'il s'agit de la reprise d'un acte antérieur. Le texte
+// vient de `MENTION_REPRISE` (src/lib/reprise.js) — la même source que la page
+// publiée (voir `buildWebVersion`, src/lib/eli.js) : une seule phrase à tenir.
+export function blocMentionReprise(rec) {
+  if (!rec || rec.reprise !== true) return null;
+  return h("aside", { class: "recueil-mention-reprise" },
+    h("p", { class: "recueil-mention-reprise__texte", text: MENTION_REPRISE }),
+    rec.provenance ? h("p", { class: "recueil-side__note", text: "Original conservé — provenance : " + rec.provenance }) : null);
 }
 
 export function blocSignature(rec) {

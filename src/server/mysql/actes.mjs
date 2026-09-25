@@ -282,7 +282,7 @@ export function createActesApi({
     // non qualifiée » / « qualifiée ») sans relire l'acte — voir
     // src/lib/qualification-signature.js. Rien de nominatif de plus que l'auteur,
     // déjà public ; la part interne de l'original reste, elle, au registre.
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
   }
 
   // ------------------------------------------- publications réservées aux agents
@@ -442,6 +442,11 @@ export function createActesApi({
       // Le client dit si l'acte doit être transmis au contrôle de légalité avant
       // sa publication (fonction éteinte par défaut côté client).
       controleLegalite: b.controleLegalite === true,
+      // REPRISE d'un acte ancien (voir src/lib/reprise.js) : le dépôt le déclare,
+      // et la publication s'en servira pour autoriser la publication SANS
+      // signature — un acte ancien a déjà été signé, et c'est son original qui
+      // est joint.
+      reprise: b.reprise === true,
       statut: "depose", deposeLe: nowIso(),
     };
     db.actes[id] = acte;
@@ -628,9 +633,6 @@ export function createActesApi({
   function hPublier(ctx) {
     const acte = lireActe(ctx.params.id);
     if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
-    if (acte.statut !== "signee" && acte.statut !== "publie") {
-      return err(409, "Un acte ne peut être publié qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
-    }
     // Étape de transmission au contrôle de légalité : lorsque le client l'a
     // demandée au dépôt, l'acte ne peut pas être publié avant d'avoir été
     // transmis. C'est le service qui tient l'ordre signé → transmis → publié.
@@ -638,6 +640,18 @@ export function createActesApi({
       return err(409, "Cet acte doit être transmis au contrôle de légalité avant sa publication.", { code: "transmission_absente", statut: acte.statut, controleLegalite: true });
     }
     const b = ctx.body || {};
+    // REPRISE D'UN ACTE ANCIEN (voir src/lib/reprise.js) : le rédacteur en a
+    // écrit le texte, joint l'original signé conservé, et la reprise se publie
+    // D'UN SEUL GESTE, sans signature ni circuit — l'acte ancien a déjà été
+    // signé. Le client DIT que le dépôt était une reprise ; un acte qui ne l'a
+    // pas été déposé comme tel ne se publie pas sans signature.
+    const reprise = b.reprise === true && acte.reprise === true;
+    if (b.reprise === true && acte.reprise !== true) {
+      return err(409, "Cet acte n'a pas été déposé comme une reprise : il ne peut pas être publié sans signature.", { code: "acte_non_reprise", statut: acte.statut });
+    }
+    if (!reprise && acte.statut !== "signee" && acte.statut !== "publie") {
+      return err(409, "Un acte ne peut être publié qu'après signature.", { code: "acte_non_signe", statut: acte.statut });
+    }
     // PUBLICATION INFORMATIVE : le texte consolidé d'un RÈGLEMENT annexé, publié
     // pour lui-même à titre d'information (voir SPEC § 2.2.4 ter). Elle
     // n'appartient pas à l'acte déposé auquel elle est rattachée — elle n'a ni
@@ -663,6 +677,19 @@ export function createActesApi({
     const cle = clePublication(eliUri, dateExpr + "-" + (b.kind || "originale"));
     if (db.publies[cle]) return ok(200, { ...resumePublication(db.publies[cle], true), idempotent: true });
 
+    // La pièce jointe d'une REPRISE : l'original signé conservé, déposé par le
+    // client AVEC la publication (le service ne l'a pas reçu au dépôt — une
+    // reprise ne passe par aucun circuit de signature).
+    const origReprise = reprise && b.originalExterne && b.originalExterne.url
+      ? {
+        url: b.originalExterne.url, sha256: b.originalExterne.sha256 || "",
+        nom: b.originalExterne.nom || "", taille: b.originalExterne.taille || 0,
+        type: b.originalExterne.type || "", deposeLe: b.originalExterne.deposeLe || nowIso(),
+        deposePar: b.originalExterne.deposePar || "", deposeParNom: b.originalExterne.deposeParNom || "",
+        certification: null,
+      }
+      : null;
+
     const rec = {
       cle, eli: eliUri, eliUri, url: b.url || "", work: b.work || "",
       // L'acte déposé dont cette publication est la version en ligne : c'est lui
@@ -686,6 +713,10 @@ export function createActesApi({
       // pour toute publication, l'acte qui l'adopte s'il y en a un : le recueil
       // s'en sert pour rattacher le règlement à sa décision d'adoption.
       informative: informative || undefined,
+      // Une REPRISE d'acte ancien (voir src/lib/reprise.js) : le drapeau voyage
+      // avec la publication, et `provenance` dit d'où vient l'original conservé.
+      reprise: reprise || undefined,
+      provenance: b.provenance || "",
       adoption: b.adoption || null,
       // L'ÉPINGLAGE suit l'ACTE (son identifiant ELI), non la version déposée :
       // une version publiée plus tard hérite donc du drapeau déjà posé — un
@@ -729,6 +760,11 @@ export function createActesApi({
       // La part INTERNE, conservée au registre et JAMAIS servie par une route
       // publique : coordonnées du signataire, compte, authentification, courriels.
       originalInterne: b.originalInterne || ((b.original && b.original.interne) ? b.original : null) || acte.originalInterne || null,
+      // La pièce jointe d'une REPRISE (l'original signé conservé) : c'est ELLE
+      // que le recueil montre comme l'original. Une publication informative qui
+      // n'est pas une reprise n'en a pas ; les autres actes portent leur propre
+      // `original` (le paquet signé).
+      originalExterne: reprise ? origReprise : undefined,
       signature: informative || !b.original ? null : (() => {
         const o = sansInterne(b.original) || {};
         const sigs = o.signatures || [];
@@ -773,12 +809,18 @@ export function createActesApi({
       epingle: rec.epingle === true,
       reserve: rec.reserve === true,
       informative: rec.informative === true,
+      reprise: rec.reprise === true,
+      provenance: rec.provenance || "",
+      kind: rec.kind,
+      publieeLe: rec.publieeLe,
+      auteur: rec.auteur || "",
       juridique: rec.juridique === false ? false : undefined,
       natureDoc: rec.natureDoc || undefined,
       adoption: rec.adoption || null,
       versions,
       ressource: "/v1/publications/" + encodeURIComponent(cle),
       original: rec.original ? { format: rec.original.format, sha256: rec.original.sha256, signatures: (rec.signature && rec.signature.signataires || []).length, href: rec.original.signaturesUrl } : null,
+      originalExterne: rec.originalExterne || null,
       formats: ["text/html", "application/akn+xml", "application/ld+json"].concat(rec.original ? [rec.original.format] : []),
     }, { location: "/v1/publications/" + encodeURIComponent(cle) });
   }

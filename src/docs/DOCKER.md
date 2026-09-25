@@ -68,6 +68,11 @@ docker push "$REGISTRE/scribae:$VERSION"
 docker push "$REGISTRE/scribae:latest"
 ```
 
+> **Tout cela en une commande** : `src/server/build-and-push.sh` enchaîne ces étapes (build,
+> étiquette `latest` facultative, `docker login` par `DOCKER_USER`/`DOCKER_PASSWORD`). Le registre
+> se donne par `DOCKER_REGISTRY` :
+> `DOCKER_REGISTRY=ghcr.io/ ./src/server/build-and-push.sh moncompte 1.5.3 true`.
+
 ### 4.2. Publier plusieurs architectures (amd64 + arm64)
 
 Avec `buildx`, on construit et pousse en une fois — l'image tirée s'adapte alors au serveur
@@ -87,6 +92,12 @@ docker buildx build \
 > délibérée.
 
 ## 5. Lancer
+
+> **Tout ce chapitre en un fichier** : `compose-exemple/docker-compose.yml` monte MariaDB et
+> l'image publiée en deux services, sans rien construire — c'est le chemin recommandé pour un
+> premier service, et le détail s'y trouve dans son `README.md`. Les sections ci-dessous
+> décrivent les mêmes gestes à la main, et les variantes (base ailleurs, Compose du dépôt,
+> rangement par fichiers).
 
 ### 5.1. Avec une base MariaDB dans un réseau dédié
 
@@ -288,7 +299,7 @@ pas.
 ## 9. Exploitation
 
 ```bash
-docker logs -f scribae            # le service journalise au démarrage, dont les variables refusées
+docker logs -f scribae            # bannière (version, licence, documentation), puis l'état — dont les variables refusées
 docker exec scribae node /srv/service/server.mjs --reconcilier  # remettre le compte applicatif au mot de passe du conteneur, puis appliquer le schéma (DB_ROOT_PASSWORD requis)
 docker exec scribae node /srv/service/server.mjs --migrate      # appliquer le schéma seul (compte déjà en règle)
 docker exec -it scribae sh        # dans le conteneur

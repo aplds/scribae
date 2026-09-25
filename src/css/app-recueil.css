@@ -156,6 +156,13 @@
   font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--error);
 }
+/* La marque d'une REPRISE d'acte ancien : la date affichée est celle de sa
+   publication d'origine, et sans ce repère la liste la ferait passer pour un
+   acte du jour. Le titre de la page, lui, porte la mention complète. */
+.recueil-item__reprise {
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--warning);
+}
 
 /* --- les thèmes : une grille de tuiles ------------------------------------ */
 .recueil-themes__grille {
@@ -604,3 +611,48 @@
 }
 
 [data-theme="dark"] .recueil-ident__logo--mark { color: #101219; }
+
+
+/* ==========================================================================
+   LA REPRISE D'UN ACTE ANCIEN.
+
+   L'écran de l'atelier fait deux colonnes : la saisie à gauche, l'aperçu du
+   document publié à droite, sous la mention que le lecteur trouvera au bas de
+   la page. La colonne est en `minmax(0, …)` parce que l'aperçu est une feuille
+   A4 de 21 cm, réduite par `fitPaper` : avec une colonne `1fr` nue, la feuille
+   élargirait la grille au-delà de l'écran.
+   ========================================================================== */
+.reprises__grille {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 16px; align-items: start;
+}
+.reprises__explication { margin-top: 14px; }
+.reprises__explication ul { margin: 8px 0 0; padding-left: 18px; }
+.reprises__explication li { margin: 3px 0; }
+.reprises__paper { max-height: 78vh; }
+/* L'empreinte SHA-256 est un mot de soixante-quatre caractères : sans coupure,
+   il déborde de sa colonne — et de la page, sur un écran étroit. */
+.reprises__empreinte { overflow-wrap: anywhere; }
+.reprises__original { margin-top: 4px; }
+.reprises__mention { margin: 0; }
+.reprises__mention-texte { display: block; }
+.reprises__blocage { display: block; margin-top: 6px; color: var(--error); }
+.reprises__pret { display: block; margin-top: 6px; color: var(--success); }
+.reprises__table { width: 100%; }
+@media (max-width: 1100px) {
+  .reprises__grille { grid-template-columns: minmax(0, 1fr); }
+  .reprises__paper { max-height: none; }
+}
+
+/* --- la mention portée au bas de la page publiée --------------------------- */
+/* Une reprise est publiée À TITRE INFORMATIF : c'est l'exigence du recueil, et
+   la phrase (`MENTION_REPRISE`, src/lib/reprise.js) ferme l'article. Le même
+   encadré sert à la page publiée elle-même (voir `buildWebVersion`). */
+.recueil-mention-reprise {
+  margin-top: 18px; padding: 10px 12px;
+  border-left: 4px solid var(--warning); background: var(--warning-bg);
+  border-radius: var(--radius);
+}
+.recueil-mention-reprise__texte { margin: 0; font-size: .85rem; }
+.recueil-mention-reprise .recueil-side__note { display: block; margin: 6px 0 0; }
+[data-theme="dark"] .recueil-mention-reprise { background: var(--warning-bg); }

@@ -355,7 +355,7 @@ export async function flushPending() {
     let refus = null;
     for (let essai = 0; essai < 2; essai += 1) {
       try {
-        compter(entry, await driver.write(entry.collection, { upserts: entry.upserts, deletes: entry.deletes, force: entry.force }));
+        compter(entry, await aLaQueue(entry.collection, () => ecrireLot(entry)));
         refus = null;
         break;
       } catch (e) {
@@ -677,9 +677,39 @@ export async function read(name, { fresh = false } = {}) {
 }
 
 // ---------------------------------------------------------------- écriture
-export async function write(name, value, { force = false } = {}) {
-  if (!COLLECTIONS[name]) return { ok: false, error: "Collection inconnue : " + name };
+// LES ÉCRITURES D'UNE COLLECTION SE SUIVENT, une à la fois.
+//
+// `write` calcule ses différences contre l'index du service connu
+// (`snapshot[name].index`), les envoie, puis met à jour cet index. Deux
+// écritures de la MÊME collection lancées ensemble (le battement de cœur et une
+// action de l'agent, deux vues qui se rafraîchissent, la reprise automatique
+// pendant une saisie) partaient donc du MÊME index : chacune ignorait ce que
+// l'autre venait d'écrire, et la seconde écrasait ou rejouait la première — des
+// conflits en rafale, et des écritures inutiles qui allaient charger la file du
+// service. En les sérialisant, le second calcul voit l'index DÉJÀ avancé par le
+// premier. La file est PAR COLLECTION : deux collections distinctes continuent
+// d'écrire en parallèle.
+const filesEcriture = new Map();
+function aLaQueue(nom, tache) {
+  const precedent = filesEcriture.get(nom) || Promise.resolve();
+  const suite = precedent.then(tache, tache);
+  const fin = suite.then(() => {}, () => {});
+  filesEcriture.set(nom, fin);
+  fin.then(() => { if (filesEcriture.get(nom) === fin) filesEcriture.delete(nom); });
+  return suite;
+}
 
+// L'envoi d'un lot DÉJÀ calculé (celui d'une écriture en attente de renvoi). Il
+// passe par la même file, pour ne pas doubler une écriture ordinaire qui
+// porterait sur la même collection.
+const ecrireLot = (entry) => driver.write(entry.collection, { upserts: entry.upserts, deletes: entry.deletes, force: entry.force });
+
+export function write(name, value, { force = false } = {}) {
+  if (!COLLECTIONS[name]) return Promise.resolve({ ok: false, error: "Collection inconnue : " + name });
+  return aLaQueue(name, () => ecrire(name, value, force));
+}
+
+async function ecrire(name, value, force) {
   if (isLocalOnly(name)) {
     await localDriver.write(name, { value });
     if (driver.shared) await kvSet(MIRROR_FOLDER, name, value);

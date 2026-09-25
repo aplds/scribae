@@ -26,7 +26,7 @@ A4), Word, Markdown.
 
 | | |
 |---|---|
-| **Version courante** | **1.6.0**, 22 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
+| **Version courante** | **1.6.1w**, 29 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
 | **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), et épreuves du domaine du service |
 | **Démonstration publiée** | <https://demo.scribae.eu> — GitHub Pages, édition **statique** : référentiel et actes vivent dans le navigateur du visiteur, rien n'est partagé entre collègues |
 | **Démonstration partagée** | aucune instance publique : la pile auto-hébergée (`src/server/`, nginx + Node + MariaDB) se monte en quelques minutes |
@@ -106,6 +106,20 @@ docker run -d \
 
 **Accès** : `http://<IP_SERVEUR>:8080`
 
+### L'exemple prêt à l'emploi : `compose-exemple/`
+
+Pour un service complet **sans rien construire** — l'image publiée et MariaDB, deux
+conteneurs, trois commandes :
+
+```bash
+cd compose-exemple
+cp env.example .env      # DB_ROOT_PASSWORD, DB_PASSWORD, ADMIN_PASSWORD
+docker compose up -d
+```
+
+**Accès** : `http://<IP_SERVEUR>:8080` — le compte `ADMIN_LOGIN` est créé au premier
+démarrage. Le détail (TLS, sauvegardes, mise à jour) est dans `compose-exemple/README.md`.
+
 ### 📦 Avec Docker Compose (tout intégré)
 
 Le dépôt fournit aussi une **pile complète** (4 services : db, db-init, api, web) :
@@ -133,7 +147,8 @@ git pull origin main
 docker compose down && docker compose up -d --build
 ```
 
-> **Pour plus de détails** : `src/server/README.md` (installation complète, configuration, sauvegardes)
+> **Pour plus de détails** : `compose-exemple/README.md` (le plus court chemin) et
+> `src/server/README.md` (installation complète, configuration, sauvegardes)
 
 ---
 

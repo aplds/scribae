@@ -27,6 +27,7 @@ import { renderTrames } from "./views/trames.js";
 import { renderEditor } from "./views/editor.js";
 import { renderRediger } from "./views/rediger.js";
 import { renderActes } from "./views/actes.js";
+import { renderReprises } from "./views/reprises.js";
 import { renderDelegations } from "./views/delegations.js";
 import { renderOrganigramme } from "./views/organigramme.js";
 import { renderChrono } from "./views/chrono.js";
@@ -65,6 +66,11 @@ const NAV = [
     { id: "rediger", label: "Rédiger un acte", icon: "plus", perm: "actes.rediger" },
     { id: "modifier", label: "Modifier un acte", icon: "refresh", perm: "actes.gerer" },
     { id: "actes", label: "Actes", icon: "list", perm: "actes.rediger" },
+    // LES REPRISES D'ACTES ANCIENS : les actes antérieurs à la mise en service du
+    // recueil, repris à la main et publiés à titre informatif. Elles ne suivent
+    // ni le parapheur, ni la signature, ni la numérotation — d'où leur écran
+    // propre, à côté des actes mais hors de leur registre.
+    { id: "reprises", label: "Reprises d'actes anciens", icon: "archive", perm: "actes.reprendre" },
     // La corbeille appartient à l'atelier : ce sont les actes et les trames
     // retirés du registre, que tout rédacteur peut consulter et rétablir.
     { id: "corbeille", label: "Corbeille", icon: "trash", perm: "actes.rediger" },
@@ -130,6 +136,7 @@ const VIEW_PERMS = {
   trame: "trames.gerer",
   rediger: "actes.rediger",
   actes: "actes.rediger",
+  reprises: "actes.reprendre",
   acte: "actes.rediger",
   // L'organigramme des délégations est visible par TOUS les comptes : savoir qui
   // peut signer à la place de qui n'est pas une donnée réservée. Ce sont les
@@ -167,6 +174,7 @@ const VIEWS = {
   trame: renderEditor,
   rediger: renderRediger,
   actes: renderActes,
+  reprises: renderReprises,
   acte: renderActeDetail,
   delegations: renderDelegations,
   organigramme: renderOrganigramme,

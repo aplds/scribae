@@ -41,10 +41,13 @@ docker run -d \
 **Accès** : `http://<IP>:8080`
 
 **Variables obligatoires** : `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-**Toutes les variables** : voir `src/server/env.example` (50+ disponibles)
+**Toutes les variables** : voir `../server/env.example` (50+ disponibles)
 
 > **Pour une installation complète avec base intégrée** : utiliser `src/server/docker-compose.yml`
 > (4 services : db, db-init, api, web). Voir `src/server/README.md` § 3.
+
+> **Le plus court chemin** : `compose-exemple/` — deux services (MariaDB et l'image publiée),
+> rien à construire, `docker compose up -d`. Voir son `README.md`.
 
 ---
 
@@ -234,8 +237,9 @@ mieux qu'une copie de fichiers entre deux formats qui n'ont pas la même forme.
 
 ### 3.1 Collections et enregistrements
 
-L'application manipule neuf **collections** : `config` (le référentiel, objet unique),
-`meta` (singleton), `trames`, `actes`, `users`, `journal` (le journal d'audit de
+L'application manipule dix **collections** : `config` (le référentiel, objet unique),
+`meta` (singleton), `trames`, `actes`, `reprises` (les actes anciens repris, publiés à titre informatif — voir § 5.5),
+`users`, `journal` (le journal d'audit de
 l'application), `presence` (la présence des postes) — listes d'objets identifiés par `id` —
 `informations` (les billets du recueil public : actualités, avis, communications, voir § 5.5)
 et `session` (**strictement locale**, jamais transmise). L'unité d'échange est
@@ -321,7 +325,7 @@ quitte par la même mise à disposition.
 | **Rédacteur** | rédiger un acte à partir d'une trame de son périmètre et mener les actions associées (enregistrer, signer) — **uniquement ses propres actes** ; il choisit son modèle dans « Rédiger un acte » (le registre des trames, `trames.voir`, est réservé aux éditeurs et aux administrateurs) |
 | **Réviseur** | **qualité cumulable** (elle ne remplace pas un profil) : contrôler les actes avant leur signature (rapport de conformité, correction, validation, rejet motivé). Elle s'exerce dans le **champ de compétence** du compte ou d'un service (voir § 4.5) |
 | **Signataire** | **qualité cumulable** (elle ne remplace pas un profil) : la **qualité de signer**. Elle **découle d'une désignation** — dès qu'une personne est désignée dans l'organigramme des **Délégations** (comme délégant ou délégataire), le compte rattaché à cette personne la reçoit, même si la désignation est faite par un éditeur. Elle ouvre l'onglet **« Ma signature »** et restreint la vue de l'atelier au **champ de compétence** du signataire (les actes dont sa signature relève). Un signataire **signe avec son compte**, rapproché du compte que l'outil de signature lui connaît (voir § 4.5) |
-| **Visiteur** | aucun accès : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public** (le recueil). C'est l'état d'un compte authentifié dont aucun rôle d'application n'est reconnu (voir § 4.4) |
+| **Visiteur** | aucun accès : l'atelier ne lui est pas ouvert, il ne lui reste que l'**espace public** (le recueil). C'est l'état d'un compte authentifié dont aucun rôle d'application n'est reconnu (voir § 4.4). **Une exception, et une seule** : une **qualité cumulée** (Signataire, Réviseur) l'emporte sur ce profil et lui rouvre le seul écran qu'elle commande — c'est le cas d'un signataire extérieur (un élu), qui n'a rien à faire dans le reste de l'atelier |
 
 Les dix-neuf permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes.rediger`,
 `actes.valider`, `actes.gerer`, `actes.tous`, `actes.reviser`, `actes.signer`, `signature.gerer`,
@@ -329,9 +333,13 @@ Les dix-neuf permissions (`trames.voir`, `trames.gerer`, `trames.styles`, `actes
 `informations.gerer`, `referentiel.gerer`, `comptes.gerer`, `api.gerer`, `docs.voir`) sont la
 **source unique** du contrôle d'accès et de la matrice affichée dans l'écran « Comptes et rôles ».
 
-**`actes.signer`** (signer un acte) et **`signature.gerer`** (conduire la publication — recueil,
+**`actes.signer`** (accéder à l'écran de signature, **envoyer** un acte en signature et, quand on
+est le titulaire, le signer) et **`signature.gerer`** (conduire la publication — recueil,
 identifiant ELI, formalités, transmission) sont **deux permissions distinctes** : un signataire
-peut signer sans pouvoir publier.
+peut signer sans pouvoir publier. La permission couvre deux gestes qu'il ne faut pas confondre :
+elle est partagée avec les rédacteurs, les éditeurs et les réviseurs pour l'**envoi** ; la
+**signature** elle-même n'appartient qu'au **titulaire** de l'étape, porteur de la qualité de
+Signataire (voir § 4.5).
 
 **`informations.gerer`** ouvre l'écran **Informations** — les billets du recueil public
 (actualités, avis, communications, § 5.5). Elle est portée par l'administrateur et l'éditeur ; les
@@ -528,6 +536,13 @@ Le journal du service (`docker compose logs api`) redit le même motif. Un **dé
 base injoignable, schéma non migré — est également journalisé et signalé à l'écran : le service ne
 sort plus en boucle de redémarrage, et il ne se contente plus d'un « registre vide » silencieux.
 
+Ce journal **s'ouvre sur la bannière du service** : la marque, le nom du logiciel, et sous lui sa
+**version**, sa **licence** et l'adresse de sa **documentation**. C'est là qu'on lit quelle version
+tourne — la première question à trancher devant une installation qui se comporte mal, et celle que
+tout rapport de panne devrait citer. La bannière ne paraît que sur le **démarrage du service** ;
+les commandes d'administration (`--reconcilier`, `--migrate`, `--mot-de-passe`) gardent un journal
+qui n'est que la trace du geste qu'on y a fait.
+
 > **`COOKIE_SECURE` (défaut `true`) interdit la session en `http://`.** Le navigateur refuse de
 > renvoyer un cookie `Secure` sur une liaison en clair : aucune session ne s'ouvre. Pour un essai en
 > clair (`http://serveur:8080`), mettez `COOKIE_SECURE=false` **le temps de l'essai**, puis remettez
@@ -711,10 +726,23 @@ la collectivité. Trois conséquences, qu'il faut connaître pour l'exploiter.
    **délégataires** (sa signature y est engagée par délégation ou subdélégation). L'onglet
    **« Ma signature »** lui présente ce qui attend sa signature et ce qui a été signé au titre
    de sa délégation. La qualité étant cumulable, un signataire qui est aussi rédacteur garde
-   la vue de son périmètre administratif.
+   la vue de son périmètre administratif. Un acte pris **sans signataire explicite** relève du
+   **signataire principal de son entité** (§ 5.1 bis) : il entre donc dans sa file, comme les
+   autres.
+4. **Qui signe, et qui envoie.** La compétence dit qui **voit** l'acte ; elle ne dit pas qui
+   l'**appose**. La signature est réservée au **titulaire** — le dernier étage de la chaîne de
+   signature, celui que l'acte attend — **et** au porteur de la qualité de Signataire. Un
+   **délégant** figure dans la chaîne sans être le titulaire : il ne signe pas à la place de son
+   délégataire. Un compte qui ne porte pas la qualité (un administrateur, un éditeur, un
+   réviseur) peut **envoyer** l'acte en signature, non l'engager. L'outil du prestataire et la
+   fenêtre de signature simple ne s'ouvrent que pour le titulaire ; tout autre compte est
+   prévenu que l'acte est parti et attend la signature de son titulaire.
 
 Signer (`actes.signer`) et publier (`signature.gerer`) sont deux permissions **distinctes** :
-un signataire signe sans conduire la publication, qui reste le fait du bureau compétent.
+un signataire signe sans conduire la publication, qui reste le fait du bureau compétent. Et
+**envoyer** n'est pas **signer** : la permission d'envoi est partagée avec les rédacteurs, les
+éditeurs et les réviseurs — c'est par elle que le réviseur, en validant un acte, le fait partir
+en signature.
 
 ---
 

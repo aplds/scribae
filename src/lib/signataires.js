@@ -180,6 +180,52 @@ export function competenceDuCompte(config, user, acte, trame) {
 export const peutSignerActe = (config, user, acte, trame) =>
   competenceDuCompte(config, user, acte, trame).ok;
 
+// ============================================================ qui peut signer
+// La COMPÉTENCE dit qui VOIT l'acte — toute la chaîne, car on suit les
+// signatures qu'on a données. Elle ne dit pas qui APPOSERA la signature.
+//
+// Pour signer, il faut deux choses de plus, et cette fonction est le SEUL
+// endroit qui les réunit :
+//
+//   1. être le TITULAIRE — le dernier étage de la chaîne, celui que l'acte
+//      désigne. Un délégant figure dans la chaîne (c'est de lui que le pouvoir
+//      descend), mais l'acte attend la signature de son délégataire : il ne
+//      signe pas à sa place. C'est toute la différence entre `ok` (être dans la
+//      chaîne) et `effectif` (être celui que l'acte attend) ;
+//   2. porter la QUALITÉ de signataire — le rôle cumulable (voir
+//      src/lib/users.js). Un compte qui n'est pas signataire ne signe pas : il
+//      peut ENVOYER l'acte en signature (la permission `actes.signer` est
+//      partagée avec les rédacteurs, les éditeurs et l'administration), il ne
+//      peut pas l'engager.
+//
+// Sans ces deux portes, un compte habilité à envoyer en signature apposerait la
+// signature au nom d'un autre. Tous les gestes de signature (simple,
+// électronique, externe déposé) passent par ici.
+//
+// Rend la compétence, enrichie du motif quand la signature est refusée (chaîne
+// vide quand elle est accordée).
+export function peutSignerEffectivement(config, user, acte, trame) {
+  const c = competenceDuCompte(config, user, acte, trame);
+  // `ok` répond à LA question de cette fonction — puis-je apposer cette
+  // signature ? —, et non à celle de la compétence de visibilité : un délégant
+  // est compétent (il est dans la chaîne), sans pour autant pouvoir signer. Le
+  // rang dans la chaîne reste lisible par `effectif` et `rang` pour les écrans
+  // qui ont besoin de le dire.
+  const refus = (motif) => ({ ...c, ok: false, motif });
+  if (!c.ok) return refus("Votre compte n'est pas dans la chaîne de signature de cet acte : vous ne pouvez pas signer à la place du signataire désigné. Faites-vous désigner, ou attendez une délégation en vigueur.");
+  const titulaire = (c.etapes || []).filter((e) => e.person).slice(-1)[0]?.person || null;
+  const nomTitulaire = titulaire ? [titulaire.civility, titulaire.firstName, titulaire.lastName].filter(Boolean).join(" ") : "";
+  if (!c.effectif) {
+    return refus("Vous figurez dans la chaîne de signature de cet acte, mais l'acte attend la signature de son titulaire"
+      + (nomTitulaire ? " — " + nomTitulaire : "")
+      + " : vous le suivez, vous ne le signez pas.");
+  }
+  if (!hasRole(user, ROLE_SIGNATAIRE)) {
+    return refus("Ce compte ne porte pas la qualité de signataire : il peut envoyer l'acte en signature, non l'engager. La qualité s'attribue en désignant la personne (écran Délégations), ou depuis « Comptes et rôles ».");
+  }
+  return { ...c, motif: "" };
+}
+
 // Les comptes dont la signature est engagée sur cet acte — ceux à qui le fait
 // est annoncé. C'est l'homologue de `reviseursPour` (src/lib/revision.js).
 export const signatairesPourActe = (config, users, acte, trame) =>
@@ -187,9 +233,14 @@ export const signatairesPourActe = (config, users, acte, trame) =>
 
 // ------------------------------------------------------------- les files
 // Ce que l'écran de signature met sous les yeux du signataire, en deux temps :
-//   aSigner  les actes qui attendent SA signature (il est le dernier étage) ;
-//   engagee  les actes signés au titre de sa délégation, qu'il n'a pas à
-//            signer lui-même mais qu'il doit pouvoir suivre.
+//   aSigner  les actes qui attendent SA signature (il en est le TITULAIRE — le
+//            dernier étage de la chaîne — et l'acte n'est pas encore signé) ;
+//   engagee  les actes SIGNÉS au titre de sa délégation : sa signature y est
+//            engagée par un délégataire, il n'a pas à les signer, mais il les
+//            suit.
+// Un acte de son champ de compétence qui n'est ni à signer par lui ni encore
+// signé ne figure donc dans aucune des deux files : il est visible dans
+// l'atelier, mais la file ne lui invente pas un geste.
 export function fileSignature(config, user, actes, trameDe) {
   const aSigner = [];
   const engagee = [];
@@ -208,8 +259,13 @@ export function fileSignature(config, user, actes, trameDe) {
     if (estAnnexe(a)) continue;
     const c = competenceDuCompte(config, user, a, trameDe ? trameDe(a) : null);
     if (!c.ok) continue;
+    // Ce qui attend SA signature : elle est le titulaire, et l'acte n'est pas
+    // encore signé. Tout le reste de son champ de compétence — un acte qu'un
+    // délégataire signe à sa place, mais qui n'est PAS encore signé — n'est ni
+    // à signer, ni à suivre : il n'y a encore rien à suivre. Il reste visible
+    // par ailleurs (l'atelier le montre), mais il n'a rien à faire dans la file.
     if (c.effectif && !signe(a)) aSigner.push(a);
-    else engagee.push(a);
+    else if (signe(a)) engagee.push(a);
   }
   const tri = (l) => l.sort((x, y) => String(y.updatedAt || "").localeCompare(String(x.updatedAt || "")));
   return { aSigner: tri(aSigner), engagee: tri(engagee) };

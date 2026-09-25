@@ -1,0 +1,89 @@
+# ============================================================================
+# Scribae — exemple de premier déploiement auto-hébergé : MariaDB + Scribae.
+#
+#   cp env.example .env        # renseignez les trois mots de passe
+#   docker compose up -d
+#   #  → http://<hôte>:8080     (ADMIN_LOGIN / ADMIN_PASSWORD du .env)
+#
+# DEUX services et deux images publiées : `mariadb` pour la base, `aplds/scribae`
+# pour l'application — cette dernière embarque le service Node, nginx et le code.
+# RIEN À CONSTRUIRE, et rien à télécharger du dépôt : il faut Docker, et c'est
+# tout. C'est la différence avec `src/server/docker-compose.yml`, qui construit
+# tout depuis le dépôt et ajoute les services d'amorçage (`db-init`) et de façade
+# (`web`).
+#
+# C'EST UN POINT DE DÉPART, PAS UN MODÈLE DE PRODUCTION : le port est publié en
+# clair, sans TLS ni sauvegarde automatique. La mise en service — reverse proxy,
+# certificat, sauvegardes, mise à jour — est décrite dans
+# `src/docs/ADMINISTRATION.md` et `src/docs/DOCKER.md`.
+# ============================================================================
+
+services:
+  db:
+    # Épinglée par EMPREINTE, comme dans `src/server/docker-compose.yml` : une
+    # étiquette flottante (`mariadb:11`) désigne ce que le registre publie ce
+    # jour-là, et deux installations faites à deux dates ne partent alors pas du
+    # même logiciel. Pour reprendre la version courante :
+    #   docker buildx imagetools inspect mariadb:11
+    image: mariadb:11@sha256:79d59758afc91b89b120b0a8904d637f5a3b3e1c4900f29b740d6d46c72fef68
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?renseignez DB_ROOT_PASSWORD dans .env}
+      MARIADB_DATABASE: ${DB_NAME:-scriba}
+      MARIADB_USER: ${DB_USER:-scriba}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?renseignez DB_PASSWORD dans .env}
+    # Le référentiel, les trames, les actes, les comptes et l'état de signature
+    # vivent TOUS dans ce volume : c'est lui qu'on sauvegarde.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - donnees:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interne]
+
+  scribae:
+    # L'image publiée de l'application. `latest` suit les livraisons ; pour figer
+    # une version, remplacez l'étiquette par une version précise
+    # (`docker.io/aplds/scribae:1.6.1q`) ou par une empreinte.
+    image: docker.io/aplds/scribae:latest
+    restart: unless-stopped
+    # TOUT le `.env` entre dans le conteneur. C'est là que s'ajoutent, le moment
+    # venu, les variables DÉCLARATIVES du référentiel (`SCRIBA_IDENTITE_*`,
+    # `SCRIBA_VOCAB_*`, `SCRIBA_NUMERO_*`…) : elles se lisent dans
+    # `src/docs/VARIABLES.md` et dans l'écran Administration, sans qu'on touche à
+    # ce fichier.
+    env_file:
+      - .env
+    environment:
+      # L'adresse de la base TELLE QUE LA VOIT LE SERVICE : le nom du service
+      # ci-dessus, sur le réseau interne. Pour viser une base EXTERNE (déjà
+      # administrée ailleurs), renseignez DB_HOST dans `.env` — il l'emporte.
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-scriba}
+      DB_USER: ${DB_USER:-scriba}
+      DB_PASSWORD: ${DB_PASSWORD:?renseignez DB_PASSWORD dans .env}
+      # Le compte applicatif est REMIS au mot de passe ci-dessus à chaque
+      # démarrage, puis le schéma est appliqué : c'est ce que fait l'amorçage de
+      # l'image dès que le mot de passe root lui est fourni. Sans lui, l'image ne
+      # touche pas à la base — elle est alors administrée ailleurs, et les deux
+      # gestes se font à la main (voir `src/docs/DOCKER.md`).
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?renseignez DB_ROOT_PASSWORD dans .env}
+    ports:
+      # nginx écoute sur le port 80 DANS le conteneur : on publie le port de
+      # l'hôte qu'on veut (8080 par défaut).
+      - "${HTTP_PORT:-8080}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [interne]
+
+volumes:
+  donnees:
+
+networks:
+  interne:
+    driver: bridge

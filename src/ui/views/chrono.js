@@ -208,7 +208,14 @@ export function renderChrono(root) {
 // « Annuler un rang » : le rang n'a jamais servi, et l'administration le déclare
 // tel — avec son motif. Il reste au chrono, dans l'état « annulé ».
 export function annulerRangDialog(ligne) {
-  const motifInput = textField({ label: "Motif", placeholder: "Numéro tiré sur un acte abandonné, erreur de saisie…" });
+  // Le motif se retient à la FRAPPE : `textField` rend le CONTENEUR du champ
+  // (libellé, aide, saisie), pas l'`<input>` — lire `motifInput.value` donnait
+  // toujours `undefined`, et le motif saisi n'était jamais enregistré.
+  let motif = "";
+  const motifInput = textField({
+    label: "Motif", placeholder: "Numéro tiré sur un acte abandonné, erreur de saisie…",
+    onChange: (v) => { motif = v; },
+  });
   const boite = h("div", { class: "fr-stack" },
     h("p", { text: `Le rang ${ligne.seq} de l'année ${ligne.annee}${ligne.entityCode ? " (" + ligne.entityCode + ")" : ""} n'a jamais servi. Le déclarer annulé l'explique, sans le remettre à disposition : le chrono ne revient pas en arrière.` }),
     motifInput,
@@ -225,12 +232,12 @@ export function annulerRangDialog(ligne) {
           const list = [...((c.numbering && c.numbering.annules) || [])];
           list.push({
             numero: "", seq: ligne.seq, annee: ligne.annee, entityCode: ligne.entityCode || "",
-            motif: motifInput.value || "Rang jamais attribué", at: new Date().toISOString(),
+            motif: motif.trim() || "Rang jamais attribué", at: new Date().toISOString(),
             par: state.user ? state.user.id : "",
           });
           c.numbering = { ...(c.numbering || {}), annules: list };
           touch("config", { rerender: false });
-          journaliser({ action: "numerotation.annule", cible: "referentiel", cibleLabel: `Rang ${ligne.seq}/${ligne.annee}`, detail: motifInput.value || "" });
+          journaliser({ action: "numerotation.annule", cible: "referentiel", cibleLabel: `Rang ${ligne.seq}/${ligne.annee}`, detail: motif.trim() });
           close();
           toast("Rang déclaré annulé.", "success");
           redrawView();

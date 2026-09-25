@@ -6,10 +6,16 @@
 // contexte (currentColor) : elle tient donc sur fond clair comme sur fond
 // sombre, sans halo ni second ton. À l'impression, le noir du texte suffit.
 //
-// Pour changer de nom, de devise ou de marque, tout passe par ce fichier (et
-// par `$meta` dans main.pjs pour le titre de la page).
+// Le NOM, lui, ne s'écrit pas ici : il appartient à l'identité du logiciel
+// (`src/lib/logiciel.js`), avec la licence et la documentation, parce que le
+// service et l'outillage de génération le lisent aussi — et qu'il n'y a pas
+// deux vérités pour un nom. On le réexporte pour que l'interface n'ait qu'un
+// module d'identité à connaître.
+//
+// Pour changer de devise ou de marque, tout passe par ce fichier (et par
+// `$meta` dans main.pjs pour le titre de la page).
 // ============================================================================
-export const APP_NAME = "Scribae";
+export { APP_NAME } from "../lib/logiciel.js";
 export const APP_TAGLINE = "Trames, rédaction et publication des actes administratifs";
 
 const DOC = "M12 2H37L57 22V53A9 9 0 0 1 48 62H12A9 9 0 0 1 3 53V11A9 9 0 0 1 12 2Z";

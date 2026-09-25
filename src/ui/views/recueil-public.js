@@ -44,7 +44,7 @@ import { filtrerPublications, facettes, parAnnee, parTheme, dernieresPublication
   recueilsExternes, recueilExterneTypeLabel, urlRecueilExterne, periodeRecueil,
   blocsMention } from "../../lib/recueil.js";
 import { licenceReutilisation } from "../../lib/recueil.js";
-import { corpsDeLActe, setListePublications, natureLabel, themeDePublication, themeLabelDePublication, blocOriginal, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
+import { corpsDeLActe, setListePublications, natureLabel, themeDePublication, themeLabelDePublication, blocOriginal, blocPieces, blocSignature, blocVersions, blocDonneesPubliques, blocMentionReprise } from "./acte-publie.js";
 
 export function renderRecueilPublic(root, params) {
   monte = { root, params: params || {} };
@@ -147,7 +147,7 @@ function charger(st) {
       st.erreur = st.liste.length || r.ok ? null : bodyOf(r).erreur || `Registre indisponible (${r.status}).`;
     })
     .catch((e) => {
-      const locales = publicationsLocales(state.actes, { reserveVue: voitReserve() });
+      const locales = publicationsLocales(registreLocal(), { reserveVue: voitReserve() });
       st.liste = locales;
       st.erreur = locales.length ? null : String((e && e.message) || e);
     })
@@ -160,13 +160,19 @@ function charger(st) {
 // une circulaire interne que le service, lui, cache.
 const voitReserve = () => !!(state.user && agentsAvecActesReserves(true));
 
+// LE REGISTRE LOCAL, pour le repli et la fusion : les actes du registre ET les
+// reprises d'actes anciens (voir src/lib/reprise.js). Une reprise publiée est une
+// publication du recueil comme une autre : elle doit apparaître même quand le
+// service ne répond pas — un poste qui la détient la montre.
+const registreLocal = () => [...(state.actes || []), ...(state.reprises || [])];
+
 // La fusion : les publications du service d'abord, puis celles que le poste
 // détient et que le service ne rend pas encore. On écarte celles dont
 // l'identifiant ELI est déjà servi — le recueil ne présente qu'une version par
 // identifiant (`corpus`), et deux enregistrements de la même version
 // l'afficheraient deux fois.
 function fusionnerPublications(duService) {
-  const locales = publicationsLocales(state.actes, { reserveVue: voitReserve() });
+  const locales = publicationsLocales(registreLocal(), { reserveVue: voitReserve() });
   if (!locales.length) return duService;
   const cles = new Set(duService.map((p) => String(p.cle || "")));
   const elis = new Set(duService.map((p) => String(p.eliUri || "")).filter(Boolean));
@@ -551,7 +557,7 @@ function zoneBulletins(st) {
 function chargerActe(st, cle) {
   if (!cle || st.actes["#" + cle]) return;
   st.actes["#" + cle] = { chargement: true };
-  const locale = publicationLocale(state.actes, cle, { reserveVue: voitReserve() });
+  const locale = publicationLocale(registreLocal(), cle, { reserveVue: voitReserve() });
   get("/v1/publications/" + encodeURIComponent(cle), { label: "Acte publié", source: "lecture" })
     .then((r) => {
       st.actes["#" + cle] = r.ok ? r.body
@@ -1460,6 +1466,10 @@ function item(p) {
         theme ? h("span", { class: "recueil-item__theme", text: theme }) : null,
         h("span", { class: "recueil-item__nature", text: natureLabel(p.nature) }),
         h("span", { class: "recueil-item__num", text: p.numero || "" }),
+        // Une REPRISE d'acte ancien se signale dans la liste : sa date ferait
+        // croire à un acte fraîchement publié, alors qu'elle n'est là qu'à titre
+        // informatif (voir `blocMentionReprise`, le bas de sa page).
+        p.reprise === true ? h("span", { class: "recueil-item__reprise", text: "reprise" }) : null,
         p.latest === false ? h("span", { class: "recueil-item__marque", text: "version antérieure" }) : null),
       h("span", { class: "recueil-item__objet", text: p.objet || p.title || "" }),
       h("span", { class: "recueil-item__bas" },
@@ -1505,7 +1515,10 @@ function acte(st, cle) {
     blocOriginal(rec),
     blocPieces(rec),
     blocSignature(rec),
-    blocDonneesPubliques(rec));
+    blocDonneesPubliques(rec),
+    // LA MENTION DE REPRISE ferme la page : le lecteur qui est allé jusqu'au
+    // bout y lit que l'acte est publié à titre informatif uniquement.
+    blocMentionReprise(rec));
   if (rec.versions && rec.versions.length > 1) article.appendChild(blocVersions(rec, { href: hrefActe }));
   main.appendChild(article);
   return main;
@@ -1529,7 +1542,12 @@ function fil(courant) {
   return h("nav", { class: "recueil-fil", "aria-label": "Fil d'Ariane" },
     h("a", { href: hrefRecueil() }, "Recueil des actes"),
     h("span", { class: "recueil-fil__sep", text: "›" }),
-    h("span", { text: courant ? [courant.numero, courant.nature ? natureLabel(courant.nature) : ""].filter(Boolean).join(" · ") : "Acte" }));
+    // Une REPRISE n'est pas un acte du registre : son fil le dit, comme la page
+    // publiée (voir `buildWebVersion`, src/lib/eli.js), plutôt que de la présenter
+    // sous la nature d'un acte ordinaire.
+    h("span", { text: courant && courant.reprise === true
+      ? ["Reprises d'actes anciens", courant.numero].filter(Boolean).join(" · ")
+      : courant ? [courant.numero, courant.nature ? natureLabel(courant.nature) : ""].filter(Boolean).join(" · ") : "Acte" }));
 }
 
 // ------------------------------------------------------------------ filtres
