@@ -1,8 +1,8 @@
 ---
 titre: Registre des non-conformités — Scribae
-version: 3
+version: 5
 cree_le: 2026-09-21
-mis_a_jour: 2026-09-29 (1.6.1r et 1.6.1s : NC-II-014 ouverte et levée aussitôt ; 1.6.1t et 1.6.1u : aucune fiche ouverte ; 1.6.1v : aucune fiche ouverte — le deadlock des écritures est corrigé et couvert par des épreuves ; 1.6.1w : aucune fiche nouvelle — la porte de signature de NC-II-006 est renforcée (le titulaire seul, porteur de la qualité) et son parcours complet est rejoué)
+mis_a_jour: 2026-09-30 (**5e campagne** : NC-I-015 et NC-I-016 ouvertes pour le verrou de dépendances et le chemin des tests à la racine ; NC-II-015 ouverte pour la balise noindex non déployée ; 39 fiches au total)
 cadre: src/audit/PROMPT-AUDIT-SCRIBAE.md
 ---
 
@@ -37,10 +37,10 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Cote | Nombre | Ouvertes | En cours | Levées |
 |---|---|---|---|---|
 | Bloquante | 3 | 0 | 0 | 3 |
-| Majeure | 11 | 0 | 3 | 8 |
+| Majeure | 13 | 0 | 5 | 8 |
 | Mineure | 11 | 0 | 3 | 8 |
-| Observation | 12 | 1 | 2 | 9 |
-| **Total** | **37** | **1** | **8** | **28** |
+| Observation | 15 | 1 | 4 | 10 |
+| **Total** | **39** | **1** | **12** | **26** |
 
 > Les nombres de cette synthèse sont **recalculés sur les fiches** à chaque campagne *et* à chaque
 > traitement d'une proposition du plan d'action. Le premier traitement du 2026-09-23 (livraison
@@ -316,6 +316,39 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Statut | **Levée** (2026-09-23, livraison 1.6.1i) — la recommandation est satisfaite par sa **branche « à défaut »** : un **jeu d'appels commun** (`src/tests/conformite-service.mjs`, 13 appels dont la dépublication) est joué **contre les deux implémentations** — en Node sur le service auto-hébergé, et dans le navigateur sur le service de démonstration —, et peut être comparé à une installation réelle par la variable `SCRIBA_CONFORMITE_URL`. Une divergence de réponse entre les deux devient donc visible mécaniquement. Réserve assumée : les deux implémentations **subsistent** (la démonstration n'est pas devenue un adaptateur du domaine) — c'est le choix de ne pas extraire le domaine côté démonstration qui reste consigné ici. |
 | Origine | Audit 2026-09-23 (3e campagne) |
 
+### NC-I-015 — Absence de verrou de dépendances à la racine pour l'outillage
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | I.3 — Industrialisation ; I.4 — Chaîne d'approvisionnement |
+| Constat | Aucun `package-lock.json` à la racine du dépôt. Le service auto-hébergé a son verrou (`src/server/mysql/package-lock.json`), mais l'outillage à la racine (`scripts/`, `tests/`) n'a pas de verrou pour ses dépendances (aucune dépendance directe, mais `npm ci` échouerait sans verrou). |
+| Exigence de référence | ISO/IEC 27002 (gestion des dépendances), bonne pratique de reproductibilité. |
+| Preuve | `ls -la package-lock.json` — b No root lock file b. `cat package.json` — pas de dépendances directes, mais `npm install` pourrait épingler des versions. |
+| Recommandation | Exécuter `npm install` à la racine et committer le `package-lock.json` généré. Voir P-31. |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | 0—30 jours |
+| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
+| Origine | Audit 2026-09-30 |
+
+### NC-I-016 — Le chemin des tests dans `package.json` à la racine est incorrect pour la CI
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | I.3 — Industrialisation ; I.3 — Environnements, tests |
+| Constat | `package.json` à la racine définit `"test": "node --test tests/ src/server/mysql/ src/server/charge/"`. Or `src/server/mysql/` et `src/server/charge/` ne sont pas à la racine, mais sous `src/`. La CI GitHub échoue car elle ne trouve pas ces chemins. |
+| Exigence de référence | ISO/IEC 25010 (fiabilité, maintenabilité), bonne pratique d'intégration continue. |
+| Preuve | `.github/workflows/ci.yml` — `run: npm test` — échec car `Cannot find module '/workspace/github__aplds__scribae/src/server/mysql'`. `node --test tests/ src/server/mysql/ src/server/charge/` — même erreur locale. |
+| Recommandation | Corriger le chemin dans `package.json` : `"test": "node --test tests/ ./src/server/mysql/ ./src/server/charge/"`. Voir P-32. |
+| Effort | Faible |
+| Priorité | Très haute |
+| Échéance | 0—30 jours |
+| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
+| Origine | Audit 2026-09-30 |
+
+
 ## Chapitre II — Sécurité des systèmes d'information (RSSI)
 
 ### NC-II-001 — Le jeton d'écriture de l'API est publié dans le code client, et sa portée est globale
@@ -540,7 +573,25 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Priorité | Haute |
 | Échéance | Faite |
 | Statut | **Levée** (2026-09-25, livraison 1.6.1s) — les dossiers `informations` et `reprises` sont déclarés, `dossierDe` ne renvoie plus d'alias pour une collection inconnue, et les données héritées du dossier commun sont reprises une fois (`HERITAGE`, `reprendreHeritage`). |
-| Origine | Constat de développement (ajout de la collection `reprises`), hors campagne |
+| Origine | Constat de développement
+### NC-II-015 — La balise `noindex` est présente dans `index.html` mais non déployée sur demo.scribae.eu
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | II.1 — Cartographie ; II.6 — Segmentation |
+| Constat | `index.html:45-49` pose une balise `<meta name="robots" content="noindex, nofollow">` si `location.hostname === "demo.scribae.eu"`. Or cette condition n'est **pas vérifiée** : la balise n'apparaît pas dans le DOM de `https://demo.scribae.eu`. |
+| Exigence de référence | ISO/IEC 27002 (classification de l'information), loyauté de la présentation. |
+| Preuve | `index.html:45-49` (condition `if (location.hostname === "demo.scribae.eu")`), inspection du DOM de `https://demo.scribae.eu` — aucune balise `meta[name="robots"]`. |
+| Points conformes | La balise est présente dans le code source. NC-III-008 presque levée. |
+| Recommandation | Vérifier que la condition `location.hostname === "demo.scribae.eu"` est bien évaluée à `true` lors du chargement de `demo.scribae.eu`. Si la page est servie par GitHub Pages, `location.hostname` devrait bien valoir `demo.scribae.eu`. Vérifier avec `console.log(location.hostname)` dans l'aperçu. Priorité haute, échéance 0—30 jours. |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | 0—30 jours |
+| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
+| Origine | Audit 2026-09-30 |
+
+ (ajout de la collection `reprises`), hors campagne |
 
 ## Chapitre III — Qualité, accessibilité et expérience (qualiticien)
 
@@ -753,3 +804,15 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Échéance | 180 jours et au-delà |
 | Statut | **Levée** (2026-09-21b) — la version consolidée porte la mention « Version consolidée — ne fait pas foi » et un lien ELI vers l'original ; vérifié à l'écran. |
 | Origine | Audit 2026-09-21 |
+
+---
+
+## Historique des audits
+
+| Date | Rapport | Auditeur | Version outil | NC ouvertes | NC levées | NC nouvelles |
+|---|---|---|---|---|---|---|
+| 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21.md` | Audit initial (quatre regards : DSI, RSSI, qualiticien, DAJ) | 1.2.0 | 0 | 0 | 27 |
+| 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21b.md` | Audit 2e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), parcours par l'interface | 1.2.0 | 6 | 18 | 3 |
+| 2026-09-23 | `rapports/AUDIT-SCRIBAE-2026-09-23.md` | Audit 3e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), dépôt GitHub, démonstration publiée et chaîne d'intégration | 1.6.0 | 16 | 0 | 6 |
+| 2026-09-29 | `rapports/AUDIT-SCRIBAE-2026-09-29.md` | Audit 4e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), version 1.6.1w, outillage à la racine, chaîne CI locale verte | 1.6.1w | 2 | 28 | 0 |
+| 2026-09-30 | `rapports/AUDIT-SCRIBAE-2026-09-30.md` | Audit 5e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), version 1.6.1w, CI locale verte, 3 nouvelles NC | 1.6.1w | 1 | 26 | 3 |
