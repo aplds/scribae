@@ -3,19 +3,42 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
-## Restes à trancher
+## Version 1.6.3c — l'image Docker éprouvée, et les non-conformités soldées (livré)
 
-- [ ] **Les doublons périmés sous `src/server/`** : `index.html`, `main.pjs`, `package.json`,
-      `.gitignore` et `.nojekyll` y sont restés d'une disposition antérieure. Le `package.json`
-      pointe encore vers `node src/scripts/verifier-syntaxe.mjs`, qui n'existe plus ; les deux
-      premiers sont d'anciennes copies de la page (112 200 octets contre 178 213 pour
-      `index.html`). **Rien ne les référence** — ni un `COPY` des `Dockerfile`, ni un document.
-      À retirer du dépôt :
+Demande : « à trancher : pas d'avis, je te fais confiance / audit : le contrôle de légalité ne peut
+pas refuser (c'est un recours contentieux dans ce cas) ; je ne sais pas ce qu'est la CI ; sur les
+autres NC, résous-les. on se concentre sur les bugs fixes, en s'assurant que tout soit fonctionnel
+en prod via docker ».
+
+- [x] **Les doublons périmés sous `src/server/`** (`index.html`, `main.pjs`, `package.json`,
+      `.gitignore`, `.nojekyll`) : l'atelier n'en contient plus aucun, rien ne les référence, et
+      l'export n'en produit pas. Reste à les retirer du dépôt **déjà publié**, une fois :
       `git rm src/server/index.html src/server/main.pjs src/server/package.json
-      src/server/.gitignore src/server/.nojekyll`.
-- [ ] **`src/server/build-and-push.sh`** : le `docker login` automatique décide qu'on est déjà
-      connecté d'après `docker info | grep "Username:"` — sortie qui dépend de la version de
-      Docker. À reprendre (tenter le push, ou lire `~/.docker/config.json`).
+      src/server/.gitignore src/server/.nojekyll` (voir la recette d'export de `README.md`).
+- [x] **`build-and-push.sh`** : la version de l'image est **lue** dans `src/lib/version.js` (elle
+      annonçait encore 1.6.2), la session se lit dans le fichier d'identifiants au lieu de
+      `docker info | grep "Username:"`, et un push qui échoue le dit avec son remède.
+- [x] **La base en mémoire connaît `sb_piece`**, et la voie MySQL des pièces est éprouvée
+      (`server/charge/faux-mysql.mjs`, `server/mysql/magasin-mysql.test.mjs`). Au passage, un
+      défaut réel : le résultat d'une ÉCRITURE y était imbriqué d'un niveau de trop, si bien que
+      `supprimerPiece` répondait toujours « rien retiré ».
+- [x] **La chaîne d'intégration construit l'image Docker et la met en service** contre une vraie
+      MariaDB (`.github/workflows/ci.yml`, travail `image`) : santé, schéma et migrations,
+      coquille, code servi, `config.js` engendré.
+- [x] **Les non-conformités restantes** — registre à l'appui : NC-I-008, NC-I-017, NC-II-010,
+      NC-III-008 et NC-IV-003 passent en **Levée**, NC-IV-006 en **Obsolète** (le contrôle de
+      légalité ne refuse pas : un refus est un recours contentieux, que le logiciel suit déjà par
+      le délai de recours), NC-II-012 devient une limite **assumée** du démonstrateur.
+
+Reste ouvert, et dit comme tel :
+
+- [ ] **L'essai de la chaîne sur un envoi réel** : le travail `image` se juge à la première
+      poussée ; s'il était rouge, NC-I-008 repasserait en « Régression ».
+- [ ] **L'identifiant ELI reste une forme `eli:`** (un identifiant, non une adresse). C'est un
+      choix nommé (`src/lib/eli.js`) : l'adresse HTTP est publiée à côté (`eliAdresse`, `eli:uri`
+      du JSON-LD, `FRBRuri` d'Akoma Ntoso). En faire l'identifiant canonique **changerait les
+      identifiants déjà publiés** — à trancher avec la collectivité avant toute bascule.
+- [ ] **L'export et la rétention du journal d'audit** restent hors périmètre (`SPEC.md` § 5).
 
 ## Version 1.6.3b — la méthode de travail entre dans le dépôt (livré)
 
@@ -68,11 +91,16 @@ possibilité de déclaration par acte ».
 - [x] **Épreuves** : `controle-legalite.test.mjs` (9) et deux cas neufs d'`actes.test.mjs` (32) —
       déclaration sans API, et opposition identité / compétence.
 
-Reste ouvert :
+Tranché en 1.6.3c :
 
-- [ ] **Les REFUS du contrôle de légalité** (rejet, demande d'observations) ne sont pas traités :
-      l'aller-retour s'arrête à l'accusé de réception, ou à la déclaration. C'est le reste de
-      NC-IV-006.
+- [x] **Les « refus » du contrôle de légalité n'ont pas d'état à porter dans l'application.** Le
+      contrôle de légalité **n'a pas de refus** : il accuse réception, et s'il conteste l'acte, il
+      forme un **recours contentieux** (déféré) — que le logiciel suit déjà par le délai de recours
+      et la constatation d'un recours introduit (`src/lib/execution.js`). NC-IV-006 est donc
+      **obsolète** ; seule l'observation « le client n'a jamais parlé à une vraie passerelle »
+      subsiste, et elle relève de l'exploitation (voir ci-dessous).
+- [ ] **Éprouver la télétransmission contre une vraie passerelle @ctes** (ou un banc reproduisant
+      ses réponses) : la lecture des champs d'accusé est défensive, jamais confrontée au réel.
 
 ## Version 1.6.3 — les accès API réels, et la signature qu'on ne prend pas (livré)
 
@@ -117,8 +145,9 @@ Reste ouvert (limites assumées, dites par l'application) :
       une clé de service peut y déposer un paquet signé. C'est une limite du démonstrateur, non du
       logiciel : l'annuaire ou les comptes locaux (`AUTH_MODE`) ferment la porte. Il n'y a rien à
       corriger ici ; c'est à redire dans toute présentation.
-- [ ] **La télétransmission ne gère pas encore les REFUS du contrôle de légalité** (rejet, demande
-      d'observations) : l'aller-retour s'arrête à l'accusé de réception (voir ci-dessous).
+- [x] **Les « refus » du contrôle de légalité** : tranché en 1.6.3c — il n'y en a pas. Le contrôle
+      de légalité accuse réception ; sa contestation est un **recours contentieux**, suivi par le
+      délai de recours (`src/lib/execution.js`). NC-IV-006 est **obsolète**.
 
 ## Version 1.6.2 — travailler à deux sur le même acte (livré)
 
@@ -165,10 +194,9 @@ par le **service** (`/v1/pieces`, `lib/fichiers.js`, `sb_piece`, `DATA_DIR/piece
       `ui/views/signature.js`, `server/mysql/server.mjs`, les deux magasins, la migration 2) :
       le poste choisit son dépôt, l'épreuve `piece-depot` (parcours 25/25) et les deux appels de
       conformité tiennent le contrat ; le retrait est refusé tant qu'un acte cite la pièce.
-- [ ] **Le faux MySQL ne connaît pas `sb_piece`** (`server/charge/faux-mysql.mjs`) : sa table
-      `TABLES`, sa `cleLigne` et ses `DELETE`/`SELECT` ne couvrent pas la table des pièces, si
-      bien que la voie **MySQL** des pièces n'est pas éprouvée en mémoire (seule la voie
-      « fichiers » l'est). À compléter pour que `magasin-mysql.test.mjs` puisse l'éprouver aussi.
+- [x] **Le faux MySQL connaît `sb_piece`** (fait en 1.6.3c) : sa table, sa clé, ses `DELETE` et
+      `SELECT` couvrent la table des pièces, et `magasin-mysql.test.mjs` éprouve la voie **MySQL**
+      des pièces (dépôt, relecture, remplacement, retrait) comme la voie « fichiers ».
 - [x] **Le circuit externe côté service Node** : `signature-externe` et `conformite` étaient
       servies par le service de démonstration, mais pas par le service Node — la pièce y était
       rangée (les routes `/v1/pieces` existent) mais l'acte ne pouvait pas la déclarer. Porté

@@ -139,8 +139,8 @@ Le **style** est en mode **strict** (comme la CI) : un `var`, un `console.log` d
 ### 3.3 Les chiffres attendus dans l'atelier
 
 Le harnais **n'est pas Node** : certaines épreuves ne peuvent pas y être justes, et il vaut mieux
-les connaître que les redécouvrir. À la version **1.6.3b**, la suite complète donne
-**37 fichiers, 420/439**, et les **19 non-verts sont tous connus** :
+les connaître que les redécouvrir. À la version **1.6.3c**, la suite complète donne
+**37 fichiers, 421/440**, et les **19 non-verts sont tous connus** :
 
 | Fichier | Résultat ici | Ce qui manque |
 |---|---|---|
@@ -154,6 +154,10 @@ les connaître que les redécouvrir. À la version **1.6.3b**, la suite complèt
 **Deux chiffres à surveiller** quand on touche au service : `src/server/mysql/actes.test.mjs`
 (**32/32**) et `src/server/mysql/controle-legalite.test.mjs` (**9/9**). Ce sont eux qui tiennent la
 signature, la publication et la transmission.
+
+Et une épreuve qu'on ne touche pas sans y penser : `src/server/mysql/magasin-mysql.test.mjs`
+(**7/7**), qui tient — entre autres — la **voie MySQL des pièces jointes** (`sb_piece`) et la forme
+des résultats d'écriture rendus par la base en mémoire.
 
 > **Le reste doit être vert, et le total ne doit pas baisser.** Si un fichier qui était vert
 > devient rouge, c'est une régression — la vôtre. Ces six-là ne font pas exception : ils sont un
@@ -290,7 +294,7 @@ bougé signale une source désynchronisée.
 **La livraison, elle, se marque ainsi** (détail : `src/CHANGELOG.md`, en-tête) :
 
 1. une entrée **datée** en tête du changelog, avec un numéro — une **note intermédiaire**
-   (`1.6.3b`) suffit entre deux dépôts, et le numéro ne se réutilise jamais ;
+   (`1.6.3c`) suffit entre deux dépôts, et le numéro ne se réutilise jamais ;
 2. `APP_VERSION` (`src/lib/version.js`) **dit la même chose** que le titre de la première entrée
    datée ;
 3. les documents que le changement rend faux (README, SPEC, TODO, registre d'audit) ;

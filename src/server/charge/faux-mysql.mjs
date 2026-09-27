@@ -11,7 +11,8 @@
 //
 // CE QU'IL FAIT, ET CE QU'IL NE FAIT PAS.
 //   • Il tient `sb_collection`, `sb_record`, `sb_journal`, `sb_etat`,
-//     `sb_motdepasse`, `sb_session`, `sb_courriel` et les trois vues ;
+//     `sb_motdepasse`, `sb_session`, `sb_courriel`, `sb_piece` (la table des
+//     pièces jointes, créée par la migration 2) et les trois vues ;
 //   • il applique `schema.sql` (les `CREATE TABLE IF NOT EXISTS` et les
 //     `CREATE OR REPLACE VIEW`), si bien que les scénarios d'installation
 //     (schéma absent, compte refusé, réparation) restent jouables ;
@@ -38,7 +39,7 @@
 const ER_ACCESS_DENIED = "ER_ACCESS_DENIED_ERROR";
 const ER_NO_SUCH_TABLE = "ER_NO_SUCH_TABLE";
 
-const TABLES = ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel", "sb_migrations"];
+const TABLES = ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel", "sb_migrations", "sb_piece"];
 const VUES = ["v_acte", "v_trame", "v_collection"];
 
 const err = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
@@ -220,12 +221,28 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
       if (lot) { /* chaque entrée du lot est un tableau de valeurs, déjà résolu */ }
       const doc = {};
       colonnes.forEach((c, i) => { doc[c] = ligne[i] === undefined ? null : ligne[i]; });
+      const table2 = tables.get(table);
+      // La clé d'auto-incrément se pose AVANT de calculer la clé de la ligne :
+      // le journal et le courriel n'ont pas d'autre identifiant, et deux envois
+      // doivent être deux lignes.
+      if (autoincrement.has(table) && doc.id === undefined) {
+        const suite = autoincrement.get(table) + 1;
+        autoincrement.set(table, suite);
+        doc.id = suite;
+      }
+      // La clé primaire, telle que le SCHÉMA la déclare : un jeton, une version,
+      // un nom, un compte, un couple (collection, id) — ou l'identifiant SEUL,
+      // pour une table dont la clé est l'identifiant lui-même (`sb_piece`, dont
+      // le jeton est tiré au hasard et ne se rattache à rien). Sans cette
+      // dernière branche, deux pièces se rangeraient sous la même clé nulle et
+      // la seconde écraserait la première — le nom de la colonne est ici le
+      // seul indice dont on dispose, comme pour les autres tables.
       const cleLigne = doc.token_hash !== undefined ? doc.token_hash
         : doc.version !== undefined ? doc.version
           : doc.name !== undefined ? doc.name
             : doc.user_id !== undefined ? doc.user_id
-              : doc.collection !== undefined ? cle(doc.collection, doc.id) : null;
-      const table2 = tables.get(table);
+              : doc.collection !== undefined ? cle(doc.collection, doc.id)
+                : doc.id !== undefined ? doc.id : null;
       const existe = cleLigne != null && table2.has(cleLigne);
       if (existe && maj) {
         const row = table2.get(cleLigne);
@@ -255,15 +272,23 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
         continue;
       }
       if (existe) { affectees += 1; continue; }   // INSERT IGNORE sur une clé déjà là
-      if (autoincrement.has(table)) {
-        const suite = autoincrement.get(table) + 1;
-        autoincrement.set(table, suite);
-        if (doc.id === undefined) doc.id = suite;
+      // Les valeurs par défaut du schéma ne sont pas interprétées ici : celle
+      // dont le service dépend se pose donc à la main. `sb_piece.depose_le` est
+      // `DEFAULT CURRENT_TIMESTAMP(3)` (migration 2), et la date de dépôt d'une
+      // pièce est lue par l'API — un dépôt sans date se lirait « Invalid Date ».
+      if (table === "sb_piece" && (doc.depose_le === undefined || doc.depose_le === null)) {
+        doc.depose_le = new Date().toISOString();
       }
       table2.set(cleLigne, doc);
       affectees += 1;
     }
-    return [[{ affectedRows: affectees, insertId: autoincrement.get(table) || 0 }, []]];
+    // La FORME de MySQL : `[résultat, champs]`. Pour une ÉCRITURE, le résultat
+    // est l'en-tête (`affectedRows`, `insertId`) — et non une liste de lignes,
+    // comme pour une lecture. Un `const [r] = await query(...)` rend donc
+    // l'en-tête, exactement comme avec `mysql2` : c'est ce que lit le service
+    // pour savoir si une suppression a bien retiré quelque chose
+    // (`supprimerPiece`, magasin-mysql.mjs).
+    return [{ affectedRows: affectees, insertId: autoincrement.get(table) || 0 }, []];
   }
 
   // Une seule fonction par famille d'ordres. L'ordre des essais compte : les
@@ -291,7 +316,9 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
     exigerTable(sql);
 
     // --- écritures -----------------------------------------------------------
-    for (const t of ["sb_collection", "sb_record", "sb_journal", "sb_etat", "sb_motdepasse", "sb_session", "sb_courriel", "sb_migrations"]) {
+    // Une seule liste de tables (TABLES) : en tenir une seconde ici ferait
+    // ignorer silencieusement toute table ajoutée là-bas.
+    for (const t of TABLES) {
       if (!new RegExp(`^INSERT [^]*?INTO ${t} `, "i").test(sql)) continue;
       // Le journal arrive en LOT : `INSERT INTO sb_journal (…) VALUES ?`.
       const mLot = /^INSERT INTO sb_journal \(([^)]*)\) VALUES \?$/is.exec(sql);
@@ -308,7 +335,7 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
           doc.at = new Date().toISOString();
           table2.set(suite, doc);
         }
-        return [[{ affectedRows: lignes.length, insertId: autoincrement.get("sb_journal") }, []]];
+        return [{ affectedRows: lignes.length, insertId: autoincrement.get("sb_journal") }, []];
       }
       const r = inserer(t, sql, params);
       if (r) return r;
@@ -321,36 +348,38 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
       // applicatif s'écrit toujours dans la collection `users`).
       const nom = m[1] !== undefined ? m[1] : params[1];
       const row = tables.get("sb_collection").get(nom);
-      if (row) { row.revision = Number(params[0]) || 0; return [[{ affectedRows: 1 }, []]]; }
-      return [[{ affectedRows: 0 }, []]];
+      if (row) { row.revision = Number(params[0]) || 0; return [{ affectedRows: 1 }, []]; }
+      return [{ affectedRows: 0 }, []];
     }
     m = /^UPDATE sb_motdepasse SET echecs = \?, bloque_jusqua = \? WHERE user_id = \?$/i.exec(sql);
     if (m) {
       const row = tables.get("sb_motdepasse").get(String(params[2]));
       if (row) { row.echecs = Number(params[0]) || 0; row.bloque_jusqua = params[1] == null ? null : new Date(params[1]).toISOString(); }
-      return [[{ affectedRows: row ? 1 : 0 }, []]];
+      return [{ affectedRows: row ? 1 : 0 }, []];
     }
     m = /^UPDATE sb_session SET last_seen_at = \? WHERE token_hash = \?$/i.exec(sql);
     if (m) {
       const row = tables.get("sb_session").get(String(params[1]));
       if (row) row.last_seen_at = new Date(params[0]).toISOString();
-      return [[{ affectedRows: row ? 1 : 0 }, []]];
+      return [{ affectedRows: row ? 1 : 0 }, []];
     }
     m = /^DELETE FROM sb_record WHERE collection = \? AND id = \?$/i.exec(sql);
     if (m) {
       const ok = tables.get("sb_record").delete(cle(params[0], params[1]));
-      return [[{ affectedRows: ok ? 1 : 0 }, []]];
+      return [{ affectedRows: ok ? 1 : 0 }, []];
     }
+    m = /^DELETE FROM sb_piece WHERE id = \?$/i.exec(sql);
+    if (m) return [{ affectedRows: tables.get("sb_piece").delete(String(params[0])) ? 1 : 0 }, []];
     m = /^DELETE FROM sb_motdepasse WHERE user_id = \?$/i.exec(sql);
-    if (m) return [[{ affectedRows: tables.get("sb_motdepasse").delete(String(params[0])) ? 1 : 0 }, []]];
+    if (m) return [{ affectedRows: tables.get("sb_motdepasse").delete(String(params[0])) ? 1 : 0 }, []];
     m = /^DELETE FROM sb_session WHERE user_id = \?$/i.exec(sql);
     if (m) {
       let n = 0;
       for (const [k, v] of [...tables.get("sb_session")]) if (String(v.user_id) === String(params[0])) { tables.get("sb_session").delete(k); n++; }
-      return [[{ affectedRows: n }, []]];
+      return [{ affectedRows: n }, []];
     }
     m = /^DELETE FROM sb_session WHERE token_hash = \?$/i.exec(sql);
-    if (m) return [[{ affectedRows: tables.get("sb_session").delete(String(params[0])) ? 1 : 0 }, []]];
+    if (m) return [{ affectedRows: tables.get("sb_session").delete(String(params[0])) ? 1 : 0 }, []];
     m = /^DELETE FROM sb_session WHERE expires_at < \?$/i.exec(sql);
     if (m) {
       const limite = new Date(params[0]).getTime();
@@ -359,7 +388,7 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
         const t = v.expires_at ? new Date(v.expires_at).getTime() : 0;
         if (t && t < limite) { tables.get("sb_session").delete(k); n++; }
       }
-      return [[{ affectedRows: n }, []]];
+      return [{ affectedRows: n }, []];
     }
 
     // --- lectures ------------------------------------------------------------
@@ -384,6 +413,11 @@ export function creerBase({ latenceMs = 0, journaliser = null, moteur = "11.4.4-
     }
     m = /^SELECT payload FROM sb_etat WHERE name = \?$/i.exec(sql);
     if (m) { const row = tables.get("sb_etat").get(String(params[0])); return [row ? [{ payload: row.payload }] : [], []]; }
+    m = /^SELECT id, nom, type, taille, sha256, base64, depose_le, depose_par FROM sb_piece WHERE id = \?$/i.exec(sql);
+    if (m) {
+      const row = tables.get("sb_piece").get(String(params[0]));
+      return [row ? [{ ...row }] : [], []];
+    }
     m = /^SELECT payload FROM sb_record WHERE collection = '(\w+)' AND id = \?$/i.exec(sql);
     if (m) { const row = tables.get("sb_record").get(cle(m[1], params[0])); return [row ? [{ payload: row.payload }] : [], []]; }
     m = /^SELECT revision, ord, payload FROM sb_record WHERE collection = \? AND id = \?$/i.exec(sql);

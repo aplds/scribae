@@ -9,16 +9,20 @@
 #   ./build-and-push.sh [image-name] [version] [latest]
 #
 # Le registre n'est PAS un argument : il se donne par `DOCKER_REGISTRY`.
+# La VERSION non plus, tant qu'on ne veut pas la forcer : sans second argument,
+# elle est LUE dans `src/lib/version.js` (`APP_VERSION`), qui est la source
+# unique du numéro du logiciel (voir src/README.md). La recopier ici ferait dire
+# au tag ce que le logiciel ne dit plus.
 #
 # EXEMPLES
-#   ./build-and-push.sh                          # Build local uniquement (scribae:1.6.2)
-#   ./build-and-push.sh moncompte 1.6.2 true     # Build + tag :latest
-#   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte 1.6.2   # Build + push
+#   ./build-and-push.sh                          # Build local (scribae:<version du dépôt>)
+#   ./build-and-push.sh scribae 1.6.3c true      # Build + tag :latest, version forcée
+#   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte   # Build + push
 #
 # ENVIRONNEMENT
 #   DOCKER_REGISTRY   Registre de destination (ex: ghcr.io/, docker.io/) ; vide = pas de push
 #   DOCKER_USER       Utilisateur (pour le login)
-#   DOCKER_PASSWORD    Mot de passe/token (pour le login)
+#   DOCKER_PASSWORD   Mot de passe/token (pour le login)
 #
 # PRÉ-REQUIS
 #   - Docker installé
@@ -35,7 +39,14 @@ REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"  # Racine du dépôt
 # Valeurs par défaut (peuvent être écrasées par les arguments)
 REGISTRY="${DOCKER_REGISTRY:-}"          # Ex: ghcr.io/, docker.io/, ou vide pour local
 IMAGE_NAME="${1:-scribae}"               # Nom de l'image
-IMAGE_VERSION="${2:-1.6.2}"            # Version (tag)
+VERSION_FICHIER="$REPO_ROOT/src/lib/version.js"
+VERSION_DU_DEPOT=""
+if [ -r "$VERSION_FICHIER" ]; then
+  # `APP_VERSION = "1.6.3c";` → 1.6.3c. C'est la SEULE source du numéro : le
+  # dépôt n'en tient pas de copie (voir src/lib/version.js).
+  VERSION_DU_DEPOT="$(sed -n 's/.*APP_VERSION *= *"\([^"]*\)".*/\1/p' "$VERSION_FICHIER" | head -n 1)"
+fi
+IMAGE_VERSION="${2:-${VERSION_DU_DEPOT:-developpement}}"   # Version (tag)
 PUSH_LATEST="${3:-false}"               # Ajouter un tag :latest ? (true/false)
 
 # Chemins
@@ -47,11 +58,12 @@ usage() {
   echo "Usage: $0 [image-name] [version] [push-latest]"
   echo ""
   echo "Le registre se donne par DOCKER_REGISTRY (vide : build local seulement)."
+  echo "Sans version, elle est lue dans src/lib/version.js (APP_VERSION)."
   echo ""
   echo "Exemples:"
-  echo "  $0                                    # Build local (scribae:1.6.2)"
-  echo "  $0 moncompte 1.6.2 true              # Build + tag :latest"
-  echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte 1.6.2   # Build + push"
+  echo "  $0                                    # Build local (scribae:<version du dépôt>)"
+  echo "  $0 scribae 1.6.3c true                # Build + tag :latest (version forcée)"
+  echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte # Build + push"
   exit 1
 }
 
@@ -75,35 +87,67 @@ check_prerequisites() {
   fi
 }
 
+# Où le client Docker range ses identifiants (le fichier que `docker login`
+# écrit). `DOCKER_CONFIG` déplace ce dossier ; sans lui, c'est `~/.docker`.
+fichier_identifiants() {
+  if [ -n "${DOCKER_CONFIG:-}" ]; then
+    echo "$DOCKER_CONFIG/config.json"
+  else
+    echo "$HOME/.docker/config.json"
+  fi
+}
+
+# Le registre porte-t-il déjà une entrée d'identification ? On lit le FICHIER, et
+# non la sortie de `docker info` : celle-ci dépend de la version du client et du
+# démon (elle ne dit pas la même chose selon qu'on emploie un magasin
+# d'identifiants ou non), alors que `auths` est écrit par `docker login` depuis
+# toujours. C'est une INDICATION, pas une décision : plus bas, c'est le `push`
+# lui-même qui tranche — un magasin d'identifiants (`credsStore`) peut n'écrire
+# aucune entrée `auths` et pourtant fournir le jeton.
+registre_deja_renseigne() {
+  local registry_host="$1"
+  local cfg
+  cfg="$(fichier_identifiants)"
+  [ -r "$cfg" ] || return 1
+  grep -q "\"$registry_host\"" "$cfg" 2>/dev/null && return 0
+  return 1
+}
+
 login_to_registry() {
   local registry="$1"
-  
-  # Pas besoin de login pour le build local ou pour Docker Hub (si déjà logué)
+
+  # Pas besoin de login pour le build local.
   if [ -z "$registry" ]; then
     return 0
   fi
-  
+
   # Extraire le nom du registry (avant le /)
   local registry_host="${registry%/}"
-  
-  # Vérifier si déjà logué
-  if docker info | grep -q "Username: $DOCKER_USER"; then
-    echo "✅ Déjà connecté à $registry_host"
-    return 0
-  fi
-  
-  # Tentative de login
+
+  # Des identifiants sont fournis : on se connecte, et un refus est un refus (on
+  # ne pousse pas avec un compte dont la base vient de dire non).
   if [ -n "${DOCKER_USER:-}" ] && [ -n "${DOCKER_PASSWORD:-}" ]; then
     echo "🔐 Connexion à $registry_host..."
-    if echo "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USER" --password-stdin "$registry_host" 2>/dev/null; then
+    if echo "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USER" --password-stdin "$registry_host"; then
       echo "✅ Connecté à $registry_host"
       return 0
     fi
+    echo "❌ Connexion refusée par $registry_host."
+    echo "   Vérifiez DOCKER_USER et DOCKER_PASSWORD (un JETON, pour un registre qui en exige un)."
+    return 1
   fi
-  
-  echo "⚠️  Impossible de se connecter à $registry_host"
-  echo "   Assurez-vous d'être déjà logué via : docker login $registry_host"
-  return 1
+
+  # Aucun identifiant fourni : on ne devine pas, et l'on n'empêche rien. Si une
+  # entrée existe pour ce registre, on le dit ; sinon, on rappelle quoi faire —
+  # mais on TENTE le push, car un magasin d'identifiants peut très bien fournir
+  # le jeton sans que ce fichier en garde trace.
+  if registre_deja_renseigne "$registry_host"; then
+    echo "✅ Identifiants trouvés pour $registry_host ($(fichier_identifiants))"
+  else
+    echo "ℹ️  Aucun identifiant fourni (DOCKER_USER / DOCKER_PASSWORD) et rien dans $(fichier_identifiants)."
+    echo "   Le push est tenté quand même : si Docker n'a pas de session, il le dira et le remède est « docker login $registry_host »."
+  fi
+  return 0
 }
 
 build_image() {
@@ -129,8 +173,18 @@ tag_image() {
 push_image() {
   local tag="$1"
   echo "📤 Push de $tag..."
-  docker push "$tag"
-  echo "✅ Push terminé : $tag"
+  if docker push "$tag"; then
+    echo "✅ Push terminé : $tag"
+    return 0
+  fi
+  # Un push qui échoue est presque toujours une session absente : le dire, et
+  # donner le remède, vaut mieux que renvoyer l'erreur brute de Docker.
+  echo "❌ Le push de $tag a échoué."
+  echo "   Le plus souvent : aucune session ouverte pour ce registre."
+  echo "     docker login ${REGISTRY%/}"
+  echo "   ou relancez ce script avec DOCKER_USER et DOCKER_PASSWORD."
+  echo "   L'image construite localement n'est pas perdue : « docker push $tag »."
+  return 1
 }
 
 # --- Vérifications -------------------------------------------------------------
@@ -171,13 +225,20 @@ echo "================================================================"
   
   if login_to_registry "$REGISTRY"; then
     echo ""
-    push_image "$PRIMARY_TAG"
-    
+    if ! push_image "$PRIMARY_TAG"; then
+      echo ""
+      echo "⚠️  L'image est construite localement, mais elle n'a PAS été publiée."
+      exit 1
+    fi
+
     if [ "$PUSH_LATEST" = "true" ] || [ "$PUSH_LATEST" = "1" ]; then
       echo ""
-      push_image "$LATEST_TAG"
+      if ! push_image "$LATEST_TAG"; then
+        echo "⚠️  $PRIMARY_TAG est publiée ; l'étiquette « latest » ne l'est pas."
+        exit 1
+      fi
     fi
-    
+
     echo ""
     echo "🎉 SUCCÈS !"
     echo "   Images publiées :"

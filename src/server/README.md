@@ -167,7 +167,7 @@ Pour diffuser Scribae sans le dossier du dépôt, `Dockerfile` (à la racine de 
 bâtit une **image unique** contenant le service, nginx et le code de l'application :
 
 ```bash
-docker build -f src/server/Dockerfile -t moncompte/scribae:1.6.1q .
+docker build -f src/server/Dockerfile -t moncompte/scribae:<version> .
 ```
 
 **Image officielle prête à l'emploi** :
@@ -176,7 +176,7 @@ docker build -f src/server/Dockerfile -t moncompte/scribae:1.6.1q .
 docker pull docker.io/aplds/scribae:latest
 
 # Ou une version spécifique
-docker pull docker.io/aplds/scribae:1.6.1q
+docker pull docker.io/aplds/scribae:<version>
 ```
 
 ### Lancer l'image autonome
@@ -245,7 +245,7 @@ la **version**, la **licence** et l'adresse de sa documentation :
 |  |    // \\    |    ___) | | (__   | |    | | | |_) | | (_| | |  __/   |
 |  |   //   \\   |   |____/   \___|  |_|    |_| |_.__/   \__,_|  \___|   |
 |  |  //     \\  |                                                       |
-|  |             |   v1.6.1w — GPLv3 — doc.scribae.eu                    |
+|  |             |   v1.6.3c — GPLv3 — doc.scribae.eu                    |
 |  |_____________|                                                       |
 +------------------------------------------------------------------------+
 ```

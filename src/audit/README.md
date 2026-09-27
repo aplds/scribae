@@ -20,6 +20,29 @@ successifs.
 | `REGISTRE-NON-CONFORMITES.md` | **Le registre cumulatif** des non-conformités. Une entrée ne se supprime jamais : son statut évolue (`Ouverte` → `En cours` → `Levée` / `Régression` / `Acceptée` / `Obsolète`). |
 | `rapports/AUDIT-SCRIBAE-AAAA-MM-JJ.md` | **Les rapports d'audit**, un par campagne, datés. Le plus récent est la référence courante. |
 
+## Les rapports présents, et la « lignée » qu'ils racontent
+
+| Rapport | Campagne | Version auditée |
+|---|---|---|
+| `rapports/AUDIT-SCRIBAE-2026-09-21.md` | 1re | avant 1.6.1 |
+| `rapports/AUDIT-SCRIBAE-2026-09-21b.md` | 2e | 1.6.0 |
+| `rapports/AUDIT-SCRIBAE-2026-09-23.md` | 3e | 1.6.1 |
+| `rapports/AUDIT-SCRIBAE-2026-09-27.md` | 4e | 1.6.3 |
+| `rapports/AUDIT-SCRIBAE-2026-09-29.md` | 4e (autre lignée) | 1.6.1w |
+| `rapports/AUDIT-SCRIBAE-2026-09-30.md` | 5e (autre lignée) | 1.6.1w |
+
+Deux **lignées** ont travaillé en parallèle sur ce dépôt (voir **NC-I-017** dans le registre) :
+celle de l'atelier, qui a mené les campagnes des 21, 23 et 27 septembre, et une seconde, qui a
+mené celles des 29 et 30 septembre sur une autre copie (version 1.6.1w). La comparaison du
+2026-09-27 a montré que le dépôt sert désormais la **lignée de l'atelier** (la plus avancée :
+1.6.3c), et que les fichiers de l'autre lignée lui **manquaient** : ses deux rapports sont
+conservés ici (c'est une **pièce**, pas une référence courante), et les trois fiches qu'elle avait
+établies et que le registre avait perdues — NC-I-015, NC-I-016, NC-II-015 — y sont **rétablies**.
+
+> Le rapport du **2026-09-30** est arrivé **corrompu** dans le dépôt (1 497 octets de contrôle à la
+> place des caractères accentués : en-tête, titres, tableaux et plans lisibles, corps non). Il est
+> remplacé ici par une **reprise** qui le dit, rassemble ce qui s'en lit encore, et n'invente rien.
+
 ## Lancer un audit
 
 Adresser à l'agent, sans le modifier, le message suivant :

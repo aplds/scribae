@@ -138,7 +138,7 @@ tels quels, sans qu'aucune règle ne soit recopiée.
 
 **Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
 `import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3b), tous dus à
+écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3c), tous dus à
 l'absence de Node et de réseau : la liste, la lecture de chaque écart et les
 chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
 
@@ -207,7 +207,7 @@ s'installer (module absent) est **sauté**, jamais vert par accident.
 ## 3. L'intégration continue
 
 `src/github/ci.yml` (recopié par l'export en `.github/workflows/ci.yml`) exécute
-deux travaux à chaque `push` et chaque demande de fusion :
+**trois** travaux à chaque `push` et chaque demande de fusion :
 
 1. **Syntaxe, style et tests** — trois étapes SÉPARÉES (`npm run syntaxe`,
    `npm run style`, `npm test`), pour qu'un échec dise du premier coup laquelle a
@@ -217,6 +217,15 @@ deux travaux à chaque `push` et chaque demande de fusion :
    échouer la chaîne ;
 2. **Service auto-hébergé** — installation des dépendances de `src/server/mysql`
    et ses tests (aucune base requise).
+3. **Image Docker, construite et mise en service** — `docker build -f
+   src/server/Dockerfile .`, puis le conteneur démarre contre une **vraie MariaDB**
+   (service éphémère de la chaîne), et l'épreuve interroge la façade et le service :
+   `GET /v1/health`, `GET /v1/db/health` (**schéma et migrations appliqués**, là où
+   la santé ne prouve que le processus), la coquille servie, le code de
+   l'application servi, `config.js` engendré depuis l'environnement. Aucune image
+   n'est poussée : aucun secret n'entre dans la chaîne. C'est la seule chose que
+   l'atelier ne peut pas faire, et c'est celle qui décide si une livraison
+   s'installe.
 
 Le second travail installe ses dépendances par **`npm ci`**, sur le verrou
 `src/server/mysql/package-lock.json` : chaque paquet est épinglé (version, adresse de
@@ -235,8 +244,9 @@ qu'ils ne peuvent pas être produits hors de l'environnement d'installation :
 
 | Point | Pourquoi il n'est pas livré | Comment le faire |
 |---|---|---|
-| **`package-lock.json`** | **livré** : le verrou du service (`src/server/mysql/package-lock.json`) est écrit à la main dans l'atelier, à partir du registre npm — chaque empreinte SHA-512 a été **vérifiée contre l'archive réellement retirée** ; il reste à confirmer par un `npm ci` sur un poste outillé (voir §3) | `cd src/server/mysql && npm ci` |
-| **Images Docker épinglées** | livré : `node:20-alpine`, `mariadb:11`, `nginx:alpine` sont épinglées **par empreinte** dans `Dockerfile` et `docker-compose.yml` | pour reprendre l'étiquette du jour : `docker buildx imagetools inspect node:20-alpine`, et reportez l'empreinte |
+| **`package-lock.json`** | **livré** : le verrou du service (`src/server/mysql/package-lock.json`) est écrit à la main dans l'atelier, à partir du registre npm — chaque empreinte SHA-512 a été **vérifiée contre l'archive réellement retirée**, et la chaîne l'éprouve désormais à chaque envoi par `npm ci` (§3, 2e travail) | `cd src/server/mysql && npm ci` |
+| **`package-lock.json` de la RACINE** | **livré** (1.6.3c, NC-I-015) : la racine du dépôt porte un verrou (lockfileVersion 3), si bien que `npm ci` y fonctionne même si le manifeste ne déclare aucune dépendance — la seule du dépôt (`mysql2`) reste verrouillée où elle vit | `npm ci` (racine), `cd src/server/mysql && npm ci` (service) |
+| **Images Docker épinglées** | livré : `node:20-alpine`, `mariadb:11`, `nginx:alpine` sont épinglées **par empreinte** dans `Dockerfile` et `docker-compose.yml` — et la chaîne **construit et met en service** l'image autonome à chaque envoi (§3, 3e travail), ce qui est la vraie preuve de l'épinglage | pour reprendre l'étiquette du jour : `docker buildx imagetools inspect node:20-alpine`, et reportez l'empreinte |
 | **Analyse statique** (linter) | **livrée** : `scripts/verifier-style.mjs` (sans dépendance) refuse `debugger`, les `var`, les traces de client, et — depuis la 1.6.1p — les **imports jamais employés** (`scripts/analyse-imports.mjs`, éprouvé). Aucun outil tiers n'est requis ; c'est un choix : un linter ajouterait une chaîne d'approvisionnement à auditer pour des règles que l'on écrit en quelques lignes. Reste à voir : la couverture des règles, à élargir au besoin | `npm run style` (les avertissements font échouer) ; en CI, `npm run verifier` |
 | **Tests de parcours** (bout en bout) | **livrés** hors de `node --test` : ils demandent le navigateur (l'application chargée, son service) — voir §2, « les épreuves de parcours ». Un pilotage automatique (Playwright…) reste à prévoir pour les exécuter en intégration continue | `node --test` ne les voit pas ; les lancer dans la console du navigateur (voir §2) |
 | **Cibles de couverture** | dépendent de l'outillage choisi | viser d'abord les parcours critiques : dépôt → signature → publication → recueil — c'est ce que `tests/parcours.mjs` exécute |

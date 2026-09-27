@@ -2571,6 +2571,24 @@ ${liste}
 
   function cles() { db.cles = db.cles || {}; return db.cles; }
 
+  // Deux EMPREINTES se comparent à TEMPS CONSTANT. La comparaison ordinaire
+  // (`===`) s'arrête au premier caractère qui diffère : le temps qu'elle met dit
+  // combien de caractères étaient justes. Le risque est faible ici — ce que l'on
+  // compare est une empreinte, et l'on ne choisit pas la sortie d'une fonction de
+  // hachage —, mais la règle est la même partout : le service Node compare ses
+  // jetons par `crypto.timingSafeEqual` (`server.mjs`), le service de
+  // démonstration par `egalConstant` (`index.html`). Une règle, une
+  // implémentation — celle-ci est en JavaScript pur, car ce module est PUR : ni
+  // Node, ni WebCrypto. Voir l'audit, NC-II-010.
+  function empreintesEgales(a, b) {
+    const x = String(a || "");
+    const y = String(b || "");
+    if (x.length !== y.length) return false;
+    let d = 0;
+    for (let i = 0; i < x.length; i++) d |= x.charCodeAt(i) ^ y.charCodeAt(i);
+    return d === 0;
+  }
+
   // L'identité portée par un jeton, ou null : on compare les EMPREINTES, jamais
   // les valeurs. C'est la seule porte par laquelle une clé d'API entre.
   function cleDeJeton(jeton) {
@@ -2578,7 +2596,7 @@ ${liste}
     const table = cles();
     for (const id of Object.keys(table)) {
       const c = table[id];
-      if (c && c.hash === h) return { id, role: c.role, label: c.label || "" };
+      if (c && empreintesEgales(c.hash, h)) return { id, role: c.role, label: c.label || "" };
     }
     return null;
   }

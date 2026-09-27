@@ -84,12 +84,28 @@ L'export est un **zip dont la racine EST le dépôt**. C'est la racine qui est l
 intégrateur, par une forge et par un agent : l'outillage y est donc rangé **à sa place
 attendue**, et le code de l'application sous `src/`.
 
+**AVANT DE CONSTRUIRE L'ARCHIVE : comparer avec le dépôt.** Un export **écrase** ce qu'il
+contient, et un dépôt peut avoir avancé d'un seul fichier — un registre d'audit plus récent, un
+rapport qu'on n'a pas ici. On lit donc, au minimum, `src/lib/version.js` (`APP_VERSION`,
+`APP_RELEASED`) et le **premier titre daté** de `src/CHANGELOG.md` du dépôt, et l'on liste ses
+fichiers (`GET /repos/<compte>/<dépôt>/git/trees/<branche>?recursive=1` — un seul appel, et l'on
+voit tout de suite ce qui manque d'un côté ou de l'autre) :
+
+- **dépôt au même niveau, ou en retard** → on construit l'archive ;
+- **dépôt plus récent, ou porteur d'un fichier qu'on n'a pas** → **on récupère d'abord** ce qui
+  manque (rapports, fiches de registre, correctifs), on le vérifie, **puis** on construit.
+
+La leçon vient de loin : un export a déjà recouvert un registre d'audit plus récent que le nôtre
+(voir `audit/REGISTRE-NON-CONFORMITES.md`, NC-I-017, et `audit/README.md` § « les deux lignées »).
+Ce qui est perdu par un écrasement ne se retrouve pas dans l'archive suivante.
+
 | Dans l'atelier | À la racine du dépôt | Pourquoi |
 |---|---|---|
 | `src/scripts/**` | `scripts/**` | l'outillage se lance depuis la racine (`npm run lint`, `npm test`) |
 | `src/tests/**` | `tests/**` | les épreuves transverses (voir `tests/README.md`) |
 | `src/compose-exemple/**` | `compose-exemple/**` | l'exemple de premier déploiement, que l'administrateur cherche à la racine |
 | `src/package.json` | `package.json` | le manifeste, lu par npm et par la forge |
+| `src/package-lock.json` | `package-lock.json` | le verrou de dépendances, lu par `npm ci` et la CI |
 | `src/github/ci.yml` | `.github/workflows/ci.yml` | la chaîne d'intégration |
 | `src/github/gitignore` | `.gitignore` | |
 | `src/docs/GITHUB.md` | `README.md` | la page d'accueil du dépôt |
@@ -102,10 +118,10 @@ attendue**, et le code de l'application sous `src/`.
 **Un fichier, un seul exemplaire.** Une source recopiée à la racine **ne reste pas** dans
 `src/` : le dépôt ne porte ni deux `package.json` ni deux outils — un doublon ferait corriger
 le mauvais fichier en silence. L'export **exclut** donc de l'arbre `src/` tout ce qu'il déplace
-(`scripts/`, `tests/`, `compose-exemple/`, `package.json`, `github/`, `AGENTS.md`, `CLAUDE.md`,
+(`scripts/`, `tests/`, `compose-exemple/`, `package.json`, `package-lock.json`, `github/`, `AGENTS.md`, `CLAUDE.md`,
 `docs/GITHUB.md`). Conséquence pour une mise à jour : ce qui a changé de place doit être
 **supprimé** du dépôt
-(`git rm -r src/scripts src/tests src/compose-exemple src/github src/package.json src/docs/GITHUB.md`)
+(`git rm -r src/scripts src/tests src/compose-exemple src/github src/package.json src/package-lock.json src/docs/GITHUB.md`)
 avant de décompresser le zip par-dessus — sinon les anciens chemins demeurent, et l'on corrige un
 fichier que personne ne lit.
 
@@ -128,7 +144,7 @@ ordinaire restitue. `@zip.js/zip.js` n'écrit que 0644 — le mode se corrige ap
 les **attributs externes** des entrées de l'annuaire central du zip (champ `external file
 attributes`, 16 bits de poids fort), en laissant le reste de l'archive intact.
 
-Le zip porte en outre **`package.json`** (recopie de `src/package.json`) et
+Le zip porte en outre **`package.json`** et **`package-lock.json`** (recopies de `src/`) et
 **`.github/workflows/ci.yml`** (recopie de `src/github/ci.yml`) : la racine est lue par
 l'intégrateur et par la forge, `src/` par le navigateur. Les commandes du manifeste désignent
 l'outillage **là où il vit dans le dépôt** (`scripts/…`, `tests/`, `src/server/mysql/`) : rien
@@ -196,7 +212,7 @@ la source, le second la copie publiée (c'est ce que l'export recopie).
 **Vérifier et tester avant de livrer** — `npm run verifier` (syntaxe, style, épreuves), la CI, et
 ce qui reste à mettre en place : `docs/INDUSTRIALISATION.md`. Des fichiers de `src/` sont
 destinés à la **racine du dépôt** et y sont recopiés par l'export (`package.json`,
-`scripts/`, `tests/`, `github/ci.yml` → `.github/workflows/ci.yml`, `AGENTS.md`,
+`package-lock.json`, `scripts/`, `tests/`, `github/ci.yml` → `.github/workflows/ci.yml`, `AGENTS.md`,
 `CLAUDE.md`) — même convention que `docs/GITHUB.md` (→ `README.md`).
 
 **Destinataire de `docs/GITHUB.md` : un tiers qui veut *se servir* du logiciel** — un agent, un
@@ -3383,6 +3399,7 @@ src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export le
 src/AGENTS.md             → `<racine>/AGENTS.md` : ce qu'un agent (Claude Code, Mistral Vibe…) doit savoir AVANT de toucher au dépôt
 src/CLAUDE.md             → `<racine>/CLAUDE.md` : le pointeur de Claude Code vers `AGENTS.md`
 src/package.json          MANIFESTE DU DÉPÔT (l'export le recopie à la racine) : `npm run lint`, `npm run style`, `npm test`, `npm run verifier`
+src/package-lock.json     VERROU DE DÉPENDANCES (l'export le recopie à la racine) : aucun paquet — Scribae n'a aucune dépendance — mais sa présence rend `npm ci` possible et fait taire les avertissements de la forge
 src/LICENSE.md            LICENCE, ARBITRÉE : logiciel sous GPL-3.0 (le fichier `LICENSE` vit à la racine du dépôt), réutilisation des actes sous Licence Ouverte 2.0, position sur le code produit par l'IA et table des dépendances
 ```
 
@@ -3743,7 +3760,7 @@ directe »), en 390 × 844 et en 1600 × 950.
 Vérifier l'outillage depuis l'atelier : l'aperçu du navigateur n'a ni système de
 fichiers ni processus, il ne peut donc pas lancer `scripts/verifier-style.mjs` tel
 qu'il est livré. C'est le rôle du **harnais de l'atelier** —
-**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3b
+**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3c
 (il n'est pas une épreuve : `npm test` ne le voit pas, `npm run syntaxe` le parse
 comme un module). Il monte la disposition livrée dans un système de fichiers
 virtuel (la table ci-dessus, la racine virtuelle étant `src/`), remplace les
@@ -3758,7 +3775,7 @@ Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
 (pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
 **virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
 import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
-1.6.3b, **huit échecs et onze sauts attendus** sur 439 épreuves — tous connus,
+1.6.3c, **huit échecs et onze sauts attendus** sur 440 épreuves — tous connus,
 tous dus à l'absence de Node et de réseau. Les recettes, les chiffres et la
 lecture des écarts sont dans `docs/ATELIER.md` § 3 : c'est le document à lire
 avant de travailler dans l'atelier.

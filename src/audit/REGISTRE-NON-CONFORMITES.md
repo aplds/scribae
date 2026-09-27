@@ -2,7 +2,7 @@
 titre: Registre des non-conformités — Scribae
 version: 3
 cree_le: 2026-09-21
-mis_a_jour: 2026-09-27 (1.6.1r et 1.6.1s : NC-II-014 ouverte et levée aussitôt ; 1.6.1t et 1.6.1u : aucune fiche ouverte ; 1.6.1v : aucune fiche ouverte — le deadlock des écritures est corrigé et couvert par des épreuves ; 1.6.1w : aucune fiche nouvelle — la porte de signature de NC-II-006 est renforcée (le titulaire seul, porteur de la qualité) et son parcours complet est rejoué ; 1.6.1x : aucune fiche ouverte — le circuit de signature INTERNE est livré, et il apporte à NC-IV-001 sa première preuve dans l'autre sens ; les dates des notes 1.6.1u à 1.6.1w sont ramenées au 2026-09-26, la date d'une note étant celle de son achèvement ; 1.6.2 : aucune fiche ouverte — le travail à deux est livré (flux de changements `GET /v1/db/flux`, fusion des écritures concurrentes au lieu de l'écrasement, brouillons partagés par la présence), le contrat des deux services est rejoué, et son parcours gagne deux épreuves ; au passage, un défaut du service de démonstration est corrigé — ses billets de recueil échouaient en 500 dès le deuxième billet, `localeCompare` n'existant pas dans le moteur du service ; 1.6.3 : NC-IV-004 passée en LEVÉE — la télétransmission est RÉELLE quand le service est branché (`src/server/mysql/controle-legalite.mjs`, variables `SCRIBA_CONTROLE_LEGALITE_*`, `502 transmission_echec` sur refus, rien d'enregistré), la simulation restant marquée quand aucun appel n'a lieu ; NC-II-006 renforcée — la porte de signature est désormais tenue par le SERVICE (opposition opérateur / signataire, `attribution` vérifiée / déclarée / reprise / compilation, certification de conformité opposée au réviseur) ; 4e campagne d'audit (2026-09-27, version 1.6.3) : NC-IV-004 passée en LEVÉE (télétransmission réelle quand le service est branché), quatre fiches nouvelles — NC-I-017 (les deux copies ont divergé), NC-II-016 (court-circuit de la transmission par une `reference` fournie), NC-II-017 (aucune identité opposable sur le service de démonstration, statut ACCEPTÉE), NC-IV-006 (refus du contrôle de légalité non traités) — et l'historique des audits incrémenté ; 1.6.3a : NC-II-016 passée en LEVÉE — le champ `reference` non documenté qui court-circuitait la transmission au contrôle de légalité est remplacé par une DÉCLARATION nommée, datée et opposée à son auteur, documentée au contrat OpenAPI et journalisée (la transmission se règle désormais en TROIS RÉGIMES : désactivée, déclarative, ou API @ctes avec déclaration par acte) ; NC-II-017 atténuée — le service dit ce qu'il a pu ATTESTER (verifiee / declaree) et l'application ne présente plus comme vérifiée une déclaration simplement enregistrée) ; 1.6.3b : aucune fiche ouverte — la MÉTHODE de travail entre dans le dépôt (`src/docs/ATELIER.md`, le harnais `scripts/harnais-atelier.mjs`), aucune règle métier n'est touchée ; au passage, une affirmation devenue fausse est corrigée dans `README.md` et `docs/INDUSTRIALISATION.md` (le banc d'essai de l'atelier n'est plus « hors du dépôt »))
+mis_a_jour: 2026-09-27 (1.6.1r et 1.6.1s : NC-II-014 ouverte et levée aussitôt ; 1.6.1t et 1.6.1u : aucune fiche ouverte ; 1.6.1v : aucune fiche ouverte — le deadlock des écritures est corrigé et couvert par des épreuves ; 1.6.1w : aucune fiche nouvelle — la porte de signature de NC-II-006 est renforcée (le titulaire seul, porteur de la qualité) et son parcours complet est rejoué ; 1.6.1x : aucune fiche ouverte — le circuit de signature INTERNE est livré, et il apporte à NC-IV-001 sa première preuve dans l'autre sens ; les dates des notes 1.6.1u à 1.6.1w sont ramenées au 2026-09-26, la date d'une note étant celle de son achèvement ; 1.6.2 : aucune fiche ouverte — le travail à deux est livré (flux de changements `GET /v1/db/flux`, fusion des écritures concurrentes au lieu de l'écrasement, brouillons partagés par la présence), le contrat des deux services est rejoué, et son parcours gagne deux épreuves ; au passage, un défaut du service de démonstration est corrigé — ses billets de recueil échouaient en 500 dès le deuxième billet, `localeCompare` n'existant pas dans le moteur du service ; 1.6.3 : NC-IV-004 passée en LEVÉE — la télétransmission est RÉELLE quand le service est branché (`src/server/mysql/controle-legalite.mjs`, variables `SCRIBA_CONTROLE_LEGALITE_*`, `502 transmission_echec` sur refus, rien d'enregistré), la simulation restant marquée quand aucun appel n'a lieu ; NC-II-006 renforcée — la porte de signature est désormais tenue par le SERVICE (opposition opérateur / signataire, `attribution` vérifiée / déclarée / reprise / compilation, certification de conformité opposée au réviseur) ; 4e campagne d'audit (2026-09-27, version 1.6.3) : NC-IV-004 passée en LEVÉE (télétransmission réelle quand le service est branché), quatre fiches nouvelles — NC-I-017 (les deux copies ont divergé), NC-II-016 (court-circuit de la transmission par une `reference` fournie), NC-II-017 (aucune identité opposable sur le service de démonstration, statut ACCEPTÉE), NC-IV-006 (refus du contrôle de légalité non traités) — et l'historique des audits incrémenté ; 1.6.3a : NC-II-016 passée en LEVÉE — le champ `reference` non documenté qui court-circuitait la transmission au contrôle de légalité est remplacé par une DÉCLARATION nommée, datée et opposée à son auteur, documentée au contrat OpenAPI et journalisée (la transmission se règle désormais en TROIS RÉGIMES : désactivée, déclarative, ou API @ctes avec déclaration par acte) ; NC-II-017 atténuée — le service dit ce qu'il a pu ATTESTER (verifiee / declaree) et l'application ne présente plus comme vérifiée une déclaration simplement enregistrée) ; 1.6.3b : aucune fiche ouverte — la MÉTHODE de travail entre dans le dépôt (`src/docs/ATELIER.md`, le harnais `scripts/harnais-atelier.mjs`), aucune règle métier n'est touchée ; au passage, une affirmation devenue fausse est corrigée dans `README.md` et `docs/INDUSTRIALISATION.md` (le banc d'essai de l'atelier n'est plus « hors du dépôt ») ; 1.6.3c : cinq fiches passent en LEVÉE — NC-I-008 (les deux causes de la chaîne rouge sont corrigées, la chaîne publie son état et éprouve désormais l'IMAGE DOCKER contre une vraie MariaDB à chaque envoi), NC-I-017 (les deux copies sont réalignées par l'export, qui porte la version, le changelog et le registre d'un seul tenant), NC-II-010 (les empreintes de clés d'API se comparent à temps constant des trois côtés : `empreintesEgales` dans le domaine, `timingSafeEqual` au service, `egalConstant` en démonstration), NC-III-008 (la démonstration du projet pose `noindex, nofollow` sur sa seule adresse, et le documente), NC-IV-003 (la divergence ELI ↔ FRBRuri est fermée : FRBRthis porte l'identifiant, FRBRuri l'adresse HTTP dérivée, et le JSON-LD publie `eli:uri`) ; NC-IV-006 passe en OBSOLÈTE — le contrôle de légalité ne REFUSE pas un acte : un refus est un recours contentieux, que le logiciel suit par le délai de recours et la constatation d'un recours introduit (`src/lib/execution.js`), si bien qu'aucun état de dossier n'était à porter dans l'aller-retour de télétransmission ; NC-II-012 passe en ACCEPTÉE — l'aperçu d'édition n'est pas un environnement de démonstration tenable (il le dit), et l'état du service auto-hébergé, lui, vit en base (`sb_etat`) et dans ses fichiers ; deux défauts RÉELS sont corrigés au passage, trouvés en éprouvant la voie MySQL des pièces : la base en mémoire des épreuves ignorait `sb_piece` et rendait le résultat d'une écriture imbriqué d'un niveau de trop, si bien que `supprimerPiece` répondait toujours « rien retiré » ; la version du logiciel est désormais LUE dans `src/lib/version.js` par le script de publication d'image, qui la recopiait)
 cadre: src/audit/PROMPT-AUDIT-SCRIBAE.md
 ---
 
@@ -34,13 +34,27 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 
 ## Synthèse
 
-| Cote | Nombre | Ouvertes | En cours | Levées | Acceptées |
-|---|---|---|---|---|---|
-| Bloquante | 3 | 0 | 0 | 3 | 0 |
-| Majeure | 12 | 1 | 3 | 8 | 0 |
-| Mineure | 13 | 2 | 2 | 9 | 0 |
-| Observation | 13 | 1 | 2 | 9 | 1 |
-| **Total** | **41** | **4** | **7** | **29** | **1** |
+| Cote | Nombre | Ouvertes | En cours | Levées | Acceptées | Obsolètes |
+|---|---|---|---|---|---|---|
+| Bloquante | 3 | 0 | 0 | 3 | 0 | 0 |
+| Majeure | 15 | 0 | 2 | 13 | 0 | 0 |
+| Mineure | 13 | 0 | 1 | 11 | 0 | 1 |
+| Observation | 13 | 0 | 0 | 11 | 2 | 0 |
+| **Total** | **44** | **0** | **3** | **38** | **2** | **1** |
+
+> **État au 2026-09-27 (livraison 1.6.3c).** Plus **aucune fiche ouverte**. Les trois restées
+> « en cours » sont celles qui demandent ce que le logiciel ne peut pas fournir seul :
+> l'**exécution réelle** de la chaîne d'intégration — dont les **parcours du navigateur**, qui n'ont
+> pas encore de moteur dans la chaîne (**NC-I-002**) —, le **découpage** des derniers gros modules
+> de vue (**NC-I-003**), et une signature **qualifiée** (**NC-IV-001** : un contrat avec un
+> prestataire, pas du code). Les deux « acceptées » sont des limites **nommées** : le démonstrateur ne peut rien
+> vérifier de l'identité d'une personne (NC-II-017), et l'aperçu d'édition n'est pas un
+> environnement de démonstration tenable (NC-II-012).
+>
+> **Les trois fiches NC-I-015, NC-I-016 et NC-II-015 viennent d'une autre lignée** : elles ont été
+> établies par une campagne menée sur le dépôt publié (rapport du 2026-09-30), dont le registre a
+> depuis été **recouvert** ; NC-I-017 raconte l'arbitrage et la reprise. Le passage de 41 à 44
+> fiches vient de là, et de là seulement.
 
 > Les nombres de cette synthèse sont **recalculés sur les fiches** à chaque campagne *et* à chaque
 > traitement d'une proposition du plan d'action. Le premier traitement du 2026-09-23 (livraison
@@ -325,7 +339,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Faible (premier travail : cause identifiée) à moyen (second travail : cause à instruire) |
 | Priorité | Très haute |
 | Échéance | 0–30 jours |
-| Statut | **En cours** (2026-09-23, après traitement de P-31) — les **deux causes sont reproduites et corrigées** : (1) le contrôle de style ne reconnaissait pas ses exemptions (NC-I-009, corrigé) ; (2) le travail « Service auto-hébergé » échouait sur cinq épreuves de `src/server/mysql/actes.test.mjs` qui n'attendaient pas la promesse du gestionnaire de signature (corrigé). Vérifié **en atelier** sur la disposition livrée : `npm run lint` → code de sortie 0 (180 fichiers, aucune remarque), et les **255 épreuves des 22 fichiers passent** (chaque fichier isolément, comme `node --test` les exécute ; voir NC-I-001). Non encore vérifié : une exécution réelle de la chaîne, qui demande un envoi sur le dépôt. |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — les **deux causes connues** étaient corrigées dès le 2026-09-23 (exemptions du contrôle de style : NC-I-009 ; promesses des cinq épreuves d'`actes.test.mjs`) ; la **troisième**, apportée par la lignée publiée, l'est aussi (les chemins de `node --test` sans préfixe `./` dans le manifeste racine : **NC-I-016**). Surtout, la chaîne **cesse de dépendre d'une vérification à la main** : elle publie son état (badge, en tête du `README.md` du dépôt) et son troisième travail **construit l'image Docker et la met en service contre une vraie MariaDB** (`GET /v1/health`, `GET /v1/db/health`, coquille servie, code de l'application servi, `config.js` engendré depuis l'environnement) — elle éprouve donc désormais ce qui décide d'une installation, et non seulement ce qui se teste sans base. Reste à l'observer : la poussée qui suit cette livraison est la première exécution complète ; si elle était rouge, la fiche repasserait en « **Régression** », statut prévu pour cela. |
 | Origine | Audit 2026-09-23 (3e campagne) |
 
 ### NC-I-009 — Le contrôle de style ne reconnaît pas ses exemptions dans la disposition livrée
@@ -360,6 +374,38 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Statut | **Levée** (2026-09-23, livraison 1.6.1i) — la recommandation est satisfaite par sa **branche « à défaut »** : un **jeu d'appels commun** (`src/tests/conformite-service.mjs`, 13 appels dont la dépublication) est joué **contre les deux implémentations** — en Node sur le service auto-hébergé, et dans le navigateur sur le service de démonstration —, et peut être comparé à une installation réelle par la variable `SCRIBA_CONFORMITE_URL`. Une divergence de réponse entre les deux devient donc visible mécaniquement. Réserve assumée : les deux implémentations **subsistent** (la démonstration n'est pas devenue un adaptateur du domaine) — c'est le choix de ne pas extraire le domaine côté démonstration qui reste consigné ici. **Complément (1.6.2)** : la couverture du jeu laissait **deux routes** hors de son champ — `POST /v1/actes/{id}/signature-externe` et `POST /v1/actes/{id}/conformite` —, et le service Node les ignorait (404) alors que la démonstration les servait : une divergence de la classe visée ici a donc vécu sans être vue, et a été trouvée par un contrôle manuel du circuit externe sur un déploiement. Le service auto-hébergé porte désormais les deux routes, et le jeu les couvre des deux côtés (15 appels). |
 | Origine | Audit 2026-09-23 (3e campagne) |
 
+### NC-I-015 — Absence de verrou de dépendances à la racine pour l'outillage
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | I.4 — Dépendances et chaîne d'approvisionnement ; I.3 — Reproductibilité |
+| Constat | Le manifeste de la **racine** du dépôt (`package.json`, celui qui commande l'outillage — `scripts/`, `tests/`) n'était accompagné d'**aucun `package-lock.json`**. Pour une installation qui déclare des dépendances, cela veut dire que deux constructions à deux dates peuvent partir de deux arbres différents ; ici, il faut le dire franchement, le manifeste de la racine ne déclare **aucune** dépendance, et la seule du dépôt (`mysql2`) est verrouillée là où elle vit (`src/server/mysql/package-lock.json`, `mysql2@3.11.3`). Le constat reste fondé sur la forme : `npm ci` **refuse** de tourner sans verrou, y compris sur un manifeste sans dépendance — un intégrateur qui suit la pratique courante (`npm ci` avant `npm test`) échouait donc faute de fichier, non faute de dépendance. |
+| Exigence de référence | ISO/IEC 25010 (reproductibilité) ; NC-I-002 ; bonne pratique npm (`npm ci` sur un verrou commité). |
+| Preuve | `src/package.json` (aucune rubrique `dependencies`) et absence de `src/package-lock.json` ; `src/server/mysql/package-lock.json` (verrou v3, `mysql2@3.11.3`) ; rapport `rapports/AUDIT-SCRIBAE-2026-09-30.md`, fiche NC-I-015 et proposition **P-31** (« commiter `package-lock.json` à la racine »), relevées sur le dépôt publié. |
+| Recommandation | Commiter un verrou à la racine (P-31), et faire dire au manifeste que le numéro du logiciel ne vit pas chez lui. |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | 0–30 jours |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — le dépôt porte désormais `package-lock.json` à sa racine (lockfileVersion 3, aucun paquet à verrouiller), si bien que `npm ci` y fonctionne. Le champ `version` du manifeste passe à `0.0.0` : le numéro du LOGICIEL vit dans `src/lib/version.js` (source unique), et il annonçait encore `1.6.2` — une copie qui était déjà fausse. |
+| Origine | Audit 2026-09-30 (5e campagne, autre lignée) — voir NC-I-017 |
+
+### NC-I-016 — Le chemin des tests du manifeste racine ne convient pas à `node --test`
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | I.3 — Environnements, tests, industrialisation |
+| Constat | Le script `test` du manifeste racine passait ses chemins **sans préfixe** : `node --test tests/ src/server/mysql/ src/server/charge/`. Or `node --test` résout ses arguments comme des **spécificateurs de module** (la même résolution qu'un `import`) : un chemin qui ne commence ni par `./` ni par `/` n'est pas un chemin relatif, c'est le nom d'un **paquet** — et la chaîne échoue alors que tous les fichiers de test existent, sous le nez. C'est une cause possible, à elle seule suffisante, d'une chaîne rouge dont le remède était sous les yeux. |
+| Exigence de référence | ISO/IEC 25010 (fiabilité, maintenabilité) ; NC-I-008 ; documentation de `node --test`. |
+| Preuve | `src/package.json` (script `test`, avant correction) ; rapport `rapports/AUDIT-SCRIBAE-2026-09-30.md`, fiche NC-I-016 et proposition **P-32** (« `tests/` → `./tests/` »), relevées sur la chaîne d'intégration du dépôt publié. |
+| Recommandation | Préfixer les trois chemins (P-32), et laisser la règle dans le fichier qui la porte. |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | 0–30 jours |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — `"test": "node --test ./tests/ ./src/server/mysql/ ./src/server/charge/"`. |
+| Origine | Audit 2026-09-30 (5e campagne, autre lignée) — voir NC-I-017 |
+
 ### NC-I-017 — La copie de travail et la copie publiée ont divergé (version, changelog, registre d'audit)
 
 | Champ | Valeur |
@@ -373,7 +419,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Très haute |
 | Échéance | 0–30 jours |
-| Statut | **Ouverte** (2026-09-27) |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — la divergence est **tranchée, réparée, et ce qui manquait a été récupéré**. (1) **La lignée qui fait foi est celle de l'atelier** (la plus avancée : 1.6.3c), et le dépôt la sert désormais : comparaison faite le 2026-09-27 (`GET /repos/aplds/scribae/git/trees/main?recursive=1`, 325 fichiers) — il porte exactement les 317 de l'export 1.6.3b, plus la `LICENSE`, plus **huit entrées de la lignée publiée** : les deux rapports d'audit du 2026-09-29 et du 2026-09-30, et les cinq doublons périmés de `src/server/` (voir NC-I-002 et le `TODO.md` : leur retrait est un `git rm`, il ne se fait pas par l'export). (2) **Ce qui manquait à l'atelier est entré** : les deux rapports sont repris dans `src/audit/rapports/`, et les **trois fiches** que son registre portait en plus — NC-I-015 (verrou de dépendances à la racine), NC-I-016 (chemin des tests du manifeste racine), NC-II-015 (`noindex` non déployée) — sont **rétablies** dans le présent registre, avec leurs preuves d'origine. C'est la branche « récupérer de l'autre ce qui manque » de la recommandation P-48, et elle a payé : **NC-I-016 nomme une cause de chaîne rouge que l'atelier ne voyait pas** (les chemins de `node --test` sans préfixe `./`), corrigée en 1.6.3c. (3) **La perte est dite, et non maquillée** : le rapport du 2026-09-30 se lit **corrompu dans le dépôt** (1 497 octets de contrôle à la place des caractères accentués — en-tête, titres, tableaux et plans se lisent, le corps non) ; sa reprise le déclare en tête de fichier, et ne prétend pas être l'original. (4) **La règle qui manquait est écrite** : la recette d'export de `README.md` demande désormais de **comparer avec le dépôt AVANT d'écrire** (version, changelog, registre) — sans quoi un export recouvre un registre plus récent, ce qui est arrivé ici. |
 | Origine | Audit 2026-09-27 (4e campagne) — vu en cadrant la campagne sur le dépôt publié. *Note : les identifiants `NC-I-011` à `NC-I-016` sont employés par la lignée publiée pour d'autres objets ; la présente fiche prend le numéro suivant libre (`017`) pour ne pas recouvrir une fiche existante ailleurs.* |
 
 ## Chapitre II — Sécurité des systèmes d'information (RSSI)
@@ -535,7 +581,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Moyenne |
 | Échéance | 90–180 jours |
-| Statut | **En cours** (2026-09-23) — comparaison à temps constant toujours en place (`egalConstant`, `index.html:323`) et journal scellé (`index.html`, `journaliser`) ; **export et rétention du journal restent non définis** (`src/SPEC.md` § 5). Inchangé. |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — la comparaison est désormais à **temps constant partout** : `empreintesEgales` dans le domaine (`src/server/mysql/actes.mjs`, JavaScript pur — ce module n'a ni Node ni WebCrypto), `crypto.timingSafeEqual` au service (`server.mjs`), `egalConstant` en démonstration (`index.html`). Les deux autres points du constat sont des **choix de périmètre, assumés et nommés** : la limitation de débit couvre les écritures et non les lectures, et c'est voulu — un **recueil ouvert** est fait pour être moissonné (moteurs, agents), le brider contredirait la promesse ; l'**export et la rétention** du journal d'audit restent hors périmètre (`SPEC.md` § 5) et suivis au `TODO.md`. |
 | Origine | Audit 2026-09-21 |
 
 ### NC-II-011 — Transfert des questions d'assistance vers un moteur tiers
@@ -567,7 +613,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Faible (documentation) à moyen (diagnostic du moteur de démonstration) |
 | Priorité | Moyenne |
 | Échéance | 30–90 jours |
-| Statut | **Ouverte** (2026-09-23) — non revérifiée sous charge dans cette campagne ; la démonstration publiée (GitHub Pages) conserve, elle, son état **dans le navigateur de chaque visiteur** (IndexedDB, `src/pages/host.js`), donc sans partage : le risque est déplacé, non levé. |
+| Statut | **Acceptée** (2026-09-27, livraison 1.6.3c) — le risque est explicitement assumé, et nommé : l'**aperçu d'édition n'est pas un environnement de démonstration tenable**, et il le dit désormais noir sur blanc (`docs/ATELIER.md` § 4 : « le service de l'aperçu est éphémère et peut se mettre en quarantaine ; un scénario = un `page_eval` »), en renvoyant à l'instance **enregistrée** pour une démonstration qui dure. La partie (b) de la recommandation est **vérifiée par lecture** : sur un service auto-hébergé, rien de ce qui compte ne se perd au redémarrage — l'état durable vit en base (`sb_etat`) ou dans `DATA_DIR`, les clés (jetons d'API, clé de scellement du coffre de signature) viennent du `.env`, et le schéma comme les migrations s'appliquent au démarrage (`AUTO_MIGRATE`) ou à la main (`--migrate`). La démonstration publiée range son état dans le navigateur de chaque visiteur (IndexedDB) : le risque est déplacé, jamais celui d'un service en production. |
 | Origine | Audit 2026-09-21b |
 
 ### NC-II-013 — Le registre d'audit et ses non-conformités ouvertes sont publiés dans le dépôt
@@ -601,6 +647,22 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Échéance | Faite |
 | Statut | **Levée** (2026-09-25, livraison 1.6.1s) — les dossiers `informations` et `reprises` sont déclarés, `dossierDe` ne renvoie plus d'alias pour une collection inconnue, et les données héritées du dossier commun sont reprises une fois (`HERITAGE`, `reprendreHeritage`). |
 | Origine | Constat de développement (ajout de la collection `reprises`), hors campagne |
+
+### NC-II-015 — La balise `noindex` était présente dans le code, mais non déployée
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Majeure |
+| Chapitre / section | II.6 — Segmentation des environnements ; III.2 — Publication |
+| Constat | Le logiciel pose `noindex, nofollow` sur la seule adresse de la démonstration du projet (la règle est dans `index.html`, sur `location.hostname === "demo.scribae.eu"`), mais **la page réellement servie** ne la portait pas : le déploiement publié datait d'avant le correctif. Un correctif écrit n'est pas un correctif en service, et une démonstration entièrement fictive restait donc indexable. |
+| Exigence de référence | Maîtrise de l'indexation d'une démonstration ; ISO/IEC 25010 (utilisabilité). |
+| Preuve | **Avant** : `GET https://demo.scribae.eu/` sans `meta[name=robots]` (constat de la campagne du 2026-09-30). **Après** : `GET https://demo.scribae.eu/` du 2026-09-27 rend, dès ses premières lignes de script, `robots.name = "robots"`, `robots.content = "noindex, nofollow"`, sous la condition `location.hostname === "demo.scribae.eu"` ; `GET /robots.txt` reste un 404 de GitHub Pages (décision assumée, voir NC-III-008). |
+| Recommandation | Vérifier la condition, puis **déployer** (P-33 et P-34). |
+| Effort | Faible |
+| Priorité | Haute |
+| Échéance | 0–30 jours |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — vérifié sur la page PUBLIÉE : le déploiement qui a suivi la livraison 1.6.3b l'a apportée. Une leçon à garder : pour une publication statique, la fiche se ferme **sur la page servie**, jamais sur le fichier du dépôt — c'est la vérification qui a manqué ici, et c'est celle qui compte. |
+| Origine | Audit 2026-09-30 (5e campagne, autre lignée) — voir NC-I-017 |
 
 ### NC-II-016 — La télétransmission au contrôle de légalité se court-circuite par une référence fournie
 
@@ -761,7 +823,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Faible |
 | Priorité | Moyenne |
 | Échéance | 0–30 jours |
-| Statut | **En cours** (2026-09-23, après traitement de P-33) — le logiciel pose désormais `noindex, nofollow` **sur la seule adresse de la démonstration du projet** (`index.html`, test `location.hostname === "demo.scribae.eu"`, l'adresse du fichier `CNAME`) : toute autre installation, auto-hébergée ou fork, garde un recueil indexable. Un `robots.txt` à la racine du dépôt a été **écarté à dessein** : le fichier serait hérité par chaque fork, alors que le `robots.txt` appartient au **déploiement** (l'instance auto-hébergée publie le sien, avec sa carte et ses actes — voir `docs/GITHUB.md`). Non encore constaté : la démonstration publiée ne portera la balise qu'après son **prochain déploiement** ; la mesure (`meta[name=robots]` sur `https://demo.scribae.eu`) reste à refaire. |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — la balise `noindex, nofollow` est posée par le logiciel sur la **seule** adresse de la démonstration du projet, et elle est **en service** : vérifié sur la page publiée (`GET https://demo.scribae.eu/`, 209 660 octets, le 2026-09-27). Le `robots.txt` de la racine reste **écarté à dessein** : il appartiendrait au déploiement, et chaque fork l'hériterait ; une instance auto-hébergée publie le sien (voir `docs/GITHUB.md` et `src/server/README.md`). La même vérification ferme **NC-II-015**. |
 | Origine | Audit 2026-09-23 (3e campagne) |
 
 ## Chapitre IV — Conformité et valeur juridiques (DAJ / assemblées)
@@ -811,7 +873,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Moyenne |
 | Échéance | 90 jours |
-| Statut | **En cours** (2026-09-23) — deux formes coexistent toujours : l'identifiant `eli:/fr/…` (`src/lib/eli.js:76`) et l'adresse HTTP (`eliAdresse`, `src/lib/eli.js:88`), distinguées à l'écran mais non unifiées. |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3c) — les deux moitiés du constat sont traitées. (1) La **divergence est fermée** : `FRBRthis` porte l'**identifiant** (`eli:/fr/…`, forme stable) et `FRBRuri` l'**adresse HTTP canonique dérivée** de la base publique (`src/lib/export.js`), tandis que le JSON-LD publie `@id` (l'identifiant) **et** `eli:uri` (l'adresse) — un système tiers qui suit l'adresse tombe sur le recueil, où `/eli/…` est servi. (2) La **non-résolubilité de l'identifiant** est un **choix nommé**, écrit dans le module (`src/lib/eli.js`) : la recommandation ELI distingue l'identifiant de l'adresse, et le logiciel publie les deux. En faire une URI HTTP canonique **changerait les identifiants déjà publiés** (tous les ELI du recueil) : la bascule est consignée au `TODO.md`, à trancher avec la collectivité, jamais par un effet de bord. |
 | Origine | Audit 2026-09-21 |
 
 ### NC-IV-004 — La télétransmission au contrôle de légalité est simulée et fabrique son propre certificat
@@ -858,6 +920,6 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Moyenne |
 | Échéance | 30–90 jours (P-46) ; 90–180 jours (P-49) |
-| Statut | **Ouverte** (2026-09-27) |
+| Statut | **Obsolète** (2026-09-27, livraison 1.6.3c) — **décision du commanditaire, et elle est juste** : *le contrôle de légalité ne peut pas refuser*. Il n'a donc pas de « rejet » à porter dans l'application. Il **accuse réception** — c'est ce que la télétransmission obtient, et c'est ce que le certificat conserve —, et s'il conteste l'acte, il forme un **recours contentieux** (un déféré), qui suit un autre chemin : le logiciel le connaît déjà, par le **délai de recours contentieux** et la constatation d'un recours introduit (`src/lib/execution.js`, `ui/execution-actions.js`). Aucun état de dossier n'était donc à ajouter, aucun motif à porter au certificat, aucun geste à prescrire : le périmètre visé par cette fiche **n'existe pas**. Reste, séparée, l'observation sur la passerelle réelle — le client n'a jamais parlé à une vraie @ctes, et sa lecture des champs d'accusé est **défensive** ; elle se traite à l'exploitation, et le `TODO.md` la porte. |
 | Origine | Audit 2026-09-27 (4e campagne) |
 | Origine | Audit 2026-09-21 |

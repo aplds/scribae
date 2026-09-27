@@ -26,14 +26,14 @@ A4), Word, Markdown.
 
 | | |
 |---|---|
-| **Version courante** | **1.6.1w**, 29 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
-| **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), et épreuves du domaine du service |
+| **Version courante** | **1.6.3c**, 27 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
+| **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), épreuves du domaine du service, et **construction de l'image Docker, mise en service contre une vraie base** puis éprouvée (santé, schéma, façade, code servi) |
 | **Démonstration publiée** | <https://demo.scribae.eu> — GitHub Pages, édition **statique** : référentiel et actes vivent dans le navigateur du visiteur, rien n'est partagé entre collègues |
 | **Démonstration partagée** | aucune instance publique : la pile auto-hébergée (`src/server/`, nginx + Node + MariaDB) se monte en quelques minutes |
-| **Audit** | 3 campagnes, 36 non-conformités recensées : **1 ouverte**, 8 en cours de traitement, 27 levées — synthèse et plan d'action dans `src/audit/README.md` |
+| **Audit** | **44 non-conformités recensées : aucune ouverte**, 3 en cours (ce qui demande un tiers ou une machine : parcours rejoués en intégration continue, signature *qualifiée*), 38 levées, 2 acceptées, 1 obsolète — synthèse dans `src/audit/REGISTRE-NON-CONFORMITES.md` |
 
 > **Ce dépôt est un travail en cours, tenu par ses propres audits.** Les nombres du tableau datent
-> la dernière campagne (23 septembre 2026) ; ils se lisent avec le registre, qui est un document de
+> la dernière campagne (27 septembre 2026) ; ils se lisent avec le registre, qui est un document de
 > travail — voir la section *Audit* plus bas. Un voyant rouge sur la chaîne d'intégration veut dire
 > « ne pas livrer », et non « détail ».
 
@@ -84,7 +84,7 @@ Réinstaller la démonstration*.
 
 ## Déployer avec Docker
 
-**Image officielle** : `docker.io/aplds/scribae:latest` (ou `docker.io/aplds/scribae:1.6.1q`)
+**Image officielle** : `docker.io/aplds/scribae:latest` (ou `docker.io/aplds/scribae:<version>`)
 
 ### ✅ Déploiement simplifié (1 conteneur)
 

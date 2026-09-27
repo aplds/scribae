@@ -28,6 +28,76 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
+## [1.6.3c] — 2026-09-27 — L'image Docker éprouvée à chaque envoi
+
+**Trois demandes d'un même mouvement : trancher ce qui restait en suspens, traiter les
+non-conformités que l'audit laissait ouvertes, et rendre MÉCANIQUEMENT VRAI ce qu'on avance du
+déploiement.** Jusqu'ici, « ça s'installe en Docker » reposait sur une vérification faite à la
+main, sur une machine, un jour — c'est-à-dire sur rien de rejouable. La chaîne d'intégration
+construit désormais l'image et la met en service contre une vraie base à chaque envoi : la
+question de l'exploitant (« est-ce que ça se construit encore, et est-ce que ça répond ? ») a
+une réponse automatique.
+
+### Ajouté
+
+- **La chaîne d'intégration construit l'image Docker et la met en service** (`.github/workflows/ci.yml`,
+  troisième travail) : l'image autonome se construit (`docker build -f src/server/Dockerfile .`),
+  démarre contre une **vraie MariaDB**, puis l'épreuve interroge la façade et le service — santé
+  (`GET /v1/health`), **schéma et migrations appliqués** (`GET /v1/db/health`, qui interroge la
+  base là où la santé ne prouve que le processus), coquille servie, code de l'application servi,
+  `config.js` engendré depuis l'environnement. Aucune image n'est poussée : aucun secret n'entre
+  dans la chaîne. C'est la seule chose que l'atelier ne peut pas faire.
+- **La base en mémoire des épreuves connaît `sb_piece`** (`src/server/charge/faux-mysql.mjs`) : sa
+  table, sa clé (l'identifiant tiré au hasard, et non un nom de collection), sa lecture et son
+  retrait. La voie **MySQL** des pièces jointes — l'original signé d'une reprise, la version
+  signée d'un circuit externe — était la seule que rien n'éprouvait.
+- **Une épreuve pour cette voie** (`src/server/mysql/magasin-mysql.test.mjs`) : dépôt, relecture,
+  date de dépôt, deux pièces distinctes, remplacement sur le même identifiant, retrait.
+
+### Corrigé
+
+- **Le résultat d'une ÉCRITURE rendu par la base en mémoire avait un niveau d'imbrication de
+  trop** (`faux-mysql.mjs`) : il rendait `[[en-tête, champs]]` là où `mysql2` rend
+  `[en-tête, champs]`. Aucun consommateur ne le lisait — sauf un, tout neuf : `supprimerPiece`
+  (`magasin-mysql.mjs`) répondait donc **toujours « rien n'a été retiré »**. C'est l'épreuve des
+  pièces qui l'a mis au jour ; la forme est maintenant celle de MySQL, et le commentaire dit
+  pourquoi elle compte.
+- **Les empreintes de clés d'API se comparent à temps constant, partout** : `actes.mjs`
+  (`empreintesEgales`, JavaScript pur — ce module n'a ni Node ni WebCrypto) rejoint
+  `crypto.timingSafeEqual` côté service Node et `egalConstant` côté démonstration. La règle est
+  la même des trois côtés (audit, NC-II-010).
+- **`src/server/build-and-push.sh` : la version de l'image est LUE dans `src/lib/version.js`**
+  au lieu d'être recopiée en quatre endroits (elle y annonçait encore la 1.6.2), et la détection
+  de session — `docker info | grep "Username:"`, dont la sortie dépend de la version du client —
+  est remplacée : les identifiants fournis sont utilisés, le fichier de session est lu pour
+  information, aucun identifiant n'est deviné, et **un push qui échoue le dit** avec son remède
+  au lieu de renvoyer l'erreur brute de Docker.
+
+### Modifié
+
+- **Le registre des non-conformités suit ces corrections** (`src/audit/REGISTRE-NON-CONFORMITES.md`) :
+  NC-I-008 (chaîne rouge) et NC-I-017 (copies divergentes) passent en **Levée** — leurs causes
+  sont corrigées et revérifiées, la chaîne publie désormais son état (badge) et construit
+  l'image ; NC-II-010 (comparaison, limitation, journal) en **Levée** — la comparaison est
+  constante, le reste étant un périmètre assumé (voir ci-dessous) ; NC-III-008 (démonstration
+  indexable) en **Levée** — la balise est posée et documentée ; NC-IV-003 (ELI non résoluble)
+  en **Levée** — la divergence ELI ↔ `FRBRuri` est fermée, l'adresse HTTP est publiée à côté de
+  l'identifiant ; **NC-IV-006 en Obsolète** — voir la décision ci-dessous.
+- **Décision, sur le contrôle de légalité** : le contrôle de légalité **ne refuse pas** un acte
+  par l'API. Ce qu'on appelle un « refus » est un **recours contentieux** (un déféré), qui suit
+  un autre chemin et que le logiciel connaît déjà par le **délai de recours** et la constatation
+  d'un recours introduit (`src/lib/execution.js`). Il n'y avait donc rien à traiter dans
+  l'aller-retour de télétransmission : NC-IV-006 est **obsolète**, et ses deux entrées au
+  `TODO.md` disparaissent.
+- **Ce qui reste ouvert est dit, plutôt que rangé** : la limitation de débit couvre les écritures
+  et non les lectures — c'est voulu, un recueil ouvert se moissonne ; l'export et la rétention du
+  journal d'audit restent **hors périmètre** (`SPEC.md` § 5) et suivis au `TODO.md` ; NC-IV-001
+  (identité du signataire) reste **en cours** : il lui faut une signature **qualifiée**, c'est-à-
+  dire un contrat avec un prestataire, et non du code.
+- **`README.md` du dépôt** (`docs/GITHUB.md`) : version courante et état de l'audit remis à jour
+  — les deux y annonçaient encore la 1.6.1w et 36 fiches.
+
+
 ## [1.6.3b] — 2026-09-27 — La méthode de travail entre dans le dépôt
 
 **Un dépôt bien documenté ne suffit pas si la façon d'y travailler n'est écrite nulle part.** Les

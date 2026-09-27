@@ -19,6 +19,17 @@
 #   tests      les épreuves des modules purs (`tests/`) et celles du domaine du
 #              service (`src/server/mysql/`, `src/server/charge/`).
 #
+# LE TROISIÈME TRAVAIL CONSTRUIT L'IMAGE DOCKER ET LA MET EN SERVICE, sur une
+# vraie MariaDB : c'est la seule chose que l'atelier ne peut pas faire, et c'est
+# pourtant ce qui décide si « ça marche en production ». Il ne pousse aucune
+# image (aucun secret, aucun registre) : il répond à la question « le
+# `Dockerfile` se construit-il encore, et le service répond-il, base comprise ? »
+# — la question que se pose un exploitant au moment de déployer. Il vérifie
+# aussi les deux choses qui, silencieusement, cassent une installation :
+# `npm ci` sur le verrou (`package-lock.json` en phase avec `package.json`) et
+# l'application du SCHÉMA et des MIGRATIONS (`GET /v1/db/health` interroge la
+# base, là où `GET /v1/health` ne prouve que le processus).
+#
 # Le second travail installe `mysql2` : il le fait par `npm ci`, sur le verrou
 # `src/server/mysql/package-lock.json` (chaque paquet épinglé, empreinte SHA-512
 # vérifiée) — c'est ce qui rend deux constructions identiques. `npm ci` exige
@@ -67,3 +78,60 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Tests du domaine des comptes et de la signature
         run: npm test
+
+  image:
+    name: Image Docker, construite et mise en service
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # UNE VRAIE BASE, le temps de l'épreuve : c'est elle qui reçoit le schéma et
+    # les migrations, et sans elle « le service répond » ne veut rien dire.
+    services:
+      db:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: racine-ci
+          MARIADB_DATABASE: scriba
+          MARIADB_USER: scriba
+          MARIADB_PASSWORD: service-ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      # Le contexte est la RACINE du dépôt, comme le documente le Dockerfile.
+      - name: Construire l'image autonome
+        run: docker build -f src/server/Dockerfile -t scribae:ci .
+      # `--network host` : le conteneur atteint MariaDB par 127.0.0.1 et nginx
+      # écoute le port 80 de la machine. `AUTO_MIGRATE` et `DB_ROOT_PASSWORD`
+      # sont tous deux fournis — le premier applique schéma et migrations au
+      # démarrage du service, le second aligne le compte au passage.
+      - name: Mettre l'image en service
+        run: |
+          docker run -d --name scribae --network host \
+            -e DB_HOST=127.0.0.1 -e DB_PORT=3306 \
+            -e DB_USER=scriba -e DB_PASSWORD=service-ci -e DB_NAME=scriba \
+            -e DB_ROOT_PASSWORD=racine-ci -e AUTO_MIGRATE=true \
+            -e AUTH_MODE=demo -e DEMO=true -e DEMO_ACCOUNTS=true \
+            -e COOKIE_SECURE=false \
+            scribae:ci
+      - name: Attendre la santé, puis éprouver la façade et l'API
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost/v1/health > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          echo "— le service répond :"; curl -fsS http://localhost/v1/health; echo
+          echo "— la base répond (schéma et migrations appliqués) :"; curl -fsS http://localhost/v1/db/health; echo
+          echo "— la coquille est servie :"; curl -fsS -o /dev/null -w "  %{http_code}\n" http://localhost/
+          echo "— le code de l'application est servi :"; curl -fsS -o /dev/null -w "  %{http_code}\n" http://localhost/src/lib/version.js
+          echo "— config.js est engendré depuis l'environnement :"; curl -fsS http://localhost/config.js; echo
+      - name: Journal du conteneur (l'épreuve a échoué)
+        if: failure()
+        run: docker logs scribae || true
+      - name: Arrêter
+        if: always()
+        run: docker rm -f scribae || true

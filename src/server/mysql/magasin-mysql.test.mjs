@@ -36,6 +36,10 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS sb_record (collection VARCHAR(64) NOT NULL, id VARCHAR(191) NOT NULL, revision BIGINT UNSIGNED NOT NULL DEFAULT 1, ord INT NOT NULL DEFAULT 0, payload LONGTEXT NOT NULL, numero VARCHAR(64) NULL, statut VARCHAR(64) NULL, service_id VARCHAR(64) NULL, bureau_id VARCHAR(64) NULL, entity_id VARCHAR(64) NULL, kind VARCHAR(64) NULL, updated_by VARCHAR(191) NULL, PRIMARY KEY (collection, id));",
   "CREATE TABLE IF NOT EXISTS sb_journal (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, collection VARCHAR(64) NOT NULL, record_id VARCHAR(191) NOT NULL, action VARCHAR(16) NOT NULL, revision BIGINT UNSIGNED NOT NULL DEFAULT 0, actor VARCHAR(191) NULL, remote_ip VARCHAR(64) NULL, PRIMARY KEY (id));",
   "CREATE TABLE IF NOT EXISTS sb_etat (name VARCHAR(64) NOT NULL, payload LONGTEXT NOT NULL, revision BIGINT UNSIGNED NOT NULL DEFAULT 0, PRIMARY KEY (name));",
+  // La table des pièces jointes : recopie MINIMALE de la migration 2
+  // (`migrations/002-pieces.sql`), dont seule la clé primaire importe ici — la
+  // base en mémoire ne modélise ni types ni index.
+  "CREATE TABLE IF NOT EXISTS sb_piece (id CHAR(32) NOT NULL, nom VARCHAR(240) NOT NULL, type VARCHAR(80) NOT NULL DEFAULT 'application/octet-stream', taille BIGINT UNSIGNED NOT NULL DEFAULT 0, sha256 VARCHAR(128) NOT NULL DEFAULT '', base64 LONGTEXT NOT NULL, depose_le DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), depose_par VARCHAR(191) NULL, PRIMARY KEY (id));",
   "CREATE OR REPLACE VIEW v_collection AS SELECT 1;",
 ].join("\n");
 
@@ -187,4 +191,55 @@ test("le no-op `revision = revision` ne transforme pas la révision en texte", a
   const revision = await magasin.lireRevisionCollection("trames");
   assert.equal(typeof revision, "number");
   assert.equal(revision, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Les PIÈCES JOINTES — la table `sb_piece` (migration 2).
+//
+// C'est la voie MySQL des pièces : l'original signé d'une reprise d'acte ancien
+// et la version signée d'un circuit externe s'y rangent quand le service est
+// installé (le rangement par fichiers a ses propres épreuves, et le contrat des
+// deux est le même). Elle n'était PAS éprouvée — la base en mémoire ignorait la
+// table —, et c'est précisément là qu'un défaut pouvait vivre sans être vu : la
+// pièce est le seul objet du service dont la clé primaire ne soit ni une
+// collection, ni un nom, ni un compte, mais un identifiant tiré au hasard.
+// ---------------------------------------------------------------------------
+test("les pièces jointes s'écrivent, se relisent et se retirent", async () => {
+  const base = await basePrete();
+  const magasin = await creerMagasinMysql({ DB, mysql: base });
+
+  const piece = {
+    id: "a".repeat(32), nom: "arrete-signe.pdf", type: "application/pdf",
+    taille: 1234, sha256: "f".repeat(64), base64: "JVBERi0=", deposePar: "u-dubois",
+  };
+  await magasin.ecrirePiece(piece);
+
+  const lue = await magasin.lirePiece(piece.id);
+  assert.equal(lue.id, piece.id);
+  assert.equal(lue.nom, piece.nom);
+  assert.equal(lue.type, "application/pdf");
+  assert.equal(lue.taille, 1234);
+  assert.equal(lue.base64, "JVBERi0=", "le contenu est rendu tel quel");
+  assert.equal(lue.deposePar, "u-dubois");
+  assert.equal(Number.isNaN(Date.parse(lue.deposeLe)), false,
+    "la date de dépôt est posée (DEFAULT CURRENT_TIMESTAMP(3) du schéma)");
+  assert.equal(await magasin.lirePiece("0".repeat(32)), null, "une pièce inconnue n'existe pas");
+
+  // Deux pièces distinctes ne se recouvrent pas : leur clé est leur identifiant,
+  // non un nom de collection ni un identifiant nul.
+  await magasin.ecrirePiece({ ...piece, id: "b".repeat(32), nom: "scan.jpg", base64: "QQ==" });
+  assert.equal((await magasin.lirePiece(piece.id)).nom, "arrete-signe.pdf");
+  assert.equal((await magasin.lirePiece("b".repeat(32))).nom, "scan.jpg");
+
+  // Re-déposer sur le même identifiant REMPLACE (ON DUPLICATE KEY UPDATE).
+  await magasin.ecrirePiece({ ...piece, nom: "arrete-signe-2.pdf", base64: "QQ==" });
+  const remplacee = await magasin.lirePiece(piece.id);
+  assert.equal(remplacee.nom, "arrete-signe-2.pdf");
+  assert.equal(remplacee.base64, "QQ==");
+  assert.equal((await magasin.lirePiece("b".repeat(32))).nom, "scan.jpg", "l'autre pièce est intacte");
+
+  assert.equal(await magasin.supprimerPiece(piece.id), true);
+  assert.equal(await magasin.lirePiece(piece.id), null);
+  assert.equal(await magasin.lirePiece("b".repeat(32)).then((p) => p !== null), true,
+    "retirer une pièce ne retire pas les autres");
 });
