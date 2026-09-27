@@ -10,7 +10,7 @@
 // ============================================================================
 import { state, setUsers, resetDemoUsers, currentUser, login, navigate, touch } from "../state.js";
 import { h, button, toast, icon, modal, clear } from "../dom.js";
-import { confirmDialog, textField, selectField, choiceField, emptyState, sectionHeader } from "../components.js";
+import { confirmDialog, textField, selectField, choiceField, emptyState, sectionHeader, pageTitle } from "../components.js";
 import { ROLES, ROLE_ORDER, ROLES_CUMULABLES, PERMS, newUser, slugLogin, uniqueLogin, fullName, initialsOf, sortName, activeAdmins, primaryRoleId, rolesOf, setRoles, toggleRole, estCumulable, hasRole, badgesOf, ACCOUNT_SOURCES, sourceOf, isDemoUser } from "../../lib/users.js";
 import {
   ROLE_SIGNATAIRE, situationDeSignature, etatRapprochement, rapprocher, deRapprocher,
@@ -35,8 +35,7 @@ export function renderComptes(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Comptes et rôles" }),
-      h("p", { class: "page-head__sub", text: "Les comptes de l'application, leur profil d'accès et leur périmètre : un compte ne voit que les trames et les actes des services et bureaux auxquels il est rattaché." }),
+      pageTitle("Comptes et rôles" , "Les comptes de l'application, leur profil d'accès et leur périmètre : un compte ne voit que les trames et les actes des services et bureaux auxquels il est rattaché." ),
     ),
     h("div", { class: "page-head__actions" },
       oidc

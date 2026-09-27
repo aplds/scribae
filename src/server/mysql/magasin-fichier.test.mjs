@@ -218,3 +218,34 @@ test("deux écritures concurrentes ne se perdent pas (la file sérialise)", asyn
   assert.equal(lus.length, 20);
   assert.equal(await b.magasin.lireRevisionCollection("trames"), 20, "chaque écriture a sa révision");
 });
+
+// ------------------------------------------------------------------ les pièces
+// Les fichiers joints à un acte — l'original signé d'une reprise, la version
+// signée d'un acte du circuit externe. Chacun tient dans son PROPRE fichier,
+// hors de l'état : une pièce pèse des mégaoctets, et `etat.json` est relu puis
+// réécrit en entier à chaque écriture.
+const PIECE = { id: "a1".repeat(16), nom: "1998-042.pdf", type: "application/pdf", taille: 12, sha256: "abc123", base64: "JVBERi0xLjQK", deposePar: "u-dubois" };
+
+test("une pièce s'écrit à part, se relit et se retire", async () => {
+  const b = banc();
+  await b.magasin.ecrirePiece(PIECE);
+  assert.ok(b.io.fichiers.has("pieces/" + PIECE.id + ".json"), "un fichier par pièce");
+  assert.equal(b.io.fichiers.has("etat.json"), false, "l'état du service n'est pas touché");
+  const lu = await b.magasin.lirePiece(PIECE.id);
+  assert.equal(lu.nom, "1998-042.pdf");
+  assert.equal(lu.type, "application/pdf");
+  assert.equal(lu.base64, "JVBERi0xLjQK");
+  assert.equal(lu.deposePar, "u-dubois");
+  assert.equal(await b.magasin.supprimerPiece(PIECE.id), true);
+  assert.equal(await b.magasin.lirePiece(PIECE.id), null);
+  assert.equal(b.io.fichiers.has("pieces/" + PIECE.id + ".json"), false);
+});
+
+test("une pièce inconnue ne se lit pas, et un identifiant tordu ne sort pas du dossier", async () => {
+  const b = banc();
+  assert.equal(await b.magasin.lirePiece("inconnue"), null);
+  // L'identifiant vient d'une requête : il nomme un fichier DANS `pieces/`, il
+  // ne peut pas désigner un chemin hors du dossier de données.
+  await b.magasin.ecrirePiece({ id: "../../secret", nom: "x", base64: "AAAA" });
+  assert.deepEqual([...b.io.fichiers.keys()].filter((p) => p.startsWith("pieces/")), ["pieces/secret.json"]);
+});

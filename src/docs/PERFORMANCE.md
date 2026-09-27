@@ -210,3 +210,46 @@ Pistes, par ordre d'intérêt, pour une prochaine campagne :
    sont pas visibles avec un seuil d'une seconde.
 4. **Reprendre la campagne 1 avec `UV_THREADPOOL_SIZE=8` et `=16`** pour chiffrer le
    réglage plutôt que de le recommander de principe.
+
+## 7. Le gel de l'atelier (côté navigateur)
+
+Le gel dont parlait le service n'était pas le seul : **l'édition de trames figeait
+l'onglet au bout de quelques minutes**, sur un poste comme sur l'autre, service ou
+pas. La cause était dans la page, et elle se lisait en trois lignes.
+
+Chaque REDESSIN d'un écran posait :
+
+- un écouteur `resize` sur la fenêtre (le zoom, `src/ui/zoom.js`) ;
+- un `ResizeObserver` sur la feuille — et **un observateur retient en vie la cible
+  qu'il observe** : la feuille du dessin précédent, détachée, restait donc en
+  mémoire, avec ses centaines de nœuds, à chaque frappe ;
+- trois écouteurs du document (la veille de sélection,
+  `armSelectionComment`), dont les fermetures capturaient eux aussi la feuille.
+
+Rien ne les reprenait jamais. Mesuré dans l'aperçu, sur l'éditeur de trame :
+**+1 écouteur `resize`, +1 observateur et +3 écouteurs du document par redessin**.
+Après quelques minutes d'édition, la mémoire ne redescendait plus et le fil
+principal passait l'essentiel de son temps à servir des observateurs et des
+écouteurs morts.
+
+### La règle
+
+**Rien ne se pose par redessin sans un moyen de le reprendre.** Un écouteur de
+fenêtre ou du document, un observateur, un intervalle : ils appartiennent à un
+CADRE DU LOGICIEL (un registre de module), jamais à un rendu. Les écouteurs posés
+sur les nœuds rendus, eux, partent avec les nœuds — ceux-là sont sans risque.
+
+### Après
+
+- `src/ui/zoom.js` tient un registre : **un seul** écouteur `resize` et **un seul**
+  `ResizeObserver` pour tous les cadres ; un cadre détaché sort du registre et
+  l'observateur cesse de le regarder.
+- `src/ui/views/editor.js` défait la veille de sélection précédente avant d'armer
+  la nouvelle.
+- Vérifié : dix redessins n'ajoutent plus **rien** (0 / 0 / 0), contre +1 / +1 / +3
+  avant. L'épreuve de parcours `editeur-sans-fuite`
+  (`src/tests/parcours.mjs`) tient la règle : elle compte les écouteurs posés
+  MOINS ceux repris, et échoue si dix redessins en laissent derrière eux.
+
+> Le geste vaut pour tout l'atelier : la rédaction, l'organigramme et les
+> délégations partagent ce zoom — ils étaient atteints par le même défaut.

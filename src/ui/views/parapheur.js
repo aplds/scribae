@@ -16,7 +16,7 @@ import {
   state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById, etapeAParachever,
 } from "../state.js";
 import { h, button } from "../dom.js";
-import { emptyState, helpLink } from "../components.js";
+import { emptyState, helpLink, pageTitle } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 import {
@@ -47,8 +47,7 @@ export function renderParapheur(root, params) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Parapheur" }),
-      h("p", { class: "page-head__sub", text: "Le circuit de validation des actes : chaque étape est une vérification, un visa ou la signature, confiée à un rôle du référentiel. En principe, le circuit s'ouvre par une vérification du réviseur, et se clôt par la signature. Tant que le circuit n'est pas achevé, l'acte ne part pas en signature." }),
+      pageTitle("Parapheur" , "Le circuit de validation des actes : chaque étape est une vérification, un visa ou la signature, confiée à un rôle du référentiel. En principe, le circuit s'ouvre par une vérification du réviseur, et se clôt par la signature. Tant que le circuit n'est pas achevé, l'acte ne part pas en signature." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("parapheur", "Comment faire ?"),
@@ -109,7 +108,7 @@ export function renderParapheur(root, params) {
     ));
   }
 
-  if (acte) right.appendChild(carteActe(acte, paint));
+  if (acte) right.appendChild(carteActe(acte));
 }
 
 const etapeMienne = (a) => !!state.user && !!etapePourUI(a);
@@ -149,7 +148,12 @@ function videDe(tab) {  if (tab === "aMoi") return "Rien ne vous attend : aucun 
 }
 
 // --------------------------------------------------------------------------
-function carteActe(a, paint) {
+// LE PARAPHEUR, CARTE PAR CARTE. La colonne de détail DIT D'ABORD ce qu'on
+// attend de vous (revue d'interface, P2) : la décision est en tête, juste sous
+// l'identité de l'acte, et tout ce qui l'explique — le parcours, le circuit, ses
+// étapes, l'historique — vient dessous. Un valideur ne descend plus chercher ses
+// boutons sous la ligne de flottaison.
+function carteActe(a) {
   const config = state.config;
   const trame = trameById(a.trameId);
   const doc = docOfActe(a);
@@ -172,20 +176,23 @@ function carteActe(a, paint) {
     h("div", { class: "fr-row" },
       button("Voir l'acte", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
       can("actes.rediger") ? button("Ouvrir en rédaction", { variant: "tertiary", size: "sm", icon: "note", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null,
-      can("actes.signer") && v?.statut === "valide" ? button("Signer", { variant: "tertiary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
     ),
   ));
 
-  // Le fil de parcours : l'acte ne s'arrête pas au circuit. Le parapheur vient
-  // AVANT la révision, qui vient avant la signature (voir src/lib/parcours.js) —
-  // le valideur voit ainsi ce que son étape débloque, et que la vérification
-  // qu'il franchit n'est pas la révision du réviseur, qui la suit.
-  box.appendChild(h("div", { class: "fr-card fr-card--soft" },
-    h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
-    bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
-
-  // ------------------------------------------------------ le circuit
-  if (!v) {
+  // ------------------------------------------------- LA DÉCISION, EN PREMIER
+  const caduque = !!v && !validationAJour(a);
+  const av = v ? avancement(v) : null;
+  const mienne = v && !caduque ? etapePourUI(a) : null;
+  if (caduque) {
+    box.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
+      h("p", { class: "fr-alert__title", text: "Validation caduque" }),
+      h("p", { class: "fr-small", text: "Le texte de l'acte a été modifié après le passage au parapheur : ce qui a été validé n'est plus ce que porte l'acte. Le circuit doit être repris avant la signature." }),
+      h("div", { class: "fr-row" },
+        circuit ? button("Reprendre le circuit depuis la première étape", { variant: "primary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }) : null),
+    ));
+  } else if (mienne) {
+    box.appendChild(carteDecision(a, mienne));
+  } else if (!v) {
     box.appendChild(h("div", { class: "fr-card" },
       h("h2", { class: "fr-card__title", text: "Aucun circuit ouvert" }),
       circuit
@@ -194,47 +201,19 @@ function carteActe(a, paint) {
           h("div", { class: "fr-row" }, button("Soumettre au circuit", { variant: "primary", icon: "upload", onClick: () => soumettreCircuit(a, circuit) })))
         : h("p", { class: "fr-small fr-muted", text: "Aucun circuit du référentiel ne s'applique à cet acte (aucun circuit actif, ou la trame demande explicitement « aucun »). L'acte peut partir directement en signature." }),
     ));
-    return box;
-  }
-
-  const av = avancement(v);
-  const caduque = !validationAJour(a);
-  if (caduque) {
-    box.appendChild(h("div", { class: "fr-alert fr-alert--warning" },
-      h("p", { class: "fr-alert__title", text: "Validation caduque" }),
-      h("p", { class: "fr-small", text: "Le texte de l'acte a été modifié après le passage au parapheur : ce qui a été validé n'est plus ce que porte l'acte. Le circuit doit être repris avant la signature." }),
-      h("div", { class: "fr-row" },
-        circuit ? button("Reprendre le circuit depuis la première étape", { variant: "primary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }) : null),
-    ));
-  }
-
-  box.appendChild(h("div", { class: "fr-card" },
-    h("div", { class: "fr-row" },
-      h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: v.circuitLabel || "Circuit" }),
-      h("span", { class: "fr-small fr-muted", text: `${av.faites}/${av.total} étape(s)` }),
-    ),
-    h("p", { class: "fr-small fr-muted", text: `Ouvert le ${formatDate(String(v.demarreLe || "").slice(0, 10))} par ${v.demarreParNom || "—"}` }),
-    h("div", { class: "sig-steps" }, ...(v.steps || []).map((s, i) => etapeEl(s, i, v))),
-  ));
-
-  // ------------------------------------------------------- mes actions
-  const mienne = etapePourUI(a);
-  if (mienne && !caduque) box.appendChild(carteDecision(a, mienne));
-  else if (v.statut === "en_cours" && !caduque) {
+  } else if (v.statut === "en_cours") {
     const suivante = etapeActive(v);
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
-      h("p", { class: "fr-small", text: suivante
+      h("p", { class: "fr-small", style: { margin: 0 }, text: suivante
         ? `L'étape ouverte est « ${suivante.label} » (${etiquetteEtape(suivante.kind).label.toLowerCase()} — ${libelleCible(suivante)}${suivante.serviceScoped ? ", du service concerné" : ""}). Elle n'est pas de votre ressort.`
         : "Toutes les étapes sont franchies." })));
-  }
-  if (v.statut === "valide" && !caduque) {
+  } else if (v.statut === "valide") {
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small", text: `Circuit achevé le ${formatDate(String(v.closLe || "").slice(0, 10))}. L'acte peut être envoyé en signature.` }),
       h("div", { class: "fr-row" },
         can("actes.signer") ? button("Aller à la signature", { variant: "primary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
         can("actes.gerer") ? button("Reprendre le circuit", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }) : null)));
-  }
-  if (v.statut === "refuse" || v.statut === "renvoye") {
+  } else if (v.statut === "refuse" || v.statut === "renvoye") {
     box.appendChild(h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small", text: v.statut === "refuse"
         ? "Le circuit a été refusé. L'acte revient en rédaction : corrigez-le, puis soumettez-le de nouveau."
@@ -243,9 +222,28 @@ function carteActe(a, paint) {
         can("actes.rediger") ? button("Corriger l'acte", { variant: "primary", size: "sm", icon: "note", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null,
         circuit ? button("Reprendre le circuit", { variant: "secondary", size: "sm", icon: "refresh", onClick: () => reprendreCircuit(a, circuit) }) : null)));
   }
+
+  // ------------------------------------------------- ce qui explique la décision
+  // Le fil de parcours : l'acte ne s'arrête pas au circuit. Le parapheur vient
+  // AVANT la révision, qui vient avant la signature (voir src/lib/parcours.js) —
+  // le valideur voit ainsi ce que son étape débloque, et que la vérification
+  // qu'il franchit n'est pas la révision du réviseur, qui la suit.
+  box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+    h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
+    bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
+
+  if (v) {
+    box.appendChild(h("div", { class: "fr-card" },
+      h("div", { class: "fr-row" },
+        h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: v.circuitLabel || "Circuit" }),
+        h("span", { class: "fr-small fr-muted", text: `${av.faites}/${av.total} étape(s)` }),
+      ),
+      h("p", { class: "fr-small fr-muted", text: `Ouvert le ${formatDate(String(v.demarreLe || "").slice(0, 10))} par ${v.demarreParNom || "—"}` }),
+      h("div", { class: "sig-steps" }, ...(v.steps || []).map((s, i) => etapeEl(s, i, v))),
+    ));
+  }
   return box;
 }
-
 function etapeEl(s, i, v) {
   const info = ETAPE_STATUTS[s.statut] || ETAPE_STATUTS.en_attente;
   const nature = etiquetteEtape(s.kind);

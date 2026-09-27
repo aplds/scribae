@@ -170,6 +170,25 @@ export function createActesApi({
   // de service — mais il dit à l'écran d'administration si le service est déjà
   // administrable par une session (auquel cas il n'y a rien à « provisionner »).
   authMode = "demo",
+  // LA SIGNATURE INTERNE (voir signature-interne.mjs) : le COFFRE du service, la
+  // clé scellée du signataire et le certificat du service. Absent — ou éteint
+  // faute de clé de scellement —, le circuit interne n'existe pas : la route le
+  // DIT, plutôt que de simuler une signature que le service ne peut pas produire.
+  // Le service de démonstration de la plateforme n'en branche aucun : c'est ce
+  // qui fait que la signature interne n'existe qu'en auto-hébergement.
+  signatureInterne = null,
+  // LE RÉFÉRENTIEL DU SERVICE (`config` du magasin), lu à la demande. Il sert à
+  // UNE chose : donner le NOM du signataire quand le service produit une
+  // signature — le nom vient du porteur de la qualité au référentiel, jamais du
+  // corps de la requête (voir `porteSignature`). Absent (service de
+  // démonstration, épreuves), le nom déclaré est conservé tel quel.
+  referentiel = null,
+  // LE CONTRÔLE DE LÉGALITÉ (voir controle-legalite.mjs) : le seul composant qui
+  // appelle réellement l'API d'envoi @ctes, avec la clé — qui ne quitte pas le
+  // serveur. Absent (ou non configuré), la télétransmission reste SIMULÉE, et
+  // l'accusé de réception le dit (`demonstration: true`) plutôt que de se
+  // présenter comme un certificat opposable. Voir NC-IV-004.
+  controleLegalite = null,
 }) {
   const db = state;
   let dirty = null;           // dernier état sérialisé, en attente d'écriture
@@ -194,9 +213,11 @@ export function createActesApi({
   // transmet que si le client le lui a demandé au dépôt (`controleLegalite`), et
   // refuse alors de publier un acte dont la transmission manque. Mêmes règles,
   // mêmes mentions que le service de la plateforme (voir index.html).
-  // L'adresse est un EXEMPLE : la transmission du service est simulée
-  // (`simule: true`), et un déploiement réel pointe vers son propre point de
-  // terminaison @ctes.
+  // L'adresse est un EXEMPLE : le service transmet RÉELLEMENT quand le client
+  // de contrôle de légalité est branché (voir controle-legalite.mjs et les
+  // variables `SCRIBA_CONTROLE_LEGALITE_*`), et reste en simulation sinon —
+  // l'accusé de réception porte alors `demonstration: true`, et sa mention le
+  // dit.
   const CONTROLE_LEGALITE = {
     destinataire: "Préfecture — contrôle de légalité",
     mode: "ctes",
@@ -213,22 +234,52 @@ export function createActesApi({
     return d.getDate() + " " + MOIS_FR[d.getMonth()] + " " + d.getFullYear() + " à " + h + " h " + mi;
   }
 
-  function certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration = false }) {
+  function certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration = false, declaration = null }) {
     const d = destinataire || CONTROLE_LEGALITE.destinataire;
     const r = recuLe || nowIso();
+    const decl = declaration && typeof declaration === "object" ? declaration : null;
+    const par = decl ? String(decl.parNom || decl.par || "") : "";
+    const nature = decl
+      ? "Déclaration de transmission au contrôle de légalité"
+      : demonstration ? "Simulation d'accusé de réception de télétransmission" : "Accusé de réception de télétransmission";
+    const emisPar = decl
+      ? "Déclaration" + (par ? " de " + par : "") + " (acte transmis hors application)"
+      : demonstration ? "Simulation locale (aucun appel à l'API @ctes)" : "Contrôle de légalité — télétransmission @ctes";
+    const mention = decl
+      ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + (par ? " (déclaration de " + par + ")" : " (déclaration)")
+      : demonstration
+        ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + " (mention de démonstration — transmission simulée, sans appel sortant)"
+        : "Transmis au contrôle de légalité le " + dateHeureFr(r);
     return {
-      nature: demonstration ? "Simulation d'accusé de réception de télétransmission" : "Accusé de réception de télétransmission",
-      emisPar: demonstration ? "Simulation locale (aucun appel à l'API @ctes)" : "Contrôle de légalité — télétransmission @ctes",
+      nature,
+      emisPar,
       emisLe: r,
       destinataire: d,
       reference: String(reference || ""),
       empreinte: String(empreinte || ""),
       algorithme: "SHA-256",
       demonstration: !!demonstration,
+      declaration: !!decl,
       sceau: sha256([reference, r, d, empreinte].join("|")),
-      mention: demonstration
-        ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + " (mention de démonstration — transmission simulée, sans appel sortant)"
-        : "Transmis au contrôle de légalité le " + dateHeureFr(r),
+      mention,
+    };
+  }
+
+  // LA DÉCLARATION de transmission — le corps d'une transmission faite hors
+  // application : à qui (`destinataire`), à quelle date (`at`), par qui
+  // (`personId`/`auteur`), avec sa référence et son motif. C'est la voie du
+  // régime déclaratif, et, en régime API, la voie de l'acte transmis autrement.
+  function normaliserDeclaration(v) {
+    if (!v || typeof v !== "object") return null;
+    return {
+      at: String(v.at || "").slice(0, 40),
+      destinataire: String(v.destinataire || "").slice(0, 200),
+      reference: String(v.reference || "").slice(0, 120),
+      motif: String(v.motif || "").slice(0, 2000),
+      mode: String(v.mode || "").slice(0, 40),
+      personId: String(v.personId || "").slice(0, 80),
+      auteur: String(v.auteur || "").slice(0, 120),
+      entite: String(v.entite || "").slice(0, 160),
     };
   }
 
@@ -269,12 +320,92 @@ export function createActesApi({
   // lecture publique — la seule garantie que rien ne fuit par une route qu'on
   // aurait oublié de fermer. Voir l'audit, NC-I-004.
 
+  // --------------------------------------------- normalisation des champs clients
+  // Ces quatre réductions sont la copie EXACTE de celles du service de
+  // démonstration (index.html) : le client les envoie au dépôt, et les deux
+  // services doivent en garder la même chose. Elles bornent ce qui entre dans
+  // l'état — longueur des chaînes, nombre de points —, pour qu'un client
+  // bavard ne fasse pas grossir l'état sans limite.
+  function normaliserValidation(v) {
+    if (!v || typeof v !== "object") return null;
+    const etapes = Array.isArray(v.etapes) ? v.etapes.slice(0, 20).map((s) => String(s || "").slice(0, 24)) : [];
+    return {
+      statut: String(v.statut || "").slice(0, 24),
+      circuitLabel: String(v.circuitLabel || "").slice(0, 160),
+      empreinte: String(v.empreinte || "").slice(0, 128),
+      closLe: String(v.closLe || "").slice(0, 40),
+      etapes,
+    };
+  }
+  function normaliserRevision(v) {
+    if (!v || typeof v !== "object") return null;
+    return {
+      statut: String(v.statut || "").slice(0, 24),
+      empreinte: String(v.empreinte || "").slice(0, 128),
+      valideLe: String(v.valideLe || "").slice(0, 40),
+      corrige: v.corrige === true,
+      par: String(v.par || "").slice(0, 80),
+      // LES RÉVISEURS COMPÉTENTS (personnes du référentiel), tels que le client
+      // les a résolus au dépôt : c'est eux — et personne d'autre — qui pourront
+      // DÉCLARER la transmission de l'acte (voir `hTransmettre`). Le service ne
+      // connaît pas les compétences ; il tient cette liste du dépôt.
+      reviseurs: Array.isArray(v.reviseurs) ? v.reviseurs.slice(0, 20).map((x) => String(x || "").slice(0, 80)).filter(Boolean) : [],
+    };
+  }
+  // La version signée d'un acte du CIRCUIT EXTERNE : le PDF déposé et son
+  // empreinte. Le service ne vérifie pas la signature (il n'y a pas de
+  // certificat à vérifier), mais il conserve la pièce : c'est elle « l'original »
+  // que le recueil publie.
+  function normaliserVersionSignee(v) {
+    if (!v || typeof v !== "object") return null;
+    const url = String(v.url || "").slice(0, 2000);
+    if (!url) return null;
+    return {
+      url,
+      sha256: String(v.sha256 || "").slice(0, 128),
+      nom: String(v.nom || "").slice(0, 240),
+      taille: Number(v.taille) || 0,
+      type: String(v.type || "application/pdf").slice(0, 80),
+      deposeLe: String(v.deposeLe || "").slice(0, 40),
+      deposePar: String(v.deposePar || "").slice(0, 80),
+      deposeParNom: String(v.deposeParNom || "").slice(0, 120),
+      // La PIÈCE rangée par le service (voir server.mjs, `/v1/pieces`) : c'est
+      // par elle qu'on la retire tant que rien ne la cite.
+      pieceId: String(v.pieceId || "").slice(0, 64),
+    };
+  }
+  // La certification de conformité du réviseur : l'attestation que la pièce
+  // signée est conforme à la version numérique publiée. Le service l'exige,
+  // quand le client l'a déclarée requise au dépôt, avant de publier.
+  function normaliserCertification(v) {
+    if (!v || typeof v !== "object") return null;
+    const statut = String(v.statut || "").slice(0, 24);
+    if (statut !== "conforme" && statut !== "non_conforme") return null;
+    const points = Array.isArray(v.points) ? v.points.slice(0, 20).map((x) => String(x || "").slice(0, 60)) : [];
+    return {
+      statut,
+      par: String(v.par || "").slice(0, 80),
+      parNom: String(v.parNom || "").slice(0, 120),
+      le: String(v.le || "").slice(0, 40),
+      empreinte: String(v.empreinte || "").slice(0, 128),
+      sha256Signe: String(v.sha256Signe || "").slice(0, 128),
+      points,
+      remarque: String(v.remarque || "").slice(0, 2000),
+      motif: String(v.motif || "").slice(0, 2000),
+    };
+  }
+
   // -------------------------------------------------------------- projections
+  function resumeOriginalExterne(a) {
+    const s = a && a.originalExterne;
+    if (!s || !s.url) return null;
+    return { url: s.url, sha256: s.sha256, nom: s.nom, taille: s.taille, type: s.type, deposeLe: s.deposeLe, deposePar: s.deposePar, deposeParNom: s.deposeParNom, pieceId: s.pieceId || "", certification: a.certification || null };
+  }
   function resumeActe(a) {
-    return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, sha256: a.sha256, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null };
+    return { id: a.id, numero: a.numero, objet: a.objet, nature: a.nature, entityName: a.entityName, dateSignature: a.dateSignature, statut: a.statut, publishable: a.publishable !== false, controleLegalite: a.controleLegalite === true, transmission: a.transmission || null, sha256: a.sha256, deposeLe: a.deposeLe, signatureId: a.signatureId || null, publication: a.publication || null, validation: a.validation || null, revision: a.revision || null, signatureMode: a.signatureMode || "electronique", certificationRequise: a.certificationRequise === true, originalExterne: resumeOriginalExterne(a), certification: a.certification || null };
   }
   function resumeSignature(s) {
-    return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
+    return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, niveau: s.niveau || "", attribution: s.attribution || "", verifie: s.verifie === true, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
   }
   function resumePublication(p, latest) {
     // `signature` (nom et fonction du signataire, niveau, date) voyage avec la
@@ -282,7 +413,10 @@ export function createActesApi({
     // non qualifiée » / « qualifiée ») sans relire l'acte — voir
     // src/lib/qualification-signature.js. Rien de nominatif de plus que l'auteur,
     // déjà public ; la part interne de l'original reste, elle, au registre.
-    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined };
+    // `originalExterne` (la version signée d'un circuit externe, ou l'original
+    // conservé d'une reprise) voyage aussi : c'est l'adresse que le recueil
+    // public cite, et que le poste affiche dans sa liste des publications.
+    return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, pieceId: p.originalExterne.pieceId || "", certification: p.originalExterne.certification || null } : null };
   }
 
   // ------------------------------------------- publications réservées aux agents
@@ -343,9 +477,9 @@ export function createActesApi({
           get: { operationId: "listerActes", summary: "Lister les actes déposés", tags: ["Actes"], responses: { 200: { description: "Liste des actes finalisés reçus par le service" } } },
           post: {
             operationId: "deposerActe", summary: "Déposer un acte finalisé", tags: ["Actes"],
-            description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `controleLegalite` (false par défaut) déclare que l'acte doit être transmis au contrôle de légalité avant sa publication.",
+            description: "Reçoit l'acte finalisé (Akoma Ntoso) et le conserve en vue de la signature. Redéposer un document identique encore en circuit renvoie le même acte (200 au lieu de 201). Le champ `publishable` (true par défaut) indique si l'acte pourra être publié au recueil : mis à false pour un acte individuel, il rend la publication impossible même après signature. Le champ `controleLegalite` (false par défaut) déclare que l'acte doit être transmis au contrôle de légalité avant sa publication. Le client transmet aussi l'état du parapheur (`validation`) et de la révision (`revision`) : le service n'exécute pas ces circuits, il refuse seulement d'ouvrir une signature sur un acte qu'ils n'ont pas approuvé. Le champ `signatureMode` (`electronique` par défaut, ou `externe`) dit quel circuit mène l'acte, et `certificationRequise` si la conformité de la pièce signée devra être certifiée (circuit externe).",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, themeId: { type: "string", description: "Famille de la trame dont l'acte est issu : le THÈME sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème au dépôt." }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, ecarts: { type: "integer" }, controleLegalite: { type: "boolean", default: false, description: "true si l'acte doit être transmis au contrôle de légalité avant publication" } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["akn"], properties: { akn: { type: "string", description: "Le document Akoma Ntoso 3.0" }, numero: { type: "string" }, objet: { type: "string" }, nature: { type: "string" }, themeId: { type: "string", description: "Famille de la trame dont l'acte est issu : le THÈME sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème au dépôt." }, entityId: { type: "string" }, entityName: { type: "string" }, dateSignature: { type: "string", format: "date" }, trameId: { type: "string" }, ecarts: { type: "integer" }, publishable: { type: "boolean", default: true, description: "false pour un acte individuel non publiable" }, controleLegalite: { type: "boolean", default: false, description: "true si l'acte doit être transmis au contrôle de légalité avant publication" }, validation: { type: "object", nullable: true, description: "État du parapheur au dépôt : un acte dont la validation n'est pas au statut « valide » ne pourra pas être envoyé en signature (409 `validation_incomplete`)." }, revision: { type: "object", nullable: true, description: "État de la révision au dépôt : un acte dont la révision n'est pas au statut « valide » ne pourra pas être envoyé en signature (409 `revision_incomplete`)." }, signatureMode: { type: "string", enum: ["electronique", "externe"], default: "electronique", description: "Circuit qui mène l'acte : electronique (prestataire, API), ou externe (papier ou outil tiers — le client déclarera la version signée par /v1/actes/{id}/signature-externe)." }, certificationRequise: { type: "boolean", default: false, description: "Circuit externe : true si un réviseur compétent doit certifier la conformité de la pièce signée avant publication (409 `conformite_non_certifiee`)." }, reprise: { type: "boolean", default: false, description: "true pour la reprise d'un acte ancien : la publication est alors autorisée sans signature." } } } } } },
             responses: { 201: { description: "Acte déposé" }, 200: { description: "Acte déjà déposé (idempotent)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide" }, 413: { description: "Document trop volumineux" } },
           },
         },
@@ -354,16 +488,34 @@ export function createActesApi({
         "/v1/actes/{id}/signature": {
           post: {
             operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
-            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte alors le lien de signature réel (`lienSignature`, `dossier`) ; sinon le circuit est simulé (`simulation: true`), et rien ne sort de la collectivité. La clé du prestataire n'est jamais transmise par le client, ni écrite au registre.",
+            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte alors le lien de signature réel (`lienSignature`, `dossier`) ; sinon le circuit est simulé (`simulation: true`), et rien ne sort de la collectivité. La clé du prestataire n'est jamais transmise par le client, ni écrite au registre. AVEC `mode: \"interne\"`, la route change de nature : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre (SCRIBA_SIGNATURE_KV_KEY), et rend l'original signé dans la réponse — aucune clé ne quitte le serveur. Ce circuit n'existe qu'en auto-hébergement : sans clé de scellement (et sur le service de démonstration), la route refuse (409 `signature_interne_indisponible`). QUAND LE SERVICE IDENTIFIE LES PERSONNES (déploiement à session : AUTH_MODE=password ou oidc), la signature est opposée à l'opérateur : le signataire déclaré doit porter un `personId`, et ce `personId` doit être celui du compte connecté — sinon la route refuse (403 `signature_non_habilitée`, `signataire_non_identifie` ou `signature_sans_identite`). Le nom inscrit vient alors du RÉFÉRENTIEL du service, jamais du corps : personne ne signe à la place du signataire.",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (voir Administration › Signature). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { mode: { type: "string", enum: ["interne"], description: "interne : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre — aucune clé ne quitte le serveur ; l'original signé est rendu dans la réponse. Auto-hébergement seulement." }, signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (voir Administration › Signature). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
             responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé" }, 401: { description: "Jeton absent" } },
+          },
+        },
+        "/v1/actes/{id}/signature-externe": {
+          post: {
+            operationId: "declarerVersionSignee", summary: "Déclarer la version signée (circuit externe)", tags: ["Signature"],
+            description: "Circuit externe (papier ou outil tiers, sans API) : l'acte a été signé hors de l'application ; le client dépose ici le PDF signé et son empreinte SHA-256. Le service n'a pas de signature cryptographique à vérifier — il enregistre la pièce et fait passer l'acte au statut « signée ». Une nouvelle version signée annule la certification de conformité précédente. La publication reste refusée (409 `conformite_non_certifiee`) tant que la conformité n'est pas certifiée, quand le client l'a déclarée requise au dépôt.",
+            security: [{ bearerAuth: [] }],
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["signe"], properties: { signe: { type: "object", description: "La version signée déposée", properties: { url: { type: "string" }, sha256: { type: "string" }, nom: { type: "string" }, taille: { type: "integer" }, deposeLe: { type: "string" }, deposePar: { type: "string" }, deposeParNom: { type: "string" }, pieceId: { type: "string" } } }, certificationRequise: { type: "boolean", description: "true si un réviseur compétent doit certifier la conformité avant publication" } } } } } },
+            responses: { 201: { description: "Version signée enregistrée" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà publié, ou circuit non externe (code `circuit_non_externe`)" }, 422: { description: "Version signée absente (code `version_signee_absente`)" }, 401: { description: "Jeton absent" } },
+          },
+        },
+        "/v1/actes/{id}/conformite": {
+          post: {
+            operationId: "certifierConformite", summary: "Certifier la conformité de la version signée (circuit externe)", tags: ["Signature"],
+            description: "Le contrôle du réviseur dans le circuit externe : il atteste que la pièce signée déposée est conforme à la version numérique qui sera publiée. La certification porte sur l'empreinte de la version signée : une empreinte différente de celle déposée est refusée (409 `certification_incoherente`). Une conformité refusée (`non_conforme`) replace l'acte au statut « déposé » : il attend une nouvelle version signée. QUAND LE SERVICE IDENTIFIE LES PERSONNES, l'attestation doit porter le `personId` du réviseur, et ce doit être celui du compte connecté — sinon la route refuse (403 `conformite_non_habilitée`) : on ne certifie pas à la place d'un autre. Le nom inscrit vient du référentiel du service.",
+            security: [{ bearerAuth: [] }],
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["certification"], properties: { certification: { type: "object", properties: { statut: { type: "string", enum: ["conforme", "non_conforme"] }, par: { type: "string" }, parNom: { type: "string" }, le: { type: "string" }, empreinte: { type: "string", description: "Empreinte du texte de la version numérique" }, sha256Signe: { type: "string", description: "Empreinte de la version signée certifiée" }, points: { type: "array", items: { type: "string" } }, remarque: { type: "string" }, motif: { type: "string", description: "Motif du refus (statut non_conforme)" } } } } } } } },
+            responses: { 201: { description: "Certification enregistrée" }, 404: { description: "Acte inconnu" }, 409: { description: "Aucune version signée déposée, ou certification incohérente" }, 422: { description: "Certification invalide" }, 401: { description: "Jeton absent" } },
           },
         },
         "/v1/webhooks/signature": {
           post: {
             operationId: "notifierSignature", summary: "Notification du prestataire (retour de l'acte signé)", tags: ["Signature"],
-            description: "Appelée par le prestataire lorsque la signature est apposée. Le service recalcule l'empreinte SHA-256 du document signé et la compare à celle de l'acte déposé : une différence est refusée (409), la signature n'est jamais acceptée sur un document qui n'est pas celui qui a été déposé.",
+            description: "Appelée par le prestataire lorsque la signature est apposée. Le service recalcule l'empreinte SHA-256 du document signé et la compare à celle de l'acte déposé : une différence est refusée (409), la signature n'est jamais acceptée sur un document qui n'est pas celui qui a été déposé. QUAND L'APPELANT EST UNE SESSION — c'est le cas de l'agent qui rapporte sa propre signature (circuit simple) —, le service exige que la personne du signataire portée par le paquet soit celle de l'opérateur : sinon il refuse (403 `signature_non_habilitée`) et marque le circuit « rejetée ». Une CLÉ de service (le prestataire) AFFIRME la signature, et celle-ci porte alors `attribution: \"declaree\"` ; une signature opposée à une personne identifiée porte `attribution: \"verifiee\"`.",
             requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["signatureId", "documentSigne"], properties: { signatureId: { type: "string" }, statut: { type: "string", enum: ["signee", "refusee"] }, documentSigne: { type: "object", description: "L'original signé (document + signatures + horodatage)" } } } } } },
             responses: { 200: { description: "Notification acceptée" }, 404: { description: "Circuit inconnu" }, 409: { description: "Empreinte du document signé différente de celle déposée" } },
           },
@@ -374,10 +526,10 @@ export function createActesApi({
         "/v1/actes/{id}/transmission": {
           post: {
             operationId: "transmettreControleLegalite", summary: "Transmettre l'acte signé au contrôle de légalité", tags: ["Contrôle de légalité"],
-            description: "Adresse l'acte signé à l'API d'envoi du contrôle de légalité (télétransmission @ctes). L'accusé de réception délivré vaut certificat informatique de transmission : « Transmis au contrôle de légalité le … à … ». Le service refuse (409) de transmettre un acte qui n'est pas signé ; un acte déjà transmis renvoie son certificat tel quel (idempotent).",
+            description: "Adresse l'acte signé à l'API d'envoi du contrôle de légalité (télétransmission @ctes), OU déclare une transmission faite hors application. TROIS VOIES : (1) DÉCLARATION — le corps porte `declaration` (`at` et `destinataire` requis, plus `reference`, `motif`, `mode`, `personId`) : aucune requête n'est adressée à l'API, le certificat conservé est une DÉCLARATION, et sa mention nomme son auteur. C'est la voie du régime déclaratif, et celle de l'acte transmis autrement en régime API. Quand le service identifie les personnes (session), la déclaration est opposée à l'opérateur : `declaration.personId` doit être celui du compte connecté (403 `declaration_non_habilitée`), et l'acte peut exiger un réviseur compétent (`revision.reviseurs`, 403 `declaration_non_habilitée`) ; le nom inscrit vient du référentiel. (2) APPEL RÉEL — sans `declaration`, quand l'API est branchée (SCRIBA_CONTROLE_LEGALITE_URL et _CLE), l'appel a lieu et le certificat est l'accusé de réception rendu par l'API ; un refus échoue en 502 (code `transmission_echec`) sans rien enregistrer. (3) SIMULATION — sans `declaration` et sans API branchée, le certificat est fabriqué localement et porte `demonstration: true`, avec une mention qui le dit. Le service refuse (409) de transmettre un acte qui n'est pas signé ; un acte déjà transmis renvoie son certificat tel quel (idempotent).",
             security: [{ bearerAuth: [] }],
-            requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { at: { type: "string", description: "Horodatage de la remise (ISO 8601) ; à défaut, l'heure du service" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, destinataire: { type: "string" }, auteur: { type: "string" }, entite: { type: "string" } } } } } },
-            responses: { 201: { description: "Transmis : certificat de transmission délivré" }, 200: { description: "Acte déjà transmis (idempotent)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé (code `acte_non_signe`)" }, 401: { description: "Jeton absent" } },
+            requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { at: { type: "string", description: "Horodatage de la remise (ISO 8601) ; à défaut, l'heure du service" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, destinataire: { type: "string" }, auteur: { type: "string" }, entite: { type: "string" }, declaration: { type: "object", nullable: true, description: "Déclaration d'une transmission faite HORS application : aucune requête n'est adressée à l'API, et le certificat conservé est une déclaration (il nomme son auteur). `at` et `destinataire` sont requis.", properties: { at: { type: "string", description: "Date de la transmission déclarée (ISO 8601)" }, destinataire: { type: "string", description: "À qui l'acte a été transmis" }, reference: { type: "string", description: "Référence de l'envoi (bordereau, accusé, identifiant @ctes) ; à défaut, le service en forge une" }, motif: { type: "string", description: "Pourquoi la transmission est déclarée plutôt que faite par l'API (API injoignable, envoi hors application…)" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, personId: { type: "string", description: "Personne du référentiel qui déclare (le réviseur). Opposée à la session quand le service identifie les personnes." }, auteur: { type: "string", description: "Nom déclaré du déclarant (le service lui substitue le nom du référentiel quand il identifie la personne)" }, entite: { type: "string", description: "Entité qui a transmis" } } } } } } } },
+            responses: { 201: { description: "Transmis : certificat de transmission délivré (accusé réel, déclaration, ou simulation marquée demonstration: true) ; pour une déclaration, la réponse porte `attribution` (`verifiee` | `declaree`) et `auteur` — ce que le service a pu attester" }, 200: { description: "Acte déjà transmis (idempotent)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé (code `acte_non_signe`)" }, 403: { description: "Déclaration engageant une autre personne, ou hors compétence (code `declaration_non_habilitée`, `operateur_non_identifie`)" }, 422: { description: "Déclaration incomplète (code `declaration_incomplete`) ou illisible (code `declaration_invalide`)" }, 502: { description: "L'API de contrôle de légalité a refusé ou n'a pas répondu (code `transmission_echec`)" }, 401: { description: "Jeton absent" } },
           },
           get: { operationId: "lireTransmission", summary: "Lire le certificat de transmission d'un acte", tags: ["Contrôle de légalité"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La transmission et son certificat" }, 404: { description: "Acte inconnu, ou acte non transmis (code `transmission_absente`)" } } },
         },
@@ -385,7 +537,7 @@ export function createActesApi({
         "/v1/actes/{id}/publication": {
           post: {
             operationId: "publierActe", summary: "Publier l'acte signé et attribuer son ELI", tags: ["Publication"],
-            description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
+            description: "Dépose la version en ligne au recueil et attribue l'identifiant ELI. La publication est refusée (409) tant que l'acte n'est pas signé : c'est la chaîne d'intégrité ; refusée aussi (409) si l'acte a été déclaré non publiable au dépôt (acte individuel, code `acte_non_publiable`) ; refusée aussi (409) si l'acte suit le circuit externe et que sa version signée manque (code `version_signee_absente`) ou que sa conformité n'est pas certifiée quand elle est requise (code `conformite_non_certifiee`) ; refusée aussi (409) si l'acte a été déclaré soumis au contrôle de légalité mais n'a pas encore été transmis (code `transmission_absente`) ; et refusée (422) si la date de publication précède la date de signature. Fournir un en-tête « Idempotency-Key » rend l'appel rejouable sans créer de doublon.",
             security: [{ bearerAuth: [] }],
             requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["html", "akn", "original"], properties: { recueil: { type: "string" }, recueilsExternes: { type: "array", description: "Les renvois du bas de page public (« Autres recueils », sites de référence), portés par la publication : le service auto-hébergé, qui rend lui-même l'espace public, ne connaît pas le référentiel. Chaque entrée : `{ type: \"bis\"|\"inactif\"|\"ressource\", label, url, du, au, note }`.", items: { type: "object" } }, mentions: { type: "array", description: "Les mentions du pied de page de l'espace public (légales, conditions de réutilisation, accessibilité), telles que `mentionsPubliques` les rend : `{ id, mode: \"texte\"|\"lien\", titre, texte, url, lienLabel }`.", items: { type: "object" } }, chatsErreur: { type: "boolean", description: "Illustrer les pages d'erreur du recueil d'une photographie de http.cat (éteint par défaut). Le service le lit sur la PLUS RÉCENTE publication qui le porte, comme les renvois et les mentions." }, themeId: { type: "string", description: "Famille de la trame : le thème sous lequel le recueil public classe l'acte." }, themeLabel: { type: "string", description: "Libellé du thème." }, datePublication: { type: "string", format: "date" }, opposabilite: { type: "object", properties: { mode: { type: "string", enum: ["lendemain", "jours"] }, jours: { type: "integer" } } }, kind: { type: "string", enum: ["originale", "consolidee", "modificative"] }, html: { type: "string", description: "La version en ligne" }, akn: { type: "string" }, jsonld: { type: "string" }, md: { type: "string", description: "Le texte de l'acte en Markdown (sert les robots et les agents)" }, texte: { type: "string", description: "Le texte de l'acte en texte brut" }, original: { type: "object", description: "L'original signé — sa part PUBLIQUE (document, signatures, horodatage). Le dossier interne en est retiré avant conservation." }, originalInterne: { type: "object", description: "La part INTERNE de l'original : coordonnées du signataire, compte, authentification, courriels. Conservée au registre, jamais servie par une route publique (voir /v1/actes/{id}/dossier-signature)." } } } } } },
             responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé" }, 422: { description: "Version en ligne manquante" } },
@@ -439,9 +591,28 @@ export function createActesApi({
       themeId: b.themeId || "", themeLabel: b.themeLabel || "",
       entityId: b.entityId || "", entityName: b.entityName || "",
       dateSignature: b.dateSignature || "", trameId: b.trameId || "", ecarts: b.ecarts || 0,
+      // Le service ne connaît pas les trames : le client lui dit si l'acte est
+      // publiable (faux pour les actes individuels). Un acte déclaré non publiable
+      // ne pourra jamais être publié, même signé (voir `hPublier`).
+      publishable: b.publishable !== false,
       // Le client dit si l'acte doit être transmis au contrôle de légalité avant
       // sa publication (fonction éteinte par défaut côté client).
       controleLegalite: b.controleLegalite === true,
+      // État du parapheur au moment du dépôt, réduit à des champs sûrs : le
+      // service n'exécute pas le circuit de validation, il en conserve la trace
+      // pour refuser d'ouvrir une signature sur un acte non approuvé.
+      validation: normaliserValidation(b.validation),
+      // État de la RÉVISION au moment du dépôt : le service ne l'exécute pas, il
+      // refuse seulement d'ouvrir une signature sur un acte que le réviseur n'a
+      // pas validé (voir `hEnvoyerEnSignature`).
+      revision: normaliserRevision(b.revision),
+      // Le CIRCUIT EXTERNE (papier ou outil tiers, sans API) : le client dit au
+      // dépôt quel circuit mène l'acte, et si la conformité de la pièce signée
+      // devra être certifiée par un réviseur. Un acte mené ainsi ne s'ouvre pas
+      // comme un circuit électronique : sa version signée est DÉCLARÉE (voir
+      // `hSignatureExterne`), et sa conformité CERTIFIÉE (voir `hConformite`).
+      signatureMode: b.signatureMode === "externe" ? "externe" : "electronique",
+      certificationRequise: b.certificationRequise === true,
       // REPRISE d'un acte ancien (voir src/lib/reprise.js) : le dépôt le déclare,
       // et la publication s'en servira pour autoriser la publication SANS
       // signature — un acte ancien a déjà été signé, et c'est son original qui
@@ -476,11 +647,212 @@ export function createActesApi({
   // restent enregistrés sur le circuit, pour que la lecture d'un dossier dise
   // toujours d'où le numéro et le lien venaient. JAMAIS la clé.
   // --------------------------------------------------------------------------
+  // ==========================================================================
+  // LA PORTE DE SIGNATURE — personne ne signe à la place d'un autre.
+  //
+  // Une signature électronique engage une PERSONNE. Le service portait jusqu'ici
+  // la signature au nom du signataire DÉCLARÉ par l'appelant (`signataires[0]`),
+  // sans jamais opposer cette identité à celle de l'opérateur : un compte
+  // habilité à envoyer en signature pouvait donc faire signer un acte au nom du
+  // maire — c'est le constat NC-II-006, « usurpation du signataire ».
+  //
+  // Cette porte tient en deux gestes :
+  //
+  //   1. l'OPÉRATEUR doit être identifié par le service — une SESSION, donc une
+  //      personne. Une CLÉ de service n'en porte aucune : elle ne signe jamais au
+  //      nom de quelqu'un. (En mode « demo », le service n'authentifie AUCUNE
+  //      personne — les comptes vivent dans le navigateur —, et il le DIT : la
+  //      signature est alors « déclarée », non « vérifiée » ; voir le champ
+  //      `attribution` du circuit.)
+  //   2. l'opérateur doit ÊTRE le signataire déclaré : son `personId` de session
+  //      doit être celui du signataire. Le NOM imprimé, lui, vient du
+  //      RÉFÉRENTIEL DU SERVICE — jamais de la requête : un compte ne peut donc
+  //      pas se faire passer pour un autre en changeant le champ `nom`.
+  //
+  // Le nom du signataire est le seul champ que le service RÉÉCRIT : la qualité
+  // (« Le maire », « Par délégation, … ») vient de la chaîne de signature, que le
+  // service ne connaît pas — c'est le référentiel du client qui l'établit.
+  //
+  // Rend `{ ok, signataire, operateur, verifie, attribution, motif, code, detail }`.
+  // ==========================================================================
+  async function porteSignature(ctx, declare) {
+    const s = declare && typeof declare === "object" ? declare : {};
+    const brut = { ok: true, signataire: s, operateur: null, verifie: false, motif: "", code: "" };
+    // Mode « demo » : le service n'a AUCUNE identité de personne à opposer. On ne
+    // simule donc pas une vérification — on la déclare absente, et la signature
+    // porte `attribution: "declaree"` (voir `attributionDans`). Un service qui
+    // administre par session, lui, ne s'en contente pas.
+    if (!ctx || ctx.sessionRequise !== true) return { ...brut, attribution: "declaree" };
+    const id = ctx.identite || null;
+    if (!id || id.type !== "session") {
+      return {
+        ok: false, attribution: "refusee", code: "signature_sans_identite",
+        motif: "Une signature engage une personne : elle se demande depuis SA session (identifiant et mot de passe), "
+          + "non avec une clé de service — une clé ne porte aucune personne.",
+      };
+    }
+    const moi = String(id.personId || "");
+    if (!moi) {
+      return {
+        ok: false, attribution: "refusee", code: "operateur_non_identifie",
+        motif: "Votre compte n'est rattaché à aucune personne du référentiel : le service ne peut donc pas vous "
+          + "identifier comme signataire. Demandez à un administrateur de rattacher votre compte à votre personne "
+          + "(Administration › Comptes et rôles).",
+      };
+    }
+    const lui = String(s.personId || "");
+    if (!lui) {
+      return {
+        ok: false, attribution: "refusee", code: "signataire_non_identifie",
+        motif: "Le signataire de cet acte n'est pas identifié (aucune personne du référentiel) : la signature ne "
+          + "peut pas lui être attribuée, et le service refuse de signer au nom d'un nom.",
+      };
+    }
+    if (lui !== moi) {
+      return {
+        ok: false, attribution: "refusee", code: "signature_non_habilitée",
+        signataire: lui, operateur: moi,
+        motif: "Cette signature engage une autre personne que vous : personne ne signe à la place du signataire. "
+          + "Seul son titulaire peut l'apposer, depuis son propre compte.",
+      };
+    }
+    let nom = String(s.nom || "");
+    try {
+      const config = referentiel ? await referentiel() : null;
+      const p = config && Array.isArray(config.people) ? config.people.find((x) => x && x.id === lui) : null;
+      if (p) nom = [p.civility, p.firstName, p.lastName].filter(Boolean).join(" ") || nom;
+    } catch (e) { /* référentiel illisible : le nom déclaré reste, la signature est vérifiée par ailleurs */ }
+    return {
+      ok: true, verifie: true, attribution: "verifiee", motif: "", code: "",
+      signataire: {
+        ...s, nom, personId: lui,
+        courriel: String(s.courriel || id.email || ""),
+        compteId: String(s.compteId || id.id || ""),
+      },
+      // L'OPÉRATEUR tel que le SERVICE l'a identifié (et non tel que la requête le
+      // déclare) : c'est lui qui va au dossier interne.
+      operateur: { id: id.id || "", nom: id.login || "", courriel: id.email || "", compte: id.login || "", personId: moi },
+    };
+  }
+
+  // L'attribution d'une signature, telle qu'elle s'inscrit au circuit : ce que le
+  // service a pu VÉRIFIER de l'identité du signataire. `verifiee` quand une
+  // session a été opposée au signataire ; `declaree` quand le service n'a aucune
+  // identité de personne (mode « demo »), ou que c'est un PRESTATAIRE (une clé de
+  // service) qui apporte la signature — c'est alors lui qui l'affirme.
+  const attributionDe = (ctx) => (ctx && ctx.identite && ctx.identite.type === "session" && ctx.sessionRequise === true ? "verifiee" : "declaree");
+
+  // --------------------------------------------------------------------------
+  // LA SIGNATURE INTERNE — le service signe, et la clé ne sort pas du coffre.
+  //
+  // C'est le seul circuit dont la clé privée n'est PAS dans le navigateur : le
+  // service la détient, scellée au repos, et signe au nom du signataire. Ce que
+  // le poste reçoit, c'est l'original signé — sa page, son certificat, son
+  // horodatage —, jamais la clé (voir signature-interne.mjs).
+  //
+  // Ce circuit n'existe qu'en AUTO-HÉBERGEMENT : il suppose un coffre durable et
+  // une clé de scellement (`SCRIBA_SIGNATURE_KV_KEY`). Sans elle — et sur le
+  // service de démonstration, qui n'en tient aucun —, la route le dit
+  // franchement, avec le même code que l'application sait présenter. Simuler
+  // ici une signature que le service ne peut pas produire serait le mensonge que
+  // l'audit a précisément relevé (NC-IV-001).
+  // --------------------------------------------------------------------------
+  async function hSignerInterne(ctx, acte, b) {
+    const dispo = signatureInterne && typeof signatureInterne.signer === "function" && typeof signatureInterne.disponible === "function" && signatureInterne.disponible();
+    if (!dispo) {
+      const motif = signatureInterne && typeof signatureInterne.motif === "function"
+        ? signatureInterne.motif()
+        : "Ce service ne tient pas de coffre de signature : la signature interne n'est disponible qu'en auto-hébergement.";
+      return err(409, "La signature interne n'est pas disponible sur ce service. " + motif, { code: "signature_interne_indisponible", motif });
+    }
+    const declares = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
+    // LA PORTE : c'est le service qui décide au nom de QUI il signe. Le signataire
+    // déclaré est confronté à l'opérateur identifié (voir `porteSignature`) ; le
+    // nom imprimé vient du référentiel, pas de la requête.
+    const porte = await porteSignature(ctx, declares[0]);
+    if (!porte.ok) return err(403, porte.motif, { code: porte.code });
+    const signataire = porte.signataire;
+    const signataires = [signataire, ...declares.slice(1)];
+    const operateur = porte.operateur || (b.operateur && typeof b.operateur === "object" ? b.operateur : {});
+    let pack;
+    try {
+      pack = await signatureInterne.signer({
+        akn: acte.akn, signataire, operateur,
+        reference: acte.numero || acte.id, objet: acte.objet || "",
+        poste: String(b.poste || "").slice(0, 300), ip: String(ctx.ip || "").slice(0, 60),
+      });
+    } catch (e) {
+      return err(502, "La signature interne a échoué : " + String((e && e.message) || e), { code: "signature_interne_echec" });
+    }
+    const id = nextId("SIG", db.signatures);
+    const signeLe = (pack.signatures && pack.signatures[0] && pack.signatures[0].signeLe) || nowIso();
+    const sig = {
+      id, acteId: acte.id, numero: acte.numero, acteSha256: acte.sha256,
+      statut: "signee", signataires, niveau: "interne",
+      urlNotification: "",
+      prestataire: (pack.prestataire && pack.prestataire.id) || "scribae-interne",
+      api: { mode: "interne" },
+      // CE QUE LE SERVICE A PU VÉRIFIER DE L'IDENTITÉ DU SIGNATAIRE : `verifiee`
+      // quand une session a été opposée au signataire, `declaree` quand le
+      // service n'authentifie aucune personne (mode « demo »).
+      attribution: porte.attribution, verifie: porte.verifie === true,
+      simulation: false, creeLe: nowIso(), signeLe, documentSigne: pack,
+    };
+    const avant = { statut: acte.statut, signatureId: acte.signatureId, signeLe: acte.signeLe, originalInterne: acte.originalInterne };
+    db.signatures[id] = sig;
+    acte.statut = "signee";
+    acte.signeLe = signeLe;
+    acte.signatureId = id;
+    // La part NON DIFFUSABLE de l'original reste au registre : c'est elle que
+    // sert la route protégée `/v1/actes/{id}/dossier-signature`, et elle ne part
+    // jamais au recueil (voir original-signe.mjs).
+    acte.originalInterne = pack.interne || null;
+    evince(db.signatures, maxSignatures, "creeLe");
+    if (!persist()) {
+      delete db.signatures[id];
+      acte.statut = avant.statut; acte.signatureId = avant.signatureId;
+      acte.signeLe = avant.signeLe; acte.originalInterne = avant.originalInterne;
+      return err(507, "Le service n'a plus de place disponible.");
+    }
+    journaliser("signature_interne", id + " — acte " + acte.id + " — " + (signataire.nom || "?")
+      + " — empreinte " + String(pack.document.sha256).slice(0, 16) + "… (clé détenue par le service)");
+    return ok(201, {
+      signatureId: id, statut: "signee", acteId: acte.id,
+      empreinte: pack.document.sha256, signeLe, signataires, niveau: "interne",
+      // L'original signé COMPLET (part publique + dossier interne) : c'est la
+      // MÊME forme que celle des autres circuits, si bien que la vérification du
+      // recueil, la part publique et la publication s'appliquent sans rien de
+      // plus. La page de l'original (`pageHtml`) est ajoutée par l'application,
+      // qui seule sait rendre le document.
+      documentSigne: pack,
+      certificat: (pack.signatures[0] || {}).certificat || null,
+      horodatage: pack.horodatage || null,
+      prestataire: pack.prestataire || null,
+      simulation: false,
+    }, { location: "/v1/signatures/" + id });
+  }
+
   async function hEnvoyerEnSignature(ctx) {
     const acte = lireActe(ctx.params.id);
     if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
     if (acte.statut === "signee" || acte.statut === "publie") return err(409, "Cet acte est déjà signé (" + acte.statut + ").", { code: "deja_signe" });
+    // Porte du PARAPHEUR : le service refuse d'ouvrir un circuit sur un acte dont
+    // la validation n'est pas achevée. L'acte signé est ainsi nécessairement
+    // l'acte qui a été approuvé (même règle que la porte du client).
+    if (acte.validation && acte.validation.statut !== "valide") {
+      return err(409, "Le circuit de validation de cet acte n'est pas achevé : la signature ne peut pas être ouverte.", { code: "validation_incomplete", validation: acte.validation });
+    }
+    // Porte de la RÉVISION, après celle du parapheur : un acte soumis à un
+    // réviseur — le client le déclare au dépôt en joignant l'état de la révision —
+    // ne s'ouvre qu'une fois la révision VALIDE. C'est ce qui garantit que l'acte
+    // signé est bien celui qui a été contrôlé.
+    if (acte.revision && acte.revision.statut !== "valide") {
+      return err(409, "La révision de cet acte n'est pas achevée : la signature ne peut pas être ouverte.", { code: "revision_incomplete", revision: acte.revision });
+    }
     const b = ctx.body || {};
+    // LE CIRCUIT INTERNE se décide ICI, avant toute ouverture de circuit : le
+    // service signe lui-même, et il n'y a rien à ouvrir auprès d'un prestataire.
+    if (String(b.mode || "") === "interne") return hSignerInterne(ctx, acte, b);
     const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
     const reglages = { ...(b.api || {}) };
     const niveau = b.niveau || reglages.niveau || "avancee";
@@ -499,6 +871,14 @@ export function createActesApi({
       // Les réglages reçus — jamais la clé, qui n'est même pas transmise par le
       // client : elle ne vit qu'auprès du service (SCRIBA_SIGNATURE_API_CLE).
       api: { ...reglages },
+      // QUI SIGNE : `verifiee` quand l'appelant est une personne identifiée et
+      // que le signataire désigné EST cette personne — c'est le cas quand le
+      // titulaire envoie lui-même. `declaree` quand c'est la RÉDACTION qui
+      // envoie (l'acte part pour la signature d'un autre : c'est le geste normal
+      // du circuit électronique, et c'est le PRESTATAIRE qui authentifiera
+      // ensuite le signataire), ou quand le service n'identifie aucune personne
+      // (mode « demo »).
+      attribution: attributionDe(ctx),
       simulation: !branche,
       creeLe: nowIso(), documentSigne: null,
     };
@@ -563,7 +943,7 @@ export function createActesApi({
     }, { location: "/v1/signatures/" + id });
   }
 
-  function hWebhookSignature(ctx) {
+  async function hWebhookSignature(ctx) {
     const b = ctx.body || {};
     const sig = lireSignature(b.signatureId);
     if (!sig) return err(404, "Circuit de signature inconnu : " + (b.signatureId || "(absent)"));
@@ -572,6 +952,55 @@ export function createActesApi({
     if (!pack || !pack.document || typeof pack.document.akn !== "string") return err(400, "Notification invalide : `documentSigne.document.akn` est attendu.", { code: "document_absent" });
     const acte = lireActe(sig.acteId);
     if (!acte) return err(404, "Acte d'origine introuvable pour ce circuit.");
+    // QUI A SIGNÉ ? Quand l'appelant est une PERSONNE (une session), la signature
+    // qu'elle apporte doit être LA SIENNE. Le paquet porte la personne du
+    // signataire (`interne.signataire.personId`, posé par le dossier de
+    // signature) ; elle doit être celle de l'opérateur. Sans cette porte, le
+    // compte d'un rédacteur pouvait apporter un paquet signé au nom du maire —
+    // sur le circuit SIMPLE, où c'est le poste qui confectionne le paquet : c'est
+    // le même trou que `porteSignature` referme pour le circuit interne, et il se
+    // referme ici pour le circuit simple. Une CLÉ de service (le prestateur réel,
+    // ou un script) n'est pas une personne : elle AFFIRME la signature, et elle
+    // est tracée comme telle (`attribution: « declaree »`).
+    //
+    // LA SEULE EXCEPTION, et elle est étroite : un ADMINISTRATEUR peut POSER AU
+    // REGISTRE un original déjà signé (le rétablissement — le service a perdu la
+    // mémoire de l'acte), ou la compilation d'un texte consolidé. Ce n'est pas
+    // une signature : elle est attribuée « reprise » ou « compilation », et
+    // l'opérateur est consigné. Le rôle est vérifié ICI, sur l'identité de la
+    // session ; le drapeau du corps (`reprise` / `compilation`) ne fait que NOMMER
+    // le geste — il n'ouvre aucun droit par lui-même.
+    let attribution = attributionDe(ctx);
+    const id = ctx.identite || null;
+    if (ctx.sessionRequise === true && id && id.type === "session") {
+      const moi = String(id.personId || "");
+      const lui = String((pack.interne && pack.interne.signataire && pack.interne.signataire.personId) || "");
+      // Le circuit SIMPLE est le geste d'une PERSONNE dans l'application : la
+      // signature apportée doit être la sienne, sans exception. Sur les autres
+      // circuits, le paquet vient d'un PRESTATAIRE — réel, ou simulé, comme la
+      // consolidation et le rétablissement, qui signent au nom du signataire de
+      // l'acte : on n'oppose l'opérateur que si le paquet NOMME une personne,
+      // pour qu'un compte ne puisse pas se faire passer pour un autre en la
+      // déclarant.
+      const personnel = sig.niveau === "simple" || !!lui;
+      if (personnel && (!moi || !lui || lui !== moi)) {
+        const roles = Array.isArray(id.roles) ? id.roles : [];
+        const estAdmin = String(id.role || "") === "administrateur" || roles.indexOf("administrateur") >= 0;
+        const pose = estAdmin ? (b.reprise === true ? "reprise" : (b.compilation === true ? "compilation" : "")) : "";
+        if (!pose) {
+          sig.statut = "rejetee";
+          sig.motif = "Signature apportée par un compte qui n'est pas le signataire";
+          persist();
+          return err(403, "Cette signature n'est pas la vôtre : seul le signataire peut apporter sa propre signature.", {
+            code: "signature_non_habilitée", signataire: lui, operateur: moi,
+          });
+        }
+        // Pose au registre : la signature n'est PAS de l'opérateur — elle est
+        // déclarée comme telle, et l'opérateur qui l'a posée reste au dossier.
+        attribution = pose;
+      }
+      sig.operateur = { id: String(id.id || ""), login: String(id.login || ""), personId: moi, role: String(id.role || "") };
+    }
     // Contrôle d'intégrité fait par le service lui-même : le document signé doit
     // être exactement le document déposé.
     const sha = sha256(pack.document.akn);
@@ -587,6 +1016,12 @@ export function createActesApi({
     }
     sig.statut = "signee";
     sig.documentSigne = pack;
+    sig.attribution = attribution;
+    // « verifie » suit l'attribution : une signature apportée par son titulaire
+    // (session opposée à la personne) est VÉRIFIÉE ; une clé de service qui
+    // l'affirme, une reprise et une compilation ne le sont pas. C'est la même
+    // clé que celle posée par `porteSignature` pour le circuit interne.
+    sig.verifie = attribution === "verifiee";
     sig.signeLe = (pack.signatures && pack.signatures[0] && pack.signatures[0].signeLe) || nowIso();
     acte.statut = "signee";
     acte.signeLe = sig.signeLe;
@@ -597,7 +1032,28 @@ export function createActesApi({
   // Télétransmission au contrôle de légalité : l'acte signé part vers l'API
   // d'envoi, qui accuse réception. Le service refuse de transmettre un acte qui
   // n'est pas signé, et renvoie son certificat tel quel si l'acte l'a déjà été.
-  function hTransmettre(ctx) {
+  //
+  // TROIS VOIES, et le certificat dit laquelle :
+  //   • DÉCLARATION (`declaration` au corps) : la transmission a été faite hors
+  //     de l'application ; une personne l'atteste, avec sa date et son
+  //     destinataire. C'est la voie du régime DÉCLARATIF, et celle de l'acte
+  //     transmis autrement en régime API. Aucun appel sortant n'a lieu ;
+  //   • le client de contrôle de légalité est BRANCHÉ (adresse + clé, voir
+  //     controle-legalite.mjs) : l'acte part réellement, et le certificat est
+  //     celui de l'accusé de réception rendu par l'API. Un refus de l'API n'est
+  //     JAMAIS converti en certificat : la transmission échoue en 502, et rien
+  //     n'est enregistré — l'appelant peut réessayer ;
+  //   • il ne l'est pas : le certificat est fabriqué localement, marqué
+  //     `demonstration: true`, et sa mention porte la réserve. Jamais de
+  //     certificat d'apparence réelle sans appel réel (NC-IV-004).
+  //
+  // QUI DÉCLARE ? Quand le service identifie les personnes (session), la
+  // déclaration est opposée à l'opérateur — le même principe que la signature
+  // (`porteSignature`) et la conformité (`hConformite`) : on ne déclare pas à la
+  // place d'un autre. Quand l'acte porte les réviseurs compétents (transmis au
+  // dépôt, `revision.reviseurs`), le déclarant doit être l'un d'eux : la porte
+  // de compétence de l'interface est ainsi rejouée par le service.
+  async function hTransmettre(ctx) {
     const acte = lireActe(ctx.params.id);
     if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
     if (acte.statut !== "signee" && acte.statut !== "publie") {
@@ -605,34 +1061,224 @@ export function createActesApi({
     }
     if (acte.transmission) return ok(200, { ...acte.transmission, idempotent: true });
     const b = ctx.body || {};
-    const recuLe = b.at || nowIso();
-    const reference = b.reference || ("AR-" + String(recuLe).slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
     const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
     const empreinte = acte.sha256;
-    // Aucun appel sortant n'est fait ici : l'accusé de réception est fabriqué
-    // localement, et la mention le dit. Une intégration @ctes réelle lèvera ce
-    // marqueur (`demonstration: false`). Voir NC-IV-004 et P-19.
-    const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration: true });
+
+    // ---- LA VOIE DÉCLARATIVE ------------------------------------------------
+    if (b.declaration !== undefined && b.declaration !== null) {
+      const decl = normaliserDeclaration(b.declaration);
+      if (!decl) return err(422, "La déclaration de transmission est illisible.", { code: "declaration_invalide" });
+      if (!decl.at) return err(422, "La date de la transmission est requise : déclarez à quelle date l'acte a été transmis.", { code: "declaration_incomplete", champ: "at" });
+      if (!decl.destinataire) return err(422, "Le destinataire est requis : déclarez à qui l'acte a été transmis.", { code: "declaration_incomplete", champ: "destinataire" });
+      // L'identité du déclarant : le service identifie les personnes, ou il ne
+      // le peut pas (mode « demo ») et l'attestation est alors « déclarée ».
+      let parNom = decl.auteur;
+      let attribution = "declaree";
+      const id = ctx.identite || null;
+      if (ctx.sessionRequise === true && id && id.type === "session") {
+        const moi = String(id.personId || "");
+        if (!moi) {
+          return err(403, "Votre compte n'est rattaché à aucune personne du référentiel : la déclaration ne peut pas être attestée sous votre nom.", { code: "operateur_non_identifie" });
+        }
+        if (decl.personId && decl.personId !== moi) {
+          return err(403, "Cette déclaration de transmission engage une autre personne que vous : personne ne déclare à la place du réviseur.", { code: "declaration_non_habilitée", declare: decl.personId, operateur: moi });
+        }
+        const revs = acte.revision && Array.isArray(acte.revision.reviseurs) ? acte.revision.reviseurs : [];
+        if (revs.length && revs.indexOf(moi) < 0) {
+          return err(403, "Cet acte n'est pas de votre compétence : seul un réviseur qui en a la charge peut déclarer sa transmission.", { code: "declaration_non_habilitée", reviseurs: revs, operateur: moi });
+        }
+        decl.personId = moi;
+        decl.par = id.id || "";
+        attribution = "verifiee";
+        try {
+          const config = referentiel ? await referentiel() : null;
+          const p = config && Array.isArray(config.people) ? config.people.find((x) => x && x.id === moi) : null;
+          if (p) parNom = [p.civility, p.firstName, p.lastName].filter(Boolean).join(" ") || parNom;
+        } catch (e) { /* référentiel illisible : le nom déclaré reste */ }
+      }
+      const recuLe = decl.at;
+      const reference = decl.reference || ("DECL-" + String(recuLe).slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
+      const cert = certificatTransmission({ reference, recuLe, destinataire: decl.destinataire, empreinte, demonstration: false, declaration: { parNom, motif: decl.motif } });
+      acte.transmission = {
+        reference, recuLe, destinataire: decl.destinataire, mode: decl.mode || CONTROLE_LEGALITE.mode,
+        empreinte, auteur: parNom, entite: decl.entite,
+        declaration: { par: decl.par || "", parNom, personId: decl.personId || "", motif: decl.motif, attribution, le: nowIso() },
+        demonstration: false,
+        certificat: cert, transmisLe: nowIso(),
+      };
+      if (!persist()) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
+      journaliser("transmission_declaree", acte.id + " — réf. " + reference + (parNom ? " — déclarée par " + parNom : "") + (attribution === "declaree" ? " (déclarée)" : ""));
+      return ok(201, {
+        acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire: acte.transmission.destinataire,
+        mode: acte.transmission.mode, empreinte, certificat: cert, declaration: true, demonstration: false,
+        // Ce que le SERVICE a pu attester : « verifiee » quand il a opposé la
+        // déclaration à l'identité de l'opérateur, « declaree » quand il n'a pas
+        // pu (service qui n'identifie pas les personnes). Le client s'en sert :
+        // il ne doit pas présenter comme vérifiée une déclaration que le service
+        // n'a pu qu'enregistrer. Voir NC-II-017.
+        attribution, auteur: parNom,
+        document: "/v1/actes/" + acte.id + "/document",
+        certificatUrl: "/v1/actes/" + acte.id + "/transmission",
+        ressource: "/v1/actes/" + acte.id + "/transmission",
+      }, { location: "/v1/actes/" + acte.id + "/transmission" });
+    }
+
+    // ---- L'APPEL RÉEL À L'API (ou la simulation marquée) --------------------
+    let recuLe = b.at || nowIso();
+    let reference = "";
+    let appelReel = false;
+    if (controleLegalite && controleLegalite.actif()) {
+      try {
+        const recu = await controleLegalite.transmettre({
+          acteId: acte.id, numero: acte.numero || "", objet: acte.objet || "", nature: acte.nature || "",
+          entityName: acte.entityName || "", dateSignature: acte.dateSignature || "",
+          akn: acte.akn || "", empreinte, destinataire,
+          urlDocument: String(b.document || ""), auteur: String(b.auteur || "").slice(0, 120), entite: String(b.entite || "").slice(0, 160),
+        });
+        reference = recu.reference;
+        recuLe = recu.recuLe || recuLe;
+        appelReel = true;
+      } catch (e) {
+        // Le contrôle de légalité n'a pas accepté : il n'y a PAS de certificat.
+        return err(502, "La télétransmission a échoué : " + String((e && e.message) || e) + " L'acte reste signé, non transmis : réessayez, ou transmettez-le hors de l'application.", { code: "transmission_echec" });
+      }
+    }
+    if (!reference) reference = "AR-" + String(recuLe).slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0");
+    const demonstration = !appelReel;
+    const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration });
     acte.transmission = {
       reference, recuLe, destinataire, mode: b.mode || CONTROLE_LEGALITE.mode,
       empreinte, auteur: String(b.auteur || "").slice(0, 120), entite: String(b.entite || "").slice(0, 160),
-      api: { url: CONTROLE_LEGALITE.apiUrl, statut: 202, simule: true },
-      demonstration: true,
+      api: appelReel
+        ? { url: (controleLegalite.reglages ? controleLegalite.reglages().url : CONTROLE_LEGALITE.apiUrl), statut: 201, simule: false }
+        : { url: CONTROLE_LEGALITE.apiUrl, statut: 202, simule: true },
+      demonstration,
       certificat, transmisLe: nowIso(),
     };
     if (!persist()) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
     return ok(201, {
       acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire,
-      mode: acte.transmission.mode, empreinte, certificat,
+      mode: acte.transmission.mode, empreinte, certificat, demonstration,
       document: "/v1/actes/" + acte.id + "/document",
       certificatUrl: "/v1/actes/" + acte.id + "/transmission",
       ressource: "/v1/actes/" + acte.id + "/transmission",
     }, { location: "/v1/actes/" + acte.id + "/transmission" });
   }
 
+  // LA VERSION SIGNÉE d'un acte mené par le CIRCUIT EXTERNE. L'acte a été signé
+  // hors de l'application (papier, ou outil tiers que l'application ne pilote
+  // pas) ; le client dépose ici le PDF signé, avec son empreinte. Le service n'a
+  // aucune signature cryptographique à vérifier : il enregistre la pièce, et fait
+  // passer l'acte au statut « signée » — la publication devient possible, sous
+  // réserve de la certification de conformité quand le client l'a déclarée
+  // requise. Même contrat que le service de démonstration (voir index.html).
+  function hSignatureExterne(ctx) {
+    const acte = lireActe(ctx.params.id);
+    if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+    if (acte.signatureMode !== "externe") {
+      return err(409, "Cet acte ne suit pas le circuit de signature externe : sa signature est ouverte auprès du prestataire.", { code: "circuit_non_externe", signatureMode: acte.signatureMode || "electronique" });
+    }
+    if (acte.statut === "publie") return err(409, "Cet acte est déjà publié : sa version signée ne se remplace pas.", { code: "deja_publie", statut: acte.statut });
+    const signe = normaliserVersionSignee(ctx.body && ctx.body.signe);
+    if (!signe) return err(422, "La version signée est requise (`signe.url`) : c'est la pièce qui sera conservée et publiée.", { code: "version_signee_absente" });
+    if (ctx.body && ctx.body.certificationRequise !== undefined) acte.certificationRequise = ctx.body.certificationRequise === true;
+    acte.originalExterne = signe;
+    // Une nouvelle version signée remet la certification à zéro : elle portait
+    // sur l'ancienne pièce.
+    acte.certification = null;
+    acte.statut = "signee";
+    acte.signeLe = signe.deposeLe || nowIso();
+    acte.misAJourLe = nowIso();
+    if (!persist()) return err(507, "Le service n'a plus de place disponible.");
+    journaliser("signature_externe", acte.id + " — pièce " + (signe.nom || "") + " (" + String(signe.sha256).slice(0, 16) + "…)");
+    return ok(201, {
+      acteId: acte.id, statut: acte.statut, href: "/v1/actes/" + acte.id,
+      originalExterne: resumeOriginalExterne(acte),
+      certificationRequise: acte.certificationRequise === true,
+    }, { location: "/v1/actes/" + acte.id + "/signature-externe" });
+  }
+
+  // LA CERTIFICATION DE CONFORMITÉ. Dans le circuit externe, le contrôle du
+  // réviseur ne porte pas sur le texte avant signature, mais sur la PIÈCE
+  // signée : il atteste qu'elle est conforme à la version numérique qui sera
+  // publiée. Le service conserve cette attestation, et refuse de publier tant
+  // qu'elle manque — quand le client a déclaré la certification requise.
+  async function hConformite(ctx) {
+    const acte = lireActe(ctx.params.id);
+    if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+    if (acte.signatureMode !== "externe") {
+      return err(409, "Cet acte ne suit pas le circuit de signature externe.", { code: "circuit_non_externe", signatureMode: acte.signatureMode || "electronique" });
+    }
+    if (!acte.originalExterne || !acte.originalExterne.url) {
+      return err(409, "Aucune version signée n'a été déposée pour cet acte : la conformité ne peut pas être certifiée.", { code: "version_signee_absente", statut: acte.statut });
+    }
+    const certification = normaliserCertification(ctx.body && ctx.body.certification);
+    if (!certification) {
+      return err(422, "La certification est requise, avec un statut « conforme » ou « non_conforme ».", { code: "certification_invalide" });
+    }
+    // Une certification qui ne porte pas sur la pièce déposée n'atteste rien : on
+    // refuse une empreinte différente de celle de la version signée.
+    if (certification.sha256Signe && acte.originalExterne.sha256 && certification.sha256Signe !== acte.originalExterne.sha256) {
+      return err(409, "La certification ne porte pas sur la version signée déposée (empreintes différentes).", { code: "certification_incoherente", empreinteSignee: acte.originalExterne.sha256 });
+    }
+    // QUI CERTIFIE ? La conformité est attestée par une PERSONNE — le réviseur
+    // compétent. Quand le service identifie les personnes (session), il exige que
+    // l'attestation soit CELLE DE L'OPÉRATEUR : le dossier déclare la personne du
+    // réviseur (`certification.personId`), et elle doit être celle de la session.
+    // Le nom inscrit vient ensuite du référentiel du service, non du corps.
+    const idConf = ctx.identite || null;
+    if (ctx.sessionRequise === true && idConf && idConf.type === "session") {
+      const moi = String(idConf.personId || "");
+      const declaree = String((ctx.body && ctx.body.certification && ctx.body.certification.personId) || "");
+      if (!moi) {
+        return err(403, "Votre compte n'est rattaché à aucune personne du référentiel : la conformité ne peut pas être attestée sous votre nom.", { code: "operateur_non_identifie" });
+      }
+      if (!declaree || declaree !== moi) {
+        return err(403, "Cette attestation de conformité engage une autre personne que vous : personne ne certifie à la place du réviseur.", { code: "conformite_non_habilitée", revue: declaree, operateur: moi });
+      }
+      certification.personId = moi;
+      certification.par = idConf.id || certification.par;
+      certification.parCompte = { id: idConf.id || "", login: idConf.login || "", personId: moi };
+      try {
+        const config = referentiel ? await referentiel() : null;
+        const p = config && Array.isArray(config.people) ? config.people.find((x) => x && x.id === moi) : null;
+        if (p) certification.parNom = [p.civility, p.firstName, p.lastName].filter(Boolean).join(" ") || certification.parNom;
+      } catch (e) { /* référentiel illisible : le nom déclaré reste */ }
+    }
+    acte.certification = certification;
+    // Une conformité refusée rend l'acte non publiable : il attend une nouvelle
+    // version signée. Le service l'applique lui-même, plutôt que de s'en remettre
+    // au client.
+    if (certification.statut !== "conforme") acte.statut = "depose";
+    acte.misAJourLe = nowIso();
+    if (!persist()) return err(507, "Le service n'a plus de place disponible.");
+    journaliser("conformite", acte.id + " — " + certification.statut + (certification.parNom ? " par " + certification.parNom : ""));
+    return ok(201, { acteId: acte.id, statut: acte.statut, certification, href: "/v1/actes/" + acte.id });
+  }
+
   function hPublier(ctx) {
     const acte = lireActe(ctx.params.id);
     if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
+    // CIRCUIT EXTERNE : la version signée doit être déposée, et sa conformité
+    // certifiée quand le client l'a déclarée requise. C'est le service qui tient
+    // l'ordre « version signée → conformité certifiée → publié ». Ces deux règles
+    // passent AVANT la règle générale « signé ? » : un acte qui attend encore sa
+    // version signée est « déposé », non « signé », et le client mérite le motif
+    // exact plutôt que le motif générique.
+    if (acte.signatureMode === "externe") {
+      if (!acte.originalExterne || !acte.originalExterne.url) {
+        return err(409, "Cet acte suit le circuit de signature externe : sa version signée doit être déposée avant sa publication.", { code: "version_signee_absente", statut: acte.statut });
+      }
+      if (acte.certificationRequise === true && (!acte.certification || acte.certification.statut !== "conforme")) {
+        return err(409, "La conformité de la version signée doit être certifiée par le réviseur avant la publication.", { code: "conformite_non_certifiee", statut: acte.statut, certification: acte.certification || null });
+      }
+    }
+    // Acte INDIVIDUEL : la trame dont il est issu est déclarée non publiable, et
+    // le client l'a dit au dépôt. Le service le refuse même signé (revalorisation
+    // d'un traitement, sanction…) : ces actes sont conservés, pas publiés.
+    if (acte.publishable === false) {
+      return err(409, "Cet acte est déclaré non publiable : un acte individuel n'est pas publié au recueil des actes administratifs.", { code: "acte_non_publiable", statut: acte.statut, trameId: acte.trameId || null });
+    }
     // Étape de transmission au contrôle de légalité : lorsque le client l'a
     // demandée au dépôt, l'acte ne peut pas être publié avant d'avoir été
     // transmis. C'est le service qui tient l'ordre signé → transmis → publié.
@@ -686,8 +1332,19 @@ export function createActesApi({
         nom: b.originalExterne.nom || "", taille: b.originalExterne.taille || 0,
         type: b.originalExterne.type || "", deposeLe: b.originalExterne.deposeLe || nowIso(),
         deposePar: b.originalExterne.deposePar || "", deposeParNom: b.originalExterne.deposeParNom || "",
+        // La PIÈCE rangée dans le service (voir server.mjs, `/v1/pieces`) : le
+        // recueil montre son adresse, et c'est par cet identifiant que le service
+        // sait qu'une pièce est CITÉE (donc qu'elle ne se retire pas).
+        pieceId: b.originalExterne.pieceId || "",
         certification: null,
       }
+      : null;
+    // La version signée d'un acte du CIRCUIT EXTERNE : le PDF déposé au registre
+    // (voir `hSignatureExterne`), avec la certification de conformité du réviseur.
+    // C'est elle « l'original » de cet acte — le recueil public la montre telle
+    // qu'elle a été mise en ligne.
+    const origExt = acte.signatureMode === "externe" && acte.originalExterne
+      ? { ...acte.originalExterne, certification: acte.certification || null }
       : null;
 
     const rec = {
@@ -760,11 +1417,12 @@ export function createActesApi({
       // La part INTERNE, conservée au registre et JAMAIS servie par une route
       // publique : coordonnées du signataire, compte, authentification, courriels.
       originalInterne: b.originalInterne || ((b.original && b.original.interne) ? b.original : null) || acte.originalInterne || null,
-      // La pièce jointe d'une REPRISE (l'original signé conservé) : c'est ELLE
-      // que le recueil montre comme l'original. Une publication informative qui
-      // n'est pas une reprise n'en a pas ; les autres actes portent leur propre
-      // `original` (le paquet signé).
-      originalExterne: reprise ? origReprise : undefined,
+      // La pièce jointe d'une REPRISE (l'original signé conservé) ou la version
+      // signée d'un acte du CIRCUIT EXTERNE : c'est ELLE que le recueil montre
+      // comme l'original. Une publication informative qui n'est pas une reprise
+      // n'en a pas ; les autres actes portent leur propre `original` (le paquet
+      // signé).
+      originalExterne: (informative && !reprise) ? null : (reprise ? origReprise : origExt),
       signature: informative || !b.original ? null : (() => {
         const o = sansInterne(b.original) || {};
         const sigs = o.signatures || [];
@@ -2052,6 +2710,11 @@ ${liste}
     { m: "GET", p: /^\/v1\/actes\/([^/]+)$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, resumeActe(a)) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
     { m: "GET", p: /^\/v1\/actes\/([^/]+)\/document$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); return a ? ok(200, { id: a.id, format: "application/akn+xml", document: a.akn, sha256: a.sha256 }) : err(404, "Acte déposé inconnu : " + ctx.params.id); } },
     { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature$/, role: { min: "redacteur" }, ecrit: true, f: hEnvoyerEnSignature },
+    // Le CIRCUIT EXTERNE (papier ou outil tiers, sans API) : le client déclare
+    // la version signée déposée, puis la certification de conformité du réviseur.
+    // Mêmes routes que le service de démonstration (voir index.html).
+    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/signature-externe$/, role: { min: "redacteur" }, ecrit: true, f: hSignatureExterne },
+    { m: "POST", p: /^\/v1\/actes\/([^/]+)\/conformite$/, role: { min: "redacteur" }, ecrit: true, f: hConformite },
     { m: "POST", p: /^\/v1\/actes\/([^/]+)\/transmission$/, role: { min: "redacteur" }, ecrit: true, f: hTransmettre },
     { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, role: { min: "lecteur" }, f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
     // Le DOSSIER INTERNE de la signature : la part de l'original qui ne se
@@ -2075,8 +2738,12 @@ ${liste}
     // un tiers pouvait donc faire signer un acte au nom de qui il voulait (le
     // seul contrôle était l'empreinte du document — publique). Elle exige une
     // clé dédiée au PRESTATAIRE (`API_TOKENS="prestataire|prestataire:<hash>"`),
-    // ou la clé d'administration.
-    { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"] }, ecrit: true, f: hWebhookSignature },
+    // ou la clé d'administration — OU une SESSION : celle du SIGNATAIRE lui-même
+    // quand c'est l'AGENT (et non un prestataire) qui rapporte sa signature, sur
+    // le circuit SIMPLE. `sessionAutorisee` ouvre la porte à toute session, et
+    // c'est `hWebhookSignature` qui la referme sur la compétence — la signature
+    // apportée doit être celle de l'opérateur.
+    { m: "POST", p: /^\/v1\/webhooks\/signature$/, role: { exact: ["prestataire", "administrateur"], sessionAutorisee: true }, ecrit: true, f: hWebhookSignature },
     { m: "POST", p: /^\/v1\/admin\/purge$/, role: { min: "administrateur" }, ecrit: true, f: hPurger },
     { m: "GET", p: /^\/v1\/publications$/, f: (ctx) => {
         const all = Object.keys(db.publies).map((k) => db.publies[k]).filter((p) => visiblePour(p, ctx.agent));
@@ -2160,7 +2827,14 @@ ${liste}
       const params = { 0: m[0] };
       if (m[1] !== undefined) { params.id = m[1]; params.cle = m[1]; }
       if (m[2] !== undefined) { params.code = m[1]; params.annee = m[2]; params.numero = m[3]; params.entite = m[4]; }
-      return r.f({ params, body: req.body, headers, conn: req.conn, path: clean, query, ip: req.ip, agent: ctx.agent === true });
+      return r.f({
+        params, body: req.body, headers, conn: req.conn, path: clean, query, ip: req.ip, agent: ctx.agent === true,
+        // L'IDENTITÉ de l'appelant (compte de session, ou clé de service) et la
+        // CAPACITÉ du service à en exiger une : c'est ce qui permet au domaine
+        // d'opposer l'opérateur au signataire — voir `porteSignature`.
+        identite: ctx.identite || null,
+        sessionRequise: ctx.sessionRequise === true,
+      });
     }
     return cheminTrouve
       ? err(405, "Méthode " + method + " non autorisée sur " + clean, { code: "methode_non_autorisee" })
@@ -2176,5 +2850,28 @@ ${liste}
   // n'est pas une clé connue — ce n'est pas une erreur, seulement « pas une clé ».
   const cleDeJetonOuNull = (jeton) => { try { return cleDeJeton(jeton); } catch (e) { return null; } };
 
-  return { route, takeDirty, openapi, emptyState, cleDeJeton: cleDeJetonOuNull, publicationsPubliques };
+  // Une PIÈCE est-elle CITÉE par un acte déposé ou par une publication ? Les
+  // pièces (l'original signé d'une reprise, la version signée d'un acte du
+  // circuit externe) sont rangées HORS de cet état — voir le magasin —, et le
+  // retrait d'une pièce est un geste de propreté : le service refuse de retirer
+  // une pièce citée, car cela laisserait une page du recueil (ou un acte déposé)
+  // avec un lien mort. Le serveur HTTP interroge cette fonction-là (voir
+  // server.mjs, `DELETE /v1/pieces/{id}`) ; la même règle est tenue par le
+  // service de démonstration (index.html, `pieceReferencee`), et les deux sont
+  // rapprochées par le jeu d'appels commun (tests/conformite-service.mjs).
+  function pieceReferencee(id) {
+    const cible = String(id || "");
+    if (!cible) return "";
+    for (const cle of Object.keys(db.actes)) {
+      const a = db.actes[cle];
+      if (a && a.originalExterne && a.originalExterne.pieceId === cible) return "l'acte déposé " + cle;
+    }
+    for (const cle of Object.keys(db.publies)) {
+      const p = db.publies[cle];
+      if (p && p.originalExterne && p.originalExterne.pieceId === cible) return "la publication " + cle;
+    }
+    return "";
+  }
+
+  return { route, takeDirty, openapi, emptyState, cleDeJeton: cleDeJetonOuNull, publicationsPubliques, pieceReferencee };
 }

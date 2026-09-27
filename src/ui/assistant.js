@@ -2,11 +2,11 @@
 // L'assistant, à l'écran — la pastille de Plume dans l'atelier, celle de
 // Publia sur le recueil.
 //
-// Une seule coquille pour les deux : un personnage posé dans un coin, une
-// bulle qui propose une question de temps en temps (le clin d'œil à l'aide
-// contextuelle d'autrefois), et un panneau de conversation. Ce qui change d'un
-// assistant à l'autre, c'est ce qu'il SAIT — et cela ne se règle pas ici, mais
-// dans src/lib/assistant.js et Administration › Assistants.
+// Une seule coquille pour les deux : un personnage posé dans un coin, et un
+// panneau de conversation qui s'ouvre quand on le demande — jamais tout seul
+// (revue d'interface, P7). Ce qui change d'un assistant à l'autre, c'est ce
+// qu'il SAIT — et cela ne se règle pas ici, mais dans src/lib/assistant.js et
+// Administration › Assistants.
 //
 // Ce qui SE RÈGLE, en revanche : le NOM et L'ICÔNE (Administration › Assistants,
 // par l'administrateur) — la coquille les relit à chaque redessin, sans être
@@ -31,9 +31,13 @@ import { get, bodyOf } from "../lib/remote.js";
 // et ne survit pas à un rechargement — une conversation d'aide n'est pas une
 // donnée que l'on conserve.
 const sessions = {
-  atelier: { messages: [], ouvert: false, occupe: false, arret: null, bulleVue: false, notices: false },
-  public: { messages: [], ouvert: false, occupe: false, arret: null, bulleVue: false, notices: false, publications: null, chargement: null },
+  atelier: { messages: [], ouvert: false, occupe: false, arret: null, notices: false },
+  public: { messages: [], ouvert: false, occupe: false, arret: null, notices: false, publications: null, chargement: null },
 };
+
+// Les racines montées, par assistant : elles servent à savoir si un panneau est
+// OUVERT ET VISIBLE (voir `majColonne`), pour que la page lui réserve sa place.
+const racines = {};
 
 const LIBELLES_ECRAN = {
   trames: "Trames", trame: "Éditeur de trame", rediger: "Rédiger un acte", actes: "Actes",
@@ -87,22 +91,14 @@ function construire(qui) {
     h("footer", { class: "assist__pied" }, suggestions, avertissement, saisie,
       h("p", { class: "assist__note", text: d.note })));
 
-  const bulleTexte = h("span", { class: "assist__bulle-texte" });
-  const bulleTete = h("span", { class: "assist__bulle-tete", text: ide.nom + " propose" });
-  const bulle = h("div", { class: "assist__bulle", hidden: true },
-    h("button", {
-      class: "assist__bulle-corps", type: "button",
-      on: { click: () => { const q = bulle.dataset.question || ""; ouvrir(true); bulle.hidden = true; if (q) envoyer(q); } },
-    }, bulleTete, bulleTexte),
-    h("button", { class: "assist__bulle-fermer", type: "button", title: "Masquer", "aria-label": "Masquer", on: { click: () => { s.bulleVue = true; bulle.hidden = true; } } }, icon("x", 12)));
-
   const pastille = h("button", {
     class: "assist__pastille", type: "button", title: d.titre + " — cliquez pour ouvrir la conversation",
     "aria-label": d.titre, "aria-expanded": "false",
     on: { click: () => ouvrir(!s.ouvert) },
   }, h("img", { class: "assist__avatar-assis", src: ide.avatar, alt: "" }), h("span", { class: "assist__pastille-nom", text: ide.nom }));
 
-  const racine = h("div", { class: "assist assist--" + qui, hidden: true, "data-assistant": qui }, bulle, panneau, pastille);
+  const racine = h("div", { class: "assist assist--" + qui, hidden: true, "data-assistant": qui }, panneau, pastille);
+  racines[qui] = racine;
 
   // Le nom et l'icône se relisent : l'administrateur peut les changer pendant
   // que la page est ouverte, et le changement doit se voir sans la recharger.
@@ -114,7 +110,6 @@ function construire(qui) {
     ide = neuf;
     for (const img of racine.querySelectorAll("img[class^='assist__avatar'], img.assist__mini")) img.src = ide.avatar;
     for (const el of racine.querySelectorAll(".assist__nom, .assist__pastille-nom")) el.textContent = ide.nom;
-    bulleTete.textContent = ide.nom + " propose";
   };
 
   // ------------------------------------------------------- les liens des réponses
@@ -224,9 +219,8 @@ function construire(qui) {
     panneau.hidden = !s.ouvert;
     pastille.setAttribute("aria-expanded", s.ouvert ? "true" : "false");
     racine.classList.toggle("is-ouvert", s.ouvert);
+    majColonne();
     if (s.ouvert) {
-      bulle.hidden = true;
-      s.bulleVue = true;
       peindreDisponibilite();
       peindreSuggestions();
       if (!fil.childElementCount) peindreFil();
@@ -301,23 +295,22 @@ function construire(qui) {
     }
   }
 
-  // La bulle d'invitation : un clin d'œil à l'aide contextuelle d'autrefois —
-  // elle propose une question de temps en temps, jamais deux fois de suite.
-  if (!s.bulleVue) {
-    setTimeout(() => {
-      if (s.bulleVue || s.ouvert || s.messages.length) return;
-      const liste = (assistantSettings(state.config, qui).prompts || []).filter((p) => p && p.texte);
-      if (!liste.length || moteurDe(state.config, qui).type === "aucun") return;
-      const p = liste[Math.floor(Math.random() * liste.length)];
-      bulleTexte.textContent = p.texte;
-      bulle.dataset.question = p.texte;
-      bulle.hidden = false;
-      s.bulleVue = true;
-    }, qui === "atelier" ? 14000 : 20000);
-  }
+  // La bulle d'invitation d'autrefois est retirée (revue d'interface, P7) :
+  // l'assistant ne se manifeste plus tout seul. Ses suggestions restent dans le
+  // panneau, où elles attendent qu'on l'ouvre ; la pastille nomme qui c'est.
 
   peindreFil();
   return racine;
+}
+
+// LE PANNEAU NE PASSE JAMAIS PAR-DESSUS LE DOCUMENT (revue d'interface, P7) :
+// tant qu'il est ouvert, la page lui RÉSERVE sa colonne sur la droite, et le
+// contenu se rétrécit au lieu d'être recouvert. Sur un écran étroit il n'y a pas
+// la place : le panneau redevient un calque (voir app-outils.css). Et rien ne
+// s'ouvre tout seul : ni au chargement, ni à l'arrivée sur un écran.
+function majColonne() {
+  const ouvert = Object.keys(sessions).some((qui) => sessions[qui].ouvert && racines[qui] && !racines[qui].hidden);
+  document.body.classList.toggle("assist-ouvert", ouvert);
 }
 
 // ------------------------------------------------------------------ les liens
@@ -424,6 +417,9 @@ export function monterAssistants() {
     // Le nom et l'icône peuvent avoir changé : on les relit.
     identites.atelier?.();
     identites.public?.();
+    // Un écran sans assistant (le recueil, la connexion) ne doit pas garder la
+    // colonne réservée d'un panneau qui n'est plus là.
+    majColonne();
   };
   onChange(maj);
   maj();

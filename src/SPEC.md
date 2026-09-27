@@ -71,7 +71,8 @@
                   accord:"",  // ""|"m"|"f" — force l'accord en genre de la qualité
                   fondementRefId,  // refId de la décision fondant son pouvoir de signer (autorité de tête)
                   refs:[{ kind, label }] } ],
-  signature:  { mode:"electronique",     // "electronique" | "simple" | "externe" (le circuit ordinaire)
+  signature:  { mode:"electronique",     // "electronique" | "simple" | "interne" | "externe" (le circuit ordinaire ;
+                                         //  "interne" : c'est le SERVICE qui signe, auto-hébergement seulement — § 2.6 quater bis)
                 api:{ transport, url, prestataire, niveau, urlNotification, timeoutMs,
                       cheminDocument, cheminSignataires, cheminDemarrer, cheminStatut } },
                                          // réglages du PRESTATAIRE de signature (voir § 2.6). La CLÉ n'est PAS ici :
@@ -106,13 +107,18 @@
                                             // signataire, qui achève le circuit). Un circuit ancien
                                             // (« accord » / « avis ») reste lu : voir § 2.8.1
   delais:     { recoursMois:2, transmissionJours:15, publicationJours:10, notificationJours:8 },
-  experimental:{ parapheur:true, controleLegalite:false },
-                                            // fonctions expérimentales (Administration › Expérimentale) :
-                                            // seule la transmission au contrôle de légalité l'est encore
-                                            // — l'étape ne s'intercale pas entre la signature et la
-                                            // publication quand elle est éteinte (voir § 2.8.2 bis).
-                                            // `parapheur` reste lu pour ne pas casser un référentiel
-                                            // antérieur, mais il vaut toujours vrai (voir § 2.8.1)
+  controleLegalite: { mode:"desactive" },
+                                            // RÉGIME DE TRANSMISSION au contrôle de légalité
+                                            // (Administration › Expérimentale) : « desactive »,
+                                            // « declaratif » ou « api ». Deux régimes gèrent la
+                                            // formalité (porte entre la signature et la publication) ;
+                                            // le troisième ne la gère pas (voir § 2.8.2 bis)
+  experimental:{ parapheur:true },
+                                            // fonctions expérimentales (Administration › Expérimentale).
+                                            // `parapheur` n'en est plus une et vaut toujours vrai
+                                            // (lu pour ne pas casser un référentiel antérieur, voir
+                                            // § 2.8.1) ; l'ancien booléen `controleLegalite` y est
+                                            // replié une fois dans `controleLegalite.mode` (§ 2.8.2 bis)
   styles:     [ { id, label, general, entityIds:[], familyIds:[], …présentation } ],
   actTypes:   [ { id, label, aknElement } ],
   colors:     [...]
@@ -512,7 +518,7 @@ présente comme un document à archiver ou à imprimer, et qui doivent se superp
 | Aperçu de rédaction, de modification, fiche d'acte | `renderDocument` + `styleCss` (scope `[data-sheet]`) injecté par `state.applySheets()` |
 | HTML autonome, fichier Word | `documentCss(config, style)` (`src/lib/export.js`) |
 | Impression / PDF | `printDocument` → `exportStandaloneHtml` → même CSS |
-| Original signé (prestation de signature) | `originalPageHtml(pack, pageHtml, brand, pageCss)` (`src/lib/signature.js`) |
+| Original signé (tous circuits de signature) | `pageOriginalSigne(pack, bodyHtml, brand, pageCss)` (`src/lib/signature.js`) |
 | PDF/A (archivage) | `creerPdfA` (`src/lib/pdfa.js`) — mise en page faite par l'application, hors CSS, sur les mêmes valeurs de charte |
 
 La **version en ligne publiée** fait exception, et c'est voulu : elle ne suit pas la charte.
@@ -767,9 +773,10 @@ son écran dans **`src/ui/views/reprises.js`**, sa collection dans **`state.repr
    montre sous le champ, avec la borne (`max`) dans le champ de date lui-même.
 3. **L'ORIGINAL SIGNÉ est joint à la main** : le PDF, ou le scan de la pièce papier
    (`carteOriginal`). L'application en calcule l'**empreinte SHA-256** (`crypto.subtle`) et le
-   dépose par `upload-plugin` ; l'écran en montre le fichier, la taille, l'empreinte, et permet de
-   l'ouvrir ou de le retirer. Ce qui fait foi, c'est cette pièce — la reprise ne signe rien, elle
-   **conserve la preuve de ce qui a été signé**.
+   dépose par `lib/fichiers.js` — l'hébergement de fichiers de l'hôte s'il est là, sinon le
+   **service** (`POST /v1/pieces`, relu à `/v1/pieces/{id}`) ; l'écran en montre le fichier, la
+   taille, l'empreinte, et permet de l'ouvrir ou de le retirer. Ce qui fait foi, c'est cette
+   pièce — la reprise ne signe rien, elle **conserve la preuve de ce qui a été signé**.
 
 **Ce qui s'ensuit : la publication est IMMÉDIATE, et INFORMATIVE.** `publier` fait deux appels, dans
 la foulée du bouton — le **dépôt** (`POST /v1/actes`, avec `reprise: true`, sans circuit de
@@ -1018,6 +1025,10 @@ celui-ci : l'originale reste accessible dans l'historique des modifications (fic
 l'acte, onglet « Versions » du registre public). Un acte importé (`.akn.xml` ou JSON) est
 relu par `src/lib/akn.js`.
 
+**Ce que le service en sait.** Le dépôt de la version consolidée au service porte la mention
+`compilation: true` : le service l'attribue « compilation » (§ 2.7.2 ter) et **réserve le geste
+au titulaire de la signature ou à l'administration** — on ne consolide pas l'acte d'un autre.
+
 **Modifier une annexe.** Une annexe (§ 2.2.4) ne se modifie pas article par article comme un
 acte ordinaire : l'acte modificatif en **adopte la nouvelle rédaction**. C'est le régime ouvert
 par défaut par l'écran « Modifier » (`state.modifier.suivi`, décochable) :
@@ -1133,7 +1144,7 @@ elle-même. Le service expose :
 | Méthode | Ressource | Rôle |
 |---|---|---|
 | `POST` | `/v1/actes` | déposer l'acte finalisé (Akoma Ntoso) ; idempotent tant que le circuit est ouvert |
-| `POST` | `/v1/actes/{id}/signature` | ouvrir un circuit auprès du prestataire → `202` + `signatureId` |
+| `POST` | `/v1/actes/{id}/signature` | ouvrir un circuit auprès du prestataire → `202` + `signatureId` ; avec `mode: "interne"`, c'est le **service qui signe** (coffre de signature interne) → `201` + l'original signé (auto-hébergement ; `409 signature_interne_indisponible` sans coffre) |
 | `POST` | `/v1/actes/{id}/signature-externe` | *(circuit externe)* déclarer la **version signée** déposée (PDF + empreinte) → `201` + statut `signee` |
 | `POST` | `/v1/actes/{id}/conformite` | *(circuit externe)* enregistrer la **certification de conformité** du réviseur → `201` |
 | `POST` | `/v1/webhooks/signature` | notification entrante du prestataire : retour de l'acte signé |
@@ -1142,13 +1153,14 @@ elle-même. Le service expose :
 | `GET` | `/v1/courriel` | état de la chaîne d'envoi du service (hôte, expéditeur, disponible ou non) — **sans aucun secret** |
 | `POST` | `/v1/courriel/envoi` | demander l'envoi d'une notification par courriel (le service parle au serveur SMTP) |
 | `POST` | `/v1/courriel/test` | message d'essai de l'écran d'administration |
-| `POST` | `/v1/actes/{id}/transmission` | télétransmettre l'acte signé au contrôle de légalité → `201` + certificat *(fonction expérimentale, § 2.8.2 bis)* |
+| `POST` | `/v1/actes/{id}/transmission` | transmettre l'acte signé au contrôle de légalité, **ou déclarer** une transmission faite hors application (corps `declaration`) → `201` + certificat ; `502 transmission_echec` si l'API refuse (rien n'est enregistré, la transmission se rejoue) ; `403 declaration_non_habilitée`, `422 declaration_incomplete` (§ 2.8.2 bis) |
 | `GET` | `/v1/actes/{id}/transmission` | relire le certificat de transmission |
 | `POST` | `/v1/actes/{id}/publication` | publier et attribuer l'ELI |
 | `POST` | `/v1/publications/{cle}/retrait` | retirer un acte du recueil (motif technique exigé, administrateur seul) |
 | `POST` | `/v1/publications/{cle}/epingle` | épingler un acte à la « une » du recueil public (corps `{ epingle, auteur }`) |
 | `GET` | `/v1/publications`, `/v1/publications/{cle}`, `/v1/eli/{...}` | registre public et résolution ELI |
 | `GET` | `/v1/informations` | **informations publiées** au recueil (actualités, avis, communications) — route **publique** : seuls les billets `publie: true` sont rendus, un brouillon ne sort que vers une identité d'`editeur` au moins |
+| `POST`, `GET`, `DELETE` | `/v1/pieces`, `/v1/pieces/{id}` | **pièces jointes** — les fichiers déposés : original signé d'une reprise, version signée d'un circuit externe. Dépôt par un `redacteur` (`POST /v1/pieces`, corps `{ nom, type, base64, sha256 }` → `201` + `{ id, url, sha256, nom, taille, type }`) ; lecture **publique** (`GET /v1/pieces/{id}` — le recueil cite l'adresse de la pièce) ; retrait refusé tant qu'un acte ou une publication la cite (`409 piece_referencee`). Sur un service auto-hébergé, c'est ce chemin qui remplace l'hébergement de fichiers de la plateforme (voir `lib/fichiers.js`) |
 | `GET` | `/v1/atelier/acces` | **état de l'accès à l'atelier** pour l'adresse de l'appelant (`actif`, `autorise`, `ip`, `interne`, `connue`, `liste`, `source`, `regle`, `erreurs`, `message`) — route **publique**, l'application en a besoin AVANT toute session ; `?ip=` **simule** une adresse (« et si j'arrivais de là ? »), la réponse portant alors `simulation: true` |
 | `POST` | `/v1/admin/purge` | **remettre le service à zéro** (actes déposés, circuits, publications ; corps `{ confirmation: "repurge" }`, administrateur seul) — le pendant, côté service, de « Repartir d'un référentiel vierge » |
 | `GET` | `/v1/config` | **réglages de référentiel posés par le `.env`** (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés, avec les valeurs refusées ; public, sans secret (§ 2.7 bis.3) |
@@ -1230,8 +1242,9 @@ que le lecteur remonte de l'un à l'autre. Le registre public, lui, n'exploite p
 (voir `TODO.md`).
 
 **Le retour signé publie l'acte.** Le webhook accepté (§ ci-dessus) déclenche la
-**transmission au contrôle de légalité** si elle est active (§ 2.8.2 bis), puis la
-publication **automatique** de l'acte **publiable** : `publierApresSignature`
+**transmission au contrôle de légalité** selon son régime (§ 2.8.2 bis) — télétransmission par
+l'API d'envoi en régime `api`, attente de la **déclaration d'un réviseur** en régime
+`declaratif` —, puis la publication **automatique** de l'acte **publiable** : `publierApresSignature`
 (`src/ui/views/signature.js`) publie avec la date du jour — sauf si la date de signature
 est à venir, auquel cas c'est elle qui est retenue, la publication ne pouvant précéder la
 signature. Un acte **individuel** (`publishable: false`) s'arrête à la signature :
@@ -1309,7 +1322,8 @@ Un second circuit existe donc, qui **n'appelle aucune API de signature** et se d
 2. le signataire signe **hors de l'application** ;
 3. le rédacteur **rentre la version signée** — « Ajouter la version signée », un **PDF**
    (contrôle du type, empreinte SHA-256 calculée dans le navigateur, fichier déposé par
-   `upload-plugin`) —, et l'acte passe à `signee` ;
+   `lib/fichiers.js` : l'hébergement de l'hôte s'il est là, sinon le service à `/v1/pieces`) —,
+   et l'acte passe à `signee` ;
 4. le **réviseur** compétent **certifie la conformité** de la **pièce signée** avec la
    version numérique qui sera publiée ; son contrôle ne porte donc plus sur le texte
    *avant* signature, mais sur le document *signé* — c'est ce qui garantit que ce qui est
@@ -1319,7 +1333,7 @@ Un second circuit existe donc, qui **n'appelle aucune API de signature** et se d
 
 **Réglage, à deux niveaux.** Le circuit se règle **globalement** (`config.signature.mode`,
 Administration › Signature : `electronique` — défaut, comportement historique —, `simple`,
-ou `externe`) et **par trame** (`trame.signature`, onglet « Trame » de l'éditeur) :
+`interne` ou `externe`) et **par trame** (`trame.signature`, onglet « Trame » de l'éditeur) :
 
 | `trame.signature` | Effet |
 |---|---|
@@ -1328,22 +1342,29 @@ ou `externe`) et **par trame** (`trame.signature`, onglet « Trame » de l'édit
 | `externe_autorise` | le rédacteur choisit, **acte par acte**, le circuit externe |
 | `simple_impose` | signature simple imposée (dans l'application) |
 | `simple_autorise` | le rédacteur choisit, **acte par acte**, la signature simple |
+| `interne_impose` | signature interne imposée (c'est le **service** qui signe — § 2.6 quater bis) |
+| `interne_autorise` | le rédacteur choisit, **acte par acte**, la signature interne |
 | `electronique` | circuit électronique imposé pour cette trame |
 
 `circuitPour(config, trame)` rend le circuit retenu, `circuitsDisponibles(config, trame)` la
-liste de ceux entre lesquels le rédacteur peut réellement trancher, et
-`modeSignature(config, trame, acte)` celui de l'acte, en tenant compte de son choix
-(`acte.signatureMode`) quand la trame l'autorise. **Un acte déjà engagé dans un circuit y
-reste** : `acte.externe` ouvert, `acte.signatureSimple` donnée, ou `acte.api` déposé — avec
-`acte.signatureMode === "simple"` ou `acte.api.niveau === "simple"`, puisque le circuit simple
-dépose lui aussi l'acte au service (c'est le même dossier, seul le niveau demandé diffère).
+liste de ceux entre lesquels le rédacteur peut réellement trancher, et `modeSignature(config, trame,
+acte)` celui de l'acte, en tenant compte de son choix (`acte.signatureMode`) quand la trame
+l'autorise. La **signature interne** ne figure dans cette liste que si le **service déclare tenir son
+coffre** (`GET /v1/config`, champ `signatureInterne`) : on n'offre pas un circuit que le service
+refusera. **Un acte déjà engagé dans un circuit y reste** : `acte.externe` ouvert,
+`acte.signatureSimple` donnée, ou `acte.api` déposé — avec `acte.signatureMode === "simple"` ou
+`acte.api.niveau === "simple"`, puisque le circuit simple dépose lui aussi l'acte au service (c'est
+le même dossier, seul le niveau demandé diffère). La **signature interne** se reconnaît de même
+(`acte.signatureInterne`, `acte.signatureMode === "interne"` ou `acte.api.niveau === "interne"`) :
+elle dépose aussi l'acte, mais c'est le service qui le signe.
 
 **Le dossier sur l'acte** (`acte.externe`) : `statut` (`a_signer`, `signe_depose`,
 `certifie`, `refuse`), la trace de la remise (`demandeLe`, `demandeParNom`, `document` avec
 son empreinte), la version signée (`signe` : `url`, `sha256`, `nom`, `taille`, `deposeLe`,
-`deposeParNom`), la certification (`certification` : `statut`, `par`, `parNom`, `le`,
-`empreinte`, `sha256Signe`, `points`, `remarque`, `motif`) et `certificationRequise` —
-`true` dès lors qu'un réviseur est compétent pour l'acte.
+`pieceId` — l'identifiant de la pièce rangée par le service, présent quand c'est le service
+qui a reçu le fichier —, `deposeParNom`), la certification (`certification` : `statut`,
+`par`, `parNom`, `le`, `empreinte`, `sha256Signe`, `points`, `remarque`, `motif`) et
+`certificationRequise` — `true` dès lors qu'un réviseur est compétent pour l'acte.
 
 **Côté service**, c'est lui qui tient l'ordre « version signée → conformité certifiée →
 publié » : `hPublier` refuse par `409 version_signee_absente` tant que la pièce manque, et
@@ -1451,6 +1472,7 @@ la même chose. `src/lib/qualification-signature.js` (module **pur**) la porte :
 |---|---|
 | `simple` | **« Signature simple — non qualifiée »** : donnée dans l'application, par le signataire, avec son compte ; elle n'est pas qualifiée au sens du règlement (UE) n° 910/2014 (eIDAS), et la valeur probante repose sur l'original conservé et la vérifiabilité de sa signature |
 | `avancee` | **« Signature avancée »** — et, quand le prestataire est **simulé**, la mention le dit (certificat de démonstration) |
+| `avancee` (signature **interne**) | **« Signature avancée (par le service) »** : c'est le SERVICE de la collectivité qui a signé, avec la clé privée du signataire qu'il détient scellée — l'autorité d'émission est interne, donc elle n'est pas **qualifiée** au sens d'eIDAS (§ 2.6 quater bis) |
 | `qualifiee` | **« Signature qualifiée »** (prestataire de confiance qualifié) |
 | `externe` | **« Signature externe »** : signée hors de l'application ; c'est la version signée déposée qui fait foi |
 | inconnu | **rien** : on ne devine pas la valeur d'une signature qu'on ne sait pas lire |
@@ -1460,6 +1482,60 @@ du certificat de transmission, donc elle s'imprime avec lui), reprise par la not
 (pastille + phrase) et transportée par le **JSON-LD** (`eli:signature_level` et
 `dcterms:description`). C'est la réponse à l'écart NC-IV-001 de l'audit : tant qu'aucun prestataire
 qualifié n'est branché, ce qui n'est pas qualifié se nomme.
+
+#### 2.6 quater bis La signature interne : c'est le SERVICE qui signe
+
+Troisième alternative au prestataire — et la seule qui mette la clé privée **hors du navigateur**.
+Dans les circuits « simple » et électronique simulé, la clé du signataire est engendrée par le poste
+et conservée en clair dans son stockage : c'est le fond de l'écart NC-IV-001. Ici, c'est le
+**service** qui engendre la clé du signataire, la **garde scellée au repos** dans un **coffre**, et
+**signe lui-même**. Le poste ne reçoit jamais la clé — seulement l'original signé (clé publique,
+certificat, horodatage). C'est la définition eIDAS de la signature **avancée** : la clé privée est
+sous le contrôle exclusif du signataire, un certificat identifie celui-ci, et la signature porte sur
+le document. Elle n'est **pas qualifiée** : l'autorité qui émet les certificats est interne à la
+collectivité, et la mention de l'acte publié le dit (§ 2.6 quater).
+
+**Auto-hébergement seulement.** Le coffre suppose un état durable : le service de **démonstration**
+de la plateforme n'en tient aucun (son état vit dans le navigateur, et une clé privée qui vivrait là
+ne serait à l'abri de personne). Il **refuse** donc franchement
+(`409 signature_interne_indisponible`, avec son motif) plutôt que de simuler une signature « au nom
+du service » — c'est le même principe que la mention de qualification : ce qui n'est pas fait se
+nomme. L'auto-hébergé sans clé de scellement refuse de la même façon (`hSignerInterne`,
+`src/server/mysql/actes.mjs`) ; l'Administration › Signature affiche alors « Coffre fermé ».
+
+**Le coffre** (`src/server/mysql/signature-interne.mjs`) : une fiche **par signataire**, et une pour
+l'**horodatage** du service. La clé d'un signataire suit la **personne** (son identifiant de
+personne, à défaut son compte, son adresse, son nom) — elle ne change donc ni avec un renommage, ni
+avec un changement de compte : c'est ce qui fait qu'un signataire garde **son** certificat, comme un
+certificat de signature suit son titulaire. Le coffre ne contient que des clés **scellées**
+(AES-256-GCM, sous `SCRIBA_SIGNATURE_KV_KEY`) et des certificats **publics** : une sauvegarde de la
+base ne livre aucune clé privée. Une clé de scellement perdue ou changée n'invalide pas les actes
+déjà signés (leur certificat voyage avec l'original, donc la vérification tient) : elle oblige
+seulement à engendrer de nouvelles clés, et le journal le consigne (`coffre_cle_illisible`,
+`coffre_cle_engendree`).
+
+**Le geste.** Mêmes portes que la signature simple (parapheur, révision), et le même partage des
+rôles : l'**envoi** est un geste de la rédaction, la **signature** n'appartient qu'au **titulaire**,
+porteur de la qualité. `engagerSignatureInterne` dépose l'acte (`POST /v1/actes`,
+`signatureMode: "interne"`) puis prévient le signataire ; `signerInterne` envoie
+`POST /v1/actes/{id}/signature` avec `mode: "interne"` et l'identité du signataire, et le **service
+rend l'original signé complet**. Ce paquet a la **même forme** que celui des autres circuits
+(`buildSignedPackage`) : la vérification du recueil, la part publique (`sansInterne`) et la
+publication s'y appliquent sans rien de plus. L'application y ajoute seulement la **page** de
+l'original (`pageOriginalSigne`) — le service ne sait pas rendre un document dont il n'a que
+l'Akoma Ntoso. L'acte porte ensuite `acte.signatureInterne` (date, empreinte, valeur d'algorithme,
+prestataire, dossier interne) et `acte.api.niveau === "interne"`.
+
+**Ce qui n'est jamais publié.** Le dossier interne est celui des autres circuits
+(`dossierSignatureInterne`) : identité nominative du signataire (adresse électronique, `personId`,
+`compteId`, compte), poste de l'opérateur, adresse réseau. Il reste au registre, lisible seulement
+par `GET /v1/actes/{id}/dossier-signature` ; la part publique ne porte que le nom, la fonction et la
+date.
+
+**La qualification.** Le prestataire de l'original est `{ id: "scribae-interne", nom: "Signature
+interne du service" }` : `qualificationSignature` (`src/lib/qualification-signature.js`) reconnaît
+cet émetteur et rend la mention **« Signature avancée (par le service) »** — jamais « simulée » (le
+service a réellement signé), jamais « qualifiée » (l'autorité est interne).
 
 #### 2.6 quinquies Les notifications par courriel, et le serveur SMTP
 
@@ -2402,6 +2478,39 @@ compte est **prévenu** que l'acte est parti et attend la signature de son titul
 distinction, invisible mais décisive, entre **envoyer** et **signer** : sans elle, un compte
 habilité à envoyer l'acte, ou un délégant, apposait sa signature au nom d'un autre.
 
+**La même porte, côté service.** L'interface ne décide pas seule : le service est le seul juge
+de ce qu'un appel a le droit d'écrire, et un `POST /v1/webhooks/signature` joué directement —
+hors de l'interface, avec un jeton valide — ne doit pas pouvoir engager la signature d'autrui.
+Le service **oppose donc l'opérateur au signataire** (`porteSignature`,
+`src/server/mysql/actes.mjs`) : la signature n'est acceptée que si l'appelant est **le signataire
+lui-même** — une **session** dont le `personId` est celui que le paquet déclare, le **nom**
+imprimé venant du référentiel du service et **jamais** du corps de la requête —, ou si c'est une
+**clé de service** (le prestataire réel, qui affirme la signature qu'il a fait apposer). Quand le
+service **identifie les personnes** (`AUTH_MODE=password` ou `oidc`) et que l'appelant est une
+session, toute autre combinaison est **refusée** (`403 signature_non_habilitée` ;
+`signataire_non_identifie` si le paquet ne nomme aucune personne ; `signature_sans_identite` si
+l'appelant est une clé de service qui prétend à une signature personnelle) et le circuit est
+marqué `rejetee` : un rédacteur ne peut pas apposer la signature du maire, un délégant ne peut
+pas signer pour son délégataire. Chaque signature s'inscrit avec son **opérateur** (`sig.operateur`)
+à côté du signataire, et `sig.verifie` ne vaut vrai **que** pour une signature `verifiee`. Le même
+principe veille sur la **certification de conformité** du circuit externe (`403
+conformite_non_habilitée` : on ne certifie pas à la place du réviseur).
+
+**Quatre attributions, nommées.** Ce que le service a réellement pu constater s'écrit dans le
+champ `attribution` de la signature : `verifiee` (une session identifiée a été opposée au
+signataire, et c'était bien lui), `declaree` (le service n'identifie aucune personne — mode
+« demo », où les comptes vivent dans le navigateur — ou c'est un prestataire, une clé de service,
+qui apporte la signature et l'affirme), `reprise` et `compilation`. Les deux dernières **nomment**
+des gestes qui ne sont pas des signatures : la **reprise** — la **repose au registre d'un original
+déjà signé**, autrement dit le rétablissement d'un acte que le service a perdu (§ 2.6 bis, amorçage)
+— et la **compilation** — le dépôt de la **version consolidée** après un acte modificatif (§ 2.5).
+Le drapeau du corps (`reprise: true`, `compilation: true`) ne fait que **nommer**
+le geste — il n'ouvre **aucun droit** par lui-même : ces deux poses sont **réservées à
+l'administration** (le rôle est vérifié sur l'identité de la session), et tout autre compte qui
+présente un paquet signé au nom d'un autre reçoit `403 signature_non_habilitée`. `resumeSignature`
+(`src/server/mysql/actes.mjs`) rend à chaque lecture `niveau`, `attribution` et `verifie` : c'est
+la même distinction que celle de l'interface, tenue à l'endroit qui décide.
+
 **Le fil de parcours.** Le chemin d'un acte — ses **portes**, leur **ordre**, et **qui** les
 tient — se lit une seule fois pour toutes dans `parcoursDeActe(acte, { config, trames, users,
 trame })` (`src/lib/parcours.js`, module **pur**), qui rend `{ phases, courante, annexe }`. Chaque
@@ -2711,7 +2820,7 @@ Le `.env` du déploiement peut **poser** des réglages qui, sinon, se saisissent
 l'interface : identité de la collectivité (nom, sigle, adresse de base, couleur, emblème,
 polices, service de contact), vocabulaire des actes, numérotation, délais et formalités
 d'exécution, recueil public (titre, publication automatique, opposabilité), circuit de
-signature, et fonctions (contrôle de légalité, assistants). Ces variables —
+signature, régime de transmission au contrôle de légalité, et fonctions (assistants). Ces variables —
 préfixe `SCRIBA_` pour le référentiel — sont **déclaratives**.
 
 Une seule déclaration les décrit : le registre **`src/server/mysql/variables.mjs`**, qui porte,
@@ -2952,46 +3061,99 @@ La délivrance d'une pièce est un **fait du dossier** : elle entre au journal
 formalité.
 
 
-#### 2.8.2 bis Transmission au contrôle de légalité par API
+#### 2.8.2 bis Transmission au contrôle de légalité : trois régimes
 
-**Fonction expérimentale, éteinte par défaut** (`experimental.controleLegalite`, Administration ›
-Expérimentale). Activée, elle **s'intercale automatiquement entre le retour signé et la
-publication** ; éteinte, la transmission reste une **constatation manuelle** (§ 2.8.2) et l'étape
-n'existe pas.
+Le code de justice administrative impose de transmettre au représentant de l'État (« contrôle de
+légalité ») les actes soumis à cette formalité, qui fait courir le délai de recours. L'application ne
+décide pas si la formalité est requise pour un acte donné — c'est `transmissionRequisePour()` qui le
+dit, à partir de `trame.transmission` et du caractère publiable de l'acte (voir § 2.8.2) ; elle décide
+**comment** la transmission est tenue, par un réglage unique : `config.controleLegalite.mode`
+(**Administration › Expérimentale**), à trois valeurs.
+
+| Régime | Ce que fait l'application | Appel sortant |
+|---|---|---|
+| `desactive` (défaut) | rien n'est géré : aucune porte entre la signature et la publication, la formalité se **constate à la main** (§ 2.8.2) | — |
+| `declaratif` | avant sa **publication**, l'acte signé attend qu'un **réviseur compétent déclare** à qui, et à quelle date, il a été transmis ; la déclaration vaut certificat | **aucun** |
+| `api` | le service adresse l'acte signé à l'**API d'envoi @ctes** ; l'accusé de réception vaut certificat. Chaque acte peut **en outre** être déclaré transmis | oui (réel) |
+
+**Les deux régimes actifs partagent la même porte.** La publication d'un acte soumis à la
+transmission est refusée tant qu'aucune transmission — réelle, simulée ou déclarée — n'est
+enregistrée (`409 transmission_absente`) : l'ordre **signé → transmis → publié** est tenu **côté
+service**, pas seulement côté client. Le drapeau accompagne le dépôt (`POST /v1/actes`, champ
+`controleLegalite`), la transmission d'un acte non signé est refusée (`409 acte_non_signe`), et un
+acte **déposé avant l'activation** ne porte pas l'exigence.
+
+**La déclaration** (`POST /v1/actes/{id}/transmission`, corps `declaration`) est une **attestation de
+personne**, non un raccourci. Ses champs : `at` (date de la transmission) et `destinataire`
+**requis** — sinon `422 declaration_incomplete` —, `reference` et `motif` facultatifs, et
+`personId` (l'opérateur). Quand le service **identifie les personnes**, `personId` doit être celui du
+compte connecté, et, si l'acte porte une liste `revision.reviseurs`, l'opérateur doit y figurer —
+sinon `403 declaration_non_habilitée` : on ne déclare pas au nom d'un autre, ni hors de sa
+compétence. L'interface applique la même règle avant d'essayer (`peutDeclarerTransmission` : un
+réviseur compétent pour l'acte, ou l'administration). Le nom inscrit au certificat est celui du
+compte, pris au référentiel du service, et la déclaration est **journalisée**.
+
+**Les trois natures de certificat** (`certificatTransmission`, `src/lib/legalite.js`) — le **sceau**
+(`sha256(reference|recuLe|destinataire|empreinte)`) et sa vérification
+(`verifierCertificatTransmission`) sont les mêmes pour toutes :
 
 ```js
-CONTROLE_LEGALITE = { id:"controle-legalite", service:"Télétransmission au contrôle de légalité",
-                      destinataire:"Préfecture — contrôle de légalité", mode:"ctes",
-                      apiUrl:"https://api.ctes.exemple.fr/v1/transmissions" }   // adresse d'EXEMPLE (transmission simulée)
 certificat = { nature, emisPar, emisLe, destinataire, reference, algorithme:"SHA-256",
-               empreinte,   // SHA-256 du document transmis
-               sceau,       // SHA-256 de reference|recuLe|destinataire|empreinte
-               mention:"Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14" }
+               empreinte,      // SHA-256 du document transmis
+               sceau,          // SHA-256 de reference|recuLe|destinataire|empreinte
+               demonstration,  // true quand AUCUN appel sortant n'a eu lieu (simulation)
+               declaration,    // true quand c'est une DÉCLARATION (par = son auteur)
+               mention }
 ```
 
-Le déroulé, dans `publierApresSignature()` (`src/ui/views/signature.js`) :
+| Nature | Quand | Mention |
+|---|---|---|
+| **Accusé de réception** | l'API @ctes a répondu | « Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14 » |
+| **Déclaration** | régime `declaratif`, ou déclaration par acte en régime `api` | « Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14 (déclaration de Camille Roussel) » |
+| **Simulation** | aucun appel n'a eu lieu (API non branchée, service de démonstration) | « Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14 (mention de démonstration — transmission simulée, sans appel sortant) » |
+
+**Le régime `api` : la transmission est RÉELLE quand le service est branché** — c'est-à-dire quand
+le `.env` du déploiement porte une adresse et une clé (`SCRIBA_CONTROLE_LEGALITE_URL`,
+`SCRIBA_CONTROLE_LEGALITE_API_CLE`, voir § 2.7 bis.3 et `src/server/mysql/variables.mjs`). C'est le
+**service** qui appelle, par `src/server/mysql/controle-legalite.mjs` : la clé ne quitte jamais le
+serveur, et le certificat conservé est **celui de l'accusé de réception rendu par l'API**. Un refus
+de l'API n'est **jamais** converti en certificat : la route rend `502` (`transmission_echec`), rien
+n'est enregistré, l'acte reste **signé, non transmis**, et la transmission peut être rejouée. **Sans
+adresse ou sans clé** (et sur le service de démonstration), l'appel n'a pas lieu : le certificat est
+fabriqué localement, marqué `demonstration: true`, et sa mention porte la réserve. Un certificat
+d'apparence réelle sans appel réel est précisément ce que l'audit interdit (NC-IV-004).
+
+**Le régime `declaratif` ne suppose aucun accès** : rien n'est adressé, la déclaration est l'unique
+source. Les deux voies sont **cumulables** en régime `api` : l'API porte les actes qu'elle peut
+porter, la déclaration ceux qui passent par un autre canal.
+
+`GET /v1/config` publie le régime et, en `api`, l'état du service (`controleLegalite` : `mode`,
+adresse, chemin, destinataire, délai, `cle` en booléen, `motif`, et `declaration: true` quand la
+déclaration est possible) ; l'écran **Administration › Expérimentale** affiche ce que le régime
+implique — et, en `api`, l'état **réel** du service (transmission réelle ou simulée), pour qu'une
+étape « activée » ne laisse pas croire à un appel qui n'aura pas lieu.
+
+Le déroulé du régime `api`, dans `publierApresSignature()` (`src/ui/views/signature.js`) :
 
 1. l'acte signé est adressé à l'**API d'envoi** — `POST /v1/actes/{id}/transmission` —, ce qui
    **trace aussi l'appel sortant** vers `apiUrl` dans le journal du service (`recordExternal`,
    service `controle-legalite`) ;
 2. l'**accusé de réception** revient ; il **vaut certificat informatique de transmission** ;
-3. le certificat est **déposé sur le document** — `acte.original.transmission` (l'empreinte du
-   paquet signé n'est pas touchée : le certificat est une pièce du dossier, pas une signature) et
-   la mention est imprimée sur la **version en ligne** (`buildWebVersion`, `src/lib/eli.js`) ;
+3. le certificat est **déposé sur le document** — `acte.original.transmission` (l'empreinte du paquet
+   signé n'est pas touchée : le certificat est une pièce du dossier, pas une signature) et la mention
+   est imprimée sur la **version en ligne** (`buildWebVersion`, `src/lib/eli.js`) ;
 4. la formalité est **constatée** au nom de l'agent (`enregistrerFormalite`, avec `certificat`) ;
 5. l'acte est **publié** (§ 2.8.2), avec le certificat joint à l'enregistrement de publication.
 
-L'ordre **signé → transmis → publié** est tenu **côté service**, pas seulement côté client : le
-drapeau accompagne le dépôt (`POST /v1/actes`, champ `controleLegalite`), la transmission d'un
-acte non signé est refusée (`409 acte_non_signe`), et la publication d'un acte soumis à l'étape
-est refusée tant que la transmission manque (`409 transmission_absente`) — après le contrôle de
-signature, avant celui de la date. La transmission est **idempotente** (un acte déjà transmis
-renvoie son certificat), et `GET /v1/actes/{id}/transmission` relit le certificat. Le même
-contrat est porté par les deux services (`index.html` et `src/server/mysql/actes.mjs`).
+En régime `declaratif`, la même chaîne **s'arrête après l'étape 3** : le client ne publie pas de
+lui-même, et annonce qu'il attend la déclaration du réviseur.
 
-Un acte **déposé avant l'activation** ne porte pas l'exigence : le service le publiera sans
-transmission. Le certificat se lit sur la **fiche de l'acte**, dans l'**échéancier**, sur
-l'**original signé** (bloc « Certificat de transmission ») et sur le **document publié**.
+La transmission est **idempotente** (un acte déjà transmis renvoie son certificat), et
+`GET /v1/actes/{id}/transmission` relit le certificat. Le même contrat est porté par les deux
+services (`index.html` et `src/server/mysql/actes.mjs`).
+
+Le certificat se lit sur la **fiche de l'acte**, dans l'**échéancier**, sur l'**original signé**
+(bloc « Certificat de transmission ») et sur le **document publié**.
 
 ### 2.8.3 Registre : recherche, corbeille, journal, versions
 
@@ -3055,7 +3217,7 @@ livrés y sont rangés) :
 
 **Identité réglable.** Le **nom** et l'**icône** de chaque assistant se changent dans le
 référentiel (`config.assistant.<qui>.nom` / `.avatar`, une adresse d'image). L'interface les relit
-partout — pastille, panneau, bulle d'invitation, menu du compte : elle est construite **une fois**
+partout — pastille, panneau, menu du compte : elle est construite **une fois**
 et son identité est rafraîchie, sans reconstruire la conversation. Un nom ou une icône **vide**
 n'est pas un choix : `assistantSettings` retombe sur les valeurs livrées, et `assistantIdentite`
 est la seule source de ce que l'interface affiche.
@@ -3116,9 +3278,10 @@ table des matières complète sous les yeux du modèle. Le budget est lu du mote
 **Écran.** `src/ui/assistant.js` pose les deux pastilles **hors de la coquille**
 (`document.body`), une fois, au démarrage : elles ne sont pas reconstruites aux redessins et
 une conversation en cours survit au changement d'écran ; c'est leur visibilité qui suit la
-route. Chaque assistant porte une **bulle d'invitation** (une question proposée, tirée au sort,
-proposée une fois par chargement) et un **panneau** : accueil, messages, questions proposées,
-zone de saisie, arrêt de la génération en cours, effacement.
+route. Chaque assistant porte un **panneau** — ouvert **sur demande**, plus de bulle
+d'invitation (revue d'interface, P7) ; au-delà de 1 200 px, la page lui **réserve sa colonne** à
+droite au lieu de le laisser recouvrir le document. Le panneau porte : accueil, messages, questions
+proposées, zone de saisie, arrêt de la génération en cours, effacement.
 
 **Renvois cliquables, et l'acte consulté.** Les réponses renvoient **par des liens**, jamais par
 une adresse à composer. `guideSommaire()` suffixe chaque ligne du sommaire de
@@ -3169,9 +3332,33 @@ d'un rôle inférieur reçoit `403`, plutôt que d'être acceptée puis ignorée
 (comparaison JSON canonique) ; seuls les enregistrements modifiés sont envoyés,
 chacun avec la **révision** connue du client. Le serveur refuse tout
 enregistrement dont la révision a changé et renvoie sa version : c'est un
-**conflit**, que l'application reprend en le signalant (le serveur gagne — jamais
-d'écrasement silencieux). Les écritures concurrentes sur des enregistrements
-*différents* sont indépendantes.
+**conflit**. Depuis la 1.6.2, l'application ne le subit plus — elle le
+**fusionne** (`src/lib/fusion.js`, repris par `reprendreConflits` dans
+`src/lib/db/index.js`) : fusion à trois branches (`base` = l'index du serveur tel
+que ce poste le connaissait, `notre` = ce qu'il veut écrire, `leur` = ce que le
+service détient), récursive, champ par champ et élément par élément pour les
+listes **identifiées** (tout élément porteur d'un `id`), puis renvoi du résultat
+**une seule fois**. Un vrai désaccord — le même champ modifié différemment des deux
+côtés — est **signalé** et la valeur du poste est conservée : jamais d'écrasement
+silencieux, jamais de travail perdu. Un élément supprimé d'un côté et modifié de
+l'autre garde le travail de qui l'a modifié. Les écritures concurrentes sur des
+enregistrements *différents* sont indépendantes.
+
+**Temps réel (1.6.2).** Sur un **service partagé** (pilote `service:http`), le
+poste ouvre `GET /v1/db/flux` : un flux SSE que le service tient ouvert et sur
+lequel il n'annonce que la **collection** changée et sa **révision** — jamais le
+contenu. Chaque poste relit ce qui lui manque par la route de lecture, avec ses
+droits. Un poste lent (tampon plein) n'est pas attendu : il reçoit
+`{ type: "resync" }` et relit tout ; un battement (commentaire SSE) entretient la
+connexion toutes les 20 secondes, et un reverse-proxy doit désactiver son tampon
+(`proxy_buffering off`) sous peine d'un flux **muet**. L'enregistrement **ouvert
+dans un éditeur n'est jamais remplacé** : la version distante est marquée
+(« modifié par untel ») et l'agent décide ; `config` et `users` ne sont jamais
+remplacés d'eux-mêmes. Les **brouillons** d'un acte non enregistré se partagent
+par la collection `presence` (les seules clés touchées, au plus une écriture
+toutes les 1,6 s, plafond de 24 000 caractères). Le modèle complet est dans
+`src/docs/COLLABORATION.md` ; il ne s'active **pas** sur la démonstration dont le
+stockage est celui du navigateur.
 
 **Résilience.** Miroir local des dernières lectures (`kv.actesMirror`) : la
 lecture se poursuit sur les données connues si la base est injoignable. File
@@ -3184,6 +3371,7 @@ le serveur MySQL (`src/server/mysql/server.mjs`) :
 ```
 GET  /v1/db/health                        → { statut, driver, collections:{ nom:{records, revision} } }
 GET  /v1/db/collections/{collection}      → { collection, revision, records:[{ id, rev, ord, payload }] }
+GET  /v1/db/flux                          → text/event-stream : { type:"collection", collection, revision, n, ids } | { type:"resync" } | « : battement »
 POST /v1/db/collections/{collection}/sync → { upserts:[{id,rev,ord,payload}], deletes:[{id,rev}], force }
                                           ← { collection, revision, applied:[{id,rev}], conflicts:[{id,rev,ord,payload}|{id,deleted:true}] }
 ```
@@ -3360,13 +3548,14 @@ publication (`eli:date_publication`, `eli:first_date_entry_in_force`).
 
 ## 4. Parcours
 
-La barre de gauche range les écrans en six rubriques, dans l'ordre de la vie de l'acte :
+La barre de gauche range les écrans en cinq rubriques, dans l'ordre de la vie de l'acte :
 **Produire** (trames, rédaction, modification, registre, corbeille), **Valider** (parapheur,
 révision), **Publier** (signature et publication, exécution et délais, publications ELI,
-recueil public), **Organisation** (organigramme, délégations, chrono de numérotation),
-**Configurer** (administration, feuilles de style) et **Aide** (guide, API REST, documentation
-technique). Une rubrique dont aucune entrée n'est permise pour le profil disparaît, et les
-écrans s'y rangent sans changer d'identifiant de route.
+recueil public), **Réglages** (organigramme, délégations, chrono de numérotation, administration,
+feuilles de style) et **Aide** (guide, API REST, documentation
+technique). Le groupe **Réglages** est repliable : il s'ouvre de lui-même quand l'écran courant en
+fait partie, et son état est une préférence de poste. Une rubrique dont aucune entrée n'est permise
+pour le profil disparaît, et les écrans s'y rangent sans changer d'identifiant de route.
 
 0. **Se connecter** — l'écran d'ouverture liste les comptes (« Qui se connecte ? ») ; on
    choisit le sien, et le **rôle** du compte décide de ce qui est permis tandis que son
@@ -3454,10 +3643,12 @@ technique). Une rubrique dont aucune entrée n'est permise pour le profil dispar
    l'on y **délivre les pièces du dossier** (l'**état des formalités** pour tout acte signé,
    l'**attestation de non-recours** pour un acte définitif que personne n'a contesté) ; on y voit
    la date d'**exécutoire**, le **délai de recours** restant et les retards. Quand la
-   **télétransmission** est active (§ 2.8.2 bis), la transmission ne se constate plus à la
-   main : elle est faite par l'API d'envoi au retour de la signature, et l'échéancier en
-   affiche le **certificat** (« Transmis au contrôle de légalité le … à … », référence,
-   sceau).
+   transmission est **gérée** par l'application (§ 2.8.2 bis — régimes `declaratif` ou
+   `api`), elle ne se constate plus à la main : en régime `api` elle est faite par l'API
+   d'envoi au retour de la signature, en régime `declaratif` elle est **déclarée par un
+   réviseur** avant publication. L'échéancier en affiche le **certificat** (« Transmis au
+   contrôle de légalité le … à … », référence, sceau — ou la mention de déclaration, qui
+   nomme son auteur).
 5 ter. **Délégations** — l'**organigramme des délégations de signature** (voir 2.7.2) : les
    chaînes de signature présentées en **arbre** — une autorité de tête, puis ses délégataires,
    puis les sous-délégations — ou en **liste** indentée sur les écrans étroits. Cliquer un

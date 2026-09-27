@@ -90,6 +90,15 @@ const ICONS = {
   // Boîte d'archive : l'export PDF/A, la forme normalisée pour la conservation
   // (voir ui/pdfa.js).
   archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
+  // Trois points verticaux : le menu « ⋯ » qui range les gestes secondaires
+  // d'une carte ou d'une ligne (voir components.js, `menuButton`).
+  dots: "M12 5h.01M12 12h.01M12 19h.01",
+  // Cloche : les notifications de l'en-tête (voir ui/collab.js).
+  cloche: "M6 9a6 6 0 0112 0c0 5 2 6 2 6H4s2-1 2-6zM9.7 19a2.4 2.4 0 004.6 0",
+  // Panneau de droite : un cadre séparé par un trait vertical, côté droit —
+  // c'est le geste « ouvrir le panneau de la rédaction » (voir rediger.js). Le
+  // dessin dit ce que le bouton fait : une barre apparaît à droite.
+  panneau: "M4 5h16v14H4zM15 5v14",
 };
 
 export function icon(name, size = 16) {
@@ -104,6 +113,9 @@ export function icon(name, size = 16) {
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
+  // Le nom de l'icône reste lisible dans le DOM : c'est ce qui permet de
+  // l'éprouver (voir « l'en-tête tient sur une ligne », tests/parcours.mjs).
+  svg.setAttribute("data-icon", name);
   const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
   p.setAttribute("d", d);
   svg.appendChild(p);

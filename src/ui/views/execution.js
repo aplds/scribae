@@ -23,9 +23,10 @@
 import {
   state, navigate, redrawView, can, visibleActes,
   actePubliable, trameById, alertesDe, journaliser,
+  controleLegaliteActif, peutDeclarerTransmission,
 } from "../state.js";
 import { h, button, toast } from "../dom.js";
-import { emptyState, helpLink } from "../components.js";
+import { emptyState, helpLink, pageTitle } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 import {
@@ -72,8 +73,7 @@ export function renderExecution(root, params) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Exécution & délais" }),
-      h("p", { class: "page-head__sub", text: "Ce qui reste à faire pour qu'un acte devienne exécutoire, et jusqu'à quand il peut être contesté. Le délai de recours court à compter de l'exécutoire, pas de la signature." }),
+      pageTitle("Exécution & délais" , "Ce qui reste à faire pour qu'un acte devienne exécutoire, et jusqu'à quand il peut être contesté. Le délai de recours court à compter de l'exécutoire, pas de la signature." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("execution", "Comment faire ?"),
@@ -323,14 +323,22 @@ function ligne(a, f, paint) {
         "le " + formatDate(f.at),
         f.ref ? "réf. " + f.ref : "",
         f.parEli ? "constatée par la chaîne ELI" : "",
-        f.byName ? "par " + f.byName : "",
+        f.declaration && f.declaration.parNom ? "déclarée par " + f.declaration.parNom : "",
+        // Le service qui n'identifie pas les personnes ne peut qu'ENREGISTRER la
+        // déclaration : le dire évite de présenter comme vérifiée une attestation
+        // qui ne l'est pas (voir NC-II-017).
+        f.declaration && f.declaration.attribution === "declaree" ? "identité non vérifiée" : "",
+        f.demonstration ? "transmission simulée (sans appel sortant)" : "",
         f.destinataires ? "destinataires : " + f.destinataires : "",
+        f.destinataire ? "à " + f.destinataire : "",
+        f.byName && !(f.declaration && f.declaration.parNom) ? "par " + f.byName : "",
       ].filter(Boolean).join(" · ") })
       : h("p", { class: "fr-small fr-muted", text: f.id === "signature" ? "L'acte n'est pas signé." : "Aucune constatation enregistrée." }),
-    // Certificat informatique de transmission : déposé sur le document par
-    // l'API d'envoi du contrôle de légalité (voir src/lib/legalite.js).
+    // Certificat de transmission : soit l'accusé de réception délivré par l'API
+    // d'envoi, soit — dans les régimes déclaratifs — la DÉCLARATION d'un
+    // réviseur, soit une simulation marquée (voir src/lib/legalite.js).
     f.certificat ? h("p", { class: "fr-small exec-certificat" },
-      h("strong", { text: "Certificat de transmission" }),
+      h("strong", { text: f.certificat.declaration ? "Déclaration de transmission" : f.certificat.demonstration ? "Certificat de transmission (démonstration)" : "Certificat de transmission" }),
       h("span", { text: f.certificat.mention || "" }),
       h("span", { class: "fr-muted", text: [
         f.certificat.reference ? " · réf. " + f.certificat.reference : "",
@@ -338,12 +346,22 @@ function ligne(a, f, paint) {
       ].filter(Boolean).join("") })) : null,
     !["signature", "publication"].includes(f.id) || (f.id === "publication" && !f.parEli)
       ? h("div", { class: "fr-row" },
-        can("signature.gerer") || can("actes.gerer")
-          ? button(f.fait ? "Corriger" : "Enregistrer", {
-            variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
-            onClick: () => ouvrirFormulaireFormalite(a, f),
-          })
-          : null)
+        (f.id === "transmission" && controleLegaliteActif())
+          // La transmission, dans un régime GÉRÉ (« declaratif » ou « api »), est
+          // un geste de RÉVISEUR : c'est lui qui atteste à qui, et quand, l'acte
+          // a été transmis (voir src/lib/legalite.js).
+          ? (peutDeclarerTransmission(a)
+            ? button(f.fait ? "Corriger la déclaration" : "Déclarer la transmission", {
+              variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
+              onClick: () => ouvrirFormulaireFormalite(a, f),
+            })
+            : h("span", { class: "fr-small fr-muted", text: "Déclaration de transmission réservée à un réviseur compétent (ou à l'administration)." }))
+          : ((can("signature.gerer") || can("actes.gerer"))
+            ? button(f.fait ? "Corriger" : "Enregistrer", {
+              variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
+              onClick: () => ouvrirFormulaireFormalite(a, f),
+            })
+            : null))
       : null,
   );
 }

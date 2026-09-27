@@ -392,7 +392,9 @@ gunzip -c scriba-2026-09-19.sql.gz | docker compose exec -T db \
 ```
 
 Le **volume** `donnees` contient les fichiers de MariaDB ; sauvegarder le volume à chaud ne
-remplace pas un dump. Voir `../docs/ADMINISTRATION.md` § « Sauvegardes » pour la politique
+remplace pas un dump. Le dump emporte **tout**, y compris les **pièces jointes** (les fichiers
+déposés, table `sb_piece`) — prévoyez la place en conséquence. Voir `../docs/ADMINISTRATION.md`
+§ « Sauvegardes » pour la politique
 (retenue, test de restauration, quoi sauvegarder en plus : `.env` et le référentiel exporté).
 
 ## 8. Mise à jour

@@ -13,6 +13,7 @@ import { styleRuntimeCss, generalPageCss } from "../lib/styles.js";
 import { isDark, brandColors, lighten } from "../lib/theme.js";
 import { debounce } from "../lib/util.js";
 import * as collab from "../lib/collab.js";
+import * as flux from "./flux.js";
 import { circuitFor, etapePour, validationAJour, validationPourSignature, parapheurActif as parapheurActifConfig } from "../lib/validation.js";
 import { circuitPour, modeSignature, certificationDe as certificationDeActe, certificationRequise as certificationRequiseActe, publicationExternePossible, versionSignee as versionSigneeDe } from "../lib/externe.js";
 import {
@@ -20,7 +21,12 @@ import {
   REVISION_STATUTS,
 } from "../lib/revision.js";
 import { statutExecution, alertes as alertesExecution } from "../lib/execution.js";
-import { controleLegaliteActif as controleLegaliteActifConfig } from "../lib/legalite.js";
+import {
+  modeControleLegalite as modeControleLegaliteConfig,
+  controleLegaliteGere as controleLegaliteGereConfig,
+  controleLegaliteDeclaratif as controleLegaliteDeclaratifConfig,
+  controleLegaliteParApi as controleLegaliteParApiConfig,
+} from "../lib/legalite.js";
 import { publicationSettings } from "../lib/eli.js";
 import { competenceDuCompte, fileSignature as fileSignatureDe } from "../lib/signataires.js";
 
@@ -48,6 +54,13 @@ export const state = {
   firstRun: false,
   storageOk: true,
   draft: {},
+  // CE QU'UN AUTRE POSTE A ENREGISTRÉ, et que ce poste n'a pas encore repris :
+  // `{ trames: { "tpl-x": { at, supprime } }, actes: {…}, config: { at } }`.
+  // Écrit par le flux (voir plus bas), lu par les écrans qui doivent le dire —
+  // l'éditeur de trame, la rédaction, l'administration. C'est ce qui remplace le
+  // silence : avant la 1.6.2, une modification venue d'ailleurs s'appliquait (ou
+  // se perdait) sans que personne ne le sache.
+  distantes: {},
   // Le mode annoncé par le DÉPLOIEMENT (`GET /v1/auth/config`), quand il y en a
   // un : `{ mode, demo, motDePasseMin, marque }`. Null hors service des comptes
   // (édition en ligne, page statique). Voir src/lib/motdepasse.js.
@@ -192,6 +205,7 @@ async function chargeDonnees() {
   applyBrand();
   emit();
   demarrerPresence();
+  demarrerFlux();
 }
 
 // Présence et journal : démarrés seulement quand une session est ouverte (le
@@ -202,6 +216,175 @@ function demarrerPresence() {
   if (state.user && !estVisiteur(state.user)) {
     collab.demarrer(state.user).catch((e) => console.warn("Collaboration indisponible :", e));
   }
+}
+
+// ============================================================================
+// LE TEMPS RÉEL — recevoir ce que les autres postes enregistrent (1.6.2).
+//
+// Le service auto-hébergé pousse « la collection X a bougé, révision N » (voir
+// lib/flux.js) ; c'est ICI qu'on décide quoi en faire. Trois règles, et elles
+// tiennent tout :
+//
+//   1. RIEN NE SE RELIT POUR RIEN. Un évènement dont la révision est celle que
+//      l'on connaît déjà vient de notre propre écriture : on l'ignore. Sans
+//      cela, chaque poste relirait chaque collection à chaque frappe de chaque
+//      autre poste.
+//   2. LE TRAVAIL EN COURS EST INTANGIBLE. L'enregistrement qu'un agent est en
+//      train d'éditer n'est jamais remplacé sous ses pieds : on garde NOTRE
+//      objet (l'éditeur travaille dessus) et l'on NOTE la version distante, que
+//      l'écran montre. La fusion, elle, se fera à l'enregistrement (voir
+//      lib/db/index.js, `reprendreConflits`).
+//   3. LA CRÉATION EN VOL SE GARDE. Un enregistrement que la base ne connaît
+//      pas encore (créé à l'instant, écriture en attente) survit à une
+//      relecture venue d'ailleurs : ce n'est pas un reste, c'est du travail.
+// ============================================================================
+
+let fluxCable = false;
+
+function demarrerFlux() {
+  if (!flux.disponible()) { collab.setFluxActif(false); return; }
+  if (!fluxCable) {
+    fluxCable = true;
+    flux.surFlux((evenement) => { traiterFlux(evenement).catch((e) => console.warn("Flux temps réel :", e)); });
+    flux.surEtatFlux((e) => {
+      // La collaboration a besoin de savoir si le temps réel est ouvert : c'est
+      // ce qui décide si les brouillons partagés circulent (voir lib/collab.js).
+      collab.setFluxActif(!!(e && e.ouvert));
+      emit();
+    });
+  }
+  flux.demarrer();
+}
+
+// Relance la liaison quand la porte change (connexion, déconnexion) : les
+// en-têtes ne sont plus les mêmes, un flux ouvert avec les droits d'avant serait
+// inutile.
+export function relancerFlux() { return flux.relancer(); }
+
+export const etatFlux = () => flux.etat();
+export const surEtatFlux = (fn) => flux.surEtatFlux(fn);
+export const resynchroniserFlux = () => flux.reveiller();
+
+async function traiterFlux(evenement) {
+  if (!evenement || !state.ready) return;
+  if (evenement.type === "resync") {
+    // Le poste a manqué des évènements (tampon plein, réveil après veille) : on
+    // relit tout, une fois.
+    await relireTout();
+    return;
+  }
+  if (evenement.type !== "collection") return;
+  const nom = String(evenement.collection || "");
+  if (!nom) return;
+  // Notre propre écriture : la révision est celle que l'on vient d'enregistrer.
+  if (evenement.revision != null && db.revisionConnue(nom) === evenement.revision) return;
+  if (nom === "presence" || nom === "journal") {
+    // La présence porte les brouillons partagés (voir lib/collab.js) et le
+    // journal, les notifications : c'est la collaboration qui les relit.
+    collab.rafraichir();
+    return;
+  }
+  if (nom === "meta") return;
+  const r = await db.rafraichirCollection(nom);
+  if (!r) return;
+  appliquerDistante(nom, r.value);
+}
+
+function appliquerDistante(nom, valeur) {
+  if (nom === "config") {
+    // Le référentiel se lit, il ne se remplace pas sous les pieds de celui qui
+    // l'édite : on le signale, et l'administrateur décide (Administration ›
+    // Base de données, « Recharger depuis la base »).
+    marquerDistante("config", "self");
+    emit();
+    return;
+  }
+  if (nom === "users") {
+    // Les comptes et les rôles engagent des droits : on ne les change pas en
+    // cours de session sans que quelqu'un l'ait demandé.
+    marquerDistante("users", "self");
+    emit();
+    return;
+  }
+  if (!Array.isArray(valeur)) return;
+  appliquerListe(nom, valeur);
+  emit();
+  redessinerSiUtile(nom);
+}
+
+// Les identifiants des enregistrements ouverts dans un éditeur : le document que
+// quelqu'un est en train d'écrire.
+function idsOuverts(collection) {
+  const out = new Set();
+  if (collection === "trames" && state.editor && state.editor.trameId) out.add(String(state.editor.trameId));
+  if (collection === "actes" && state.rediger && state.rediger.acteId) out.add(String(state.rediger.acteId));
+  return out;
+}
+
+function appliquerListe(collection, distants) {
+  const locale = Array.isArray(state[collection]) ? state[collection] : [];
+  const parId = new Map(locale.map((x) => [String(x && x.id), x]));
+  const ouverts = idsOuverts(collection);
+  const out = [];
+  const pris = new Set();
+  for (const d of distants) {
+    if (!d || d.id === undefined || d.id === null) continue;
+    const id = String(d.id);
+    pris.add(id);
+    if (ouverts.has(id)) {
+      out.push(parId.get(id) || d);      // l'objet en cours d'édition reste le nôtre
+      marquerDistante(collection, id);
+    } else {
+      out.push(d);
+    }
+  }
+  for (const [id, item] of parId) {
+    if (pris.has(id)) continue;
+    // Absent de la base : soit supprimé ailleurs, soit jamais écrit d'ici.
+    if (ouverts.has(id) || !db.indexConnu(collection, id)) {
+      out.push(item);
+      if (ouverts.has(id)) marquerDistante(collection, id, { supprime: true });
+    }
+  }
+  state[collection] = out;
+}
+
+function marquerDistante(collection, id, extra = {}) {
+  const par = state.distantes[collection] || (state.distantes[collection] = {});
+  par[id] = { at: new Date().toISOString(), ...extra };
+}
+
+// Ce qu'un écran doit savoir d'une modification venue d'ailleurs.
+export const modificationDistante = (collection, id) => state.distantes?.[collection]?.[String(id)] || null;
+export function oublierDistante(collection, id) {
+  const par = state.distantes[collection];
+  if (par) delete par[String(id)];
+}
+
+// Redessine la vue courante — SAUF si elle est justement en train d'éditer la
+// collection qui a bougé : là, on ne casse pas la saisie, et c'est l'écran qui
+// dit ce qu'il sait (voir views/rediger.js, `paintCollab`). L'éditeur de trame,
+// lui, se redessine : c'est son fonctionnement ordinaire (chaque geste le
+// redessine, avec conservation du curseur — voir src/ui/focus.js), et il doit
+// afficher la ligne « un autre poste l'a enregistrée ».
+function redessinerSiUtile(collection) {
+  const vue = state.route && state.route.view;
+  const edite = (collection === "actes" && vue === "rediger")
+    || (collection === "informations" && vue === "informations");
+  if (edite) return;
+  redrawView();
+}
+
+// Reprise complète : après un `resync`, ou quand l'agent le demande.
+async function relireTout() {
+  for (const nom of ["config", "trames", "actes", "reprises", "informations", "users"]) {
+    try {
+      const r = await db.rafraichirCollection(nom);
+      if (r) appliquerDistante(nom, r.value);
+    } catch (e) { console.warn("Relecture de « " + nom + " » impossible :", e); }
+  }
+  collab.rafraichir();
+  emit();
 }
 
 export async function init() {
@@ -363,6 +546,9 @@ export async function logout() {
   // ne peut pas être effacé par le JavaScript de la page : c'est le service qui
   // le fait, et qui invalide le jeton en base).
   await collab.arreter().catch(() => {});
+  // Le flux est arrêté AVANT la fermeture de session : un flux ouvert avec les
+  // droits d'avant continuerait d'annoncer les changements de l'atelier.
+  flux.arreter();
   if (sessionDeService(state.config)) await motdepasse.deconnexion().catch(() => {});
   state.user = null;
   state.motDePasseAChanger = false;
@@ -603,11 +789,24 @@ export async function journaliser(entry) {
 // `parapheurActif()` reste le point d'entrée du reste de l'interface.
 export const parapheurActif = () => parapheurActifConfig(state.config);
 
-// La transmission automatique au contrôle de légalité est elle aussi une
-// fonction expérimentale (Administration › Expérimentale) : éteinte par défaut,
-// aucun acte n'est télétransmis, et l'étape ne s'intercale pas entre la
-// signature et la publication (voir src/lib/legalite.js).
-export const controleLegaliteActif = () => controleLegaliteActifConfig(state.config);
+// La transmission au contrôle de légalité : TROIS RÉGIMES (Administration ›
+// Expérimentale) — « desactive » (rien n'est géré), « declaratif » (un réviseur
+// déclare la transmission avant publication) et « api » (le service adresse
+// l'acte à l'API d'envoi). `controleLegaliteActif()` signifie « la transmission
+// est GÉRÉE par l'application » — c'est le seul point d'entrée dont se servent
+// les écrans qui font exister l'étape (voir src/lib/legalite.js).
+export const controleLegaliteActif = () => controleLegaliteGereConfig(state.config);
+export const modeControleLegalite = () => modeControleLegaliteConfig(state.config);
+export const controleLegaliteDeclaratif = () => controleLegaliteDeclaratifConfig(state.config);
+export const controleLegaliteParApi = () => controleLegaliteParApiConfig(state.config);
+
+// QUI déclare la transmission : un RÉVISEUR compétent pour l'acte, ou
+// l'administration (le recours). C'est la même compétence que la révision
+// (voir src/lib/revision.js) : une déclaration engage celui qui l'écrit.
+export function peutDeclarerTransmission(acte) {
+  const trame = trameById(acte?.trameId);
+  return isAdmin() || peutReviser(state.config, state.user, { trame, acte });
+}
 
 // La publication automatique au recueil (Administration › Publication) : allumée
 // par défaut, elle publie l'acte dès le retour signé. Éteinte, l'acte signé
@@ -752,6 +951,14 @@ export const signalerEcranCollab = (ecran, opts) => collab.signalerEcran(ecran, 
 export const signalerRedaction = (id, label) => collab.signalerRedaction(id, label);
 export const libererRedaction = () => collab.libererRedaction();
 export const quiRedige = (acteId) => collab.quiRedige(acteId);
+export const signalerRedactionTrame = (id, label) => collab.signalerRedactionTrame(id, label);
+export const libererRedactionTrame = () => collab.libererRedactionTrame();
+export const quiRedigeTrame = (trameId) => collab.quiRedigeTrame(trameId);
+// Les brouillons partagés (1.6.2) : ce que les autres postes sont en train
+// d'écrire dans l'acte ouvert, et ce que ce poste leur publie.
+export const publierBrouillon = (acteId, charge) => collab.publierBrouillon(acteId, charge);
+export const brouillonsDistants = (acteId) => collab.brouillonsDistants(acteId);
+export const fluxActif = () => collab.fluxOuvert();
 export const presencesActives = () => collab.presencesActives();
 export const enLigne = () => collab.enLigne();
 export const journalPour = (opts) => collab.journalPour(opts);

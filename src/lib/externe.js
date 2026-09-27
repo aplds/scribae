@@ -38,7 +38,7 @@
 //
 // Ce module est pur : il ne connaît ni le DOM ni l'état de l'application.
 // ============================================================================
-import { prestataireDeploye } from "./deploiement-config.js";
+import { prestataireDeploye, signatureInterneDeploye, controleLegaliteDeploye } from "./deploiement-config.js";
 
 // --------------------------------------------------------------- les réglages
 // Le circuit général de la collectivité. « electronique » est le comportement
@@ -55,6 +55,11 @@ export const SIGNATURE_MODES = [
     hint: "Le signataire signe DANS Scribae, avec son compte. La signature est horodatée et sa trace nominative (nom, courriel, compte, moyen d'authentification) est conservée dans l'original interne — jamais diffusée au public, qui ne voit que le nom, la fonction et la date.",
   },
   {
+    id: "interne",
+    label: "Signature interne (c'est le service qui signe)",
+    hint: "Le SERVICE détient la clé privée du signataire, scellée au repos, et signe lui-même : la clé ne quitte jamais le serveur, et le poste ne reçoit que l'original signé (certificat, empreinte, horodatage). C'est une signature avancée au sens d'eIDAS, sans être qualifiée. Elle suppose un coffre — donc l'auto-hébergement : le service de démonstration ne l'offre pas.",
+  },
+  {
     id: "externe",
     label: "Circuit externe (papier ou outil tiers, sans API)",
     hint: "Le rédacteur télécharge le document prêt à signer, le fait signer hors de l'application, puis dépose la version signée en PDF. Le réviseur certifie la conformité du PDF avec la version numérique avant publication.",
@@ -63,7 +68,7 @@ export const SIGNATURE_MODES = [
 
 export const SIGNATURE_DEFAUT = { mode: "electronique" };
 
-const MODES_VALIDES = ["electronique", "simple", "externe"];
+const MODES_VALIDES = ["electronique", "simple", "interne", "externe"];
 
 // ----------------------------------------------------------------------------
 // L'API DU PRESTATAIRE DE SIGNATURE (circuit « electronique »).
@@ -159,6 +164,63 @@ export function motifCircuitSimule(config) {
   return "Cette page n'est pas servie par le service de la collectivité : le prestataire ne peut pas être appelé d'ici.";
 }
 
+// ----------------------------------------------------------------------------
+// LA SIGNATURE INTERNE EST-ELLE OFFERTE PAR CE SERVICE ?
+//
+// Elle suppose un COFFRE : le service détient la clé privée du signataire,
+// scellée au repos sous une clé du `.env` (`SCRIBA_SIGNATURE_KV_KEY`). Le service
+// dit lui-même s'il en tient un (`GET /v1/config`, champ `signatureInterne`) —
+// c'est la seule réponse qui vaille : un poste ne peut pas savoir si le serveur
+// a un coffre, et une page statique encore moins. Sans service qui parle (aperçu
+// en ligne, page statique) ou sans clé de scellement, le circuit est ÉTEINT, et
+// on le dit plutôt que d'offrir un geste qui sera refusé.
+// ----------------------------------------------------------------------------
+export const signatureInterneDuService = () => signatureInterneDeploye();
+
+export const signatureInterneDisponible = () => {
+  const c = signatureInterneDeploye();
+  return !!(c && c.disponible === true);
+};
+
+// Pourquoi la signature interne n'est pas offerte, en une phrase — celle qu'on
+// montre à l'agent et à l'administrateur. Vide quand elle est disponible.
+export function motifSignatureInterne() {
+  const c = signatureInterneDeploye();
+  if (c) return c.disponible === true ? "" : (c.motif || "Le service n'a pas de coffre de signature interne.");
+  return "Cette page n'est pas servie par le service de la collectivité : la signature interne suppose un coffre, et donc l'auto-hébergement (voir src/server/README.md).";
+}
+
+// Le prestataire « interne » : ce que la qualification de la signature doit
+// savoir de l'émetteur. Il n'est pas un tiers — c'est le service lui-même — et
+// la mention de l'acte publié le dit (voir qualification-signature.js).
+export const PRESTATAIRE_INTERNE = { id: "scribae-interne", nom: "Signature interne du service" };
+
+// ----------------------------------------------------------------------------
+// LA TÉLÉTRANSMISSION AU CONTRÔLE DE LÉGALITÉ EST-ELLE RÉELLE ?
+//
+// L'application peut ACTIVER l'étape (Administration › Expérimentale), mais elle
+// ne sait pas si le service, lui, appellera vraiment l'API @ctes : cela dépend de
+// la clé et de l'adresse posées dans le `.env` du déploiement, que le navigateur
+// ne voit jamais. C'est le service qui le dit (`GET /v1/config`, champ
+// `controleLegalite`) — et c'est ce que l'écran d'administration affiche, pour ne
+// pas laisser croire à une transmission réelle là où le certificat ne sera qu'une
+// simulation marquée.
+// ----------------------------------------------------------------------------
+export const controleLegaliteDuService = () => controleLegaliteDeploye();
+
+export const controleLegaliteReelle = () => {
+  const c = controleLegaliteDeploye();
+  return !!(c && c.actif === true);
+};
+
+// Pourquoi la transmission n'est pas réelle, en une phrase — celle qu'on montre à
+// l'administrateur. Vide quand elle l'est.
+export function motifControleLegaliteSimule() {
+  const c = controleLegaliteDeploye();
+  if (c) return c.actif === true ? "" : (c.motif || "Le service n'appelle pas l'API du contrôle de légalité.");
+  return "Cette page n'est pas servie par le service de la collectivité : la télétransmission ne peut partir que du service auto-hébergé (voir src/server/README.md).";
+}
+
 // Les réglages du prestataire tels que le service les reçoit au dépôt de
 // l'acte et à l'ouverture du circuit : jamais la clé, qui ne quitte pas le
 // serveur. C'est ce que l'application joint à `POST /v1/actes/{id}/signature`.
@@ -190,6 +252,8 @@ export const MODES_TRAME = [
   { id: "electronique", label: "Circuit électronique imposé" },
   { id: "simple_impose", label: "Signature simple imposée (dans l'application)" },
   { id: "simple_autorise", label: "Signature simple autorisée (au choix du rédacteur)" },
+  { id: "interne_impose", label: "Signature interne imposée (c'est le service qui signe)" },
+  { id: "interne_autorise", label: "Signature interne autorisée (au choix du rédacteur)" },
   { id: "externe_impose", label: "Circuit externe imposé" },
   { id: "externe_autorise", label: "Circuit externe autorisé (au choix du rédacteur)" },
 ];
@@ -211,23 +275,32 @@ export const trameModeLabel = (id) => (MODES_TRAME.find((m) => m.id === id) || M
 export function circuitPour(config, trame) {
   const t = String((trame && trame.signature) || "");
   const g = signatureSettings(config).mode;
-  if (t === "externe_impose") return { mode: "externe", choix: false, externePermis: true, simplePermis: false, impose: true, source: "trame" };
-  if (t === "simple_impose") return { mode: "simple", choix: false, externePermis: false, simplePermis: true, impose: true, source: "trame" };
-  if (t === "electronique") return { mode: "electronique", choix: false, externePermis: false, simplePermis: false, impose: true, source: "trame" };
-  if (t === "externe_autorise") return { mode: g, choix: true, externePermis: true, simplePermis: false, impose: false, source: "trame" };
-  if (t === "simple_autorise") return { mode: g, choix: true, externePermis: false, simplePermis: true, impose: false, source: "trame" };
-  return { mode: g, choix: false, externePermis: g === "externe", simplePermis: g === "simple", impose: g !== "electronique", source: "global" };
+  if (t === "externe_impose") return { mode: "externe", choix: false, externePermis: true, simplePermis: false, internePermis: false, impose: true, source: "trame" };
+  if (t === "interne_impose") return { mode: "interne", choix: false, externePermis: false, simplePermis: false, internePermis: true, impose: true, source: "trame" };
+  if (t === "simple_impose") return { mode: "simple", choix: false, externePermis: false, simplePermis: true, internePermis: false, impose: true, source: "trame" };
+  if (t === "electronique") return { mode: "electronique", choix: false, externePermis: false, simplePermis: false, internePermis: false, impose: true, source: "trame" };
+  if (t === "externe_autorise") return { mode: g, choix: true, externePermis: true, simplePermis: false, internePermis: false, impose: false, source: "trame" };
+  if (t === "interne_autorise") return { mode: g, choix: true, externePermis: false, simplePermis: false, internePermis: true, impose: false, source: "trame" };
+  if (t === "simple_autorise") return { mode: g, choix: true, externePermis: false, simplePermis: true, internePermis: false, impose: false, source: "trame" };
+  return { mode: g, choix: false, externePermis: g === "externe", simplePermis: g === "simple", internePermis: g === "interne", impose: g !== "electronique", source: "global" };
 }
 
 // Les circuits entre lesquels un acte peut être mené, d'après la résolution
 // ci-dessus : toujours celui qui est retenu, plus ceux que la trame ouvre.
+//
+// La SIGNATURE INTERNE n'y figure que si le SERVICE dit qu'il en tient le coffre
+// (`signatureInterneDisponible`) : offrir un circuit que le service refusera
+// ferait perdre un geste à l'agent. Un circuit IMPOSÉ, lui, reste affiché même
+// éteint — c'est un réglage à corriger, et l'écran le dit.
 export function circuitsDisponibles(config, trame) {
   const c = circuitPour(config, trame);
   if (!c.choix) return [c.mode];
   const liste = [c.mode];
   if (c.externePermis && !liste.includes("externe")) liste.push("externe");
   if (c.simplePermis && !liste.includes("simple")) liste.push("simple");
-  return liste;
+  if (c.internePermis && !liste.includes("interne")) liste.push("interne");
+  const offerts = liste.filter((m) => m !== "interne" || signatureInterneDisponible());
+  return offerts.length ? offerts : liste;
 }
 
 // Le circuit effectivement retenu pour un ACTE : le choix du rédacteur, quand
@@ -242,12 +315,18 @@ export function circuitsDisponibles(config, trame) {
 export function modeSignature(config, trame, acte) {
   if (acte && acte.externe) return "externe";
   if (acte && acte.signatureSimple) return "simple";
+  // Un acte signé par le SERVICE (`signatureInterne`) est acquis à ce circuit,
+  // comme les deux autres : changer le réglage général ne le déplace pas.
+  if (acte && acte.signatureInterne) return "interne";
   // Un acte dont le circuit SIMPLE est ouvert porte lui aussi un `acte.api` : le
   // dépôt au service est commun aux deux circuits (c'est le même dossier, seul
   // le niveau demandé diffère). Sans ce test, il serait relu « électronique » dès
   // le rechargement suivant, et la fenêtre de signature céderait la place à
   // l'outil du prestataire — pour un acte que le signataire doit signer ici.
   if (acte && (acte.signatureMode === "simple" || (acte.api && acte.api.niveau === "simple"))) return "simple";
+  // Le circuit INTERNE, lui aussi, passe par un dépôt /v1/actes : `niveau` y vaut
+  // « interne ». Même raison de le reconnaître avant le circuit électronique.
+  if (acte && (acte.signatureMode === "interne" || (acte.api && acte.api.niveau === "interne"))) return "interne";
   if (acte && acte.api && acte.api.acteId) return "electronique";
   const c = circuitPour(config, trame);
   if (!c.choix) return c.mode;
@@ -320,16 +399,35 @@ export const dossierSimpleInterne = (acte) => {
 };
 export const signeeSimple = (acte) => !!(acte && acte.signatureSimple && acte.signatureSimple.signeLe);
 
+// -------------------------------------------------- la signature interne
+// Le dossier de la signature donnée par le SERVICE : le signataire n'a pas de
+// clé sur son poste — c'est le service qui signe avec la sienne, gardée scellée
+// dans son coffre. L'acte porte alors `acte.signatureInterne` : la trace du
+// geste (date, empreinte, algorithme, valeur) et le dossier interne que le
+// service a renvoyé. Mêmes lecteurs que la signature simple, autre circuit.
+export const dossierInterneSignature = (acte) => (acte && acte.signatureInterne) || null;
+export const dossierInterneSignatureInterne = (acte) => {
+  const d = dossierInterneSignature(acte);
+  return (d && d.interne) || null;
+};
+export const signeeInterne = (acte) => !!(acte && acte.signatureInterne && acte.signatureInterne.signeLe);
+
 // ------------------------------------------------------------------ libellés
 export const phraseCircuit = (config, trame) => {
   const c = circuitPour(config, trame);
   if (c.impose && c.mode === "externe") return "Circuit externe imposé par la trame : le document est signé hors de l'application, puis la version signée est déposée.";
   if (c.impose && c.mode === "simple") return "Signature simple imposée par la trame : l'acte est signé dans l'application, par le signataire, avec son compte.";
+  if (c.impose && c.mode === "interne") return "Signature interne imposée par la trame : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre.";
   if (c.choix) {
     const n = circuitsDisponibles(config, trame).map((m) => modeLabel(m).replace(/^Circuit /, "").replace(/^Signature /, "")).join(", ou ");
     return `Cette trame ouvre plusieurs circuits : le rédacteur choisit, acte par acte, entre ${n}.`;
   }
   if (c.mode === "externe") return "Le circuit externe est le circuit général de la collectivité : les actes sont signés hors de l'application, puis la version signée est déposée.";
   if (c.mode === "simple") return "La signature électronique simple est le circuit général de la collectivité : les actes sont signés dans l'application, par le signataire, avec son compte.";
+  if (c.mode === "interne") {
+    return signatureInterneDisponible()
+      ? "La signature interne est le circuit général de la collectivité : c'est le service qui signe, avec la clé du signataire, gardée scellée dans son coffre."
+      : "La signature interne est le circuit général de la collectivité, mais ce service n'en tient pas le coffre : " + motifSignatureInterne();
+  }
   return "Circuit électronique : l'acte est signé dans l'outil du prestataire.";
 };

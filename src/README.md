@@ -113,8 +113,8 @@ fichier que personne ne lit.
 arbre que la plateforme conserve d'une séance à l'autre. Il est pourtant **écrit pour la
 disposition livrée** — le code y est `../src/…`, l'outillage `../scripts/…`. Trois choses le
 rendent tenable : `tests/README.md` le dit à qui ouvre un fichier d'épreuve, `scripts/racine-code.mjs`
-**constate** la racine du code au lieu de la supposer, et le harnais de l'atelier **simule la
-disposition livrée** (voir `docs/INDUSTRIALISATION.md` § 2).
+**constate** la racine du code au lieu de la supposer, et le harnais de l'atelier
+(`scripts/harnais-atelier.mjs`) **simule la disposition livrée** (voir `docs/ATELIER.md` § 3).
 
 Recette : écrire les fichiers dans un zip (outil `execute_js` + `@zip.js/zip.js`, niveau 9,
 dates fixes pour un export reproductible), en excluant `node_modules`, `scratch/`, `.git` et
@@ -313,7 +313,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 |---|---|
 | **Trames** (liste, création, duplication, import/export JSON) | ✅ |
 | **Éditeur de trame** (plan / page éditable en place / inspecteur : bloc, champs, règles, trame — commentaires et règles **signés du service** de leur auteur ; administrateurs **et** éditeurs ; bloc **« Division »** pour un texte long, **échelle des divisions** réglable — nombre d'échelons, mot imprimé, numérotation —, et **nature du document** : acte ou annexe) — **les commentaires se posent sur ce qu'on voit** (bouton sur chaque bloc, ou **passage sélectionné dans la page** et cité par la pastille « Commenter ») et **se voient dans la page**, sous le bloc visé, avec repère de marge, compteur d'en-tête et onglet « Commentaires » | ✅ |
-| **Rédiger** (choix de l'acte à rédiger — rédaction en cours, acte enregistré, ou trame avec recherche — puis document éditable en place : WYSIWYG, pastilles de champs, **bibliothèque de variables glissables**, **blocs déplaçables — flèches et glisser-déposer, avec renumérotation** —, **ajout et retrait d'un bloc ou d'un élément d'un seul clic**, **clic sur un bloc → onglet « Bloc »** (intitulé, numérotation, échelon, éléments, ajouts, retrait), **divisions** (Livre, Titre, Section…) et leurs cartes **« Annexe » / « Annexes »**, **consignes de la trame affichées sous le passage concerné** (onglet « Consignes » et compteur d'en-tête), écarts « hors trame » — réécritures, réglages et structure —, panneau « À compléter » / « Contrôle & écarts », exports) | ✅ |
+| **Rédiger** (choix de l'acte à rédiger — rédaction en cours, acte enregistré, ou trame avec recherche — puis document éditable en place : WYSIWYG, pastilles de champs, **bibliothèque de variables glissables**, **blocs déplaçables — flèches et glisser-déposer, avec renumérotation** —, **ajout et retrait d'un bloc ou d'un élément d'un seul clic**, **clic sur un bloc → onglet « Bloc »** (intitulé, numérotation, échelon, éléments, ajouts, retrait), **divisions** (Livre, Titre, Section…) et leurs cartes **« Annexe » / « Annexes »**, **consignes de la trame affichées sous le passage concerné** (onglet « Consignes » et compteur d'en-tête), écarts « hors trame » — réécritures, réglages et structure —, panneau « À compléter » / « Contrôle & écarts », **ligne d'état de l'enregistrement sous le titre** (« Enregistré » avec l'heure, « Modifications non enregistrées », « Pas encore enregistré »), exports) | ✅ |
 | **Exports** (Akoma Ntoso, Schematron, JSON-LD/ELI, HTML, **Word (.doc)**, Markdown, JSON — tous au **format A4** pour l'impression et le PDF) | ✅ |
 | **Actes** (registre local : numéro, objet, nature, conformité à la trame, statut, parapheur, exécution, export ; pastille **« abrogé »** / **« abrogation prévue »** ; **corbeille réservée aux brouillons**, les actes signés ou publiés passant par **« Retirer / abroger »**) | ✅ |
 | **Annexes** (un document adopté par un autre — règlement, tableau : **pas de numéro propre**, pas de signature ; son texte suit l'acte qui l'adopte, dans le même original signé ; identification par la décision d'adoption — « Annexe à la délibération n° … » ; ni autorité ni mention de publication au recueil, mais les **visas** sont conservés ; modification par **adoption d'une nouvelle rédaction**, en suivi des modifications) | ✅ |
@@ -326,14 +326,14 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Recherche globale** (Ctrl+K ou « / » : actes, trames, personnes, services, références, comptes, guide) | ✅ |
 | **Corbeille** (suppression réversible des actes **et** des trames, restauration, suppression définitive ; seuls les actes encore en brouillon peuvent y être mis — un acte signé ou publié s'abroge ou se retire du recueil, il ne se supprime pas) | ✅ |
 | **Journal d'audit & historique des brouillons** (tous les faits, filtrables ; vingt versions par acte, restauration) | ✅ |
-| **Collaboration** (présence des postes, verrou souple de rédaction, notifications et cloche) | ✅ |
+| **Collaboration** (présence des postes, verrou souple de rédaction, notifications et cloche ; **synchronisation en temps réel** sur un service partagé — flux de changements, brouillons partagés, fusion des écritures concurrentes — voir `docs/COLLABORATION.md`) | ✅ |
 | **Modifier un acte** (l'acte en vigueur est **édité en place**, comme dans un traitement de texte : ajout et retrait d'un **paragraphe**, d'une **ligne de liste** ou d'une **ligne de tableau** ; **réattribution d'un numéro** à un article — le numéro doit être libre — ou **« tout renuméroter »** ; la confirmation produit l'acte modificatif + la version consolidée, puis le circuit signature → publication rend la consolidation opposable et supplante l'originale) | ✅ |
 | **Abroger un acte, ou l'un de ses articles** (prévu **dès la rédaction** d'un acte, y compris un acte non modificatif : on vise au référentiel l'acte — ou tel article d'un acte — à abroger ; la clause d'abrogation s'ajoute au document, et l'abrogation prend effet **au jour de l'entrée en vigueur** de l'acte qui la porte, non à sa publication ; l'acte abrogé le devient en bloc, l'article abrogé est consolidé) | ✅ |
 | **Signature électronique** — réglages de l'**API du prestataire** (transport, adresse, prestataire, niveau de signature, adresse de notification, délai, et les quatre points de terminaison : document, signataires, démarrage, statut) posés dans l'Administration ou déclarés dans le `.env` (`SCRIBA_SIGNATURE_API_*`), la **clé restant au service** (`SCRIBA_SIGNATURE_API_CLE`, jamais dans le référentiel ni dans une réponse) ; ouverture réelle du circuit par le **service**, retour de l'acte signé et vérification par empreinte | ✅ (démonstration hors service) |
 | **Signature électronique simple** — signer **dans l'application**, sans prestataire : fenêtre de signature (document, identité du signataire, empreinte, **déclaration à cocher**), signature cryptographique et horodatée, **trace nominative** (nom, fonction, adresse électronique, compte, moyen d'authentification, poste) conservée dans l'**original interne** ; réglage **global** ou **par trame** (*imposée* / *autorisée*) | ✅ (démonstration) |
 | **Original signé à deux parts** — **part publique** (nom, fonction, date, empreinte, certificat, horodatage : ce que voit le recueil, l'export JSON et les routes ouvertes) et **part interne** (mentions nominatives, authentification, poste, courriels : rangée au registre, servie par la seule route protégée `GET /v1/actes/{id}/dossier-signature`, lue par « Dossier de signature (interne)… ») | ✅ (démonstration) |
 | **Notifications par courriel** (six événements activables — acte à signer, signé, publié, à valider, à réviser, notification à l'intéressé —, expéditeur, adresse de réponse, copie systématique ; le service parle au **serveur SMTP** du `.env`, `SMTP_*` ; message d'essai ; un envoi qui échoue est tracé « non envoyé » au journal **et** au dossier interne de l'acte) | ✅ (service auto-hébergé ; indisponible en démonstration) |
-| **Circuit de signature externe** — signer **sans API** (papier, outil tiers) : réglage **global** ou **par trame** (*imposé* / *autorisé*), **téléchargement** du document prêt à signer (bordereau de remise), dépôt de la **version signée** en PDF (empreinte SHA-256, hébergement), **certification de conformité** par le réviseur (file dédiée dans « Révision »), publication tenant l'ordre « version signée → conforme → publié » (`409 version_signee_absente` / `conformite_non_certifiee`) et **version signée montrée comme l'original** sur le recueil public | ✅ (démonstration) |
+| **Circuit de signature externe** — signer **sans API** (papier, outil tiers) : réglage **global** ou **par trame** (*imposé* / *autorisé*), **téléchargement** du document prêt à signer (bordereau de remise), dépôt de la **version signée** en PDF (empreinte SHA-256, hébergement), **certification de conformité** par le réviseur (file dédiée dans « Révision »), publication tenant l'ordre « version signée → conforme → publié » (`409 version_signee_absente` / `conformite_non_certifiee`) et **version signée montrée comme l'original** sur le recueil public | ✅ |
 | **Le signataire** — rôle « Signataire » **cumulable**, **attribué par la désignation** dans l'organigramme des délégations ; **compte** rapproché de celui de l'outil de signature ; **onglet « Ma signature »** (actes qui attendent sa signature, actes signés au titre de sa délégation) ; **champ de compétence** (l'atelier ne montre que les actes dont sa signature relève) | ✅ |
 | **Publication & ELI** (dépôt au recueil, identifiant ELI, opposabilité, original signé, registre de l'administration) | ✅ (démonstration) |
 | **Recueil public** (site sans compte : accueil — **carrousel des derniers actes publiés** et **thèmes** par lesquels on parcourt les actes, **effacés dès qu'une recherche est en cours** pour ne laisser que les résultats —, recherche et filtres dont le **thème**, liste groupée par année, texte de chaque acte rendu dans la page — les actes s'affichent par défaut **dans leur version la plus récente**, avec une case **« Afficher les versions antérieures »** et une case **« Afficher les articles abrogés »** —, adresse citable ; les **règlements** publiés à titre informatif y comptent parmi les publications ; les actes **réservés aux agents** — `reserve` — en sont écartés pour un visiteur anonyme, qui doit se connecter) | ✅ |
@@ -343,8 +343,8 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Mentions du recueil public** (Administration › Publication : **mentions légales** rappelant les règles de publication et d'opposabilité des actes — L. 2131-1 CGCT, R. 421-1 CJA — et **mentions d'accessibilité** — loi du 11 février 2005, RGAA, Défenseur des droits —, écrites par l'administrateur, remplacées par un **lien** vers le site de la collectivité, ou **désactivées** ; repliées sous leur titre en bas de page du recueil) | ✅ |
 | **Mention de l'éditeur du logiciel** (les trois pieds de page — recueil public, atelier, écran de connexion — portent « **Propulsé par Scribae — GPLv3** », le nom renvoyant à la documentation du logiciel ; Administration › Identité permet de l'**éteindre**) | ✅ |
 | **Réglage « Publication automatique »** (Administration › Publication : publier au retour signé, ou laisser l'acte au registre pour une administration qui publie ailleurs) | ✅ |
-| **Administration** (identité, vocabulaire, numérotation — **séquence interne ou service externe**, entités, personnes, rôles, **services et bureaux**, références, mentions, familles, types d'actes, données) | ✅ |
-| **Chrono de numérotation** (tous les rangs attribués — année, entité, type d'acte, numéro composé, état de l'acte, dates, rédacteur —, **rangs jamais attribués** et **numéros annulés** avec leur motif ; compteurs, filtres, tri par colonne, **export CSV et XLSX** ; portée du chrono — un seul, un par entité ou un par type d'acte —, **passage à l'année suivante** et annulation d'un rang ; un numéro n'est **jamais attribué deux fois**) | ✅ |
+| **Administration** (identité, vocabulaire, numérotation — **séquence interne ou service externe**, entités, personnes, rôles, **services et bureaux**, références, mentions, familles, types d'actes, données ; une **barre de recherche des réglages** traverse les vingt-trois onglets : un mot, la liste des réglages qui y répondent avec leur chemin, et le champ visé qui clignote) | ✅ |
+| **Chrono de numérotation** (tous les rangs attribués — année, entité, type d'acte, numéro composé, état de l'acte, dates, rédacteur —, **rangs jamais attribués** et **numéros annulés** avec leur motif ; compteurs, filtres, tri par colonne, **six colonnes essentielles et les quatorze autres à la demande**, **pagination**, **export CSV et XLSX** ; portée du chrono — un seul, un par entité ou un par type d'acte —, **passage à l'année suivante** et annulation d'un rang ; un numéro n'est **jamais attribué deux fois**) | ✅ |
 | **Organigramme** (entités → services → bureaux, en arbre ou en liste, même toile que les délégations : fiche de chaque maille, **signataire principal** d'une entité, **entité autonome ou rattachée** à une autre — le cas d'une régie sans personnalité morale propre mais avec son directeur, ses services et ses actes —, entités hors arbre signalées) | ✅ |
 | **API REST documentée, avec panneau de commande** (*Aide › API REST*, et `docs/API.md` engendré) : toutes les routes du service — rôle exigé, paramètres, corps, réponses, champs notables, exemple cURL —, et la possibilité de **jouer la requête pour de vrai** depuis l'application (chemin, corps et jeton modifiables, réponse avec code et durée ; l'appel figure dans « API & journal ») | ✅ |
 | **Feuilles de style** (charte graphique : marges, typographie, couleurs, **deux emblèmes en en-tête — à gauche et à droite du filet**, chacun sa hauteur, en-tête, pied, filets, **encadrés à côtés choisis**, **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; **graisse de la formule d'autorité** — normal, italique, **gras**, gras italique —, les feuilles enregistrées avant ce choix gardant leur rendu ; préréglages ; résolution trame → entité → famille → générale ; **éditeur direct WYSIWYG sur le style**) | ✅ |
@@ -356,7 +356,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Base de données** (pilotes local / service partagé / **serveur MySQL-MariaDB** externe, synchronisation par enregistrement, conflits, file hors ligne) | ✅ |
 | **Auto-hébergement** (pile Docker nginx + service Node + MySQL/MariaDB, édition web de l'application, transport HTTP) | ✅ |
 | **Bibliothèque de trames partagée / multi-poste** | ✅ (mode partagé ; export/import JSON toujours disponible) |
-| **Guide** (wiki intégré : 30 chapitres — dont le chrono de numérotation, l'organigramme, l'API REST, les informations du recueil et les reprises d'actes anciens —, glossaire, dépannage, fiche mémo, impression) | ✅ |
+| **Guide** (wiki intégré : 32 chapitres — dont le chrono de numérotation, l'organigramme, l'API REST, les informations du recueil, les reprises d'actes anciens et le travail à deux —, glossaire, dépannage, fiche mémo, impression) | ✅ |
 | **Export PDF/A** (PDF/A-2b et PDF/A-1b : mise en page réelle par l'application — marges, police, filets, tableaux, annexes, signature —, **polices et profil sRGB embarqués**, langue, métadonnées et identifiant ELI ; la conformité reste à valider par `veraPDF` sur un déploiement) | ✅ |
 | Bordereau SEDA | ⏳ |
 
@@ -425,13 +425,25 @@ Une **vue** peut aussi être ouverte à tous (entrée `null` dans `VIEW_PERMS`) 
   `visibleActes()` ouvre en outre au compte les actes dont sa **compétence de révision**
   (`peutReviser`) ou sa **compétence de signature** (`competenceDeSignature`) relève —
   `fileSignature()` rend la file de l'onglet « Ma signature ».
-- `app.js` porte la barre de gauche (`NAV`), rangée en six rubriques — **Produire** (trames,
+- `app.js` porte la barre de gauche (`NAV`), rangée en **cinq rubriques** — **Produire** (trames,
   rédaction, modification, registre, corbeille), **Valider** (parapheur, révision), **Publier**
-  (signature et publication, exécution et délais, publications ELI, recueil public),
-  **Organisation** (organigramme, délégations, chrono), **Configurer** (administration,
-  feuilles de style) et **Aide** (guide, API REST, documentation technique) : l'ordre suit la
-  vie de l'acte, et les référentiels de la collectivité ne sont pas rangés parmi les gestes de
-  production. Il filtre la barre (`NAV[].perm`), la vue (`VIEW_PERMS`) et **replie sur
+  (signature et publication, exécution et délais, publications ELI, recueil public), **Réglages**
+  (organigramme, délégations, chrono, administration, feuilles de style) et **Aide** (guide, API
+  REST, documentation technique) : l'ordre suit la vie de l'acte, et les référentiels de la
+  collectivité ne sont pas rangés parmi les gestes de production. **« Réglages » est un groupe
+  repliable** (`PREF_REGLAGES`, préférence de poste `nav.reglages`) : son intitulé est un bouton
+  `aria-expanded`, il s'ouvre de lui-même quand la vue courante en fait partie (`vueDeLEntree`),
+  et sous 760 px il garde une puce compacte pour que rien ne devienne inatteignable. La barre
+  **se replie** (bouton au **pied** de la barre, `app-nav--replie`, 58 px
+  d'icônes — les libellés restent dans le DOM pour les lecteurs d'écran, et le titre du bouton
+  les donne au survol) ; le choix est une **préférence de poste** (`lib/prefs.js`, clé
+  `nav.replie`), jamais une donnée du référentiel, et un écran étroit part replié sans elle.
+  La **coquille de l'atelier est bornée à la fenêtre** (`.app` en `100vh`, seule la zone de
+  contenu défile — `.app-main` ; c'est le **corps** de la barre, `.app-nav__corps`, qui défile
+  quand ses entrées dépassent la hauteur) : l'en-tête, le sommaire et le pied restent donc en
+  place, et le pied de la barre porte le bouton de repli. Les écrans hors coquille (connexion,
+  recueil public) font, eux, défiler la fenêtre. Il filtre la barre
+  (`NAV[].perm`), la vue (`VIEW_PERMS`) et **replie sur
   le premier écran autorisé** : un rédacteur qui demande `#/referentiel` ou `#/trames` est
   ramené à la rédaction. Une vue **inconnue** est ramenée, elle, à la page d'accueil du site —
   le recueil public (`normaliserRoute`). Le registre des trames est réservé aux éditeurs et aux
@@ -551,6 +563,20 @@ agent ordinaire :
   fenêtre de signature simple ne s'ouvrent que pour le titulaire. `fileSignature` distingue ce qu'il
   a **à signer** (`aSigner` : il est titulaire, l'acte n'est pas signé) de ce qu'il **suit**
   (`engagee` : les actes signés au titre de sa délégation).
+- **Ce que la même règle devient au service.** L'interface ne décide pas seule : un
+  `POST /v1/webhooks/signature` joué directement, avec un jeton valide, ne doit pas pouvoir
+  engager la signature d'autrui. `porteSignature` (`src/server/mysql/actes.mjs`) **oppose
+  l'opérateur au signataire** : quand le service identifie les personnes (`AUTH_MODE=password` ou
+  `oidc`) et que l'appelant est une session, la signature n'est acceptée que si le `personId` du
+  signataire est celui de l'opérateur — et le **nom** imprimé vient du référentiel du service,
+  jamais du corps de la requête. Un autre compte reçoit `403 signature_non_habilitée` et le
+  circuit est marqué `rejetee` ; une **clé de service** (le prestataire) reste recevable, mais
+  elle **affirme** la signature (`attribution: "declaree"`). La certification de conformité du
+  circuit externe a la même porte (`403 conformite_non_habilitée`). Chaque signature s'inscrit
+  avec son **opérateur** et son **attribution** (`verifiee` | `declaree` | `reprise` |
+  `compilation`) : la reprise (repose au registre d'un original déjà signé) et la compilation
+  (dépôt d'une version consolidée) ne sont **pas** des signatures, et sont **réservées à
+  l'administration** — le drapeau du corps les nomme, il n'ouvre aucun droit.
 
 ### Qualités du signataire et délégations de signature
 
@@ -1722,9 +1748,10 @@ sont pas. Ses règles pures sont dans **`src/lib/reprise.js`**, son écran dans
    sa chronologie, et ferait courir des délais de recours à compter du jour. Le champ de date porte
    la borne (`max`) et l'aperçu dit ce qui manque.
 3. **L'original signé est joint à la main.** `carteOriginal` calcule l'empreinte **SHA-256** du
-   fichier (`crypto.subtle`) et le dépose par `upload-plugin` ; la pièce est gardée sur la reprise
-   (adresse, empreinte, taille, qui l'a déposée). C'est elle qui **fait foi** — la reprise ne signe
-   rien, elle conserve la preuve de ce qui a été signé.
+   fichier (`crypto.subtle`) et le dépose par `lib/fichiers.js` (l'hébergement de l'hôte s'il en
+   a un, sinon le **service** à `/v1/pieces`) ; la pièce est gardée sur la reprise
+   (adresse, empreinte, taille, identifiant, qui l'a déposée). C'est elle qui **fait foi** — la
+   reprise ne signe rien, elle conserve la preuve de ce qui a été signé.
 
 **La publication est immédiate, et informative.** `publier` fait le **dépôt** (`POST /v1/actes`,
 avec `reprise: true`) puis la **publication** (`POST /v1/actes/{id}/publication`, avec
@@ -1976,14 +2003,16 @@ n'appelle **aucune** API de signature : le rédacteur « envoie à signature » 
 **télécharge** le document prêt à signer, une page A4 précédée d'un **bordereau de remise** (`documentPretsASigner`,
 `views/signature.js`) —, le signataire signe hors de l'application, le rédacteur **rentre la
 version signée** (« Ajouter la version signée », un PDF dont l'empreinte SHA-256 est calculée
-dans le navigateur et le fichier déposé par `upload-plugin`), et le **réviseur certifie la
+dans le navigateur et le fichier déposé par `lib/fichiers.js` — l'hébergement de l'hôte s'il en
+a un, sinon le **service** à `/v1/pieces`), et le **réviseur certifie la
 conformité** de la **pièce signée** avec la version numérique publiée. Le service suit (routes
 `POST /v1/actes/{id}/signature-externe` et `POST /v1/actes/{id}/conformite`) et refuse de publier
 tant que la version signée manque (`409 version_signee_absente`) ou que la conformité n'est pas
 certifiée quand un réviseur est compétent (`409 conformite_non_certifiee`). Le circuit se règle
 **globalement** (`config.signature`, Administration › Signature) ou **par trame**
-(`trame.signature` : suivre le général, imposé, autorisé — le rédacteur choisit alors acte par
-acte —, ou électronique imposé) ; un acte **déjà engagé** dans un circuit y reste. Côté écrans :
+(`trame.signature` : suivre le général, ou imposer / autoriser l'un des circuits — électronique,
+signature simple, signature interne, circuit externe —, le rédacteur choisissant alors acte par
+acte) ; un acte **déjà engagé** dans un circuit y reste. Côté écrans :
 la fiche de l'acte montre la version signée, l'onglet « Révision » gagne une file
 « Certifications (signature externe) », et le **recueil public** montre le **PDF signé** comme
 l'« original », tel qu'il a été mis en ligne. Le détail est dans `SPEC.md` (§ 2.6 ter).
@@ -2006,6 +2035,22 @@ signature — déposer l'acte, ouvrir le circuit, prévenir le signataire — ap
 n'appartient qu'au **titulaire** de l'étape, porteur de la qualité de signataire
 (`peutSignerEffectivement`, `lib/signataires.js`). La fenêtre de signature ne s'ouvre que pour lui :
 tout autre compte est prévenu que l'acte est parti et attend la signature de son titulaire.
+
+**La signature interne — c'est le SERVICE qui signe.** Troisième alternative, et la seule qui mette
+la clé privée **hors du navigateur**. Dans les circuits « simple » et électronique simulé, la clé du
+signataire est engendrée par le poste et conservée en clair : c'est le fond de l'écart NC-IV-001.
+Ici, le **service** engendre la clé du signataire, la garde **scellée** (AES-256-GCM, sous
+`SCRIBA_SIGNATURE_KV_KEY`) dans un **coffre**, et **signe lui-même** — le poste ne reçoit que
+l'original signé. C'est une signature **avancée** au sens d'eIDAS (clé sous le contrôle exclusif du
+signataire, certificat émis, signature liée au document), **non qualifiée** (l'autorité d'émission
+est interne) — et l'acte publié le dit. Le coffre vit au service
+(`src/server/mysql/signature-interne.mjs`) : une fiche **par signataire** (la clé suit la
+**personne**, donc son certificat lui reste), une pour l'**horodatage** du service, et rien qui
+contienne une clé privée en clair. Ce circuit n'existe qu'en **auto-hébergement** : le service de
+démonstration ne tient pas de coffre et **refuse** franchement
+(`409 signature_interne_indisponible`) plutôt que de simuler ; l'application n'offre le circuit que
+si le service déclare tenir son coffre (`GET /v1/config`, `signatureInterne`). Le détail est dans
+`SPEC.md` (§ 2.6 quater bis) et `docs/ADMINISTRATION.md` (§ 5.5 sexies bis).
 
 **L'original signé se partage en deux.** `partiePublique(pack)` (pure, `src/lib/signature.js`)
 retire d'un paquet signé ce qui n'a pas à être diffusé : la part **interne** (`interne`) et, dans
@@ -2492,9 +2537,11 @@ alors par-dessus l'écran où l'on était. L'application enregistre le redessin 
 à l'écran (`setViewRenderer`, `src/ui/app.js`), pour qu'une invalidation venue de l'atelier
 l'atteigne vraiment.
 
-**Limites assumées** : le prestataire est simulé, le certificat n'est pas qualifié eIDAS,
-et le service conserve au plus 40 publications (les plus anciennes sont évincées) —
-`state` est un `Uint8Array` de taille fixe, rangé en JSON sur une vue UTF-16.
+**Limites assumées** : en **démonstration**, le prestataire de signature est simulé ; le
+certificat n'est pas qualifié eIDAS, et le service conserve au plus 40 publications (les plus
+anciennes sont évincées) — `state` est un `Uint8Array` de taille fixe, rangé en JSON sur une vue
+UTF-16. (Un déploiement auto-hébergé qui branche le prestataire (`SCRIBA_SIGNATURE_API_*`) ou le
+contrôle de légalité (`SCRIBA_CONTROLE_LEGALITE_*`) appelle alors de **vrais** services.)
 
 ### Le parapheur : un acte est validé avant d'être signé
 
@@ -2656,42 +2703,81 @@ non la charte de l'acte, car ce ne sont pas des actes :
 
 Chaque délivrance entre au **journal** : une pièce sortie du registre est un fait du dossier.
 
-### La transmission au contrôle de légalité par API (fonction expérimentale)
+### La transmission au contrôle de légalité : trois régimes
 
-**Fonction expérimentale, éteinte par défaut** (`config.experimental.controleLegalite`,
-**Administration › Expérimentale**) : elle reste **la seule fonction expérimentale**, parce que la
-télétransmission suppose une convention et des identifiants d'accès auprès de la préfecture.
-Éteinte, rien n'est envoyé, la marche n'apparaît pas dans le circuit de signature, et la
-transmission reste une **constatation manuelle** (§ ci-dessus).
+L'acte signé qu'une collectivité doit transmettre au représentant de l'État (« contrôle de
+légalité ») est tenu de **trois façons**, réglées dans **Administration › Expérimentale**
+(`config.controleLegalite.mode`, publié par `GET /v1/config`) :
 
-Activée, l'étape **s'intercale entre le retour signé et la publication**
-(`publierApresSignature`, `src/ui/views/signature.js`) :
+| Régime | Ce qui se passe | Appel sortant |
+|---|---|---|
+| **Désactivée** (`desactive`, défaut) | rien n'est géré : l'étape ne s'intercale pas entre la signature et la publication, et la transmission se **constate à la main** depuis l'échéancier | — |
+| **Déclarative** (`declaratif`) | avant sa **publication**, l'acte signé attend qu'un **réviseur compétent déclare** à qui, et à quelle date, il a été transmis — la déclaration vaut attestation | **aucun** |
+| **API (@ctes)** (`api`) | le service adresse l'acte signé à l'**API d'envoi** ; l'accusé de réception vaut certificat. Chaque acte peut **en outre** être déclaré transmis | oui (réel) |
 
-1. `POST /v1/actes/{id}/transmission` — l'acte signé part vers l'**API d'envoi**
-   (`CONTROLE_LEGALITE.apiUrl`, `src/lib/legalite.js`) ; l'appel sortant est **tracé** dans le
-   journal du service (`recordExternal`, service `controle-legalite`) ;
+**La déclaration est un geste nommé, daté et opposable, non un raccourci.** Elle porte une date et un
+destinataire **requis**, une référence et un motif facultatifs, et **l'identité de son auteur** : le
+nom inscrit au certificat est celui du compte qui déclare. Elle se pose depuis la **fiche de
+l'acte**, l'**échéancier** et l'écran **Signature & publication**, et l'interface la réserve à qui
+peut la porter — un **réviseur compétent** pour l'acte, ou l'**administration**. Le service va plus
+loin : quand il **identifie les personnes**, il oppose la déclaration à son auteur (`personId`) — on
+ne déclare pas au nom d'un autre (`403 declaration_non_habilitée`) — et, si l'acte porte une liste de
+réviseurs, il faut y figurer. C'est la **suppression du champ `reference`** non documenté, qui
+court-circuitait la formalité (NC-II-016), que cette déclaration remplace : elle est **documentée au
+contrat OpenAPI** (les deux services) et **journalisée**. Le service **dit ce qu'il a pu attester**
+— `attribution: "verifiee"` quand il a opposé la déclaration à l'identité de l'opérateur,
+`"declaree"` quand il n'a pas pu l'opposer — et l'application **reprend ce mot** au lieu de
+présenter comme vérifiée une déclaration simplement enregistrée (NC-II-017).
+
+**Les trois natures de certificat** (`src/lib/legalite.js`, `certificatTransmission`) — le **sceau**
+(`sha256(reference|recuLe|destinataire|empreinte)`) et sa vérification
+(`verifierCertificatTransmission`) sont les mêmes pour toutes :
+
+| Nature | Quand | Mention |
+|---|---|---|
+| **Accusé de réception** | l'API @ctes a répondu | « Transmis au contrôle de légalité le 22 janvier 2026 à 09 h 14 » |
+| **Déclaration** | régime `declaratif`, ou déclaration par acte en régime `api` | « … (déclaration de Camille Roussel) » |
+| **Simulation** | aucun appel n'a eu lieu (API non branchée, démonstration) | « … (mention de démonstration — transmission simulée, sans appel sortant) » |
+
+**En régime API, c'est le service qui appelle** — `src/server/mysql/controle-legalite.mjs`, créé par
+`server.mjs` quand le `.env` porte `SCRIBA_CONTROLE_LEGALITE_URL` et
+`SCRIBA_CONTROLE_LEGALITE_API_CLE` : la clé ne quitte jamais le serveur, et l'appel sortant est
+**tracé** dans le journal du service (`recordExternal`, service `controle-legalite`). Le déroulé,
+dans `publierApresSignature()` (`src/ui/views/signature.js`) :
+
+1. `POST /v1/actes/{id}/transmission` — l'acte signé part vers l'**API d'envoi** ;
 2. l'**accusé de réception** revient et **vaut certificat informatique de transmission** —
-   mention « Transmis au contrôle de légalité le … à … », référence `AR-…`, `empreinte`
-   (SHA-256 du document transmis) et **sceau** (`sha256(reference|recuLe|destinataire|empreinte)`,
-   recalculable par `verifierCertificatTransmission`) ;
-3. le certificat est **déposé sur le document** : `acte.original.transmission` — **l'empreinte
-   du paquet signé n'est pas touchée**, le certificat est une pièce du dossier, pas une
-   signature — et la mention s'imprime sur la **version en ligne** (`buildWebVersion`). Le
-   **sceau est vérifié à l'affichage** de l'original signé (`verifierCertificatTransmission`) ;
+   mention, référence `AR-…`, `empreinte` (SHA-256 du document transmis) et **sceau** ;
+3. le certificat est **déposé sur le document** : `acte.original.transmission` — **l'empreinte du
+   paquet signé n'est pas touchée**, le certificat est une pièce du dossier, pas une signature — et
+   la mention s'imprime sur la **version en ligne** (`buildWebVersion`). Le **sceau est vérifié à
+   l'affichage** de l'original signé (`verifierCertificatTransmission`) ;
 4. la formalité est constatée au nom de l'agent (`enregistrerFormalite`, champ `certificat`) ;
 5. l'**acte est publié**, certificat joint à l'enregistrement de publication.
 
-L'ordre **signé → transmis → publié** est tenu par le **service**, pas seulement par le
-client : le drapeau est transmis au dépôt (`POST /v1/actes`, `controleLegalite`),
-`hTransmettre` refuse un acte non signé (`409 acte_non_signe`), `hPublier` refuse un acte
-soumis à l'étape et non transmis (`409 transmission_absente`) — après le contrôle de
-signature, avant celui de la date — et la transmission est **idempotente**
-(`GET /v1/actes/{id}/transmission` relit le certificat). Les deux services portent le même
-contrat (`index.html` et `src/server/mysql/actes.mjs`, testé par `actes.test.mjs`).
+En régime **déclaratif**, la chaîne **s'arrête après l'étape 3** : le client ne publie pas de
+lui-même, et annonce qu'il attend la déclaration du réviseur.
 
-Un acte **déposé avant l'activation** ne porte pas l'exigence. Les transmissions de
-démonstration (`src/lib/demo-actes.js`) portent leur certificat, calculé par le même
-`certificatTransmission()` : la démonstration ne court-circuite rien.
+L'ordre **signé → transmis → publié** est tenu par le **service**, pas seulement par le client : le
+drapeau est transmis au dépôt (`POST /v1/actes`, `controleLegalite`), `hTransmettre` refuse un acte
+non signé (`409 acte_non_signe`), `hPublier` refuse un acte soumis à l'étape et non transmis
+(`409 transmission_absente`) — après le contrôle de signature, avant celui de la date — et la
+transmission est **idempotente** (`GET /v1/actes/{id}/transmission` relit le certificat). Les deux
+services portent le même contrat (`index.html` et `src/server/mysql/actes.mjs`, testé par
+`actes.test.mjs`).
+
+**Réelle quand le service est branché, simulée — et marquée — sinon.** Tant qu'aucune adresse ni clé
+n'est posée (et sur le service de démonstration), l'appel n'a pas lieu : le certificat est fabriqué
+localement, marqué `demonstration: true`, et sa mention porte la réserve (« … transmission simulée,
+sans appel sortant »). Un refus de l'API n'est **jamais** converti en certificat : la route rend `502
+transmission_echec`, **rien n'est enregistré**, l'acte reste *signé, non transmis*, et la
+transmission se rejoue. `GET /v1/config` publie l'état (`controleLegalite`) et Administration ›
+Expérimentale l'affiche : une étape « activée » ne doit pas laisser croire à un appel qui n'aura pas
+lieu.
+
+Un acte **déposé avant l'activation** ne porte pas l'exigence. Les transmissions de démonstration
+(`src/lib/demo-actes.js`) portent leur certificat, calculé par le même `certificatTransmission()` :
+la démonstration ne court-circuite rien.
 
 ### Registre : recherche globale, corbeille, journal, versions
 
@@ -2732,6 +2818,18 @@ cloche et panneau). Le journal et la présence sont deux **collections** du cont
 persistance (`journal`, `presence`) : elles sont marquées silencieuses (pas de toast de
 conflit), et le service MySQL ne les recopie pas dans son journal technique — ce sont
 elles-mêmes des flux.
+
+**Le temps réel (1.6.2)** — et seulement sur un **service partagé** (auto-hébergement), jamais
+sur la démonstration statique : `GET /v1/db/flux` tient une connexion SSE ouverte et n'y
+annonce que la **collection** changée et sa **révision** (jamais les documents) ; chaque poste
+relit ce qui lui manque, sans jamais remplacer l'enregistrement ouvert sous les yeux de
+quelqu'un. Deux écritures concurrentes ne s'écrasent plus : elles se **fusionnent** champ par
+champ (`src/lib/fusion.js`, `reprendreConflits` dans `src/lib/db/index.js`), et seuls les vrais
+désaccords sont signalés. Les **brouillons** d'un acte non enregistré se partagent par la
+présence (clés touchées, 1,6 s, plafond de 24 000 caractères). Un témoin d'en-tête dit si le
+flux est « temps réel », en veille ou absent. Le modèle complet, les réglages d'exploitation
+(bloc nginx `proxy_buffering off`) et ce qui n'est **pas** temps réel sont dans
+`docs/COLLABORATION.md`.
 
 ### Les assistants : « Plume » dans l'atelier, « Publia » sur le recueil
 
@@ -2793,9 +2891,10 @@ premiers, ceux de l'écran courant, puis
 un socle — tronqués plutôt qu'écartés, avec la **table des matières complète** sous les yeux
 du modèle pour qu'il puisse renvoyer au bon chapitre.
 
-`src/ui/assistant.js` est la coquille d'écran : une pastille flottante (le personnage), une
-bulle qui propose une question de temps en temps — le clin d'œil à l'aide contextuelle
-d'autrefois —, et un panneau de conversation. Les deux pastilles vivent **hors de la
+`src/ui/assistant.js` est la coquille d'écran : une pastille (le personnage) et un panneau de
+conversation qui ne s'ouvre **que sur demande** — plus de bulle d'invitation, plus de question
+spontanée (revue d'interface, P7) ; au-delà de **1 200 px**, la page lui **réserve sa colonne** à
+droite (`body.assist-ouvert`, `padding-right`) au lieu de le laisser recouvrir le document. Les deux pastilles vivent **hors de la
 coquille de l'application** (posées au démarrage dans `document.body`) : elles ne sont pas
 reconstruites aux redessins, donc une conversation en cours ne se perd pas quand on change
 d'écran — c'est leur **visibilité** qui suit la route (jamais sur le recueil public pour
@@ -3036,11 +3135,13 @@ migration depuis la démonstration : `docs/ADMINISTRATION.md`.
 main.pjs                  $meta + les imports de la plateforme (stockage, canal du service, relais HTTP)
 index.html                coquille : script serveur (LE SERVICE) + <link> + <div id="app"> + module
 src/SPEC.md               spécification
+src/docs/ATELIER.md       TRAVAILLER DANS L'ATELIER : la méthode, les dix garde-fous, vérifier sans terminal (le harnais), ce qui compte comme « terminé »
 src/docs/ADMINISTRATION.md  DOCUMENTATION D'ADMINISTRATION ET D'EXPLOITATION (auto-hébergement, sécurité, sauvegardes)
 src/docs/API.md           RÉFÉRENCE DE L'API REST (engendrée par scripts/generer-api.mjs, lue par « Documentation technique »)
 src/docs/VARIABLES.md     VARIABLES DE DÉPLOIEMENT (engendré par scripts/generer-variables.mjs)
 src/docs/INDUSTRIALISATION.md  VÉRIFIER, TESTER, LIVRER (outillage, intégration continue, épreuves de parcours)
 src/docs/REPRISE.md       KIT DE REPRISE : points d'entrée, « un seul point de vérité par règle », recettes de livraison, et ce qui n'est pas couvert
+src/docs/UI-UX.md         REVUE D'INTERFACE : constats chiffrés (hauteur des écrans, contrôles, pastilles, tailles de texte), huit propositions d'UI/UX et leur ordre de mise en œuvre
 src/docs/AUDIT-BUGS-2026-09-22.md  AUDIT CIBLÉ : session, anti-CSRF, file d'attente, état de la base (constats corrigés et points ouverts)
 src/docs/PERFORMANCE.md   PERFORMANCE MESURÉE : le gel des connexions simultanées, ce qui l'a corrigé, les scénarios et les chiffres avant/après
 src/docs/GITHUB.md        PAGE D'ACCUEIL DU DÉPÔT (recopiée en README.md à la racine par l'export GitHub)
@@ -3085,7 +3186,7 @@ src/lib/
   remote.js               CLIENT de l'API REST : connexion, appel, journal des échanges
   api-reference.js        LA DESCRIPTION DE L'API REST, une seule fois : les groupes, les opérations (méthode, chemin, rôle, corps, réponses, champs), les rôles, les codes d'erreur, l'export cURL et le sommaire des routes — ce qui alimente l'écran « API REST » ET `docs/API.md` (engendré)
   signature.js            cryptographie (ECDSA/SHA-256), original signé, prestataire simulé
-  externe.js              CIRCUIT DE SIGNATURE EXTERNE (sans API) : réglage global et par trame (imposé / autorisé), résolution du circuit d'un acte, dossier de la version signée (statut, empreinte, certification de conformité du réviseur) et conditions de publication (module pur)
+  externe.js              CIRCUITS DE SIGNATURE — réglage global et par trame (imposé / autorisé) pour les QUATRE circuits (électronique, signature simple, signature interne, circuit externe), résolution du circuit d'un acte, dossier de la version signée (statut, empreinte, certification de conformité du réviseur), état du COFFRE de signature interne rendu par le service (`/v1/config`) et conditions de publication (module pur)
   eli.js                  identifiant ELI, opposabilité, réglages de publication (recueil, automatisme), JSON-LD, et la VERSION EN LIGNE — opposable pour un acte, **informative** pour un règlement (ni opposabilité ni original, mais l'acte qui l'adopte)
   recueil.js              RECUEIL PUBLIC et RECUEIL OUVERT : extraction du document publié (sans sa charte — `data-sheet`, en-tête et pied retirés —, la charte valant pour le papier), **FEUILLE DE STYLE WEB** (`CSS_DOCUMENT_WEB`, la MÊME pour tous les actes : deux entités aux chartes différentes se présentent à l'identique en ligne), mise en page web, thèmes des actes (famille de la trame) et thème sans matière, derniers actes publiés en vigueur, actes épinglés (bande « À la une »), recherche/facettes, adresses d'un acte (de navigation et de référence), représentations lisibles par machine (JSON, Markdown, texte, Akoma Ntoso) et fichiers du site (llms.txt, recueil.json, sitemap.xml, robots.txt)
   validation.js           CIRCUIT DE VALIDATION (le parapheur, fonction ordinaire) : circuits du référentiel, étapes à trois natures (vérification, visa, signature), décisions, empreinte du texte validé
@@ -3098,7 +3199,7 @@ src/lib/
   bulletins-service.js    LE BULLETIN VU DU SERVICE : `chargerPublic` (l'état public — cadence, prochaine parution, numéros parus, ouverture de l'abonnement), `chargerTableau` (le tableau de bord), les gestes d'administration (`generer`, `envoyer`, `retirerAbonne`) et `chargerNumeros` (les numéros EN ENTIER, pour composer le flux). Un service absent n'est pas une erreur : le module le DIT (`etat.disponible === false`) et les écrans s'en passent
   demo-informations.js    LES BILLETS DE DÉMONSTRATION (trois publiés — dont un épinglé — et un brouillon, pour que les deux états se voient)
   atelier-acces.js        L'ACCÈS À L'ATELIER, VU DU NAVIGATEUR : l'état que le service rend (`/v1/atelier/acces`), ses clés de réglage (`CLE_IPS`/`CLE_MESSAGE`), `chargerAcces` (et la SIMULATION d'une adresse), `atelierRestreint`, `horsReseau`, `agentsAvecActesReserves` — un reflet, jamais une décision : c'est le service qui voit l'adresse (voir `server/mysql/atelier.mjs`)
-  legalite.js             TRANSMISSION AU CONTRÔLE DE LÉGALITÉ par API (fonction expérimentale — voir `experimental.controleLegalite`) : API d'envoi, certificat de transmission (mention, référence, sceau), vérification
+  legalite.js             TRANSMISSION AU CONTRÔLE DE LÉGALITÉ : les TROIS RÉGIMES (`config.controleLegalite.mode` — `desactive`, `declaratif`, `api`), le certificat de transmission à trois natures (accusé de réception, DÉCLARATION nommée, simulation marquée), la mention et le sceau, la vérification — le CLIENT RÉEL vit au service (`server/mysql/controle-legalite.mjs`) quand le `.env` porte `SCRIBA_CONTROLE_LEGALITE_*` ; ici, en régime `api`, l'appel n'a pas lieu et le certificat est marqué `demonstration`
   execution.js            CARACTÈRE EXÉCUTOIRE : formalités requises, date d'exécutoire, délai de recours, recours introduit, alertes, constatations
   execution-documents.js  PIÈCES DE L'EXÉCUTION : état des formalités (tout acte), attestation de non-recours (acte définitif non contesté)
   historique-brouillons.js HISTORIQUE DES BROUILLONS : versions successives d'un acte, restauration
@@ -3118,6 +3219,7 @@ src/lib/
   signataires.js          LE SIGNATAIRE : qualité (attribuée par la désignation), rapprochement personne ↔ compte ↔ outil de signature, champ de compétence (chaîne de signature), file « Ma signature » (module pur)
   conseils.js             LES ASSEMBLÉES DÉLIBÉRANTES : les conseils du référentiel (conseil municipal, conseil d'administration) — entité de rattachement, formule d'autorité de la ligne d'en-tête, et la QUALITÉ QUI SIGNE (un rôle du référentiel, configurable conseil par conseil) ; résolution de l'assemblée d'un acte et qualification en genre du signataire (module pur)
   hosts.js                OÙ SONT LES SERVICES DE L'HÔTE (stockage, canal du service, relais HTTP sans CORS, moteur de langage intégré) — point unique
+  fichiers.js             LE DÉPÔT D'UN FICHIER : il choisit son dépôt (l'hôte s'il en a un — `root.uploadPlugin` —, sinon LE SERVICE à `/v1/pieces`), mesure le fichier et refuse tôt au-delà de la limite, encode en base64 par tranches, calcule l'empreinte et rend la PIÈCE (adresse, identifiant, nom, type, taille) — le retrait est confié au service, sans jamais faire échouer le geste (l'original signé d'une reprise, la version signée d'un circuit externe)
   assistant.js            LES DEUX ASSISTANTS (Plume, Publia) : réglages (allumé/éteint, nom et icône réglables, moteur interchangeable — intégré / API personnalisée / repli documentaire, flux SSE ou appel simple), préférence de poste (masqué pour soi), connaissances (le guide et ses liens de chapitre pour l'un, les actes publiés, leurs liens et l'acte consulté pour l'autre), composition de l'invite et repli documentaire (recherche dans le guide ou dans les actes publiés, sans réseau)
   auth.js                 MODE D'AUTHENTIFICATION : comptes de l'application / annuaire (OIDC) / comptes locaux (mot de passe) — modèle du référentiel, PRESAGE du déploiement, et autorité du service ; LA SECONDE PORTE (`annuaire`, `annuairePropose`, `annuaireFermePour`, `ANNUAIRE_CLES` : l'annuaire proposé À CÔTÉ de la porte ordinaire, et les réglages que le service publie)
   motdepasse.js           CLIENT DU SERVICE DES COMPTES : /v1/auth/… (connexion, session, mot de passe, état des comptes) + jeton anti-CSRF
@@ -3162,8 +3264,8 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     comptes.test.mjs      banc d'essai du domaine des comptes (npm test)
     magasin.mjs           LE MAGASIN — LE CONTRAT DE STOCKAGE DU SERVICE ET L'ALGORITHME COMMUN : le protocole est le MÊME pour les deux rangements (collections, révisions, conflits, journal), seule l'ÉCRITURE change — `synchroniser(t, {…})` vit donc ici, une fois, piloté par les primitives de la transaction `t` ; porte aussi `str`/`projections` (les colonnes indexées) (module pur)
     magasin-mysql.mjs     LE RANGEMENT MARIADB : l'adaptateur du magasin (import dynamique de `mysql2/promise` — le pilote est INJECTABLE pour les épreuves, pool, transaction SQL, schéma et migrations, `reconcilierCompte`) — c'est le rangement PAR DÉFAUT ; les écritures d'une collection passent par une file PAR COLLECTION, la ligne de collection est créée par `INSERT … ON DUPLICATE KEY UPDATE revision = revision` (verrou EXCLUSIF pris d'emblée), et une transaction heurtée (`ER_LOCK_DEADLOCK`, `ER_LOCK_WAIT_TIMEOUT`) est rejouée en entier
-    magasin-fichier.mjs   LE RANGEMENT PAR FICHIERS (`STOCKAGE=fichier`) : tout dans un dossier (`DATA_DIR`, `./data` par défaut), EN CLAIR — état, collections, journal, courriels, secrets ; écriture atomique (temporaire + renommage) et SÉRIALISÉE par une file interne ; disque injecté (`io`) pour s'éprouver en mémoire ; mime les FORMES du magasin SQL (comme `createStoreMysql`) pour que le domaine ne voie aucune différence
-    magasin-fichier.test.mjs  banc d'essai du rangement par fichiers, entièrement en mémoire — insert, conflit de révision, `force`, suppression, ordre, état, comptes, mots de passe et sessions, santé, écritures concurrentes (npm test)
+    magasin-fichier.mjs   LE RANGEMENT PAR FICHIERS (`STOCKAGE=fichier`) : tout dans un dossier (`DATA_DIR`, `./data` par défaut), EN CLAIR — état, collections, journal, courriels, secrets, PIÈCES (`pieces/`) ; écriture atomique (temporaire + renommage) et SÉRIALISÉE par une file interne ; disque injecté (`io`) pour s'éprouver en mémoire ; mime les FORMES du magasin SQL (comme `createStoreMysql`) pour que le domaine ne voie aucune différence
+    magasin-fichier.test.mjs  banc d'essai du rangement par fichiers, entièrement en mémoire — insert, conflit de révision, `force`, suppression, ordre, état, comptes, mots de passe et sessions, santé, écritures concurrentes, pièces (écriture à part, relecture, retrait, identifiant tordu confiné au dossier) (npm test)
     magasin-mysql.test.mjs  banc d'essai du rangement MySQL sur la base EN MÉMOIRE (`charge/faux-mysql.mjs`) — sérialisation par collection, collections distinctes en parallèle, reprise sur `ER_LOCK_DEADLOCK`, refus de rejouer une erreur étrangère, idiome SQL de prise de verrou exclusive (npm test)
     chats-erreur.mjs      LES CHATS DES PAGES D'ERREUR (http.cat), LA RÈGLE ÉCRITE UNE FOIS : le catalogue des codes réellement publiés, le repli par classe (`codeChat`), l'adresse (`urlChat`) et ce qu'une page doit dire (`chatPour` → code, url, alt, légende) — partagé par le service (`actes.mjs`) et le navigateur (`lib/chats-erreur.js`) ; l'option est éteinte par défaut (module pur)
     chats-erreur.test.mjs banc d'essai de la règle des chats d'erreur : bornes, repli par classe, adresses, légendes (npm test)
@@ -3181,8 +3283,14 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
     smtp.mjs              LE PROTOCOLE SMTP à l'état pur (aucune dépendance) : le réseau et la configuration lui sont injectés sous forme d'un transport — il s'éprouve donc seul
     courriel.mjs          COURRIEL, LA PART RÉSEAU : la socket (TCP ou TLS), la configuration SMTP, l'envoi et le journal des envois — le mot de passe SMTP ne sort jamais de ce module
     signature.mjs         CLIENT DU PRESTATAIRE DE SIGNATURE : provisionne le document, ajoute les signataires, démarre le circuit, relit le statut — la clé d'API ne quitte jamais ce module
+    controle-legalite.mjs TÉLÉTRANSMISSION AU CONTRÔLE DE LÉGALITÉ — LE CLIENT RÉEL (`createControleLegalite`) : un POST vers l'adresse et le chemin du `.env` (`SCRIBA_CONTROLE_LEGALITE_*`), en `Authorization: Bearer`, avec un délai (`AbortController`) ; rend `{ actif, etat, transmettre, reglages }` et LÈVE sur un refus ou une réponse sans référence — le service ne convertit jamais un échec en certificat (502 `transmission_echec`)
+    controle-legalite.test.mjs banc d'essai du client de contrôle de légalité : appel réel vérifié, refus levé, réponse sans référence, inactif sans clé (npm test)
+    signature-interne.mjs LA SIGNATURE INTERNE : le SERVICE détient la clé privée du signataire (scellée au repos, AES-256-GCM sous `SCRIBA_SIGNATURE_KV_KEY`), la garde dans un coffre — une fiche PAR SIGNATAIRE, la clé suivant la personne, plus une fiche d'horodatage — et SIGNE lui-même ; l'original produit a la même forme que `buildSignedPackage`, donc le recueil le vérifie sans rien de plus. Sans clé de scellement, le circuit est ÉTEINT (module pur, crypto injectée)
+    signature-interne.test.mjs banc d'essai du coffre de signature interne : clé de scellement (hex/base64), certificat stable d'un signataire, sceau illisible après changement de clé, original vérifiable et non falsifiable (npm test)
     amorcage.mjs          amorçage du service (compte d'administration du `.env`, clés)
     schema.sql            tables sb_collection / sb_record / sb_journal / sb_etat + vues
+    migrations.mjs        LES MIGRATIONS VERSIONNÉES : la table `sb_migrations`, la liste ordonnée (`schema.sql` EST la version 1, puis `migrations/NNN-….sql`), l'application à la demande et le signalement d'un fichier changé après coup (module pur)
+    migrations/002-pieces.sql  la table des pièces jointes (`sb_piece`) — migration 2
     Dockerfile  README.md  env.example  package.json  package-lock.json
   charge/                 ÉTUDE DE CHARGE : postes simulés à tous les rôles + le public, et rapport
     README.md             comment s'en servir, ce qu'il mesure, ce qu'il ne mesure pas
@@ -3200,10 +3308,10 @@ src/wiki.js               CONTENU du guide d'utilisation (texte, étapes, captur
 src/pdfa/                 RESSOURCES DE L'EXPORT PDF/A (voir src/pdfa/README.md) : les polices embarquées (Source Serif 4, Source Sans 3 — OFL) et le profil colorimétrique sRGB (CC0), chargés à la demande
 src/ui/
   dom.js                  primitives DOM (h, boutons, champs, modale, info-bulle…)
-  components.js           compositions (formulaires, dialogues, états vides)
+  components.js           compositions (formulaires, dialogues, états vides, `mentions` — la ligne grise d'une carte —, `menuButton` — le « ⋯ » —, `aideEcran`/`pageTitle`/`notePlier` — l'aide à la demande)
   annotations.js          LES COMMENTAIRES D'UNE TRAME : la bande posée sous le bloc commenté (nature, auteur, date, passage cité, crayon et corbeille), la fenêtre d'écriture, la pastille « Commenter » qui suit une sélection de texte, le repère de marge et la mise en évidence d'un bloc — partagé par l'éditeur de trame (où l'on écrit) et la rédaction (où on les lit)
   signer-picker.js        CHOIX DU SIGNATAIRE en deux temps : la fonction, puis qui la tient (sélecteur partagé)
-  assistant.js            LES DEUX PASTILLES D'ASSISTANCE (Plume dans l'atelier, Publia sur le recueil) : personnage, bulle d'invitation, panneau de conversation, réponse en flux, liens des réponses suivis dans l'application, questions de l'acte consulté, et le bloc « Assistants » du menu du compte (masquer pour soi)
+  assistant.js            LES DEUX PASTILLES D'ASSISTANCE (Plume dans l'atelier, Publia sur le recueil) : personnage, panneau de conversation ouvert à la demande (au-delà de 1 200 px la page lui RÉSERVE sa colonne à droite, sans recouvrir le document), réponse en flux, liens des réponses suivis dans l'application, questions de l'acte consulté, et le bloc « Assistants » du menu du compte (masquer pour soi)
   pdfa.js                 LE BOUTON DE L'EXPORT PDF/A : montre son attente, fabrique le fichier (lib/pdfa.js), le télécharge et le dit — posé à côté de « Imprimer / PDF » dans les écrans d'export, deux niveaux (PDF/A-2b, PDF/A-1b)
   dnd.js                  GLISSER-DÉPOSER : primitives partagées sur les POINTER EVENTS (glissable, deposable, conversion d'un point de dépôt en position de curseur) — souris, doigt et stylet d'un seul chemin
   brand.js                devise et marque du logiciel (SVG en ligne, currentColor) — le nom vient de lib/logiciel.js, dont il est réexporté
@@ -3214,7 +3322,7 @@ src/ui/
   import-trame.js         OUVRIR LA TRAME PROPOSÉE PAR UN IMPORT DE DOCUMENT : l'adresse réservée `trame/__import__`, la lecture du fichier, la fenêtre des points à vérifier, et l'enregistrement ou l'abandon (rien n'est écrit avant)
   mise-a-disposition.js   METTRE UNE TRAME À DISPOSITION DES SERVICES — ET LA RETIRER : le bouton (carte de trame, bannière de l'éditeur) et les deux confirmations ; l'écriture, elle, est dans state.js
   parapheur-actions.js    GESTES DU PARAPHEUR partagés (soumettre, décider, reprendre, carte de décision)
-  execution-actions.js    CONSTATATION D'UNE FORMALITÉ OU D'UN RECOURS, partagée (formulaire + journalisation + exécutoire)
+  execution-actions.js    CONSTATATION D'UNE FORMALITÉ OU D'UN RECOURS, partagée (formulaire + journalisation + exécutoire) ; en régime géré, la TRANSMISSION se DÉCLARE (date et destinataire requis, auteur nommé, refus du service repris tel quel)
   abrogations-apply.js    APPLICATION DES ABROGATIONS à leur entrée en vigueur (idempotent) : acte entier → « abrogé par », article → version consolidée à publier ; appelé au démarrage et après publication
   demo-publications.js    AMORÇAGE DU RECUEIL (démonstration) : provisionne le service (une démonstration n'a pas d'administrateur), dépose les billets, publie les actes que la fiction déclare publiés, relit et garde leur fiche complète, et porte au service la mise à la une des actes épinglés
   global-search.js        RECHERCHE GLOBALE (Ctrl+K ou « / ») : superposition, index, navigation clavier
@@ -3227,7 +3335,7 @@ src/ui/
   app.js                  coquille, navigation, amorçage — et la ROUTE PAR DÉFAUT : le recueil public (page d'accueil), une vue inconnue y ramenant (`normaliserRoute`)
   views/trames.js  editor.js  rediger.js  wysiwyg.js  actes.js  modifier.js
   views/amend-editor.js   l'acte publié rendu éditable (l'équivalent de wysiwyg.js pour la modification)
-  views/signature.js      SIGNATURE & PUBLICATION : onglet « Ma signature » (le signataire : son compte, le rapprochement, sa file), les DEUX circuits (électronique ; externe — document prêt à signer téléchargé, version signée PDF déposée, certification de conformité du réviseur) + publication ; api-console.js : OpenAPI & journal
+  views/signature.js      SIGNATURE & PUBLICATION : onglet « Ma signature » (le signataire : son compte, le rapprochement, sa file), les QUATRE circuits (électronique — outil du prestataire ; signature simple — signée dans l'application avec le compte ; signature interne — c'est le SERVICE qui signe, coffre auto-hébergé ; circuit externe — document prêt à signer téléchargé, version signée PDF déposée, certification de conformité du réviseur) + publication ; api-console.js : OpenAPI & journal
   views/publications.js   registre de l'administration et consultation d'une publication (texte rendu dans la page)
   views/informations.js   INFORMATIONS DU RECUEIL (atelier) : liste des billets (recherche, filtre publié/brouillon) et billet ouvert — titre, date, auteur, résumé, texte en Markdown, aperçu au rendu réel, publier / dépublier / supprimer (permission `informations.gerer`)
   views/reprises.js       REPRISES D'ACTES ANCIENS (permission `actes.reprendre` — rédacteurs) : la liste des reprises (numéro, intitulé, genre, date d'origine, état), l'atelier d'une reprise (intitulé, genre acte/texte autonome, nature, numéro d'origine, date de publication d'origine, entité, thème, provenance, texte libre), l'APERÇU de la version en ligne tel que le recueil la montrera, la mention portée au bas de la page, la carte de l'ORIGINAL SIGNÉ (dépôt, empreinte SHA-256, ouverture, retrait) et la PUBLICATION D'UN SEUL GESTE — dépôt puis publication, sans circuit de signature
@@ -3267,6 +3375,7 @@ src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
   generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`src/server/mysql/variables.mjs`)
   generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`src/lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
   generer-logiciel.mjs    engendre `src/server/mysql/logiciel-engendre.mjs` depuis `src/lib/version.js` et `src/lib/logiciel.js` : l'image du service, qui ne contient que son dossier, peut ainsi annoncer la version RÉELLE dans sa bannière de démarrage
+  harnais-atelier.mjs     LE BANC D'ÉPREUVES DE L'ATELIER : rejoue, sans terminal, la syntaxe, le style, les épreuves et les générateurs en chargeant LES SCRIPTS LIVRÉS eux-mêmes (doublures de `node:fs`/`node:path`/`node:url`/`node:crypto`, esbuild) — voir `docs/ATELIER.md` § 3
 src/compose-exemple/      EXEMPLE DE PREMIER DÉPLOIEMENT — dans le dépôt livré : `compose-exemple/` : MariaDB et l'image publiée `aplds/scribae`, deux services, rien à construire (docker-compose.yml, env.example, README.md)
 src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export les recopie, ils ne restent pas sous src/) :
   ci.yml                  → `<racine>/.github/workflows/ci.yml` : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
@@ -3288,14 +3397,26 @@ en sont exclus. Il accepte aussi le **dépôt d'une variable** dans ses zones é
 (`insererJeton`), affiche les outils de chaque **élément de liste** (un visa, un considérant :
 « + » et corbeille au survol) et le bouton qui ferme chaque liste (« Ajouter un visa »). Le clic
 sur un bloc le **désigne** (`rx.selectBlock`) sans redessiner la page.
-`views/rediger.js` l'orchestre : en-tête (entité, badges, Enregistrer), panneau
-de droite (bibliothèque de variables, onglets « Bloc », « À compléter », « Consignes »,
-« Abrogations », « Contrôle & écarts »), enregistrement de l'acte (`values`, `overrides`,
-`ecarts`), et la **suite du parcours** — un **parcours** en tête de page (Rédiger → Soumettre au
+`views/rediger.js` l'orchestre : en-tête (l'identité du document, puis **une seule ligne d'état**
+— où en est l'acte, ce que dit le parapheur, ce que dit la révision — et **un seul geste primaire**,
+« Enregistrer », le reste derrière « ⋯ »), **tiroir de droite** (revue d'interface, P6) fermé par
+défaut, ouvert par un bouton « Compléter l'acte · N » — qui **dit son état** (`aria-expanded`,
+icône de panneau, couleur d'action) — et qui y fait remplir **un champ à la fois**
+(« Plus tard » / « Valider et suivant »), avec le repli « Tous les champs (N) », les **variables**
+dans un second onglet et les **consignes** ; la barre **se nomme** (« Panneau de rédaction »,
+`.rx-tiroir__entete`) et porte sa **propre fermeture**, et son ouverture **se voit** —
+`revelerTiroir` la fait entrer, l'amène à l'écran quand la mise en page l'empile (≤ 1100 px), met
+en évidence la pastille du champ courant dans le document et y place le curseur, **sans qu'aucune
+pastille ait eu à être désignée d'abord** (l'état du tiroir se décide sur ce qui est réellement
+affiché — `tiroirOuvert()` — pour qu'un désaccord entre le brouillon et l'écran ne puisse pas
+rendre un clic sans effet) ; enregistrement de l'acte (`values`, `overrides`,
+`ecarts`) ; une **ligne de contrôle** en bas d'écran qui suit le défilement ; et la **suite du
+parcours** — un **parcours** en tête de page (Rédiger → Soumettre au
 circuit → Révision → Signer → Publier, l'étape courante marquée) et, à la suite du document, le
-**geste du moment en bouton principal** : « Soumettre au circuit », ou « Aller à la signature »
+**geste du moment en bouton secondaire** : « Soumettre au circuit », ou « Aller à la signature »
 quand l'acte est validé et que l'on peut signer. L'**export** n'est plus présenté comme
-l'aboutissement : il reste disponible, discret, avec la phrase qui dit ce qu'il est (« ce n'est pas
+l'aboutissement : il reste disponible, discret, dans le menu « ⋯ », avec la phrase qui dit ce
+qu'il est (« ce n'est pas
 la fin du parcours »). C'est lui qui porte les gestes de **structure** : il reçoit les demandes du document
 (`rx.supprimer`, `rx.ajouterElement`, `rx.menuAjout`, `rx.onCommit`) et écrit dans
 `src/lib/structure.js`.
@@ -3312,8 +3433,10 @@ du guide n'apparaissent que pour eux. C'est de l'exploitation, de l'installation
 sécurité — pas de la rédaction d'actes. Elle lit les documents du dépôt — `CHANGELOG.md`,
 `docs/ADMINISTRATION.md`, `server/README.md`, `SPEC.md`, `README.md`, `TODO.md` — et les
 affiche dans l'application
-(`ui/markdown.js` les rend en DOM : titres, listes, tableaux, blocs de code), avec sommaire,
-impression et téléchargement. Les documents ne sont pas recopiés dans le code : c'est le
+(`ui/markdown.js` les rend en DOM : titres, listes, tableaux, blocs de code), avec **le sommaire du
+document ouvert dans la colonne de gauche** (revue d'interface, P5) — il y reste sous les yeux
+pendant la lecture, au lieu de défiler avec le texte ; sous 1 100 px, faute de place, il se replie
+en un bloc borné en tête de lecture —, impression et téléchargement. Les documents ne sont pas recopiés dans le code : c'est le
 fichier qui fait foi, et il est lu tel quel.
 
 ### L'éditeur de trame : glisser-déposer, jamais « liste déroulante »
@@ -3413,10 +3536,11 @@ est **figée en pixels** sur le contenu, que `ResizeObserver` surveille pour que
 document qui grandit (un article ajouté, une division ouverte). Le cran et le défilement sont rangés
 dans `state.ui.zooms[cle]` : un écran se redessine souvent, et le cran choisi ne s'y perd pas.
 
-L'éditeur de trame occupe par ailleurs **toute la fenêtre** (`.app--plein`, posé sur la coquille
-quand la route est `trame`) : ses volets défilent sur place au lieu d'allonger la page — c'est aussi
-ce qui donne au canvas de la feuille une vraie fenêtre à déplacer. Sans cette borne, la coquille
-(`min-height: 100vh`) s'allongeait avec le contenu.
+L'éditeur de trame occupe par ailleurs **toute la fenêtre** (`.app--plein` quand la route est
+`trame`) : ses volets défilent sur place au lieu d'allonger la page — c'est aussi ce qui donne au
+canvas de la feuille une vraie fenêtre à déplacer. Depuis 1.6.2, la coquille entière est de toute
+façon bornée à la fenêtre (`.app` en `100vh`, seule la zone de contenu défile : voir `app.js` et
+app-base.css) ; l'écran « plein » est ce qui retire le défilement à la zone de contenu elle-même.
 
 ### Les commentaires : commenter ce qu'on voit, et ne pas pouvoir les manquer
 
@@ -3517,6 +3641,21 @@ distantes) — c'est ce qui sert à produire le fichier à diffuser.
   de préparation du HTML. (C'est la différence centrale avec un commentaire Word.)
 - **UI sobre inspirée du DSFR** (tokens, composants, focus, rayon 4 px) sans Marianne,
   sans police propriétaire : couleurs et polices viennent de `brand`.
+- **L'échelle typographique est tenue** (revue d'interface, P1) : cinq jetons `--t-xs` … `--t-xl`
+  déclarés dans `:root` (`app-base.css`), et **rien de la chrome sous 13 px** — une taille de texte
+  nouvelle se demande à l'échelle, pas en dur.
+- **Une action principale par carte** (P2, P3) : la première place pour le geste courant, le reste
+  derrière `menuButton` (« ⋯ », `components.js`) ; **une seule** pastille d'état par objet, le reste
+  en `mentions()` — une ligne en gris, séparée par des points.
+- **L'aide à la demande** (P4) : l'explication d'un écran se range derrière un bouton « ? »
+  (`aideEcran()`, `pageTitle()`), et un encadré long devient pliable (`notePlier()`) — sauf les
+  sous-titres de **données**, qui restent visibles.
+- **Les listes longues se rangent** (P5, P6) : barre de commandes collante, compte, colonnes
+  essentielles et pagination (registre, chrono, sommaire de la documentation technique) ; l'espace
+  de rédaction complète ses champs dans un **tiroir** fermé par défaut, **un champ à la fois**.
+- **L'en-tête tient sur une ligne** : « Scribae » à gauche, la structure et les outils au centre,
+  **le compte tout à droite** ; ce qui est décoratif s'efface par paliers quand la fenêtre se
+  rétrécit (`css/app-base.css`), et le compte ne se rogne jamais.
 
 ## Conventions de code
 
@@ -3603,19 +3742,26 @@ directe »), en 390 × 844 et en 1600 × 950.
 
 Vérifier l'outillage depuis l'atelier : l'aperçu du navigateur n'a ni système de
 fichiers ni processus, il ne peut donc pas lancer `scripts/verifier-style.mjs` tel
-qu'il est livré. On monte la disposition livrée dans un système de fichiers
-virtuel (la table ci-dessus), les modules Node (`node:fs`, `node:path`,
-`node:url`, `node:child_process`) sont remplacés par des bouchons, le script
-passe par esbuild, et les écritures reviennent dans `src/`. Les épreuves, elles,
-se lancent **un fichier par processus** (`node --test` les isole, et un bouchon
-qui fuit d'un fichier à l'autre fausse le suivant). Ce banc vit hors du dépôt :
-il n'y a rien à y chercher dans `scripts/` ni dans `tests/`.
+qu'il est livré. C'est le rôle du **harnais de l'atelier** —
+**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3b
+(il n'est pas une épreuve : `npm test` ne le voit pas, `npm run syntaxe` le parse
+comme un module). Il monte la disposition livrée dans un système de fichiers
+virtuel (la table ci-dessus, la racine virtuelle étant `src/`), remplace les
+modules Node (`node:fs`, `node:path`, `node:url`, `node:crypto`) par des
+doublures, fait passer le tout par esbuild, et laisse les écritures revenir dans
+`src/`. Il **charge les scripts du dépôt eux-mêmes** : le contrôle de style et
+les trois générateurs s'exécutent tels quels, sans qu'aucune règle soit recopiée.
+Les épreuves, elles, se construisent **un fichier à la fois** — comme `node --test`
+les isole, une doublure qui fuit d'un fichier à l'autre fausserait le suivant.
 
-Deux pièges de cet environnement : `node:url` n'y est pas traduisible
-(`fileURLToPath` jette), les épreuves qui s'en servent se **sautent** — c'est le
-cas des onze sauts attendus ; et `import.meta.url` doit être servi sous une
-adresse `file://` virtuelle, sans quoi `new URL("..", import.meta.url)` calcule
-faux.
+Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
+(pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
+**virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
+import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
+1.6.3b, **huit échecs et onze sauts attendus** sur 439 épreuves — tous connus,
+tous dus à l'absence de Node et de réseau. Les recettes, les chiffres et la
+lecture des écarts sont dans `docs/ATELIER.md` § 3 : c'est le document à lire
+avant de travailler dans l'atelier.
 
 ## Pièges connus
 

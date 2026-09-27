@@ -1,5 +1,6 @@
-import { state, touch, navigate, redrawView, can } from "../state.js";
+import { state, touch, navigate, redrawView, can, signalerRedactionTrame, quiRedigeTrame, modificationDistante, fluxActif } from "../state.js";
 import { h, clear, button, icon, toast, modal, badge } from "../dom.js";
+import { dateHeureFr } from "../../lib/legalite.js";
 import { cadreZoom } from "../zoom.js";
 import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { compile, buildContext } from "../../lib/compile.js";
@@ -450,6 +451,11 @@ export function renderEditor(root, params) {
     ? state.editor
     : { trameId: trame.id, selPath: "body.0", tab: "bloc", mode: "edit", armed: null });
 
+  // Ce poste travaille sur cette trame : les autres le voient (voir
+  // lib/collab.js). Un IMPORT n'a pas encore d'existence au registre : on ne
+  // l'annonce pas.
+  if (!importee) signalerRedactionTrame(trame.id, trame.name);
+
   const ctxSample = buildContext(state.config, { __entityId: state.config.entities?.[0]?.id }, { trame });
 
   // Passe par le rendu de vue partagé : différé (donc jamais déclenché depuis un
@@ -466,6 +472,30 @@ export function renderEditor(root, params) {
   // voit » ; ce qui les distingue, c'est le geste qui en fait sortir.
   if (importee) root.appendChild(banniereImport(state.trameImport));
   else if (!trameEstDisponible(trame)) root.appendChild(banniereDisponibilite(trame));
+
+  // DEUX PERSONNES SUR LA MÊME TRAME (1.6.2). On le dit avant qu'elles ne se
+  // demandent pourquoi le document change tout seul. Le travail de chacune est
+  // conservé : les modifications faites de part et d'autre portent sur des
+  // champs différents, et la fusion à trois voies (voir lib/fusion.js) les
+  // réunit à l'enregistrement. Un désaccord sur la MÊME valeur est signalé, et
+  // jamais effacé en silence.
+  if (!importee && fluxActif()) {
+    const autre = quiRedigeTrame(trame.id);
+    const modif = modificationDistante("trames", trame.id);
+    if (autre || modif) {
+      const lignes = [];
+      if (autre) {
+        lignes.push(h("p", { class: "fr-alert__title", text: "Cette trame est ouverte sur un autre poste" }));
+        lignes.push(h("p", { class: "fr-small", text: `${autre.byName} la modifie en ce moment. Vous pouvez continuer : ce que vous faites chacun de votre côté est conservé et fusionné à l'enregistrement.` }));
+      }
+      if (modif) {
+        lignes.push(h("p", { class: "fr-small", text: modif.supprime
+          ? "Cette trame a été supprimée de la base par un autre poste. Vos modifications restent les vôtres : enregistrez pour la remettre au registre."
+          : `Cette trame a été enregistrée sur un autre poste${modif.at ? " le " + dateHeureFr(modif.at) : ""} : vos modifications seront FUSIONNÉES à l'enregistrement — rien n'est perdu.` }));
+      }
+      root.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { margin: "0 0 10px" } }, ...lignes));
+    }
+  }
 
   // ------------------------------------------------------------- en-tête
   root.appendChild(h("div", { class: "fr-row", style: { padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg)" } },
@@ -611,7 +641,11 @@ export function renderEditor(root, params) {
     applyPaper(paper, compile(trame, sampleValues(trame), state.config), state.config);
     renderEditableBody(paper, trame, ed, redraw, softSave, ctxSample);
     // Sélectionner un passage dans la page propose aussitôt de le commenter.
-    armSelectionComment(paper, {
+    // Cette veille écoute le DOCUMENT (sélection, Échap, molette) : sans la
+    // défaire, chaque redessin en laissait trois de plus, et l'atelier
+    // ralentissait à chaque frappe. On défait donc la précédente avant d'armer.
+    ed.annotDispose?.();
+    ed.annotDispose = armSelectionComment(paper, {
       onComment: ({ path, quote }) => {
         const node = nodeAt(trame, path);
         if (node) openCommentComposer(node, -1, quote);
@@ -2051,7 +2085,7 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     selectField({
       label: "Circuit de signature", value: trame.signature || "",
       options: MODES_TRAME.map((m) => ({ value: m.id, label: m.label })),
-      help: "Trois circuits (voir Administration › Signature). ÉLECTRONIQUE : signé dans l'outil du prestataire. SIMPLE : signé dans l'application, par le signataire, avec son compte — les mentions nominatives restent dans l'original interne, jamais diffusées. EXTERNE : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée (PDF) est déposée, et le réviseur certifie sa conformité avec la version numérique avant publication. « Imposé » l'exige pour cette trame ; « autorisé » le laisse au choix du rédacteur, acte par acte.",
+      help: "Quatre circuits (voir Administration › Signature). ÉLECTRONIQUE : signé dans l'outil du prestataire. SIMPLE : signé dans l'application, par le signataire, avec son compte — les mentions nominatives restent dans l'original interne, jamais diffusées. INTERNE : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — la clé ne quitte jamais le serveur (auto-hébergement seulement). EXTERNE : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée (PDF) est déposée, et le réviseur certifie sa conformité avec la version numérique avant publication. « Imposé » l'exige pour cette trame ; « autorisé » le laisse au choix du rédacteur, acte par acte.",
       onChange: (v) => { trame.signature = v; redraw(); softSave(); },
     }),
     h("p", { class: "fr-small fr-muted", style: { margin: "2px 0 0" }, text: (() => {

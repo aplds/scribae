@@ -1,11 +1,12 @@
 import {
   state, init, parseRoute, navigate, onChange, applyBrand, setViewRenderer, can, logout,
-  currentUser, emit, signalerEcranCollab, libererRedaction, demandeAtelier,
+  currentUser, emit, signalerEcranCollab, libererRedaction, libererRedactionTrame, demandeAtelier,
 } from "./state.js";
 import { h, clear, icon, button, badge, toast } from "./dom.js";
 import { chatErreurEl } from "./chats-erreur.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "./brand.js";
 import { mentionAffichee, contenuMention } from "./mention.js";
+import { decrireDesaccords } from "../lib/fusion.js";
 import { versionBadge, releasedLabel } from "../lib/version.js";
 import { fullName, roleLabel, badgesOf, initialsOf, estVisiteur } from "../lib/users.js";
 import { scopeLabel } from "../lib/scope.js";
@@ -52,6 +53,22 @@ import { monterBarreCollab } from "./collab.js";
 import { avecCurseur } from "./focus.js";
 import { monterAssistants, assistantsChooser } from "./assistant.js";
 import { installerRaccourcis, ouvrirRecherche } from "./global-search.js";
+import { prefBool, prefPosee, setPrefBool } from "../lib/prefs.js";
+
+// La clé de la préférence de poste « barre de gauche repliée » (voir plus bas,
+// dans `shell()`).
+const PREF_NAV = "nav.replie";
+// L'état du groupe « Réglages » (P8) : une préférence de POSTE, comme le repli
+// de la barre — celui qui administre l'ouvre, les autres ne la voient pas
+// dépliée. Un écran de Réglages ouvert force l'ouverture du groupe.
+const PREF_REGLAGES = "nav.reglages";
+
+// Les écrans DÉTAILLÉS qui appartiennent à une entrée du menu : la fiche d'une
+// trame est « Trames », celle d'un acte est « Actes », celle d'une publication
+// est « Publications ». L'entrée s'allume donc aussi quand on est sur le
+// détail — et un groupe replié s'ouvre pour montrer où l'on est (P8).
+const VUES_DE_LENTREE = { trames: "trame", actes: "acte", publications: "publication" };
+const vueDeLEntree = (it) => VUES_DE_LENTREE[it.id] || "";
 
 // La barre de gauche suit la VIE DE L'ACTE plutôt que la liste des écrans : on
 // écrit (Produire), on valide (Valider), on rend l'acte opposable et public
@@ -100,11 +117,17 @@ const NAV = [
     // place dans le menu est une commodité, non un droit.
     { id: "recueil", label: "Recueil public", icon: "globe" },
   ] },
-  // Les référentiels de la collectivité : sa structure (l'organigramme), les
-  // délégations de signature, et le chrono qui dit comment les numéros sont
-  // tirés. Ouverts à tous les comptes — savoir qui existe et qui signe n'est pas
-  // une donnée réservée ; seules leurs modifications sont gardées.
-  { group: "Organisation", items: [
+  // LES RÉGLAGES (revue d'interface, P8). « Organisation » et « Configurer »
+  // sont deux rubriques de la même chose : ce qui ne se fait pas tous les jours.
+  // Elles se rangent derrière une SEULE entrée, dépliée à la demande — le menu
+  // du rédacteur passe ainsi de six rubriques à quatre. Le groupe s'ouvre de
+  // lui-même quand l'écran courant en fait partie (un écran actif ne doit jamais
+  // se cacher), et son état est une préférence de poste.
+  { group: "Réglages", repli: true, items: [
+    // Les référentiels de la collectivité : sa structure (l'organigramme), les
+    // délégations de signature, et le chrono qui dit comment les numéros sont
+    // tirés. Ouverts à tous les comptes — savoir qui existe et qui signe n'est pas
+    // une donnée réservée ; seules leurs modifications sont gardées.
     { id: "organigramme", label: "Organigramme", icon: "org" },
     { id: "delegations", label: "Délégations", icon: "org" },
     // Le chrono : le registre des numéros tirés. Il se lit comme les actes —
@@ -112,8 +135,6 @@ const NAV = [
     // gestes d'écriture (passer à l'année suivante, annuler un rang) sont
     // réservés à l'administration, dans la vue.
     { id: "chrono", label: "Chrono de numérotation", icon: "list", perm: "actes.rediger" },
-  ] },
-  { group: "Configurer", items: [
     { id: "referentiel", label: "Administration", icon: "grid", perm: "referentiel.gerer" },
     { id: "styles", label: "Feuilles de style", icon: "palette", perm: "trames.styles" },
   ] },
@@ -378,9 +399,9 @@ function shell() {
       h("button", {
         class: "app-search", type: "button", title: "Rechercher dans tout l'outil (Ctrl+K)",
         on: { click: () => ouvrirRecherche() },
-      }, icon("info", 15), h("span", { text: "Rechercher" }), h("kbd", { text: "Ctrl K" })),
+      }, icon("search", 15), h("span", { text: "Rechercher" }), h("kbd", { text: "Ctrl K" })),
       userBar,
-      button("Guide", { variant: "secondary", icon: "info", size: "", onClick: () => navigate("aide") }),
+      h("span", { class: "app-header__guide" }, button("Guide", { variant: "secondary", icon: "info", size: "", onClick: () => navigate("aide") })),
       can("referentiel.gerer") ? h("span", { class: "app-header__ref" }, button("Administration", { variant: "secondary", icon: "gear", size: "", onClick: () => navigate("referentiel") })) : null,
       themeButton(),
       userMenu(),
@@ -391,19 +412,58 @@ function shell() {
   // regroupement de liens soient identifiables — le recueil public porte le
   // sien (« Navigation principale du recueil »), l'atelier doit porter le sien
   // (audit, NC-III-007).
-  const nav = h("nav", { class: "app-nav", "aria-label": "Navigation principale de l'atelier" });
+  // LA BARRE DE GAUCHE SE REPLIE. Vingt-deux entrées sur 232 px, c'est beaucoup
+  // pour un poste de travail : qui écrit veut de la place pour son document, pas
+  // un sommaire permanent. Le repli est une préférence de POSTE (voir
+  // lib/prefs.js) — chaque collègue garde la sienne, elle ne voyage pas avec le
+  // référentiel. Sans préférence posée, un écran étroit (portable, fenêtre
+  // réduite, aperçu dans l'éditeur) part replié : c'est là que la place manque.
+  const replie = prefPosee(PREF_NAV) ? prefBool(PREF_NAV) : window.innerWidth < 1100;
+  const nav = h("nav", {
+    class: "app-nav" + (replie ? " app-nav--replie" : ""),
+    "aria-label": "Navigation principale de l'atelier",
+  });
+  const corps = h("div", { class: "app-nav__corps" });
   for (const g of NAV) {
     const items = g.items.filter((it) => !it.perm || can(it.perm));
     if (!items.length) continue;
-    nav.appendChild(h("div", { class: "app-nav__group", text: g.group }));
+    // Un groupe REPLIABLE (« Réglages », P8) : son intitulé est un bouton, ses
+    // entrées n'apparaissent qu'une fois ouvert — ou tout de suite quand l'écran
+    // courant en fait partie, car un écran actif ne doit jamais se cacher.
+    const repliable = !!g.repli;
+    const contientLaVue = items.some((it) => it.id === state.route.view || vueDeLEntree(it) === state.route.view);
+    const ouvert = repliable && (contientLaVue || prefBool(PREF_REGLAGES));
+    if (repliable) {
+      corps.appendChild(h("button", {
+        class: "app-nav__group app-nav__group--ouvrable" + (ouvert ? " is-ouvert" : ""),
+        type: "button", title: (replie ? g.group + " — " : "") + (ouvert ? "Replier" : "Déplier") + " cette rubrique",
+        "aria-expanded": ouvert ? "true" : "false",
+        on: { click: () => { setPrefBool(PREF_REGLAGES, !ouvert); renderRoot(document.getElementById("app")); } },
+      }, h("span", { text: g.group }), icon(ouvert ? "down" : "right", 13)));
+    } else {
+      corps.appendChild(h("div", { class: "app-nav__group", text: g.group, title: replie ? g.group : undefined }));
+    }
+    if (repliable && !ouvert) continue;
     for (const it of items) {
-      const active = state.route.view === it.id || (it.id === "trames" && state.route.view === "trame") || (it.id === "rediger" && state.route.view === "rediger") || (it.id === "actes" && state.route.view === "acte") || (it.id === "publications" && state.route.view === "publication");
-      nav.appendChild(h("button", {
+      const active = state.route.view === it.id || vueDeLEntree(it) === state.route.view;
+      corps.appendChild(h("button", {
         class: "app-nav__item" + (active ? " is-active" : ""),
+        title: replie ? it.label : undefined,
         on: { click: () => navigate(it.id) },
-      }, h("span", { class: "fr-icon" }, icon(it.icon, 17)), h("span", { text: it.label })));
+      }, h("span", { class: "fr-icon" }, icon(it.icon, 17)), h("span", { class: "app-nav__label", text: it.label })));
     }
   }
+  nav.appendChild(corps);
+  // Le bouton de repli est posé AU PIED de la barre, derrière un filet : c'est le
+  // commandement de la barre elle-même, il ne se dispute pas la place de la
+  // première rubrique. C'est le corps de la barre qui défile — le pied, lui,
+  // reste sous la main (voir app-base.css).
+  nav.appendChild(h("button", {
+    class: "app-nav__repli", type: "button",
+    title: replie ? "Déplier le menu" : "Replier le menu",
+    "aria-expanded": replie ? "false" : "true",
+    on: { click: () => { setPrefBool(PREF_NAV, !replie); renderRoot(document.getElementById("app")); } },
+  }, icon(replie ? "right" : "left", 16), h("span", { class: "app-nav__repli-texte", text: "Replier le menu" })));
 
   mainEl = h("main", { class: "app-main" });
   const body = h("div", { class: "app-body" }, nav, mainEl);
@@ -447,8 +507,10 @@ function drawViewNow() {
   if (appEl) appEl.classList.toggle("app--plein", state.route.view === "trame");
   // La présence annonce l'écran courant : les autres postes voient qui travaille
   // où. Le libellé de l'acte, lui, est posé par l'éditeur de rédaction.
-  // Quitter la rédaction relâche le verrou souple de l'acte.
+  // Quitter la rédaction relâche le verrou souple de l'acte ; quitter l'éditeur
+  // de trame retire la trame de la présence (1.6.2).
   if (state.route.view !== "rediger") libererRedaction();
+  if (state.route.view !== "trame") libererRedactionTrame();
   signalerEcranCollab(state.route.view);
   try {
     view(mainEl, params);
@@ -543,10 +605,19 @@ async function boot() {
   // Le système passe en sombre (ou revient en clair) : suivi tant que le choix
   // d'apparence est « Automatique ».
   onSystemThemeChange(() => { applyBrand(); emit(); });
-  // Deux postes peuvent écrire en même temps : le service refuse l'écrasement et
-  // renvoie sa version. On prévient l'utilisateur, et l'écran se rafraîchit.
-  db.onConflict(({ collection, conflicts }) => {
-    toast(`${conflicts.length} élément(s) de « ${COLLECTIONS[collection]?.label || collection} » ont été modifiés sur un autre poste. La version de la base a été reprise.`, "warning");
+  // Deux postes peuvent écrire en même temps. La base REFUSE l'écrasement et
+  // renvoie sa version : depuis la 1.6.2, la façade FUSIONNE (voir
+  // lib/fusion.js) — les modifications de chacun sur des champs différents sont
+  // conservées de part et d'autre. On dit ce qui s'est passé ; seul ce qui
+  // demande vraiment un arbitrage est signalé comme un désaccord.
+  db.onConflict(({ collection, conflicts = [], fusionnes = [], desaccords = [] }) => {
+    const quoi = COLLECTIONS[collection]?.label || collection;
+    const detail = decrireDesaccords(desaccords);
+    if (conflicts.length) {
+      toast(`${conflicts.length} élément(s) de « ${quoi} » avaient changé sur un autre poste : la version de la base a été reprise.` + (detail ? ` En désaccord : ${detail}.` : ""), "warning");
+    } else if (fusionnes.length) {
+      toast(`Modifications simultanées fusionnées sur « ${quoi} » (${fusionnes.length} élément(s)) : le travail des deux postes est conservé.` + (detail ? ` À vérifier : ${detail}.` : ""), "success");
+    }
     emit();
   });
   // L'état de la base, lui, ne refait pas l'écran : il ne change QUE ce que la

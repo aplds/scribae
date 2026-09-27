@@ -51,13 +51,13 @@
 .recueil-ident__logo { height: 44px; width: auto; max-width: 120px; object-fit: contain; flex: none; }
 .recueil-ident__logo--mark {
   display: grid; place-items: center; width: 44px; height: 44px;
-  background: var(--brand); color: #fff; font-weight: 700; font-size: .8rem; letter-spacing: .04em;
+  background: var(--brand); color: #fff; font-weight: 700; font-size: var(--t-xs); letter-spacing: .04em;
 }
 .recueil-ident__text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.recueil-ident__org { font-size: .8rem; color: var(--ink-muted); }
-.recueil-ident__title { font-size: 1.05rem; font-weight: 700; }
+.recueil-ident__org { font-size: var(--t-xs); color: var(--ink-muted); }
+.recueil-ident__title { font-size: var(--t-lg); font-weight: 700; }
 .recueil-header__out { margin-left: auto; flex: none; }
-.recueil-out { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--ink-muted); text-decoration: none; }
+.recueil-out { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-muted); text-decoration: none; }
 .recueil-out:hover { color: var(--brand); }
 /* « Se connecter » est la porte de l'application depuis l'espace public : elle
    mérite plus qu'un lien gris, sans pour autant crier au milieu du recueil. */
@@ -81,22 +81,22 @@
 
 .recueil-hero { padding: 26px 0 24px; border-bottom: 1px solid var(--border); }
 .recueil-hero__eyebrow {
-  margin: 0 0 7px; font-size: .76rem; font-weight: 700;
+  margin: 0 0 7px; font-size: var(--t-xs); font-weight: 700;
   text-transform: uppercase; letter-spacing: .09em; color: var(--brand);
 }
 .recueil-hero__title { margin: 0; font-size: clamp(1.7rem, 1.1rem + 2vw, 2.35rem); line-height: 1.18; letter-spacing: -.01em; }
 .recueil-hero__lead { margin: 11px 0 0; max-width: 66ch; color: var(--ink-2); }
-.recueil-hero__stats { margin: 13px 0 0; font-size: .84rem; color: var(--ink-muted); }
+.recueil-hero__stats { margin: 13px 0 0; font-size: var(--t-sm); color: var(--ink-muted); }
 .recueil-hero .recueil-recherche { margin-top: 17px; max-width: 640px; }
 
 .recueil-recherche--hero { padding: 1px 13px; }
-.recueil-recherche--hero .recueil-input { padding: 12px 0; font-size: 1rem; }
+.recueil-recherche--hero .recueil-input { padding: 12px 0; font-size: var(--t-lg); }
 
 .recueil-section { margin-top: 30px; }
 .recueil-section__tete { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
 .recueil-section__titres { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.recueil-section__title { margin: 0; font-size: 1.16rem; }
-.recueil-section__sous { margin: 3px 0 0; color: var(--ink-muted); font-size: .86rem; }
+.recueil-section__title { margin: 0; font-size: var(--t-xl); }
+.recueil-section__sous { margin: 3px 0 0; color: var(--ink-muted); font-size: var(--t-sm); }
 
 /* --- les derniers actes : un carrousel ------------------------------------ */
 .recueil-carrousel__nav { display: flex; align-items: center; gap: 8px; }
@@ -131,11 +131,11 @@
 .recueil-carte:hover { box-shadow: 0 8px 20px rgb(0 0 0 / .10); transform: translateY(-2px); }
 .recueil-carte__lien { display: flex; flex-direction: column; gap: 5px; padding: 14px 15px; min-height: 152px; text-decoration: none; color: inherit; }
 .recueil-carte__lien:hover { background: var(--bg-alt); }
-.recueil-carte__theme { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: hsl(var(--h, 220) 52% 36%); }
+.recueil-carte__theme { font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: hsl(var(--h, 220) 52% 36%); }
 .recueil-carte__theme.is-sans { color: var(--ink-muted); }
-.recueil-carte__objet { font-size: 1.02rem; font-weight: 600; line-height: 1.35; }
+.recueil-carte__objet { font-size: var(--t-lg); font-weight: 600; line-height: 1.35; }
 .recueil-carte__lien:hover .recueil-carte__objet { color: var(--brand); }
-.recueil-carte__meta, .recueil-carte__date { font-size: .8rem; color: var(--ink-muted); }
+.recueil-carte__meta, .recueil-carte__date { font-size: var(--t-xs); color: var(--ink-muted); }
 .recueil-carte__date { margin-top: auto; }
 
 /* --- la mise en avant : la bande « À la une » ------------------------------ */
@@ -146,21 +146,21 @@
 .recueil-une { margin-top: 22px; }
 .recueil-carte--une { border-top-color: var(--brand); background: var(--brand-soft); }
 .recueil-carte__epingle, .recueil-item__epingle {
-  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--brand);
 }
-.recueil-item__epingle { font-size: .66rem; }
+.recueil-item__epingle { font-size: var(--t-xs); }
 /* La marque d'un acte à DIFFUSION RESTREINTE (réservé aux agents connectés) :
    visible seulement par les agents, puisque le public ne le voit pas. */
 .recueil-item__reserve {
-  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--error);
 }
 /* La marque d'une REPRISE d'acte ancien : la date affichée est celle de sa
    publication d'origine, et sans ce repère la liste la ferait passer pour un
    acte du jour. Le titre de la page, lui, porte la mention complète. */
 .recueil-item__reprise {
-  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--warning);
 }
 
@@ -180,8 +180,8 @@
 .recueil-theme.is-sans .recueil-theme__puce { background: var(--border-strong); }
 .recueil-theme__corps { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
 .recueil-theme__nom { font-weight: 600; line-height: 1.3; }
-.recueil-theme__desc { font-size: .8rem; line-height: 1.4; color: var(--ink-muted); }
-.recueil-theme__n { flex: none; padding-top: 2px; font-size: .76rem; color: var(--ink-muted); white-space: nowrap; }
+.recueil-theme__desc { font-size: var(--t-xs); line-height: 1.4; color: var(--ink-muted); }
+.recueil-theme__n { flex: none; padding-top: 2px; font-size: var(--t-xs); color: var(--ink-muted); white-space: nowrap; }
 .recueil-recherche {
   display: flex; align-items: center; gap: 8px; flex: 1 1 300px;
   border: 1px solid var(--border-strong); border-radius: var(--radius);
@@ -190,25 +190,25 @@
 .recueil-recherche:focus-within { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 0; }
 .recueil-input { flex: 1 1 auto; border: 0; background: transparent; font: inherit; color: var(--ink); padding: 9px 0; outline: none; min-width: 0; }
 /* Cible tactile de la croix de recherche : 24 x 24 px au minimum. */
-.recueil-recherche__x { border: 0; background: none; font-size: 1.15rem; line-height: 1; color: var(--ink-muted); cursor: pointer; padding: 0 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
-.recueil-select { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); color: var(--ink); font: inherit; font-size: .84rem; padding: 8px 10px; max-width: 230px; }
+.recueil-recherche__x { border: 0; background: none; font-size: var(--t-xl); line-height: 1; color: var(--ink-muted); cursor: pointer; padding: 0 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
+.recueil-select { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); color: var(--ink); font: inherit; font-size: var(--t-sm); padding: 8px 10px; max-width: 230px; }
 
-.recueil-lien { border: 0; background: none; color: var(--brand); font: inherit; font-size: .84rem; cursor: pointer; text-decoration: underline; padding: 0; }
+.recueil-lien { border: 0; background: none; color: var(--brand); font: inherit; font-size: var(--t-sm); cursor: pointer; text-decoration: underline; padding: 0; }
 
 .recueil-resultats { scroll-margin-top: 14px; }
 .recueil-filtres { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.recueil-filtres__label { font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.recueil-filtres__label { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
 /* « Afficher les versions antérieures » : un filtre du recueil, discret, à côté
    des sélecteurs — il ne paraît que si des versions antérieures existent. */
 .recueil-anciennes {
   display: inline-flex; align-items: center; gap: 7px; margin-left: 4px;
-  font-size: .82rem; color: var(--ink-2); cursor: pointer;
+  font-size: var(--t-sm); color: var(--ink-2); cursor: pointer;
 }
 .recueil-anciennes input { width: 15px; height: 15px; accent-color: var(--brand); }
 
 .recueil-listes { display: flex; flex-direction: column; gap: 18px; }
 .recueil-annee__title {
-  margin: 0 0 6px; padding-bottom: 5px; font-size: .78rem; font-weight: 700;
+  margin: 0 0 6px; padding-bottom: 5px; font-size: var(--t-xs); font-weight: 700;
   text-transform: uppercase; letter-spacing: .08em; color: var(--ink-muted);
   border-bottom: 2px solid var(--border);
 }
@@ -221,22 +221,22 @@
 .recueil-item__lien:hover .recueil-item__objet { color: var(--brand); }
 .recueil-item__haut { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .recueil-item__theme {
-  font-size: .73rem; font-weight: 700; letter-spacing: .01em;
+  font-size: var(--t-xs); font-weight: 700; letter-spacing: .01em;
   color: var(--brand); background: var(--brand-soft, var(--bg-alt)); border-radius: 3px; padding: 1px 7px;
 }
-.recueil-item__nature { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
-.recueil-item__num { font-family: var(--font-mono); font-size: .82rem; color: var(--ink-2); }
-.recueil-item__marque { font-size: .7rem; color: var(--warning); }
-.recueil-item__objet { display: block; margin: 3px 0 0; font-size: .96rem; color: var(--ink); }
-.recueil-item__bas { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 3px; font-size: .78rem; color: var(--ink-muted); }
+.recueil-item__nature { font-size: var(--t-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.recueil-item__num { font-family: var(--font-mono); font-size: var(--t-sm); color: var(--ink-2); }
+.recueil-item__marque { font-size: var(--t-xs); color: var(--warning); }
+.recueil-item__objet { display: block; margin: 3px 0 0; font-size: var(--t-lg); color: var(--ink); }
+.recueil-item__bas { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 3px; font-size: var(--t-xs); color: var(--ink-muted); }
 
-.recueil-fil { display: flex; gap: 8px; flex-wrap: wrap; font-size: .8rem; color: var(--ink-muted); }
+.recueil-fil { display: flex; gap: 8px; flex-wrap: wrap; font-size: var(--t-xs); color: var(--ink-muted); }
 .recueil-fil a { color: var(--brand); }
 
 /* Marques d'un acte : sa nature, sa version. */
 .recueil-badge {
   display: inline-block; border: 1px solid var(--border-strong); border-radius: 3px;
-  padding: 2px 8px; font-size: .72rem; font-weight: 600; letter-spacing: .02em;
+  padding: 2px 8px; font-size: var(--t-xs); font-weight: 600; letter-spacing: .02em;
   text-transform: uppercase; color: var(--ink-2); background: var(--bg);
 }
 .recueil-badge--nature { border-color: var(--brand); color: var(--brand); }
@@ -257,12 +257,12 @@
   margin: 0; font-family: var(--font-ui);
   font-size: 1.75rem; line-height: 1.28; font-weight: 700; color: var(--ink); letter-spacing: -.01em;
 }
-.recueil-notice__sous { margin: 8px 0 0; font-size: .88rem; color: var(--ink-muted); }
+.recueil-notice__sous { margin: 8px 0 0; font-size: var(--t-md); color: var(--ink-muted); }
 /* L'avertissement d'un texte publié A TITRE INFORMATIF (un règlement) : il ne
    doit pas se confondre avec un acte opposable — la phrase le dit, et le style
    la met en avant sans crier. */
 .recueil-notice__info {
-  margin: 12px 0 0; padding: 10px 12px; font-size: .86rem; line-height: 1.5;
+  margin: 12px 0 0; padding: 10px 12px; font-size: var(--t-sm); line-height: 1.5;
   color: var(--ink-2); background: var(--bg-alt); border-left: 3px solid var(--border-strong); border-radius: 3px;
 }
 
@@ -271,18 +271,18 @@
   display: flex; flex-wrap: wrap; gap: 8px 30px; margin: 16px 0 0;
   padding: 12px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.recueil-meta__item { display: flex; gap: 6px; align-items: baseline; font-size: .84rem; }
+.recueil-meta__item { display: flex; gap: 6px; align-items: baseline; font-size: var(--t-sm); }
 .recueil-meta dt { color: var(--ink-muted); }
 .recueil-meta dd { margin: 0; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .recueil-meta__eli dd { font-weight: 400; }
-.recueil-meta__eli code { font-family: var(--font-mono); font-size: .78rem; word-break: break-all; }
+.recueil-meta__eli code { font-family: var(--font-mono); font-size: var(--t-xs); word-break: break-all; }
 
 .recueil-lecture { margin-top: 26px; }
 
 /* --- les blocs sous le texte ---------------------------------------------- */
 .recueil-bloc { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border); }
 .recueil-bloc__title {
-  margin: 0 0 12px; font-size: .78rem; text-transform: uppercase;
+  margin: 0 0 12px; font-size: var(--t-xs); text-transform: uppercase;
   letter-spacing: .06em; color: var(--ink-muted); font-weight: 700;
 }
 .recueil-pieces { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -295,19 +295,19 @@
 .recueil-version.is-on { font-weight: 600; }
 .recueil-version__texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .recueil-version__fin { display: flex; align-items: center; gap: 8px; }
-.recueil-dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 16px; margin: 0 0 12px; font-size: .85rem; }
+.recueil-dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 16px; margin: 0 0 12px; font-size: var(--t-sm); }
 .recueil-dl dt { color: var(--ink-muted); }
 .recueil-dl dd { margin: 0; overflow-wrap: anywhere; }
 /* Sur un téléphone, la colonne des libellés mange celle des valeurs : une
    empreinte SHA-256 (64 caractères) devient illisible. On empile. */
 @media (max-width: 640px) {
   .recueil-dl { grid-template-columns: 1fr; gap: 0; }
-  .recueil-dl dt { margin-top: 9px; font-size: .78rem; }
-  .recueil-dl dd { font-size: .84rem; }
+  .recueil-dl dt { margin-top: 9px; font-size: var(--t-xs); }
+  .recueil-dl dd { font-size: var(--t-sm); }
 }
-.recueil-side__note { color: var(--ink-muted); font-size: .8rem; }
+.recueil-side__note { color: var(--ink-muted); font-size: var(--t-xs); }
 .recueil-verif-box { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.recueil-verif { margin: 0; font-size: .84rem; }
+.recueil-verif { margin: 0; font-size: var(--t-sm); }
 .recueil-verif.is-ok { color: var(--success); }
 .recueil-verif.is-ko { color: var(--error); }
 
@@ -326,9 +326,9 @@
   border-left: 4px solid var(--brand-public, var(--brand)); background: var(--bg);
   padding: 12px 14px; border-radius: 3px; margin: 0 0 12px;
 }
-.recueil-certif__titre { margin: 0 0 6px; font-size: .95rem; }
+.recueil-certif__titre { margin: 0 0 6px; font-size: var(--t-lg); }
 .recueil-certif__statut { font-weight: 600; }
-.recueil-certif__points { margin: 8px 0 0; padding-left: 18px; font-size: .82rem; color: var(--ink-2); }
+.recueil-certif__points { margin: 8px 0 0; padding-left: 18px; font-size: var(--t-sm); color: var(--ink-2); }
 
 .recueil-vide { background: var(--bg); border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 26px 22px; text-align: center; color: var(--ink-2); }
 .recueil-vide h2 { margin-top: 0; }
@@ -343,9 +343,9 @@
    12.7 — « aller au contenu principal »). */
 .recueil-evitement { position: absolute; left: -9999px; top: 0; z-index: 100; }
 .recueil-evitement:focus { position: fixed; left: 12px; top: 12px; z-index: 100; background: var(--bg); color: var(--ink); padding: 10px 14px; border: 2px solid var(--focus); border-radius: var(--radius); text-decoration: none; }
-.recueil-pied__ligne { margin: 0 0 3px; font-size: .84rem; color: var(--ink-2); }
-.recueil-pied__note { margin: 0; font-size: .76rem; color: var(--ink-muted); }
-.recueil-pied__ouvert { margin: 6px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.recueil-pied__ligne { margin: 0 0 3px; font-size: var(--t-sm); color: var(--ink-2); }
+.recueil-pied__note { margin: 0; font-size: var(--t-xs); color: var(--ink-muted); }
+.recueil-pied__ouvert { margin: 6px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
 .recueil-pied__sep { color: var(--border-strong); }
 
 /* --- Les mentions du pied de page ----------------------------------------
@@ -356,13 +356,13 @@
 .recueil-pied__mentions { max-width: 780px; margin: 14px 0 0; text-align: left; }
 .recueil-mention { border-top: 1px solid var(--border); padding: 9px 0 2px; }
 .recueil-mention[open] { padding-bottom: 8px; }
-.recueil-mention__titre { cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--ink-2); }
+.recueil-mention__titre { cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); }
 .recueil-mention__titre:hover { color: var(--ink); }
 .recueil-mention__titre::marker { color: var(--border-strong); }
-.recueil-mention__texte { font-size: .8rem; line-height: 1.55; color: var(--ink-2); }
+.recueil-mention__texte { font-size: var(--t-xs); line-height: 1.55; color: var(--ink-2); }
 .recueil-mention__texte p { margin: 7px 0 0; }
 .recueil-mention__liste { margin: 7px 0 0; padding-left: 18px; }
-.recueil-pied__mention-lien { margin: 9px 0 0; font-size: .82rem; }
+.recueil-pied__mention-lien { margin: 9px 0 0; font-size: var(--t-sm); }
 
 /* --- « Vous ne trouvez pas ce que vous recherchez ? » ----------------------
    Le renvoi du recueil vers les recueils qu'il ne gère pas (recueil « bis »,
@@ -372,14 +372,14 @@
 .recueil-ailleurs {
   max-width: 780px; margin: 0 auto 18px; padding: 0 0 16px; text-align: left;
 }
-.recueil-ailleurs__titre { margin: 0 0 5px; font-size: 1.05rem; }
-.recueil-ailleurs__lead { margin: 0 0 12px; font-size: .86rem; color: var(--ink-2); }
+.recueil-ailleurs__titre { margin: 0 0 5px; font-size: var(--t-lg); }
+.recueil-ailleurs__lead { margin: 0 0 12px; font-size: var(--t-sm); color: var(--ink-2); }
 /* La mention des actes à diffusion restreinte (réservés aux agents connectés) :
    elle se distingue du renvoi vers d'autres recueils, sans crier. */
-.recueil-ailleurs__lead--agents { font-size: .82rem; color: var(--ink-muted); border-left: 3px solid var(--border-strong); padding-left: 10px; }
+.recueil-ailleurs__lead--agents { font-size: var(--t-sm); color: var(--ink-muted); border-left: 3px solid var(--border-strong); padding-left: 10px; }
 .recueil-ailleurs__groupe { margin-top: 12px; }
 .recueil-ailleurs__groupe-titre {
-  margin: 0 0 6px; font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  margin: 0 0 6px; font-size: var(--t-xs); font-weight: 700; text-transform: uppercase;
   letter-spacing: .06em; color: var(--ink-muted);
 }
 .recueil-ailleurs__liste { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
@@ -398,13 +398,13 @@
 .recueil-ailleurs__tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .recueil-ailleurs__type {
   border: 1px solid var(--border-strong); border-radius: 3px; padding: 1px 7px;
-  font-size: .71rem; font-weight: 700; letter-spacing: .02em; color: var(--ink-2);
+  font-size: var(--t-xs); font-weight: 700; letter-spacing: .02em; color: var(--ink-2);
 }
 .recueil-ailleurs__type--bis { color: var(--brand); border-color: var(--brand); }
 .recueil-ailleurs__type--inactif { color: var(--warning); border-color: var(--warning); }
 .recueil-ailleurs__type--ressource { color: var(--ink-2); }
-.recueil-ailleurs__periode { font-size: .78rem; color: var(--ink-muted); }
-.recueil-ailleurs__note { font-size: .82rem; color: var(--ink-2); }
+.recueil-ailleurs__periode { font-size: var(--t-xs); color: var(--ink-muted); }
+.recueil-ailleurs__note { font-size: var(--t-sm); color: var(--ink-2); }
 .recueil-ailleurs--resultats { max-width: none; margin: 22px 0 0; padding: 16px 0 0; border-top: 1px solid var(--border); }
 
 /* --- les sous-pages du site (1.5.3) ---------------------------------------
@@ -414,7 +414,7 @@
 .recueil-souspage { max-width: min(var(--recueil-largeur), 900px); }
 .recueil-souspage__tete { margin: 6px 0 18px; }
 .recueil-souspage__titre { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem); line-height: 1.2; letter-spacing: -.01em; }
-.recueil-souspage__chapo { margin: 10px 0 0; max-width: 68ch; font-size: 1rem; color: var(--ink-2); }
+.recueil-souspage__chapo { margin: 10px 0 0; max-width: 68ch; font-size: var(--t-lg); color: var(--ink-2); }
 .recueil-souspage__texte > p { margin: 0 0 1em; max-width: 78ch; line-height: 1.65; }
 .recueil-souspage__texte .recueil-mention__liste { max-width: 78ch; line-height: 1.65; }
 
@@ -425,7 +425,7 @@
 .recueil-reserve-note {
   display: flex; align-items: center; gap: 9px; margin: 0;
   padding: 9px 13px; border: 1px solid var(--border-strong); border-left: 3px solid var(--error);
-  border-radius: calc(var(--radius) + 2px); background: var(--bg); color: var(--ink-2); font-size: .84rem;
+  border-radius: calc(var(--radius) + 2px); background: var(--bg); color: var(--ink-2); font-size: var(--t-sm);
 }
 .recueil-reserve-note svg { flex: none; color: var(--error); }
 
@@ -439,25 +439,25 @@
 .recueil-info-carte.is-epinglee { border-top: 3px solid var(--brand); }
 .recueil-info-carte__lien { display: flex; flex-direction: column; gap: 6px; padding: 15px 16px; height: 100%; text-decoration: none; color: inherit; }
 .recueil-info-carte__epingle {
-  align-self: flex-start; font-size: .66rem; font-weight: 700; text-transform: uppercase;
+  align-self: flex-start; font-size: var(--t-xs); font-weight: 700; text-transform: uppercase;
   letter-spacing: .07em; color: var(--brand);
 }
-.recueil-info-carte__date { font-size: .78rem; color: var(--ink-muted); }
-.recueil-info-carte__titre { font-size: 1.05rem; font-weight: 650; line-height: 1.32; }
+.recueil-info-carte__date { font-size: var(--t-xs); color: var(--ink-muted); }
+.recueil-info-carte__titre { font-size: var(--t-lg); font-weight: 650; line-height: 1.32; }
 .recueil-info-carte__lien:hover .recueil-info-carte__titre { color: var(--brand); }
-.recueil-info-carte__resume { font-size: .88rem; line-height: 1.5; color: var(--ink-2); }
+.recueil-info-carte__resume { font-size: var(--t-md); line-height: 1.5; color: var(--ink-2); }
 .recueil-info-carte__pied {
   display: flex; gap: 12px; flex-wrap: wrap; margin-top: auto; padding-top: 4px;
-  font-size: .76rem; color: var(--ink-muted);
+  font-size: var(--t-xs); color: var(--ink-muted);
 }
 
 .recueil-info { max-width: 78ch; }
-.recueil-info__meta { margin: 6px 0 8px; font-size: .82rem; color: var(--ink-muted); }
+.recueil-info__meta { margin: 6px 0 8px; font-size: var(--t-sm); color: var(--ink-muted); }
 .recueil-info__titre { margin: 0; font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem); line-height: 1.2; letter-spacing: -.01em; }
-.recueil-info__chapo { margin: 12px 0 4px; font-size: 1.02rem; line-height: 1.6; color: var(--ink-2); }
+.recueil-info__chapo { margin: 12px 0 4px; font-size: var(--t-lg); line-height: 1.6; color: var(--ink-2); }
 .recueil-info__corps { margin-top: 18px; line-height: 1.65; }
-.recueil-info__corps .md-h2 { font-size: 1.2rem; }
-.recueil-info__retour { margin: 26px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: .86rem; }
+.recueil-info__corps .md-h2 { font-size: var(--t-xl); }
+.recueil-info__retour { margin: 26px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--t-sm); }
 .recueil-info-carte__resume, .recueil-info__chapo { text-wrap: pretty; }
 
 /* --- LE BULLETIN : la page des numéros, la page d'un numéro, l'abonnement --
@@ -465,9 +465,9 @@
    listes, un cran plus sobre — un sommaire de numéros, puis dans un numéro les
    entités, leurs thématiques et leurs actes. */
 .recueil-bulletins-zone { margin: 26px 0 0; }
-.recueil-bulletins-zone__chapo { margin: 6px 0 0; max-width: 70ch; font-size: .92rem; color: var(--ink-2); }
-.recueil-bulletins__cadence { margin: 8px 0 0; font-size: .88rem; color: var(--ink-2); }
-.recueil-bulletins__liens { margin: 8px 0 0; font-size: .86rem; }
+.recueil-bulletins-zone__chapo { margin: 6px 0 0; max-width: 70ch; font-size: var(--t-md); color: var(--ink-2); }
+.recueil-bulletins__cadence { margin: 8px 0 0; font-size: var(--t-md); color: var(--ink-2); }
+.recueil-bulletins__liens { margin: 8px 0 0; font-size: var(--t-sm); }
 .recueil-bulletins__liste { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
 .recueil-bulletins__item {
   display: flex; flex-direction: column; gap: 3px; padding: 13px 15px;
@@ -475,40 +475,40 @@
 }
 .recueil-bulletins__titre { font-weight: 650; line-height: 1.3; text-decoration: none; color: var(--ink); }
 .recueil-bulletins__titre:hover { color: var(--brand); }
-.recueil-bulletins__meta { font-size: .84rem; color: var(--ink-muted); }
-.recueil-bulletins__formats { font-size: .8rem; }
+.recueil-bulletins__meta { font-size: var(--t-sm); color: var(--ink-muted); }
+.recueil-bulletins__formats { font-size: var(--t-xs); }
 .recueil-bulletin { margin-top: 10px; }
 .recueil-bulletin__entite { margin: 24px 0 0; }
 .recueil-bulletin__nom {
   margin: 0 0 6px; padding-bottom: 5px; border-bottom: 2px solid var(--brand);
-  font-size: .84rem; text-transform: uppercase; letter-spacing: .07em; color: var(--brand);
+  font-size: var(--t-sm); text-transform: uppercase; letter-spacing: .07em; color: var(--brand);
 }
-.recueil-bulletin__theme > h3 { margin: 16px 0 6px; font-size: 1rem; }
+.recueil-bulletin__theme > h3 { margin: 16px 0 6px; font-size: var(--t-lg); }
 .recueil-bulletin__actes { list-style: none; margin: 0; padding: 0; }
 .recueil-bulletin__acte { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-.recueil-bulletin__meta { font-size: .82rem; color: var(--ink-muted); }
+.recueil-bulletin__meta { font-size: var(--t-sm); color: var(--ink-muted); }
 /* L'abonnement : un formulaire simple, dans une carte, avec sa phrase de double
    consentement — on ne s'étonne pas de ne rien recevoir tout de suite. */
 .recueil-abon {
   margin: 20px 0 8px; padding: 16px 18px; max-width: 560px;
   background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.recueil-abon__titre { margin: 0 0 6px; font-size: 1.05rem; }
-.recueil-abon__aide { margin: 0 0 12px; font-size: .9rem; color: var(--ink-2); }
+.recueil-abon__titre { margin: 0 0 6px; font-size: var(--t-lg); }
+.recueil-abon__aide { margin: 0 0 12px; font-size: var(--t-md); color: var(--ink-2); }
 .recueil-abon__form { display: flex; flex-direction: column; gap: 6px; }
-.recueil-abon__label { font-size: .82rem; color: var(--ink-muted); }
+.recueil-abon__label { font-size: var(--t-sm); color: var(--ink-muted); }
 .recueil-abon__message { margin: 6px 0 0; }
-.recueil-pied__bulletin { margin: 8px 0 0; font-size: .82rem; }
+.recueil-pied__bulletin { margin: 8px 0 0; font-size: var(--t-sm); }
 
 /* --- l'écran d'administration du Bulletin ---------------------------------
    Des chiffres d'abord (cadence, prochaine parution, abonnés), puis des
    tableaux : les numéros, les abonnés, les envois. */
 .bul-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 14px 0 6px; }
 .bul-stat { display: flex; flex-direction: column; gap: 2px; padding: 11px 13px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
-.bul-stat__l { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); }
-.bul-stat__v { font-size: 1.02rem; }
-.bul-stat__d { font-size: .78rem; color: var(--ink-muted); }
-.bul-liens { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 0; font-size: .84rem; }
+.bul-stat__l { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); }
+.bul-stat__v { font-size: var(--t-lg); }
+.bul-stat__d { font-size: var(--t-xs); color: var(--ink-muted); }
+.bul-liens { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 0; font-size: var(--t-sm); }
 .bul-lien { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bul-lien .fr-link { word-break: break-all; }
 .bul-table { width: 100%; }
@@ -518,25 +518,25 @@
 .bul-apercu__actions { margin-top: 12px; }
 .bul-corps { margin-top: 12px; }
 .bul-ent { margin: 16px 0 0; }
-.bul-ent__nom { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-strong); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--brand); }
-.bul-ent__theme { margin: 12px 0 2px; font-size: .88rem; font-weight: 600; }
+.bul-ent__nom { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-strong); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--brand); }
+.bul-ent__theme { margin: 12px 0 2px; font-size: var(--t-md); font-weight: 600; }
 .bul-ent__actes { list-style: none; margin: 0; padding: 0 0 0 14px; }
 .bul-ent__actes li { padding: 3px 0; }
 
 /* --- le pied de page : le sommaire du site et la porte de l'application ---- */
-.recueil-pied__pages { margin: 12px 0 0; font-size: .82rem; }
+.recueil-pied__pages { margin: 12px 0 0; font-size: var(--t-sm); }
 .recueil-pied__acces { margin: 14px 0 0; }
 .recueil-pied__connexion {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: 999px;
-  background: var(--bg); color: var(--ink); font-weight: 600; font-size: .86rem; text-decoration: none;
+  background: var(--bg); color: var(--ink); font-weight: 600; font-size: var(--t-sm); text-decoration: none;
 }
 .recueil-pied__connexion:hover { border-color: var(--brand); color: var(--brand); background: var(--bg-alt); }
-.recueil-pied__licence { margin: 4px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.recueil-pied__licence { margin: 4px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
 /* La mention de l'éditeur du logiciel ferme le pied de page du recueil (voir
    src/ui/mention.js) : « Propulsé par Scribae — GPLv3 ». Elle se règle dans
    Administration › Identité, et vaut « affichée » par défaut. */
-.recueil-pied__propulse { margin: 10px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.recueil-pied__propulse { margin: 10px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
 .mention-editeur__lien { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .mention-editeur__lien:hover { color: var(--brand); }
 
@@ -547,23 +547,23 @@
    qu'un moteur ou un agent le lit. */
 .recueil-machine { background: var(--bg); min-height: 100vh; padding: 20px clamp(16px, 4vw, 48px) 40px; }
 .recueil-machine__contenu {
-  margin: 0; font-family: var(--font-mono); font-size: .82rem; line-height: 1.6;
+  margin: 0; font-family: var(--font-mono); font-size: var(--t-sm); line-height: 1.6;
   color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .recueil-machine__note {
   margin: 22px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
-  font-size: .8rem; color: var(--ink-muted);
+  font-size: var(--t-xs); color: var(--ink-muted);
 }
 
 /* --- les adresses du recueil ouvert, sous le texte de l'acte -------------- */
-.recueil-donnees__resume { cursor: pointer; font-size: .85rem; font-weight: 600; color: var(--brand); }
+.recueil-donnees__resume { cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--brand); }
 .recueil-donnees > p { margin: 12px 0; }
-.recueil-donnees__titre { margin: 18px 0 4px; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.recueil-donnees__titre { margin: 18px 0 4px; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
 .recueil-adresse { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
 .recueil-adresse + .recueil-adresse { border-top: 1px solid var(--border); }
-.recueil-adresse__url { font-family: var(--font-mono); font-size: .78rem; color: var(--brand); overflow-wrap: anywhere; text-decoration: none; }
+.recueil-adresse__url { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--brand); overflow-wrap: anywhere; text-decoration: none; }
 .recueil-adresse__url:hover { text-decoration: underline; }
-.recueil-adresse__label { flex: 1 1 200px; font-size: .78rem; color: var(--ink-muted); }
+.recueil-adresse__label { flex: 1 1 200px; font-size: var(--t-xs); color: var(--ink-muted); }
 
 @media (max-width: 980px) {
   .recueil-notice__titre { font-size: 1.45rem; }
@@ -577,14 +577,14 @@
   .recueil-item__lien { padding: 10px 4px; }
   .recueil-select { max-width: none; flex: 1 1 140px; }
   .recueil-notice__titre { font-size: 1.25rem; }
-  .recueil-badge { padding: 2px 7px; font-size: .68rem; }
+  .recueil-badge { padding: 2px 7px; font-size: var(--t-xs); }
   .recueil-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 10px 12px; }
   .recueil-meta__item { display: contents; }
   /* L'accueil sur un téléphone : l'entrée se resserre, les tuiles s'empilent
      (une colonne), et le carrousel garde une carte et un peu de la suivante —
      c'est ce qui montre qu'il y a de la suite. */
   .recueil-hero { padding-top: 18px; }
-  .recueil-hero__lead { font-size: .95rem; }
+  .recueil-hero__lead { font-size: var(--t-lg); }
   .recueil-themes__grille { grid-template-columns: 1fr; }
   .recueil-carte { flex-basis: min(86vw, 280px); }
   .recueil-carte__lien { min-height: 0; }
@@ -653,6 +653,6 @@
   border-left: 4px solid var(--warning); background: var(--warning-bg);
   border-radius: var(--radius);
 }
-.recueil-mention-reprise__texte { margin: 0; font-size: .85rem; }
+.recueil-mention-reprise__texte { margin: 0; font-size: var(--t-sm); }
 .recueil-mention-reprise .recueil-side__note { display: block; margin: 6px 0 0; }
 [data-theme="dark"] .recueil-mention-reprise { background: var(--warning-bg); }

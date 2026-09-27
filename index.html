@@ -5,6 +5,20 @@
   caractères, largeur d'écran pour les téléphones, titre d'onglet. Dans
   l'environnement d'édition elles sont sans effet (le document existe déjà).
 -->
+
+<!--
+  AGENT : avant d'écrire quoi que ce soit, lisez src/docs/ATELIER.md — la
+  méthode, les dix garde-fous, la vérification SANS TERMINAL
+  (src/scripts/harnais-atelier.mjs : syntaxe, style, épreuves, générateurs) et
+  ce qui compte comme « terminé ». L'architecture est dans src/README.md, les
+  règles du projet dans src/AGENTS.md.
+
+  CE FICHIER PORTE LE SERVICE DE DÉMONSTRATION (le bloc « text/x-server-plugin »
+  ci-dessous), que la plateforme d'édition exécute dans un fil séparé. Toute
+  règle métier y a son JUMEAU dans src/server/mysql/ : les deux doivent suivre
+  ensemble, et le jeu de conformité (src/tests/conformite-service.mjs) est ce qui
+  les empêche de diverger (voir docs/REPRISE.md, § 2).
+-->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scribae — trames, rédaction et publication des actes administratifs</title>
@@ -81,9 +95,25 @@ const SERVICE_VERSION = "1.0.0";
 const STATE_VERSION = 2;
 const MAX_CHARS = 8000000;   // capacité maximale du document JSON stocké
 const MAX_DOC = 400000;      // taille maximale d'un document accepté par l'API
+// Taille maximale d'une PIÈCE (son contenu, en base64). Les fichiers joints —
+// l'original signé d'une reprise, la version signée d'un acte du circuit
+// externe — se déposaient chez l'hôte de la plateforme (`uploadPlugin`), qui
+// n'existe pas en auto-hébergement : l'application les range donc DANS le
+// service quand l'hôte n'en offre pas (voir src/lib/fichiers.js). Ce service-ci
+// n'a pas de dépôt de fichiers à lui : les pièces tiennent dans son état, d'où
+// un plafond modeste — les scans lourds appartiennent au service auto-hébergé,
+// dont la documentation dit où ils sont rangés et comment les sauvegarder.
+const MAX_PIECE = 900000;
 const MAX_PUBLIES = 40;      // au-delà, la plus ancienne publication est retirée
 const MAX_SIGNATURES = 80;
 const MAX_ACTES = 80;
+// LE MOTIF DU REFUS DE LA SIGNATURE INTERNE, écrit UNE fois : ce service-ci vit
+// dans le navigateur, n'a aucun `.env`, et ne peut donc pas tenir de coffre. Il
+// le dit — à la route de signature (`hEnvoyerEnSignature`) comme à celle des
+// réglages (`GET /v1/config`, champ `signatureInterne`), pour que l'application
+// ne propose pas un circuit que ce service refusera. Voir la même règle côté
+// auto-hébergé (src/server/mysql/actes.mjs, `hSignerInterne`).
+const MOTIF_SIGNATURE_INTERNE = "Le service de démonstration de la plateforme ne tient pas de coffre de signature : la signature interne n'est disponible qu'en auto-hébergement (SCRIBA_SIGNATURE_KV_KEY).";
 // Rôles et portée des clés d'écriture. Les quatre premiers forment une
 // hiérarchie (administrateur > editeur > redacteur > lecteur) ; `prestataire`
 // est hors hiérarchie : il ne donne accès qu'à la notification de signature.
@@ -98,7 +128,7 @@ const U16 = new Uint16Array(state.buffer, U16_OFFSET, Math.floor((state.length -
 const HEADER = 4;
 
 function dbVide() {
-  return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {}, cles: {}, journal: [] };
+  return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {}, cles: {}, journal: [], pieces: {} };
 }
 
 function loadDb() {
@@ -127,6 +157,7 @@ function loadDb() {
     db.collections = db.collections || {};
     db.cles = db.cles || {};
     db.journal = db.journal || [];
+    db.pieces = db.pieces || {};
     return db;
   } catch (e) {
     console.log("État illisible, réinitialisation :", String(e));
@@ -217,6 +248,26 @@ function cmp(a, b) {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
+// Comparaison de TEXTES (libellés d'entités, de thèmes, objets d'actes) : mêmes
+// raisons que `cmp`, plus une difficulté propre — `localeCompare` savait ignorer
+// accents et casse, le moteur du service ne le sait pas. On plie donc soi-même
+// la casse et les accents français, ce qui suffit pour que « École » se range
+// avec « ecole » et non après « zoo ».
+const PLIAGE_ACCENTS = {
+  "à": "a", "á": "a", "â": "a", "ã": "a", "ä": "a", "å": "a", "ç": "c",
+  "è": "e", "é": "e", "ê": "e", "ë": "e", "ì": "i", "í": "i", "î": "i", "ï": "i",
+  "ò": "o", "ó": "o", "ô": "o", "õ": "o", "ö": "o",
+  "ù": "u", "ú": "u", "û": "u", "ü": "u", "ñ": "n", "ý": "y", "ÿ": "y",
+  "œ": "oe", "æ": "ae",
+};
+function plierTexte(s) {
+  return String(s == null ? "" : s).toLowerCase().replace(/[àáâãäåçèéêëìíîïòóôõöùúûüñýÿœæ]/g, (c) => PLIAGE_ACCENTS[c] || c);
+}
+function cmpTexte(a, b) {
+  const x = plierTexte(a), y = plierTexte(b);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 // ------------------------------------------------------------------ utilitaires
 function utf8Bytes(str) {
   const out = [];
@@ -303,19 +354,34 @@ function dateHeureFr(iso) {
   return d.getDate() + " " + MOIS_FR[d.getMonth()] + " " + d.getFullYear() + " à " + h + " h " + mi;
 }
 
-function certificatTransmission({ reference, recuLe, destinataire, empreinte }) {
+function certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration = false, declaration = null }) {
   const d = destinataire || CONTROLE_LEGALITE.destinataire;
   const r = recuLe || nowIso();
+  const decl = declaration && typeof declaration === "object" ? declaration : null;
+  const par = decl ? String(decl.parNom || decl.par || "") : "";
+  const nature = decl
+    ? "Déclaration de transmission au contrôle de légalité"
+    : demonstration ? "Simulation d'accusé de réception de télétransmission" : "Accusé de réception de télétransmission";
+  const emisPar = decl
+    ? "Déclaration" + (par ? " de " + par : "") + " (acte transmis hors application)"
+    : demonstration ? "Simulation locale (aucun appel à l'API @ctes)" : "Contrôle de légalité — télétransmission @ctes";
+  const mention = decl
+    ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + (par ? " (déclaration de " + par + ")" : " (déclaration)")
+    : demonstration
+      ? "Transmis au contrôle de légalité le " + dateHeureFr(r) + " (mention de démonstration — transmission simulée, sans appel sortant)"
+      : "Transmis au contrôle de légalité le " + dateHeureFr(r);
   return {
-    nature: "Accusé de réception de télétransmission",
-    emisPar: "Contrôle de légalité — télétransmission @ctes",
+    nature,
+    emisPar,
     emisLe: r,
     destinataire: d,
     reference: String(reference || ""),
     empreinte: String(empreinte || ""),
     algorithme: "SHA-256",
+    demonstration: !!demonstration,
+    declaration: !!decl,
     sceau: sha256Hex([reference, r, d, empreinte].join("|")),
-    mention: "Transmis au contrôle de légalité le " + dateHeureFr(r),
+    mention,
   };
 }
 
@@ -657,7 +723,11 @@ function hInformations(headers) {
   const estEditeur = !authFail(headers, { min: "editeur" });
   const tous = Object.keys(c.records).map((k) => c.records[k].payload).filter((i) => i && typeof i === "object");
   const liste = tous.filter((i) => i.publie === true || estEditeur);
-  liste.sort((a, b) => String(b.date || b.creeLe || "").localeCompare(String(a.date || a.creeLe || "")));
+  // Du plus récent au plus ancien : `cmp` sur des dates ISO, jamais
+  // `localeCompare` (voir `cmp` : il lève dans le moteur du service, et la liste
+  // échouait dès le DEUXIÈME billet — le comparateur n'étant appelé qu'à partir
+  // de là, le défaut ne se voyait pas sur un recueil vide).
+  liste.sort((a, b) => cmp(String(b.date || b.creeLe || ""), String(a.date || a.creeLe || "")));
   return ok(200, { informations: liste.map(resumeInformation) });
 }
 
@@ -671,13 +741,13 @@ function resumeActe(a) {
 function resumeOriginalExterne(a) {
   const s = a && a.originalExterne;
   if (!s || !s.url) return null;
-  return { url: s.url, sha256: s.sha256, nom: s.nom, taille: s.taille, type: s.type, deposeLe: s.deposeLe, deposePar: s.deposePar, deposeParNom: s.deposeParNom, certification: a.certification || null };
+  return { url: s.url, sha256: s.sha256, nom: s.nom, taille: s.taille, type: s.type, deposeLe: s.deposeLe, deposePar: s.deposePar, deposeParNom: s.deposeParNom, pieceId: s.pieceId || "", certification: a.certification || null };
 }
 function resumeSignature(s) {
-  return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
+  return { id: s.id, acteId: s.acteId, numero: s.numero, statut: s.statut, signataires: s.signataires, creeLe: s.creeLe, signeLe: s.signeLe || null, motif: s.motif || null, niveau: s.niveau || "", attribution: s.attribution || "", verifie: s.verifie === true, empreinte: (s.documentSigne && s.documentSigne.document && s.documentSigne.document.sha256) || null };
 }
 function resumePublication(p, latest) {
-  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, certification: p.originalExterne.certification || null } : null };
+  return { cle: p.cle, eli: p.eli, eliUri: p.eliUri, url: p.url, numero: p.numero, nature: p.nature, themeId: p.themeId || "", themeLabel: p.themeLabel || "", objet: p.objet, entityName: p.entityName, dateDocument: p.dateDocument, datePublication: p.datePublication, dateOpposabilite: p.dateOpposabilite, kind: p.kind, recueil: p.recueil, publieeLe: p.publieeLe, latest: !!latest, epingle: p.epingle === true, reserve: p.reserve === true, transmission: p.transmission || null, signature: p.signature || null, versions: p.versions || [], informative: p.informative === true, reprise: p.reprise === true, provenance: p.provenance || "", adoption: p.adoption || null, juridique: p.juridique === false ? false : undefined, natureDoc: p.natureDoc || undefined, originalExterne: p.originalExterne ? { url: p.originalExterne.url, sha256: p.originalExterne.sha256, nom: p.originalExterne.nom, taille: p.originalExterne.taille, deposeLe: p.originalExterne.deposeLe, pieceId: p.originalExterne.pieceId || "", certification: p.originalExterne.certification || null } : null };
 }
 
 // Les publications RÉSERVÉES AUX AGENTS : publiées (ELI, original, versions),
@@ -756,7 +826,7 @@ function openapi() {
         operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
         description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Ces réglages viennent du référentiel (Administration › Signature). La CLÉ du prestataire ne figure jamais ici : elle ne vit qu'auprès du service (SCRIBA_SIGNATURE_API_CLE).",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (transport, adresse, identifiant, niveau, notification, délai, points de terminaison). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { mode: { type: "string", enum: ["interne"], description: "interne : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre — aucune clé ne quitte le serveur ; l'original signé est rendu dans la réponse. Auto-hébergement seulement." }, signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (transport, adresse, identifiant, niveau, notification, délai, points de terminaison). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
         responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé, ou circuit de validation non achevé (code `validation_incomplete`), ou révision non achevée (code `revision_incomplete`)" }, 401: { description: "Jeton absent" } },
       },
     },
@@ -774,10 +844,10 @@ function openapi() {
     "/v1/actes/{id}/transmission": {
       post: {
         operationId: "transmettreControleLegalite", summary: "Transmettre l'acte signé au contrôle de légalité", tags: ["Contrôle de légalité"],
-        description: "Adresse l'acte signé à l'API d'envoi du contrôle de légalité (télétransmission @ctes). L'accusé de réception délivré vaut certificat informatique de transmission : « Transmis au contrôle de légalité le … à … ». Le service refuse (409) de transmettre un acte qui n'est pas signé ; un acte déjà transmis renvoie son certificat tel quel (idempotent). C'est cette étape, et non la publication, qui fait courir le délai de deux mois du représentant de l'État.",
+        description: "Adresse l'acte signé à l'API d'envoi du contrôle de légalité (télétransmission @ctes), OU déclare une transmission faite hors application. TROIS VOIES : (1) DÉCLARATION — le corps porte `declaration` (`at` et `destinataire` requis, plus `reference`, `motif`, `mode`, `personId`) : le service n'adresse AUCUNE requête à l'API, et le certificat conservé est une DÉCLARATION, dont la mention nomme son auteur. C'est la voie du régime déclaratif, et celle de l'acte transmis autrement en régime API. (2) SIMULATION — sans `declaration`, le service de démonstration ne sort pas sur le réseau : le certificat est fabriqué localement et porte `demonstration: true`, avec une mention qui le dit. (3) Le service auto-hébergé, quand son API est branchée, adresse réellement l'acte et conserve l'accusé de réception rendu (voir src/server/mysql/controle-legalite.mjs). Le service refuse (409) de transmettre un acte qui n'est pas signé ; un acte déjà transmis renvoie son certificat tel quel (idempotent). C'est cette étape, et non la publication, qui fait courir le délai de deux mois du représentant de l'État.",
         security: [{ bearerAuth: [] }],
-        requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { at: { type: "string", description: "Horodatage de la remise (ISO 8601) ; à défaut, l'heure du service" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, destinataire: { type: "string" }, auteur: { type: "string" }, entite: { type: "string" } } } } } },
-        responses: { 201: { description: "Transmis : certificat de transmission délivré" }, 200: { description: "Acte déjà transmis (idempotent)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé (code `acte_non_signe`)" }, 401: { description: "Jeton absent" } },
+        requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { at: { type: "string", description: "Horodatage de la remise (ISO 8601) ; à défaut, l'heure du service" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, destinataire: { type: "string" }, auteur: { type: "string" }, entite: { type: "string" }, declaration: { type: "object", nullable: true, description: "Déclaration d'une transmission faite HORS application : aucune requête n'est adressée à l'API, et le certificat conservé est une déclaration (il nomme son auteur). `at` et `destinataire` sont requis.", properties: { at: { type: "string", description: "Date de la transmission déclarée (ISO 8601)" }, destinataire: { type: "string", description: "À qui l'acte a été transmis" }, reference: { type: "string", description: "Référence de l'envoi (bordereau, accusé, identifiant @ctes) ; à défaut, le service en forge une" }, motif: { type: "string", description: "Pourquoi la transmission est déclarée plutôt que faite par l'API (API injoignable, envoi hors application…)" }, mode: { type: "string", enum: ["ctes", "prefecture", "sous_prefecture", "arrete_controle", "autre"] }, personId: { type: "string", description: "Personne du référentiel qui déclare (le réviseur)" }, auteur: { type: "string", description: "Nom déclaré du déclarant" }, entite: { type: "string", description: "Entité qui a transmis" } } } } } } } },
+        responses: { 201: { description: "Transmis : certificat de transmission délivré (déclaration, ou simulation marquée demonstration: true) ; pour une déclaration, la réponse porte `attribution` (`verifiee` | `declaree`) et `auteur` — ce que le service a pu attester" }, 200: { description: "Acte déjà transmis (idempotent)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé (code `acte_non_signe`)" }, 422: { description: "Déclaration incomplète (code `declaration_incomplete`) ou illisible (code `declaration_invalide`)" }, 401: { description: "Jeton absent" } },
       },
       get: { operationId: "lireTransmission", summary: "Lire le certificat de transmission d'un acte", tags: ["Contrôle de légalité"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La transmission et son certificat" }, 404: { description: "Acte inconnu, ou acte non transmis (code `transmission_absente`)" } } },
     },
@@ -808,10 +878,13 @@ function openapi() {
         responses: { 201: { description: "Publié : ELI attribué" }, 200: { description: "Appel rejoué (Idempotency-Key)" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte non signé, acte déclaré non publiable, ou acte non transmis au contrôle de légalité" }, 422: { description: "Version en ligne manquante" } },
       },
     },
+    "/v1/pieces": { post: { operationId: "deposerPiece", summary: "Déposer une pièce (fichier joint)", description: "Range un fichier joint à un acte — l'original signé d'une reprise d'acte ancien, ou la version signée d'un acte du circuit externe — et rend son ADRESSE de lecture. Le contenu voyage en base64 dans un corps JSON : le canal temps réel de l'édition en ligne ne transporte pas de binaire, et l'API REST lit ses corps en UTF-8. Les métadonnées (nom, type, taille, empreinte SHA-256) sont DÉCLARÉES par le client : c'est lui qui lit le fichier. Ce service-ci range la pièce dans son état, dont le plafond est modeste (MAX_PIECE), et rend une adresse `data:` ; le service auto-hébergé la range à part (table `sb_piece`, ou un fichier par pièce) et rend l'adresse HTTP `/v1/pieces/{id}`. L'application y recourt quand l'hébergement n'offre pas de dépôt de fichiers de son côté (`root.uploadPlugin`), c'est-à-dire en auto-hébergement : voir src/lib/fichiers.js.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["nom", "base64"], properties: { nom: { type: "string", description: "Nom du fichier, tel qu'il sera proposé au téléchargement" }, type: { type: "string", description: "Type MIME (`application/pdf`, `image/jpeg`…)" }, taille: { type: "integer", description: "Taille du fichier en octets" }, sha256: { type: "string", description: "Empreinte SHA-256, calculée par le client" }, base64: { type: "string", description: "Le contenu du fichier, en base64" } } } } } }, tags: ["Pièces"], responses: { 201: { description: "Pièce déposée : son identifiant et son adresse de lecture" }, 400: { description: "Contenu illisible (code `piece_illisible`)" }, 401: { description: "Jeton absent" }, 403: { description: "Rôle rédacteur requis" }, 413: { description: "Pièce trop volumineuse (code `piece_trop_volumineuse`)" }, 422: { description: "Nom ou contenu absent (codes `piece_sans_nom`, `piece_absente`)" }, 507: { description: "Le service n'a plus de place disponible" } } } },
+    "/v1/pieces/{id}": { get: { operationId: "lirePiece", summary: "Lire une pièce (fichier joint)", description: "Rend la pièce déposée. Route PUBLIQUE, et ce n'est pas un oubli : le recueil public cite cette adresse — c'est elle qui montre l'original signé d'un acte ancien, ou la version signée d'un acte du circuit externe. L'identifiant, tiré au hasard à la taille d'une clé, est le seul droit d'entrée. Le service auto-hébergé rend les OCTETS de la pièce avec son type MIME (elle s'ouvre donc dans un lien, un cadre de lecture ou un téléchargement) ; le service de démonstration, qui n'a pas de façade HTTP, rend le même contenu en JSON + base64, avec l'adresse `data:` correspondante. Une pièce inconnue est un 404 `piece_inconnue`.", tags: ["Pièces"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La pièce (octets, ou JSON + base64 selon le service)" }, 404: { description: "Pièce inconnue (code `piece_inconnue`)" } } }, delete: { operationId: "supprimerPiece", summary: "Retirer une pièce", description: "Retire une pièce déposée. Geste de PROPRETÉ — le rédacteur qui venait de joindre un original et se ravise —, jamais une dépublication. Refusé (409 `piece_referencee`) tant qu'un acte déposé ou une publication cite la pièce : la retirer laisserait une page du recueil avec un lien mort.", security: [{ bearerAuth: [] }], tags: ["Pièces"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Pièce retirée" }, 401: { description: "Jeton absent" }, 403: { description: "Rôle rédacteur requis" }, 404: { description: "Pièce inconnue (code `piece_inconnue`)" }, 409: { description: "Pièce citée par un acte ou une publication (code `piece_referencee`)" } } } },
     "/v1/admin/purge": { post: { operationId: "purgerService", summary: "Remettre le service à zéro", description: "Vide les actes déposés, les circuits de signature et les publications — le pendant, côté service, du bouton « Repartir d'un référentiel vierge ». Le recueil public lit le service : vider le seul navigateur laisserait les publications de démonstration en ligne. Exige `{ \"confirmation\": \"repurge\" }` : un appel accidentel ne doit pas l'emporter. Réservé à l'administration.", security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["confirmation"], properties: { confirmation: { type: "string", description: "Le mot « repurge »" } } } } } }, tags: ["Service"], responses: { 200: { description: "Service purgé" }, 400: { description: "Confirmation absente (code `confirmation_absente`)" }, 401: { description: "Jeton absent" }, 403: { description: "Jeton invalide ou rôle insuffisant" } } } },
     "/v1/publications": { get: { operationId: "listerPublications", summary: "Registre public des publications", description: "Les publications, de la plus récente à la plus ancienne. Les publications marquées `reserve` (circulaires internes) ne sont rendues qu'à l'appelant qui porte une clé de service ; elles sont invisibles aux visiteurs anonymes.", tags: ["Publication"], responses: { 200: { description: "Publications, de la plus récente à la plus ancienne" } } } },
     "/v1/informations": { get: { operationId: "listerInformations", summary: "Informations publiées au recueil", description: "Les billets publiés par la collectivité (actualités, avis, communications), du plus récent au plus ancien. Route PUBLIQUE : seuls les billets publiés sont rendus ; un brouillon ne sort que vers une clé de service de rôle `editeur` au moins.", tags: ["Publication"], responses: { 200: { description: "Les informations publiées" } } } },
     "/v1/atelier/acces": { get: { operationId: "accesAtelier", summary: "L'accès à l'atelier depuis cette adresse", description: "Route PUBLIQUE. Dit si l'accès à l'atelier est restreint à certains réseaux (`actif`), quelle liste s'applique (`liste`) et le message à montrer en cas de refus. Le paramètre `ip` permet de DEMANDER « et si j'arrivais de là ? » — c'est le simulateur de l'écran d'administration. Sur le service auto-hébergé, la restriction est appliquée à toutes les routes de l'atelier, qui répondent alors 403 `atelier_hors_reseau` ; le service de démonstration de la plateforme, lui, ne voit pas l'adresse de l'appelant et ne peut donc pas restreindre l'entrée (`restriction_appliquee: false`).", tags: ["Service"], parameters: [{ name: "ip", in: "query", required: false, schema: { type: "string" }, description: "Adresse à éprouver (simulation)" }], responses: { 200: { description: "État de l'accès depuis cette adresse" } } } },
+    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (chemins pointés, `{ \"brand.name\": \"…\" }`), les valeurs refusées (`erreurs`), l'ÉTAT DU PRESTATAIRE DE SIGNATURE (`prestataire` : transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé) et celui du COFFRE DE SIGNATURE INTERNE (`signatureInterne` : `disponible`, `motif` quand il est éteint, `niveau`, `algorithme`, nombre de `signataires` munis d'un certificat, `horodatage`). Ce service-ci n'a pas de `.env` : il rend des variables vides, un circuit électronique déclaré SIMULÉ, et un coffre FERMÉ avec son motif — c'est ce qui permet à l'application de n'offrir que les circuits que ce service peut réellement mener. Route PUBLIQUE, aucun secret : elle sert à l'écran de connexion avant toute session.", tags: ["Service"], responses: { 200: { description: "Réglages posés, valeurs refusées, état du prestataire et du coffre" } } } },
     "/v1/publications/{cle}": { get: { operationId: "lirePublication", summary: "Lire une publication (version en ligne, formats, original)", description: "Renvoie 404 pour une publication réservée quand l'appelant est anonyme.", tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Publication complète" }, 404: { description: "Publication inconnue" } } } },
     "/v1/publications/{cle}/retrait": { post: { operationId: "retirerPublication", summary: "Retirer une publication du recueil", description: "Geste EXCEPTIONNEL : un acte administratif publié ne se retire jamais. Seul un motif technique le justifie (dépôt en double, erreur de dépôt, acte publié avant d'être signé…) ; un acte dont le retrait se justifierait autrement se modifie ou s'abroge, et reste au recueil. Le motif est exigé (422 `motif_absent` s'il manque) et conservé sur l'acte : le retrait laisse une trace. L'acte déposé redevient « signé », donc publiable de nouveau ; les autres versions publiées sous le même ELI ne sont pas touchées.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["motif"], properties: { motif: { type: "string", description: "Le motif technique du retrait (au moins 8 caractères)" }, auteur: { type: "string", description: "Qui a procédé au retrait (pour la trace)" } } } } } }, responses: { 200: { description: "Publication retirée du recueil" }, 404: { description: "Publication inconnue" }, 422: { description: "Motif technique absent" }, 401: { description: "Jeton absent" } } } },
     "/v1/publications/{cle}/epingle": { post: { operationId: "epinglerPublication", summary: "Épingler un acte au recueil (le mettre à la une)", description: "Met en avant un acte publié sur la page d'accueil du recueil public (bande « À la une »). Le drapeau suit l'ACTE — son identifiant ELI — et non la version déposée : il est posé sur toutes les versions publiées sous cet identifiant, et une version publiée plus tard l'hérite. Le geste est réversible (`epingle: false`) et ne touche pas au texte publié.", security: [{ bearerAuth: [] }], tags: ["Publication"], parameters: [{ name: "cle", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["epingle"], properties: { epingle: { type: "boolean", description: "true pour mettre à la une, false pour l'en retirer" }, auteur: { type: "string", description: "Qui a épinglé (pour la trace)" } } } } } }, responses: { 200: { description: "Publication épinglée ou désépinglée" }, 404: { description: "Publication inconnue" }, 401: { description: "Jeton absent" } } } },
@@ -867,11 +940,14 @@ function hPurger(ctx) {
   if (String(corps.confirmation || "") !== "repurge") {
     return err(400, "Confirmation absente : envoyer {\"confirmation\": \"repurge\"}.", { code: "confirmation_absente" });
   }
-  const avant = { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publies: Object.keys(db.publies).length };
+  const avant = { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publies: Object.keys(db.publies).length, pieces: Object.keys(db.pieces || {}).length };
   db.actes = {};
   db.signatures = {};
   db.publies = {};
   db.idem = {};
+  // Les PIÈCES aussi : elles ne sont plus citées par rien, et les garder
+  // laisserait des mégaoctets de scans dans l'état du service.
+  db.pieces = {};
   db.seq = 0;
   // Les bulletins aussi : ils sont faits des publications qu'on vient de
   // retirer, et un numéro qui survivrait à ses actes serait un document faux.
@@ -1021,6 +1097,11 @@ function normaliserRevision(v) {
     valideLe: String(v.valideLe || "").slice(0, 40),
     corrige: v.corrige === true,
     par: String(v.par || "").slice(0, 80),
+    // Les RÉVISEURS COMPÉTENTS (personnes du référentiel), résolus par le client
+    // au dépôt : ce sont eux qui pourront DÉCLARER la transmission de l'acte. Le
+    // service de démonstration ne peut pas opposer cette liste (aucune session),
+    // mais l'auto-hébergé s'en sert (voir src/server/mysql/actes.mjs).
+    reviseurs: Array.isArray(v.reviseurs) ? v.reviseurs.slice(0, 20).map((x) => String(x || "").slice(0, 80)).filter(Boolean) : [],
   };
 }
 
@@ -1041,6 +1122,10 @@ function normaliserVersionSignee(v) {
     deposeLe: String(v.deposeLe || "").slice(0, 40),
     deposePar: String(v.deposePar || "").slice(0, 80),
     deposeParNom: String(v.deposeParNom || "").slice(0, 120),
+    // La PIÈCE rangée par le service (voir `hDeposerPiece`) : c'est par elle
+    // qu'on la retire tant que rien ne la cite. Vide quand c'est l'hôte de la
+    // plateforme qui a fait le dépôt — c'est lui qui garde alors le fichier.
+    pieceId: String(v.pieceId || "").slice(0, 64),
   };
 }
 
@@ -1146,6 +1231,19 @@ function hEnvoyerEnSignature(ctx) {
     return err(409, "La révision de cet acte n'est pas achevée : la signature ne peut pas être ouverte.", { code: "revision_incomplete", revision: acte.revision });
   }
   const b = ctx.body || {};
+  // LA SIGNATURE INTERNE n'existe pas ici, et le service le DIT.
+  //
+  // Elle suppose un coffre durable et une clé de scellement
+  // (`SCRIBA_SIGNATURE_KV_KEY`) : le service de démonstration de la plateforme
+  // n'en tient aucun — son état vit dans le navigateur, et une clé privée qui
+  // vivrait là ne serait à l'abri de personne. Simuler la signature « au nom du
+  // service » sans coffre serait exactement le mensonge que l'audit a relevé
+  // (NC-IV-001). On refuse donc franchement, avec le code que l'application sait
+  // présenter à l'agent. Voir la même règle côté auto-hébergé
+  // (src/server/mysql/actes.mjs, `hSignerInterne`).
+  if (String(b.mode || "") === "interne") {
+    return err(409, "La signature interne n'est pas disponible sur ce service. " + MOTIF_SIGNATURE_INTERNE, { code: "signature_interne_indisponible", motif: MOTIF_SIGNATURE_INTERNE });
+  }
   const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
   // Les RÉGLAGES DU PRESTATAIRE viennent du référentiel (Administration ›
   // Signature) et sont transmis par le client : transport, adresse, identifiant,
@@ -1167,6 +1265,12 @@ function hEnvoyerEnSignature(ctx) {
     // et doit dire d'où venait son numéro et son lien. Jamais de clé : elle
     // n'est même pas transmise par le client.
     api: { ...api },
+    // CE SERVICE N'AUTHENTIFIE AUCUNE PERSONNE : ses comptes vivent dans le
+    // navigateur, et son autorisation est une CLÉ, non une session. Il ne peut
+    // donc pas opposer l'opérateur au signataire, et il ne le PRÉTEND pas : la
+    // signature est « déclarée ». L'auto-hébergé, qui identifie les personnes,
+    // la marque « vérifiée » (voir src/server/mysql/actes.mjs, `porteSignature`).
+    attribution: "declaree",
     simulation: true, creeLe: nowIso(), documentSigne: null,
   };
   db.signatures[id] = sig;
@@ -1231,11 +1335,41 @@ function hWebhookSignature(ctx) {
   return ok(200, { recu: true, signatureId: sig.id, acteId: acte.id, statut: "signee", signeLe: sig.signeLe, empreinte: sha });
 }
 
+// La DÉCLARATION de transmission — le corps d'une transmission faite hors
+// application : à qui l'acte a été transmis (`destinataire`), à quelle date
+// (`at`), par qui (`auteur`/`personId`), avec sa référence et son motif. C'est
+// la voie du régime DÉCLARATIF, et, en régime API, la voie de l'acte transmis
+// autrement. Le service ne l'invente jamais : sans elle, il n'y a pas de
+// déclaration. Rend `null` quand le corps n'en porte pas une exploitable.
+function normaliserDeclaration(v) {
+  if (!v || typeof v !== "object") return null;
+  return {
+    at: String(v.at || "").slice(0, 40),
+    destinataire: String(v.destinataire || "").slice(0, 200),
+    reference: String(v.reference || "").slice(0, 120),
+    motif: String(v.motif || "").slice(0, 2000),
+    mode: String(v.mode || "").slice(0, 40),
+    personId: String(v.personId || "").slice(0, 80),
+    auteur: String(v.auteur || "").slice(0, 120),
+    entite: String(v.entite || "").slice(0, 160),
+  };
+}
+
 // Télétransmission au contrôle de légalité : l'acte signé part vers l'API
 // d'envoi, qui accuse réception. L'accusé de réception vaut certificat de
 // transmission ; il est conservé sur l'acte, et c'est lui que le client dépose
 // sur le document. Le service refuse de transmettre un acte qui n'est pas
 // signé — la transmission est l'étape qui suit la signature, jamais l'inverse.
+//
+// TROIS VOIES, et le certificat dit laquelle :
+//   • DÉCLARATION (`declaration` au corps) : la transmission a été faite hors de
+//     l'application ; une personne l'atteste, avec sa date et son destinataire.
+//     Aucun appel sortant n'a lieu, et le certificat est une déclaration — il
+//     nomme son auteur. C'est la voie du régime déclaratif ;
+//   • appel réel (service auto-hébergé, API branchée) : c'est le certificat de
+//     l'accusé de réception (voir src/server/mysql/controle-legalite.mjs) ;
+//   • SIMULATION : aucun appel n'a eu lieu, et le certificat le DIT
+//     (`demonstration: true`, mention de démonstration).
 function hTransmettre(ctx) {
   const acte = lireActe(ctx.params.id);
   if (!acte) return err(404, "Acte déposé inconnu : " + ctx.params.id);
@@ -1245,10 +1379,44 @@ function hTransmettre(ctx) {
   // Idempotence : un acte déjà transmis renvoie son certificat tel quel.
   if (acte.transmission) return ok(200, { ...acte.transmission, idempotent: true });
   const b = ctx.body || {};
-  const recuLe = b.at || nowIso();
-  const reference = b.reference || ("AR-" + recuLe.slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
-  const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
   const empreinte = acte.sha256;
+  // LA VOIE DÉCLARATIVE. Une déclaration n'est pas une simulation : c'est une
+  // attestation, et elle exige de dire À QUI et À QUELLE DATE.
+  if (b.declaration !== undefined && b.declaration !== null) {
+    const decl = normaliserDeclaration(b.declaration);
+    if (!decl) return err(422, "La déclaration de transmission est illisible.", { code: "declaration_invalide" });
+    if (!decl.at) return err(422, "La date de la transmission est requise : déclarez à quelle date l'acte a été transmis.", { code: "declaration_incomplete", champ: "at" });
+    if (!decl.destinataire) return err(422, "Le destinataire est requis : déclarez à qui l'acte a été transmis.", { code: "declaration_incomplete", champ: "destinataire" });
+    const recuLe = decl.at;
+    const destinataire = decl.destinataire;
+    const reference = decl.reference || ("DECL-" + String(recuLe).slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0"));
+    const parNom = decl.auteur || (decl.personId ? decl.personId : "");
+    const certificat = certificatTransmission({ reference, recuLe, destinataire, empreinte, demonstration: false, declaration: { parNom, motif: decl.motif } });
+    acte.transmission = {
+      reference, recuLe, destinataire, mode: decl.mode || CONTROLE_LEGALITE.mode,
+      empreinte, auteur: parNom, entite: decl.entite,
+      declaration: { par: decl.personId, parNom, personId: decl.personId, motif: decl.motif, attribution: "declaree", le: nowIso() },
+      demonstration: false,
+      certificat, transmisLe: nowIso(),
+    };
+    journaliser("transmission_declaree", acte.id + " — réf. " + reference + (parNom ? " — déclarée par " + parNom : ""));
+    if (!saveDb(db)) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
+    return ok(201, {
+      acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire,
+      mode: acte.transmission.mode, empreinte, certificat, declaration: true, demonstration: false,
+      // Le service de démonstration n'identifie pas les personnes : il ne peut
+      // qu'ENREGISTRER la déclaration, pas l'opposer à un opérateur. Il le DIT,
+      // et le client ne présente donc pas cette déclaration comme vérifiée
+      // (voir NC-II-017, et src/ui/execution-actions.js).
+      attribution: acte.transmission.declaration.attribution, auteur: parNom,
+      document: "/v1/actes/" + acte.id + "/document",
+      certificatUrl: "/v1/actes/" + acte.id + "/transmission",
+      ressource: "/v1/actes/" + acte.id + "/transmission",
+    }, { location: "/v1/actes/" + acte.id + "/transmission" });
+  }
+  const recuLe = b.at || nowIso();
+  const reference = "AR-" + recuLe.slice(0, 7) + "-" + String(Object.keys(db.actes).length).padStart(4, "0");
+  const destinataire = b.destinataire || CONTROLE_LEGALITE.destinataire;
   // Le service de démonstration ne fait AUCUN appel sortant : l'accusé de
   // réception est fabriqué localement. Il est donc marqué comme une simulation,
   // et la mention portée sur le document le dit. Un service réel (auto-hébergé,
@@ -1265,7 +1433,7 @@ function hTransmettre(ctx) {
   if (!saveDb(db)) { delete acte.transmission; return err(507, "Le service n'a plus de place disponible."); }
   return ok(201, {
     acteId: acte.id, numero: acte.numero, reference, recuLe, destinataire,
-    mode: acte.transmission.mode, empreinte, certificat,
+    mode: acte.transmission.mode, empreinte, certificat, demonstration: true,
     document: "/v1/actes/" + acte.id + "/document",
     certificatUrl: "/v1/actes/" + acte.id + "/transmission",
     ressource: "/v1/actes/" + acte.id + "/transmission",
@@ -1419,6 +1587,7 @@ function hPublier(ctx) {
       nom: b.originalExterne.nom || "", taille: b.originalExterne.taille || 0,
       type: b.originalExterne.type || "", deposeLe: b.originalExterne.deposeLe || nowIso(),
       deposePar: b.originalExterne.deposePar || "", deposeParNom: b.originalExterne.deposeParNom || "",
+      pieceId: b.originalExterne.pieceId || "",
       certification: null,
     }
     : null;
@@ -2113,7 +2282,7 @@ function bComposer(periode, cadence, r, liste, annee, rang, provisoire) {
     });
     total += 1;
   }
-  const ordreTexte = (a, b) => String(a).localeCompare(String(b), "fr", { sensitivity: "base" });
+  const ordreTexte = (a, b) => cmpTexte(a, b);
   const listeEntites = [...entites.entries()]
     .filter(([, themes]) => themes.size)
     .map(([nom, themes]) => ({
@@ -2605,6 +2774,114 @@ function hBulletinsRetirerAbonne(ctx) {
   return ok(200, { retire: true, abonne: r.abonne });
 }
 
+// ------------------------------------------------------------------- pièces
+// LES PIÈCES : les fichiers joints à un acte — l'original signé d'une reprise
+// d'acte ancien, la version signée d'un acte du circuit externe.
+//
+// Le dépôt passait par le plugin de fichiers de la plateforme
+// (`root.uploadPlugin`) : hors de la plateforme — auto-hébergement, édition
+// statique — il n'existe pas, et le dépôt ÉCHOUAIT alors toujours, sur un
+// « root.uploadPlugin is not a function » que le rédacteur n'avait aucun moyen
+// de comprendre ni de contourner. L'application s'adresse donc au SERVICE quand
+// l'hôte n'offre pas de dépôt (voir src/lib/fichiers.js), et c'est ce que
+// servent les trois routes ci-dessous.
+//
+// Le contenu voyage en JSON + base64 : le canal temps réel de l'édition en
+// ligne ne transporte pas de binaire, et l'API REST lit ses corps en UTF-8. Un
+// seul format, donc, quel que soit l'hébergement.
+function resumePiece(p) {
+  return { id: p.id, nom: p.nom, type: p.type, taille: p.taille, sha256: p.sha256, deposeLe: p.deposeLe, deposePar: p.deposePar || "", deposeParNom: p.deposeParNom || "" };
+}
+
+// L'ADRESSE de la pièce. Ce service-ci n'a pas de façade HTTP : il n'existe que
+// par le canal de l'application, qui ne sert que du JSON. Une adresse `data:`
+// est donc la seule qui soit utilisable telle quelle — dans un lien, dans le
+// cadre de lecture du recueil, dans un téléchargement — sans dépendre d'un
+// serveur qui n'existe pas ici. Le service auto-hébergé, lui, rend l'adresse
+// HTTP de la pièce (`/v1/pieces/{id}`), servie hors de l'état.
+function urlPiece(p) {
+  return "data:" + (p.type || "application/octet-stream") + ";base64," + p.base64;
+}
+
+// L'identifiant de la pièce : tiré au hasard, il EST le droit d'entrée. La
+// lecture est publique — le recueil public cite l'adresse de l'original —, et
+// seul le hasard empêche de deviner l'adresse d'une pièce qu'aucune publication
+// ne cite encore. (Le service auto-hébergé tire ce jeton de `crypto` ; ici, le
+// moteur de démonstration n'a que `Math.random`, et l'empreinte le brouille.)
+function jetonPiece() {
+  return sha256Hex("piece|" + nowIso() + "|" + String(Math.random()) + "|" + String(Math.random())).slice(0, 32);
+}
+
+// Une pièce CITÉE ne se retire pas : un acte déposé (la version signée d'un
+// circuit externe) ou une publication (l'original d'une reprise) la référence,
+// et la retirer laisserait une page du recueil avec un lien mort. Rend la raison
+// de la citation, ou "".
+function pieceReferencee(id) {
+  const cible = String(id || "");
+  if (!cible) return "";
+  for (const aid of Object.keys(db.actes)) {
+    const a = db.actes[aid];
+    if (a && a.originalExterne && a.originalExterne.pieceId === cible) return "l'acte déposé " + aid;
+  }
+  for (const cle of Object.keys(db.publies)) {
+    const p = db.publies[cle];
+    if (p && p.originalExterne && p.originalExterne.pieceId === cible) return "la publication " + cle;
+  }
+  return "";
+}
+
+// DÉPÔT : la pièce entière, en base64. Les métadonnées — nom, type, taille,
+// empreinte — sont DÉCLARÉES par le client : c'est lui qui lit le fichier, et
+// c'est son empreinte que le recueil affichera. Le service ne les juge pas, il
+// les range.
+function hDeposerPiece(ctx) {
+  const b = ctx.body || {};
+  const nom = String(b.nom || "").slice(0, 240);
+  const base64 = String(b.base64 || "");
+  if (!nom) return err(422, "Le nom de la pièce est requis (`nom`).", { code: "piece_sans_nom" });
+  if (!base64) return err(422, "Le contenu de la pièce est requis (`base64`).", { code: "piece_absente" });
+  if (base64.length > MAX_PIECE) {
+    return err(413, "Pièce trop volumineuse (" + base64.length + " caractères, maximum " + MAX_PIECE + ").", { code: "piece_trop_volumineuse", maximum: MAX_PIECE });
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return err(400, "Le contenu de la pièce n'est pas du base64 lisible.", { code: "piece_illisible" });
+  const id = jetonPiece();
+  const piece = {
+    id, nom, base64,
+    type: String(b.type || "").slice(0, 80) || "application/octet-stream",
+    taille: Number(b.taille) || 0,
+    sha256: String(b.sha256 || "").slice(0, 128),
+    deposeLe: nowIso(),
+    deposePar: String(b.deposePar || "").slice(0, 80),
+    deposeParNom: String(b.deposeParNom || "").slice(0, 120),
+  };
+  db.pieces[id] = piece;
+  journaliser("piece_deposee", nom + " (" + Math.round((Number(b.taille) || 0) / 1024) + " Ko)");
+  if (!saveDb(db)) { delete db.pieces[id]; return err(507, "Le service n'a plus de place disponible pour cette pièce."); }
+  return ok(201, { ...resumePiece(piece), url: urlPiece(piece) }, { location: "/v1/pieces/" + id });
+}
+
+// LECTURE : la pièce et son contenu. PUBLIQUE — l'adresse d'une pièce est citée
+// par le recueil public —, et servie en JSON, ce service n'ayant pas de façade
+// HTTP qui pourrait rendre les octets tels quels.
+function hLirePiece(ctx) {
+  const piece = db.pieces[ctx.params.id];
+  if (!piece) return err(404, "Pièce inconnue : " + ctx.params.id, { code: "piece_inconnue" });
+  return ok(200, { ...resumePiece(piece), url: urlPiece(piece), base64: piece.base64 });
+}
+
+// RETRAIT : un geste de PROPRETÉ (le rédacteur retire l'original qu'il venait de
+// joindre), jamais une dépublication. Refusé tant que la pièce est citée.
+function hSupprimerPiece(ctx) {
+  const id = String(ctx.params.id || "");
+  if (!db.pieces[id]) return err(404, "Pièce inconnue : " + id, { code: "piece_inconnue" });
+  const citee = pieceReferencee(id);
+  if (citee) return err(409, "Cette pièce est citée par " + citee + " : la retirer laisserait un lien mort. Retirez ou dépubliez d'abord ce qui la cite.", { code: "piece_referencee" });
+  delete db.pieces[id];
+  journaliser("piece_retiree", id);
+  saveDb(db);
+  return ok(200, { id, supprimee: true });
+}
+
 // --------------------------------------------------------------- table routière
 const ROUTES = [
   { m: "GET", p: /^\/v1\/health$/, f: hSante, tag: "service" },
@@ -2653,6 +2930,14 @@ const ROUTES = [
   { m: "POST", p: /^\/v1\/actes\/([^/]+)\/conformite$/, auth: "redacteur", ecrit: true, f: hConformite },
   { m: "GET", p: /^\/v1\/actes\/([^/]+)\/transmission$/, auth: "lecteur", f: (ctx) => { const a = lireActe(ctx.params.id); if (!a) return err(404, "Acte déposé inconnu : " + ctx.params.id); return a.transmission ? ok(200, { acteId: a.id, numero: a.numero, controleLegalite: a.controleLegalite === true, ...a.transmission }) : err(404, "Aucune transmission enregistrée pour cet acte.", { code: "transmission_absente" }); } },
   { m: "POST", p: /^\/v1\/actes\/([^/]+)\/publication$/, auth: "redacteur", ecrit: true, f: hPublier },
+  // --- les pièces (fichiers joints) -----------------------------------------
+  // Dépôt et retrait : une identité et le rôle rédacteur. LECTURE : PUBLIQUE,
+  // et ce n'est pas un oubli — le recueil public cite l'adresse de l'original
+  // signé d'un acte ancien ; l'identifiant tiré au hasard est le droit
+  // d'entrée. Voir `hDeposerPiece` et les trois gestionnaires ci-dessus.
+  { m: "POST", p: /^\/v1\/pieces$/, auth: "redacteur", ecrit: true, f: hDeposerPiece },
+  { m: "GET", p: /^\/v1\/pieces\/([^/]+)$/, f: hLirePiece },
+  { m: "DELETE", p: /^\/v1\/pieces\/([^/]+)$/, auth: "redacteur", ecrit: true, f: hSupprimerPiece },
   { m: "GET", p: /^\/v1\/signatures$/, auth: "lecteur", f: () => ok(200, { signatures: Object.keys(db.signatures).map((k) => resumeSignature(db.signatures[k])).sort((a, b) => cmp(b.creeLe, a.creeLe)) }) },
   // Le document signé est servi SANS sa part interne : le dossier nominatif se
   // lit par `/v1/actes/{id}/dossier-signature`, jamais ici.
@@ -2692,6 +2977,43 @@ const ROUTES = [
       return p ? ok(200, { eli: eliUri, cle: p.cle, original: p.original, signature: p.signature }) : err(404, "ELI inconnu : " + eliUri);
     } },
   { m: "GET", p: /^\/v1\/eli\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/, f: hResoudreEli },
+  // --- les réglages posés par le déploiement --------------------------------
+  // Le service auto-hébergé lit son `.env` et rend ici les variables de
+  // RÉFÉRENTIEL qu'il y a trouvées (voir src/server/mysql/variables.mjs). Ce
+  // service-ci n'a PAS de `.env` : il rend donc des variables vides — mais il
+  // doit dire ce qu'il est, parce que c'est de cette réponse que l'application
+  // tire ce qu'elle peut lui demander. L'ÉTAT DU PRESTATAIRE DE SIGNATURE y
+  // figure (`prestataire`) : ce service ne sort pas sur le réseau, le circuit
+  // électronique y est donc SIMULÉ, et il le déclare plutôt que de le laisser
+  // croire. Le COFFRE DE SIGNATURE INTERNE aussi (`signatureInterne`) : il
+  // suppose un coffre durable que ce service ne tient pas (voir
+  // `hEnvoyerEnSignature`) — l'application n'offre alors pas ce circuit, et
+  // l'écran d'administration dit « Coffre fermé » avec son motif. Aucun secret
+  // ne sort par cette route : elle sert à l'écran de connexion avant session.
+  { m: "GET", p: /^\/v1\/config$/, f: () => ok(200, {
+      variables: {}, erreurs: [],
+      prestataire: {
+        actif: false, transport: "demonstration", url: "", prestataire: "esup-signature", niveau: "avancee",
+        urlNotification: "", timeoutMs: 20000, chemins: {}, cle: false,
+        motif: "Le service de démonstration de la plateforme ne sort pas sur le réseau : le circuit électronique y est simulé.",
+      },
+      signatureInterne: {
+        disponible: false, motif: MOTIF_SIGNATURE_INTERNE, niveau: "avancee",
+        algorithme: "ECDSA P-256 / SHA-256", signataires: 0, horodatage: false,
+      },
+      // L'état du CONTRÔLE DE LÉGALITÉ : même déclaration que le prestataire —
+      // ce service ne sort pas sur le réseau, la télétransmission y est donc
+      // SIMULÉE, et le certificat qu'il délivre porte la mention de
+      // démonstration (voir `hTransmettre`). La DÉCLARATION, elle, y est
+      // possible (une transmission faite hors application, attestée par un
+      // réviseur). Le service auto-hébergé, lui, transmet réellement quand son
+      // API est branchée (src/server/mysql/controle-legalite.mjs).
+      controleLegalite: {
+        actif: false, transport: "demonstration", url: "", chemin: "", destinataire: CONTROLE_LEGALITE.destinataire,
+        mode: CONTROLE_LEGALITE.mode, timeoutMs: 20000, cle: false, declaration: true,
+        motif: "Le service de démonstration de la plateforme ne sort pas sur le réseau : la télétransmission y est simulée, et le certificat le dit. Une transmission faite hors application peut y être DÉCLARÉE.",
+      },
+    }) },
   // --- courriel : la plateforme n'a pas d'accès réseau -------------------------
   // Ce service-ci tourne dans un environnement SANS accès à un serveur SMTP :
   // l'envoi par courriel y est déclaré INDISPONIBLE, avec son motif.
@@ -2711,7 +3033,9 @@ const eliKey = (p) => "eli:/fr/" + [p.code, p.annee, p.numero, p.entite].filter(
 // Les routes qui appartiennent à l'ATELIER : hors réseau autorisé, elles
 // s'arrêtent à la porte (voir `route`). Les routes PUBLIQUES — santé, recueil,
 // informations, état de l'accès — n'y passent jamais : un visiteur extérieur
-// doit pouvoir lire le recueil.
+// doit pouvoir lire le recueil. Les PIÈCES (`/v1/pieces/…`) non plus : le
+// recueil public cite l'adresse d'un original signé, et le jeton tiré au hasard
+// qui la compose est le seul droit d'entrée.
 const ATELIER_PUBLIC = new Set(["/v1/health", "/v1/", "/v1/atelier/acces", "/v1/informations"]);
 const estRouteAtelier = (pathname) => {
   if (ATELIER_PUBLIC.has(pathname)) return false;

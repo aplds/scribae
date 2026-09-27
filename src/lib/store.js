@@ -408,6 +408,21 @@ function migrateExperiments(config) {
   return changed;
 }
 
+// RÉGIME DE TRANSMISSION au contrôle de légalité : le booléen
+// `experimental.controleLegalite` (éteint/allumé) devient un régime à trois
+// valeurs (`config.controleLegalite.mode` : « desactive », « declaratif »,
+// « api »). Un référentiel antérieur garde son comportement : allumé valait
+// « l'API d'envoi », donc « api » ; éteint valait « rien », donc « desactive ».
+// Purement additif, idempotent, et écrit une seule fois.
+function migrateControleLegaliteMode(config) {
+  if (!config) return false;
+  const bloc = config.controleLegalite;
+  if (bloc && typeof bloc === "object" && (bloc.mode === "desactive" || bloc.mode === "declaratif" || bloc.mode === "api")) return false;
+  const mode = config.experimental && config.experimental.controleLegalite ? "api" : "desactive";
+  config.controleLegalite = { ...(bloc && typeof bloc === "object" ? bloc : {}), mode };
+  return true;
+}
+
 // Assistants : réglage introduit après coup. Un référentiel antérieur n'a pas
 // ce bloc — on pose deux blocs VIDES, c'est-à-dire « tout par défaut » : les
 // deux assistants s'allument (leurs réglages livrés), sans qu'aucun écran ne
@@ -769,6 +784,7 @@ export async function bootstrap() {
     | migrateDemoLogoDark(config)
     | migrateDemoCcasLogo(config)
     | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
+    | migrateControleLegaliteMode(config)
     | migrateCircuitsNatures(config)
     | migrateDemoServiceRevision(config) | migrateDemoOrganigramme(config)
     | migrateFamilyDescriptions(config) | migrateAssistants(config)

@@ -41,6 +41,25 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-doc: "Times New Roman", Times, Georgia, serif;
   --space: 8px;
+
+  /* L'ÉCHELLE TYPOGRAPHIQUE. Le public de Scribae lit à 16 px, et jamais en
+     dessous de 13 px (règle du système de design de l'État) : l'application
+     comptait pourtant 58 tailles distinctes, dont la moitié sous 13 px,
+     jusqu'à 9,6 px. Cinq paliers nommés les remplacent. Toute taille écrite
+     ailleurs que dans ces cinq-là est une exception, et se justifie en
+     commentaire (les titres, eux, gardent leur valeur : ils portent la
+     hiérarchie des pages, et le titre d'écran reste à 24 px).
+
+       --t-xs   13 px   pastilles, mentions, plancher absolu
+       --t-sm   14 px   explications sous un champ, textes secondaires
+       --t-md   15 px   libellés de champ, titres de carte
+       --t-lg   16 px   texte courant, champs, boutons
+       --t-xl   18 px   sous-titres de section, chiffres mis en avant */
+  --t-xs: .8125rem;
+  --t-sm: .875rem;
+  --t-md: .9375rem;
+  --t-lg: 1rem;
+  --t-xl: 1.125rem;
   color-scheme: light;
 }
 
@@ -112,18 +131,20 @@ html, body {
   background: var(--bg-alt);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 16px;
+  font-size: var(--t-lg);
   line-height: 1.5;
   text-align: left;
 }
 
 h1, h2, h3, h4 { margin: 0 0 .5em; line-height: 1.25; font-weight: 700; }
 h1 { font-size: 1.5rem; }
-h2 { font-size: 1.2rem; }
-h3 { font-size: 1rem; }
+h2 { font-size: var(--t-xl); }
+h3 { font-size: var(--t-lg); }
 p { margin: 0 0 .75em; }
 a { color: var(--brand); }
-code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
+/* Le code porte un plancher : plus petit que le texte qui l'entoure, jamais
+   sous 13 px (le monospace paraît déjà plus grand à taille égale). */
+code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875em); }
 ::selection { background: var(--brand-soft); }
 
 :focus-visible {
@@ -132,14 +153,31 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
 }
 
 /* ---------------------------------------------------------------- structure */
-.app { min-height: 100vh; display: flex; flex-direction: column; }
-/* Écran « plein » (l'éditeur de trame) : la coquille est bornée à la fenêtre,
-   si bien que les volets et le canvas défilent SUR PLACE au lieu d'allonger la
-   page. Sans cela, la hauteur du contenu l'emporte et l'éditeur devient une
-   longue page — les volets perdent le défilement interne pour lequel ils sont
-   écrits (`.editor__scroll`, `.canvas`). */
-.app--plein { height: 100vh; overflow: hidden; }
-@supports (height: 100dvh) { .app--plein { height: 100dvh; } }
+/* LA COQUILLE DE L'ATELIER EST BORNÉE À LA FENÊTRE : l'en-tête, le sommaire et
+   le pied restent en place, seule la zone de contenu défile. Sans cela, une page
+   de six mille pixels (le chrono, la documentation) emportait tout avec elle :
+   au premier défilement, le sommaire — vingt-deux entrées — sortait de l'écran,
+   et il fallait remonter tout en haut pour changer d'écran. Le défilement de la
+   FENÊTRE reste celui des écrans qui ne portent pas la coquille (connexion,
+   recueil public, hors-réseau). */
+.app { height: 100vh; display: flex; flex-direction: column; }
+@supports (height: 100dvh) { .app { height: 100dvh; } }
+/* Pas de `overflow: hidden` ici : les menus qui pendent de l'en-tête (menu du
+   compte) dépasseraient la coquille — coupés, et donc hors d'atteinte. Le
+   défilement, lui, est déjà tenu en main par `.app-main` et `.app-nav__corps`. */
+/* Écran « plein » (l'éditeur de trame) : le contenu ne défile pas lui-même, les
+   volets et le canvas défilent SUR PLACE — c'est pour cela qu'ils sont écrits
+   (`.editor__scroll`, `.canvas`). */
+.app--plein .app-main { overflow: hidden; }
+/* À l'IMPRESSION, la coquille se rouvre : la fenêtre n'est plus une fenêtre, et
+   un document borné à la hauteur de l'écran ne sortirait que sur une page. Les
+   voiles de l'atelier (en-tête, barre, pied) se retirent, la zone de contenu
+   reprend sa hauteur naturelle. */
+@media print {
+  .app { height: auto; overflow: visible; }
+  .app-body { min-height: 0; }
+  .app-main { overflow: visible; }
+}
 
 /* Le pied de l'ATELIER : la mention de l'éditeur du logiciel (voir
    src/ui/mention.js et Administration › Identité). Il est discret — un filet, une
@@ -150,7 +188,7 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
   background: var(--bg);
   padding: 10px 20px; text-align: left;
 }
-.app-pied__mention { margin: 0; font-size: .76rem; color: var(--ink-muted); }
+.app-pied__mention { margin: 0; font-size: var(--t-xs); color: var(--ink-muted); }
 .app--plein .app-pied { display: none; }
 /* À l'écran de connexion, le pied ferme une colonne centrée : il se pose sans
    filet, sur le fond de la page. */
@@ -164,19 +202,19 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
   padding: 5px 20px; min-height: 32px;
   background: var(--warning-bg); color: var(--warning);
   border-bottom: 1px solid rgba(179, 64, 0, .22);
-  font-size: .78rem; line-height: 1.35; text-align: left;
+  font-size: var(--t-xs); line-height: 1.35; text-align: left;
 }
 .app-demo__tag {
   display: inline-flex; align-items: center; gap: 5px; flex: none;
   background: var(--warning); color: #fff; border-radius: 2px;
-  padding: 2px 8px; font-size: .66rem; font-weight: 700;
+  padding: 2px 8px; font-size: var(--t-xs); font-weight: 700;
   text-transform: uppercase; letter-spacing: .07em;
 }
 .app-demo__text { flex: 1 1 220px; }
 .app-demo .fr-btn { flex: none; }
 .app-demo .fr-btn.fr-btn--tertiary {
   color: var(--warning); text-decoration: underline;
-  padding: 2px 8px; min-height: 22px; font-size: .74rem;
+  padding: 2px 8px; min-height: 22px; font-size: var(--t-xs);
 }
 .app-demo .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(179, 64, 0, .12); }
 
@@ -188,40 +226,44 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
   padding: 5px 20px; min-height: 32px;
   background: var(--info-bg); color: var(--info);
   border-bottom: 1px solid rgba(0, 99, 203, .22);
-  font-size: .78rem; line-height: 1.35; text-align: left;
+  font-size: var(--t-xs); line-height: 1.35; text-align: left;
 }
 .app-vierge__tag {
   display: inline-flex; align-items: center; gap: 5px; flex: none;
   background: var(--info); color: #fff; border-radius: 2px;
-  padding: 2px 8px; font-size: .66rem; font-weight: 700;
+  padding: 2px 8px; font-size: var(--t-xs); font-weight: 700;
   text-transform: uppercase; letter-spacing: .07em;
 }
 .app-vierge__text { flex: 1 1 220px; }
 .app-vierge .fr-btn { flex: none; }
 .app-vierge .fr-btn.fr-btn--tertiary {
   color: var(--info); text-decoration: underline;
-  padding: 2px 8px; min-height: 22px; font-size: .74rem;
+  padding: 2px 8px; min-height: 22px; font-size: var(--t-xs);
 }
 .app-vierge .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(0, 99, 203, .12); }
 
+/* L'EN-TÊTE TIENT SUR UNE LIGNE (demande d'usage). « Scribae » à gauche, la
+   structure et les outils au centre, le compte tout à droite : il ne se replie
+   plus en deux rangées — mais ce qui est décoratif s'efface par paliers quand
+   la fenêtre se rétrécit (voir plus bas), pour que rien ne soit coupé. */
 .app-header {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 10px 20px;
   position: sticky;
   top: 0;
   z-index: 30;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-.app-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.app-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; min-width: 0; }
 .app-mark { display: inline-flex; flex: none; color: var(--ink); }
-.app-brand__text { display: flex; flex-direction: column; line-height: 1.15; }
-.app-brand__name { font-size: .95rem; }
-.app-brand__sub { font-size: .72rem; color: var(--ink-muted); font-weight: 400; }
+.app-brand__text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.app-brand__name { font-size: var(--t-lg); }
+.app-brand__sub { font-size: var(--t-xs); color: var(--ink-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Rappel de la structure : l'application sert plusieurs entités du référentiel. */
 .app-org {
@@ -232,26 +274,63 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
 .app-org__mark {
   width: 22px; height: 22px; border-radius: var(--radius);
   background: var(--brand); color: #fff; flex: none;
-  display: grid; place-items: center; font-size: .6rem; letter-spacing: .04em;
+  display: grid; place-items: center; font-size: var(--t-xs); letter-spacing: .04em;
 }
-.app-org__name { font-size: .82rem; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.app-org__name { font-size: var(--t-sm); font-weight: 600; color: var(--ink); white-space: nowrap; }
 
-.app-header__spacer { flex: 1 1 auto; }
-.app-header__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.app-header__spacer { flex: 1 1 auto; min-width: 0; }
+.app-header__tools { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.app-header__tools > * { flex: none; }
+/* Le nom de la structure cède avant le reste : c'est le seul libellé de
+   l'en-tête qu'on retrouve ailleurs (l'emblème reste, lui). */
+.app-org__name { overflow: hidden; text-overflow: ellipsis; }
+
+/* CE QUI S'EFFACE PAR PALIERS. Rien de fonctionnel ne disparaît : d'abord le
+   compte d'entités et la devise sous « Scribae », puis les LIBELLÉS des deux
+   boutons (l'icône et l'infobulle restent), puis le texte de la recherche, puis
+   le nom de la structure. Le compte, lui, reste toujours entier, tout à droite.
+   Ces seuils sont calculés : chaque palier laisse au moins une quarantaine de
+   pixels de marge à la largeur où il prend le relais (la devise, elle, se
+   tronque d'elle-même avant d'être retirée, ce qui lisse la transition). */
+@media (max-width: 1550px) { .app-header__tools > .fr-badge--brand { display: none; } }
+@media (max-width: 1450px) { .app-brand__sub { display: none; } }
+@media (max-width: 1200px) {
+  .app-header__guide .fr-btn > span { display: none; }
+}
+@media (max-width: 1150px) {
+  .app-header__ref .fr-btn > span { display: none; }
+}
+@media (max-width: 1050px) {
+  .app-search span,
+  .app-search kbd { display: none; }
+}
+@media (max-width: 900px) { .app-org__name { display: none; } }
+/* Sous 700 px, la place manque pour tenir à deux : l'en-tête repasse sur deux
+   rangées plutôt que de rogner le compte (la barre de gauche est déjà
+   horizontale à cette largeur — voir app-atelier.css). */
+@media (max-width: 700px) { .app-header { flex-wrap: wrap; } }
 
 .app-body { flex: 1 1 auto; display: flex; align-items: stretch; min-height: 0; }
 
+/* Le sommaire : une colonne de 232 px, bornée à la fenêtre. Son CORPS (les
+   rubriques) défile sur place — quatre-vingts entrées ne poussent plus la page ;
+   le bouton de repli, lui, reste au pied de la barre. */
 .app-nav {
   width: 232px;
   flex: none;
   background: var(--bg);
   border-right: 1px solid var(--border);
-  padding: 16px 12px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+.app-nav__corps {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  padding: 16px 12px;
+  display: flex; flex-direction: column;
   gap: 4px;
 }
-.app-nav__group { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); margin: 14px 8px 6px; }
+.app-nav__group { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); margin: 14px 8px 6px; }
 .app-nav .app-nav__item {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 10px; border-radius: var(--radius);
@@ -262,13 +341,117 @@ code, kbd, pre { font-family: var(--font-mono); font-size: .875em; }
 .app-nav .app-nav__item.is-active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
 .app-nav__item .fr-icon { color: inherit; }
 
-.app-main { flex: 1 1 auto; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+/* --------------------------------------------------- replier la barre de gauche
+   Vingt-deux entrées sur 232 px : c'est le sommaire de tout l'atelier, et il
+   occupe une place utile au poste de travail. Le bouton de repli est posé AU
+   PIED de la barre, derrière un filet : c'est le commandement de la barre
+   elle-même, et de là il ne se dispute pas la place de la première rubrique.
+   Comme la coquille est bornée à la fenêtre et que c'est le corps de la barre
+   qui défile (voir `.app-nav__corps`), le pied reste visible en permanence.
+   Repliée, elle ne garde que les icônes (58 px) ; les libellés restent dans le
+   DOM (le lecteur d'écran les lit), et le titre du bouton les donne à la
+   souris. Les rubriques (« Produire », « Valider »…) deviennent un simple
+   filet : elles séparent sans écrire. */
+.app-nav__repli {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 12px 10px;
+  border: 0; border-top: 1px solid var(--border); border-radius: 0;
+  background: none; cursor: pointer; color: var(--ink-muted);
+  font: inherit; font-size: var(--t-sm); text-align: left;
+  padding: 10px 6px 8px;
+}
+.app-nav__repli:hover { background: var(--bg-alt); color: var(--ink); }
+.app-nav--replie { width: 58px; }
+.app-nav--replie .app-nav__corps { padding: 12px 8px; }
+.app-nav--replie .app-nav__repli { justify-content: center; margin: 0 8px 10px; padding: 10px 0 8px; }
+.app-nav--replie .app-nav__repli-texte,
+.app-nav--replie .app-nav__label { display: none; }
+.app-nav--replie .app-nav__group {
+  font-size: 0; height: 0; overflow: hidden;
+  margin: 12px 6px 6px; border-top: 1px solid var(--border);
+}
+.app-nav--replie .app-nav__item { justify-content: center; padding: 10px 0; }
+
+/* Sur un écran étroit, la barre passe à l'HORIZONTALE, au-dessus du contenu
+   (voir app-atelier.css, 760 px) : elle est déjà la forme compacte, et le repli
+   n'y a plus d'objet — un bouton qui ne change rien vaut moins que pas de
+   bouton. Le bouton disparaît donc, et les libellés reviennent. */
+@media (max-width: 760px) {
+  .app-nav__repli { display: none; }
+  .app-nav--replie .app-nav__label { display: inline; }
+  .app-nav--replie .app-nav__item { justify-content: flex-start; padding: 9px 10px; }
+  .app-nav--replie .app-nav__group { height: auto; overflow: visible; margin: 14px 8px 6px; border-top: 0; font-size: var(--t-xs); }
+}
+
+/* ==========================================================================
+   LE GROUPE « RÉGLAGES » (revue d'interface, P8).
+
+   « Organisation » et « Configurer » ne se consultent pas tous les jours :
+   leurs entrées se rangent derrière un seul intitulé, déplié à la demande.
+   Repliée, la barre ne peut pas montrer d'intitulé : le groupe n'y est plus
+   qu'un chevron — assez pour l'ouvrir, rien de plus.
+   ========================================================================== */
+.app-nav__group--ouvrable {
+  display: flex; align-items: center; gap: 6px;
+  border: 0; background: none; cursor: pointer; font: inherit; text-align: left;
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-muted); margin: 14px 8px 6px; padding: 0;
+}
+.app-nav__group--ouvrable:hover { color: var(--ink); }
+.app-nav__group--ouvrable .fr-icon { color: inherit; }
+.app-nav__group--ouvrable.is-ouvert { color: var(--ink-2); }
+.app-nav--replie .app-nav__group--ouvrable {
+  height: auto; overflow: visible; font-size: var(--t-xs);
+  justify-content: center; margin: 12px 6px 6px; padding: 8px 0 0;
+  border-top: 1px solid var(--border);
+}
+/* Repliée, la barre ne montre plus l'intitulé — mais sur un écran étroit (barre
+   horizontale), l'intitulé reste : il y a la place, et c'est le seul repère. */
+@media (min-width: 761px) {
+  .app-nav--replie .app-nav__group--ouvrable > span:first-child { display: none; }
+}
+
+/* La zone de contenu : c'est ELLE qui défile (la coquille est bornée à la
+   fenêtre). Le `min-height: 0` est ce qui permet à un enfant d'accepter d'être
+   plus court que son contenu — sans lui, la zone s'allonge et rien ne défile. */
+.app-main {
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  overflow-y: auto;
+  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+/* Dans une colonne BORNÉE, un enfant ne se laisse jamais écraser pour tenir dans
+   la fenêtre : c'est le défilement qui fait la place. Sans cette ligne, un
+   conteneur qui défile (un tableau large, un `.fr-table-wrap`) voit son
+   `min-height: auto` se résoudre à 0, se fait comprimer à quelques dizaines de
+   pixels, et clippe ses lignes sans que rien ne le signale. La croissance, elle,
+   reste permise : l'éditeur de trame s'étend toujours sur la hauteur. */
+.app-main > * { flex-shrink: 0; }
 .app-main--flush { padding: 0; }
 
 .page-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .page-head__text { flex: 1 1 320px; }
+/* Le titre, et l'aide à la demande à sa droite (P4). Ouverte, la note prend
+   toute la largeur : elle se lit comme un paragraphe, pas comme une colonne. */
+.page-head__ligne { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.aide-ecran, .note-pliable { font-family: var(--font-ui); list-style: none; }
+.aide-ecran { margin-left: auto; }
+.aide-ecran[open] { flex-basis: 100%; margin-left: 0; }
+.aide-ecran > summary, .note-pliable > summary { list-style: none; cursor: pointer; }
+.aide-ecran > summary::-webkit-details-marker, .note-pliable > summary::-webkit-details-marker { display: none; }
+.aide-ecran__titre, .note-pliable__titre { color: var(--brand); font-size: var(--t-sm); }
+.note-pliable { margin-top: 6px; }
+.aide-ecran__texte, .note-pliable__texte {
+  margin: 6px 0 0; max-width: 92ch; font-size: var(--t-sm); color: var(--ink-muted);
+  border-left: 3px solid var(--border); padding-left: 10px;
+}
+.note-pliable__corps { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid var(--border); font-size: var(--t-sm); color: var(--ink-muted); }
+.note-pliable__corps > * { margin: 0 0 4px; }
 .page-head__title { margin: 0; }
-.page-head__sub { color: var(--ink-muted); margin: 4px 0 0; font-size: .9rem; }
+.page-head__sub { color: var(--ink-muted); margin: 4px 0 0; font-size: var(--t-md); }
+/* L'état d'enregistrement d'une rédaction : une ligne de badges, sous le
+   sous-titre — « Enregistré » ou « Modifications non enregistrées ». */
+.rediger-etat { display: flex; align-items: center; flex-wrap: wrap; margin: 6px 0 0; }
 .page-head__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Les contrôles de formulaire : la plateforme injecte un reset qui remet
@@ -285,7 +468,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 7px 14px; min-height: 36px;
   border-radius: var(--radius); border: 1px solid transparent;
-  font: inherit; font-size: .875rem; font-weight: 500;
+  font: inherit; font-size: var(--t-md); font-weight: 500;
   cursor: pointer; text-decoration: none; background: none; color: inherit;
   white-space: nowrap;
 }
@@ -300,7 +483,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: var(--brand-soft); }
 .fr-btn.fr-btn--danger { color: var(--error); border-color: transparent; }
 .fr-btn.fr-btn--danger:hover:not(:disabled) { background: var(--error-bg); }
-.fr-btn--sm { min-height: 28px; padding: 3px 9px; font-size: .8rem; }
+.fr-btn--sm { min-height: 28px; padding: 3px 9px; font-size: var(--t-xs); }
 .fr-btn--icon { padding: 6px; min-height: 30px; }
 /* Bouton « allumé » : un état durable, pas un survol — la punaise qui dit
    « cet acte est à la une » (voir views/actes.js). */
@@ -309,7 +492,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 
 .fr-badge {
   display: inline-block; padding: 1px 8px; border-radius: 999px;
-  font-size: .72rem; font-weight: 600; line-height: 1.5;
+  font-size: var(--t-xs); font-weight: 600; line-height: 1.5;
   background: var(--bg-contrast); color: var(--ink-2);
 }
 .fr-badge--success { background: var(--success-bg); color: #1b5e2c; }
@@ -318,12 +501,44 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .fr-badge--info { background: var(--info-bg); color: var(--info); }
 .fr-badge--brand { background: var(--brand-soft); color: var(--brand); }
 
+/* LES MENTIONS D'UN OBJET (revue d'interface, P3). Ce qui n'est plus une
+   pastille : la nature, la famille, le service, les compteurs. Une ligne, en
+   gris, séparée par des points — présente mais discrète, à côté du statut qui,
+   lui, garde sa couleur pour être trouvé d'un coup d'œil dans une liste. */
+.app-mentions { margin: 6px 0 0; font-size: var(--t-sm); color: var(--ink-muted); }
+.app-mentions__sep { color: var(--border-strong); }
+/* Ce qui reste un avertissement le garde, même en mention : une trame non
+   publiable ne doit pas se confondre avec une description. */
+.app-mentions__item--alerte { color: var(--warning); font-weight: 600; }
+
+/* LE MENU « ⋯ » (revue d'interface, P2). Une action principale par écran, une
+   par carte ; les autres se rangent ici. Le panneau est posé en `fixed` : il
+   échappe au défilement de la zone de contenu, et le code choisit de l'ouvrir
+   vers le bas ou vers le haut selon la place (voir components.js). */
+.app-menubtn { display: inline-flex; }
+.app-menu {
+  position: fixed; z-index: 95;
+  min-width: 220px; max-width: min(340px, 92vw);
+  padding: 6px; text-align: left;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 14px 34px rgba(16, 18, 35, .18);
+}
+.app-menu__item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; background: none; border-radius: var(--radius);
+  font: inherit; font-size: var(--t-sm); color: var(--ink); cursor: pointer; text-align: left;
+}
+.app-menu__item:hover { background: var(--brand-soft); color: var(--brand); }
+.app-menu__item--danger { color: var(--error); }
+.app-menu__item--danger:hover { background: var(--error-bg); color: var(--error); }
+.app-menu__sep { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+
 .fr-alert {
   position: relative; padding: 12px 14px 12px 16px; border-radius: var(--radius);
   background: var(--bg); border: 1px solid var(--border); border-left: 4px solid var(--info);
   margin: 0 0 10px;
 }
-.fr-alert__title { margin: 0; font-weight: 700; font-size: .92rem; }
+.fr-alert__title { margin: 0; font-weight: 700; font-size: var(--t-md); }
 .fr-alert__title + p { margin-top: 4px; }
 .fr-alert p:last-child { margin-bottom: 0; }
 .fr-alert--info { border-left-color: var(--info); background: var(--info-bg); }
@@ -338,19 +553,19 @@ input[type="search"].fr-input { box-sizing: border-box; }
    nombre de badges ou la longueur de la description. */
 .fr-card--pied { display: flex; flex-direction: column; }
 .fr-card--pied > .fr-row:last-child { margin-top: auto; }
-.fr-card__title { margin: 0 0 4px; font-size: 1rem; }
-.fr-card__sub { color: var(--ink-muted); font-size: .85rem; margin: 0 0 12px; }
+.fr-card__title { margin: 0 0 4px; font-size: var(--t-lg); }
+.fr-card__sub { color: var(--ink-muted); font-size: var(--t-sm); margin: 0 0 12px; }
 
 .fr-field { margin-bottom: 14px; }
-.fr-label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+.fr-label { display: block; font-size: var(--t-sm); font-weight: 600; margin-bottom: 4px; }
 .fr-required { color: var(--error); }
-.fr-hint { margin: 0 0 5px; font-size: .78rem; color: var(--ink-muted); }
-.fr-error-text { margin: 4px 0 0; font-size: .78rem; color: var(--error); }
+.fr-hint { margin: 0 0 5px; font-size: var(--t-xs); color: var(--ink-muted); }
+.fr-error-text { margin: 4px 0 0; font-size: var(--t-xs); color: var(--error); }
 
 .fr-input, .fr-select, .fr-textarea {
   width: 100%; padding: 7px 10px; min-height: 36px;
   border: 1px solid var(--border-strong); border-radius: var(--radius);
-  background: var(--bg); color: var(--ink); font: inherit; font-size: .875rem;
+  background: var(--bg); color: var(--ink); font: inherit; font-size: var(--t-md);
 }
 .fr-textarea { min-height: 76px; resize: vertical; line-height: 1.45; }
 /* La flèche native du menu déroulant se dessine à l'intérieur du champ : sans
@@ -359,26 +574,66 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .fr-input:focus, .fr-select:focus, .fr-textarea:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: var(--focus); }
 .fr-input[readonly] { background: var(--bg-alt); color: var(--ink-muted); }
 .fr-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.fr-check { display: flex; gap: 8px; align-items: flex-start; font-size: .875rem; margin-bottom: 6px; cursor: pointer; }
+.fr-check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--t-md); margin-bottom: 6px; cursor: pointer; }
 .fr-check input { margin-top: 3px; accent-color: var(--brand); }
 .fr-choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .fr-choice {
   border: 1px solid var(--border-strong); border-radius: var(--radius);
-  padding: 5px 10px; font-size: .82rem; cursor: pointer; background: var(--bg);
+  padding: 5px 10px; font-size: var(--t-sm); cursor: pointer; background: var(--bg);
 }
 .fr-choice.is-on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 600; }
 
 .fr-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
 .fr-tabs .fr-tab {
   padding: 8px 14px; border: 0; border-bottom: 2px solid transparent;
-  background: none; font: inherit; font-size: .875rem; cursor: pointer; color: var(--ink-muted);
+  background: none; font: inherit; font-size: var(--t-md); cursor: pointer; color: var(--ink-muted);
 }
 .fr-tabs .fr-tab--active { border-bottom-color: var(--brand); color: var(--brand); font-weight: 700; }
-.fr-tab__count { margin-left: 6px; font-size: .72rem; color: var(--ink-muted); }
+.fr-tab__count { margin-left: 6px; font-size: var(--t-xs); color: var(--ink-muted); }
 
-.fr-table { width: 100%; border-collapse: collapse; font-size: .85rem; background: var(--bg); }
+/* ------------------------------------------------ chercher dans les réglages
+   L'administration compte vingt-trois onglets : la barre posée sous le titre dit
+   OÙ mène un mot, dans cet onglet comme dans les autres, et un clic y va. La
+   loupe se dessine DANS le champ (d'où la réserve de `padding-left`), donc le
+   champ doit être le repère de position. */
+.ref-recherche { position: relative; max-width: 640px; margin: 0 0 14px; }
+.ref-recherche__champ { padding-left: 34px; }
+.ref-recherche__loupe {
+  position: absolute; left: 10px; top: 9px; width: 16px; height: 16px;
+  color: var(--ink-muted); pointer-events: none;
+}
+.ref-recherche__loupe svg { display: block; width: 16px; height: 16px; }
+.ref-recherche__annonce { margin: 6px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
+.ref-recherche__annonce:empty { display: none; }
+.ref-recherche__resultats {
+  margin-top: 6px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); max-height: 15rem; overflow: auto;
+}
+.ref-resultat {
+  display: block; width: 100%; text-align: left; padding: 8px 10px;
+  border: 0; border-bottom: 1px solid var(--border); background: none;
+  font: inherit; cursor: pointer; color: var(--ink);
+}
+.ref-resultat:last-child { border-bottom: 0; }
+.ref-resultat:hover, .ref-resultat:focus-visible { background: var(--brand-soft); }
+.ref-resultat__label { display: block; font-size: var(--t-sm); font-weight: 600; }
+.ref-resultat__chemin { display: block; font-size: var(--t-xs); color: var(--ink-muted); }
+.ref-resultat.is-ici .ref-resultat__chemin { color: var(--brand); }
+.ref-recherche__suite { margin: 0; padding: 8px 10px; font-size: var(--t-xs); color: var(--ink-muted); }
+
+/* Le champ où l'on vient d'arriver clignote : un onglet fait parfois trois mille
+   pixels de long, et arriver en haut de cet onglet ne dirait pas ce qu'on est
+   venu voir. L'animation s'arrête d'elle-même (2 × 1,3 s). */
+.ref-field--cible { border-radius: var(--radius); animation: ref-pouls 1.3s ease-out 2; }
+@keyframes ref-pouls {
+  0% { background: var(--brand-soft); box-shadow: 0 0 0 0 var(--brand-soft); }
+  100% { background: transparent; box-shadow: 0 0 0 10px rgba(0, 0, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .ref-field--cible { animation: none; outline: 2px solid var(--brand); } }
+
+.fr-table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); background: var(--bg); }
 .fr-table th, .fr-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.fr-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); font-weight: 600; }
+.fr-table th { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); font-weight: 600; }
 .fr-table tbody tr:hover { background: var(--bg-alt); }
 .fr-table__empty { padding: 28px; text-align: center; color: var(--ink-muted); }
 
@@ -390,8 +645,8 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .fr-stack { display: flex; flex-direction: column; gap: 10px; }
 .fr-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .fr-muted { color: var(--ink-muted); }
-.fr-small { font-size: .78rem; }
-.fr-mono { font-family: var(--font-mono); font-size: .8rem; }
+.fr-small { font-size: var(--t-xs); }
+.fr-mono { font-family: var(--font-mono); font-size: var(--t-xs); }
 .fr-spacer { flex: 1 1 auto; }
 .fr-sep { height: 1px; background: var(--border); margin: 12px 0; border: 0; }
 
@@ -409,14 +664,14 @@ input[type="search"].fr-input { box-sizing: border-box; }
 }
 .fr-modal--wide { width: min(1000px, 100%); }
 .fr-modal__header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.fr-modal__title { margin: 0; font-size: 1.05rem; flex: 1 1 auto; }
+.fr-modal__title { margin: 0; font-size: var(--t-lg); flex: 1 1 auto; }
 .fr-modal__body { padding: 16px; overflow: auto; }
 .fr-modal__footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
 
 .fr-toast {
   position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 12px);
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius);
-  font-size: .85rem; opacity: 0; transition: opacity .2s, transform .2s; z-index: 200;
+  font-size: var(--t-sm); opacity: 0; transition: opacity .2s, transform .2s; z-index: 200;
   max-width: 90vw;
 }
 .fr-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
@@ -426,6 +681,52 @@ input[type="search"].fr-input { box-sizing: border-box; }
 /* formulaire de rédaction : formulaire + aperçu */
 .rediger-grid { display: grid; gap: 16px; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); align-items: start; }
 .fr-table-wrap { overflow-x: auto; }
+
+/* ------------------------------------------------ LA BARRE D'UNE LISTE LONGUE
+   Un registre de quatre cents actes ne se lit pas : il se cherche. Cette barre
+   porte la recherche, les filtres et le compte ; elle RESTE en haut du
+   défilement de la zone de contenu (`sticky`), pour qu'on garde sous la main ce
+   avec quoi on est en train de chercher (revue d'interface, P5). */
+.liste-barre {
+  position: sticky; top: 0; z-index: 6;
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end;
+  padding: 10px 12px; margin: -6px 0 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.liste-barre__champ { display: flex; flex-direction: column; gap: 3px; flex: 1 1 180px; min-width: 0; }
+.liste-barre__champ--gestes { flex: 0 0 auto; align-items: flex-end; }
+.liste-barre__champ--gestes > .fr-btn { margin: 0; }
+.liste-barre__champ .fr-label { margin: 0; font-size: var(--t-sm); }
+.liste-barre .fr-input, .liste-barre .fr-select { min-height: 34px; }
+/* Le compte de ce qui est affiché : « 128 actes — 25 affichés ». */
+.liste-compte { margin: 0; font-size: var(--t-sm); color: var(--ink-muted); }
+.liste-plus { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ------------------------------------------------------------- LE REGISTRE
+   Quatre colonnes seulement : le numéro, l'objet (avec sa ligne de mentions),
+   le statut, les gestes. Tout le reste vit dans la fiche dépliée. */
+.registre__numero { white-space: nowrap; }
+.registre__deplie {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; margin-right: 6px; padding: 0;
+  border: 0; background: none; border-radius: 3px; cursor: pointer; color: var(--ink-muted);
+  vertical-align: middle;
+}
+.registre__deplie:hover { background: var(--bg-alt); color: var(--ink); }
+.registre__objet-cell { min-width: 260px; }
+.registre__objet { display: block; font-weight: 600; }
+.registre__objet-cell .app-mentions { margin-top: 2px; }
+.registre__gestes-col { width: 1%; }
+.registre__gestes { white-space: nowrap; }
+.registre__ligne.is-ouvert { background: var(--bg-alt); }
+.registre__details > td { background: var(--bg-alt); padding: 4px 12px 14px; }
+.registre__fiche {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 20px; margin: 0;
+}
+.registre__fait { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.registre__fait dt { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); font-weight: 600; }
+.registre__fait dd { margin: 0; font-size: var(--t-sm); }
 .fr-table-wrap .fr-table { min-width: 640px; }
 
 /* ------------------------------------------------------- éditeur de trame */
@@ -446,7 +747,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .editor__col--right { border-left: 1px solid var(--border); }
 .editor__colhead {
   padding: 8px 12px; border-bottom: 1px solid var(--border);
-  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted);
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted);
   display: flex; align-items: center; gap: 6px;
 }
 .editor__scroll { overflow: auto; padding: 12px; flex: 1 1 auto; }
@@ -455,7 +756,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .outline__item {
   display: flex; align-items: center; gap: 7px; padding: 5px 7px;
   border-radius: var(--radius); border: 0; background: none; font: inherit;
-  font-size: .82rem; cursor: pointer; text-align: left; width: 100%; color: var(--ink-2);
+  font-size: var(--t-sm); cursor: pointer; text-align: left; width: 100%; color: var(--ink-2);
 }
 .outline__item:hover { background: var(--bg-alt); }
 .outline__item.is-active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
@@ -509,11 +810,11 @@ input[type="search"].fr-input { box-sizing: border-box; }
 }
 .zoom__btn, .zoom__pct {
   border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2);
-  border-radius: 999px; padding: 2px 8px; font-size: .78rem; line-height: 1.5;
+  border-radius: 999px; padding: 2px 8px; font-size: var(--t-xs); line-height: 1.5;
 }
-.zoom__btn { font-size: .95rem; min-width: 26px; }
+.zoom__btn { font-size: var(--t-lg); min-width: 26px; }
 .zoom__btn:hover, .zoom__pct:hover { background: var(--bg-alt); color: var(--brand); }
-.zoom__btn--fit { font-size: .76rem; }
+.zoom__btn--fit { font-size: var(--t-xs); }
 [data-theme="dark"] .zoom__bar { box-shadow: 0 1px 6px rgba(0, 0, 0, .6); }
 
 /* blocs éditables — `.blk` n'existe que dans l'éditeur de trame. Les blocs sont
@@ -543,13 +844,13 @@ input[type="search"].fr-input { box-sizing: border-box; }
   border: 0; border-radius: var(--radius); background: none; color: var(--ink-2); cursor: pointer; }
 .blk__note:hover { color: var(--brand); background: var(--brand-soft); }
 .blk__note.is-on { color: var(--info); }
-.blk__note-count { font-size: .62rem; font-weight: 700; font-family: var(--font-ui); }
+.blk__note-count { font-size: var(--t-xs); font-weight: 700; font-family: var(--font-ui); }
 .blk__annot-flag {
   position: absolute; right: calc(100% + 2px); top: 1px; z-index: 4;
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 16px; height: 16px; padding: 0 3px;
   border: 0; border-radius: 999px; background: var(--info); color: #fff; cursor: pointer;
-  font-family: var(--font-ui); font-size: .62rem; font-weight: 700; line-height: 16px;
+  font-family: var(--font-ui); font-size: var(--t-xs); font-weight: 700; line-height: 16px;
 }
 .blk__annot-flag:hover { background: var(--brand); }
 

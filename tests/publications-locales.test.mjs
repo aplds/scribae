@@ -145,6 +145,20 @@ test("publications locales : la signature est qualifiée, ou reprise de l'acte",
   assert.equal(rec.signature.niveau, "simple");
   assert.equal(rec.signature.signeLe, "2026-01-03T09:00:00.000Z");
 
+  // 2 bis. La signature INTERNE (c'est le SERVICE qui signe) se lit comme les
+  //    autres circuits : « avancee », et le prestataire est le service lui-même
+  //    — c'est ce qui permet au recueil de dire « par le service », sans le
+  //    confondre avec un prestataire simulé.
+  const signeInterne = actePublie({
+    id: "s2b",
+    signatureInterne: { signeLe: "2026-01-04T09:00:00.000Z", niveau: "avancee", circuit: "interne" },
+    signeLe: "2026-01-04T09:00:00.000Z", signeParNom: "Camille Roy",
+  });
+  const recInterne = mod.publicationLocale([signeInterne], signeInterne.publication.cle);
+  assert.equal(recInterne.signature.niveau, "avancee");
+  assert.equal(recInterne.signature.prestataire.id, "scribae-interne");
+  assert.equal(recInterne.signature.signeLe, "2026-01-04T09:00:00.000Z");
+
   // 3. Un acte publié sans circuit connu ne reçoit AUCUNE qualification : on ne
   //    devine pas ce que vaut une signature qu'on ne sait pas lire.
   const muet = actePublie({ id: "s3" });

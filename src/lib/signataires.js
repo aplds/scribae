@@ -199,7 +199,7 @@ export const peutSignerActe = (config, user, acte, trame) =>
 //      peut pas l'engager.
 //
 // Sans ces deux portes, un compte habilité à envoyer en signature apposerait la
-// signature au nom d'un autre. Tous les gestes de signature (simple,
+// signature au nom d'un autre. Tous les gestes de signature (simple, interne,
 // électronique, externe déposé) passent par ici.
 //
 // Rend la compétence, enrichie du motif quand la signature est refusée (chaîne

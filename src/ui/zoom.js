@@ -76,6 +76,43 @@ function magasin() {
 
 const nombre = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 
+// ---------------------------------------------------------------------------
+// Un registre, une veille, un observateur.
+//
+// L'éditeur — de trame comme de rédaction — se redessine à chaque frappe. Un
+// écouteur `resize` et un `ResizeObserver` posés par DESSIN s'accumulaient sans
+// fin, et l'observateur retenait en vie le contenu DÉTACHÉ du dessin précédent :
+// une page entière retenue à chaque frappe, la mémoire ne redescendait plus, et
+// la session d'édition finissait par se figer. La fenêtre n'a donc qu'un seul
+// écouteur, et il ne veille que sur les cadres encore dans le document.
+const cadres = new Map();   // contenu -> { cadre, contenu, etat, mesurer, peindre, ajuster, taille, ne }
+let veilleFenetre = false;
+let observateur = null;
+let prevu = false;
+
+function elaguerCadres() {
+  const maintenant = Date.now();
+  for (const [contenu, f] of cadres) {
+    if (f.cadre.isConnected) continue;
+    // Un cadre qui vient d'être créé n'est pas encore posé dans la page : on lui
+    // laisse le temps de l'être avant de le tenir pour détaché.
+    if (maintenant - f.ne < 1500) continue;
+    cadres.delete(contenu);
+    observateur?.unobserve(contenu);
+  }
+}
+
+function installerVeille() {
+  if (veilleFenetre) return;
+  veilleFenetre = true;
+  // Un cadre « ajusté » suit la largeur de la fenêtre : c'est ce que faisait
+  // l'ancien ajustement à la feuille, à chaque redessin.
+  window.addEventListener("resize", () => {
+    elaguerCadres();
+    for (const f of cadres.values()) if (f.etat.auto) f.ajuster();
+  });
+}
+
 // `contenu` : l'élément à zoomer (il sera mis hors flux — il doit donc porter
 // une largeur propre : 21 cm pour une feuille, `max-content` pour un arbre).
 // Options : `cle` (mémorisation), `mode` (« feuille » | « canvas »), `classe`
@@ -272,11 +309,15 @@ export function cadreZoom(contenu, opts = {}) {
     etat.sy = cadre.scrollTop;
   });
 
-  // Un cadre « ajusté » suit la largeur de la fenêtre : c'est ce que faisait
-  // l'ancien ajustement à la feuille, à chaque redessin.
-  window.addEventListener("resize", () => {
-    if (etat.auto) ajuster();
+  // Le cadre entre au registre : la veille de la fenêtre et l'observateur de
+  // taille le suivent tant qu'il est dans le document (un seul des deux pour
+  // tous les cadres, voir l'en-tête).
+  elaguerCadres();
+  cadres.set(contenu, {
+    cadre, contenu, etat, mesurer, peindre, ajuster, ne: Date.now(),
+    taille: () => ({ natW, natH, applW, applH }),
   });
+  installerVeille();
 
   // Le contenu peut grandir tout seul — un article ajouté, une division
   // ouverte, une annexe jointe : le plateau qui réserve sa place doit suivre,
@@ -284,19 +325,26 @@ export function cadreZoom(contenu, opts = {}) {
   // donc, et l'on ne redessine que si sa taille a réellement changé (sans quoi
   // le moindre détail de mise en page relancerait la boucle).
   if (typeof ResizeObserver === "function") {
-    let prevu = false;
-    const ro = new ResizeObserver(() => {
-      if (prevu) return;
-      prevu = true;
-      requestAnimationFrame(() => {
-        prevu = false;
-        mesurer();
-        if (natW === applW && natH === applH) return;
-        if (etat.auto) ajuster();
-        else peindre();
+    if (!observateur) {
+      observateur = new ResizeObserver((entrees) => {
+        if (prevu) return;
+        prevu = true;
+        requestAnimationFrame(() => {
+          prevu = false;
+          elaguerCadres();
+          for (const e of entrees) {
+            const f = cadres.get(e.target);
+            if (!f || !f.cadre.isConnected) continue;
+            f.mesurer();
+            const t = f.taille();
+            if (t.natW === t.applW && t.natH === t.applH) continue;
+            if (f.etat.auto) f.ajuster();
+            else f.peindre();
+          }
+        });
       });
-    });
-    ro.observe(contenu);
+    }
+    observateur.observe(contenu);
   }
 
   // --------------------------------------------------------------- premier cran

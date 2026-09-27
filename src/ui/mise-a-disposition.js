@@ -18,22 +18,34 @@ import { confirmDialog } from "./components.js";
 
 export { trameEstDisponible };
 
+// Le geste de mise à disposition, décrit UNE fois : son libellé, son icône, son
+// explication et son exécution. Le bouton de la carte et l'entrée du menu « ⋯ »
+// le lisent tous les deux — deux chemins ne peuvent donc pas diverger.
+export function actionDisponibilite(trame) {
+  if (trameEstDisponible(trame)) {
+    return {
+      label: "Retirer la mise à disposition", court: "Retirer", icon: "lock",
+      title: "Retirer la trame : elle redevient un brouillon, invisible des services",
+      onClick: (o) => retirerMiseADisposition(trame, o),
+    };
+  }
+  return {
+    label: "Mettre à disposition des services", court: "Mettre à disposition", icon: "partage",
+    title: trame.status === "archived"
+      ? "Sortir la trame des archives et la mettre à disposition des services"
+      : "Ouvrir la trame aux services : ils pourront rédiger des actes à partir d'elle",
+    onClick: (o) => mettreADisposition(trame, o),
+  };
+}
+
 // Le bouton, dans ses deux états. `variant` et `size` sont laissés à l'appelant :
 // la carte de la liste et la bannière de l'éditeur ne lui donnent pas la même
 // importance, mais c'est le même geste.
-export function boutonDisponibilite(trame, { variant = "secondary", size = "", court = false } = {}) {
-  if (trameEstDisponible(trame)) {
-    return button(court ? "Retirer" : "Retirer la mise à disposition", {
-      variant: "tertiary", size, icon: "lock",
-      title: "Retirer la trame : elle redevient un brouillon, invisible des services",
-      onClick: () => retirerMiseADisposition(trame),
-    });
-  }
-  return button("Mettre à disposition", {
-    variant, size, icon: "partage",    title: trame.status === "archived"
-      ? "Sortir la trame des archives et la mettre à disposition des services"
-      : "Ouvrir la trame aux services : ils pourront rédiger des actes à partir d'elle",
-    onClick: () => mettreADisposition(trame),
+export function boutonDisponibilite(trame, { variant = "secondary", size = "", court = false, redraw } = {}) {
+  const a = actionDisponibilite(trame);
+  return button(court ? a.court : a.label, {
+    variant, size, icon: a.icon, title: a.title,
+    onClick: () => a.onClick({ redraw }),
   });
 }
 

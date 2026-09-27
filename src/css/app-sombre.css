@@ -89,13 +89,13 @@
   background: var(--bg); color: var(--ink); cursor: pointer;
 }
 .app-theme:hover { background: var(--bg-alt); border-color: var(--border-strong); }
-.app-theme__pref { font-size: .68rem; color: var(--ink-muted); margin-left: 6px; }
+.app-theme__pref { font-size: var(--t-xs); color: var(--ink-muted); margin-left: 6px; }
 .app-user__theme { padding: 8px 10px 4px; }
-.app-user__themelabel { display: flex; align-items: center; gap: 6px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
+.app-user__themelabel { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
 .app-user__themes { display: flex; gap: 4px; }
 .app-user__themebtn {
   flex: 1 1 auto; border: 1px solid var(--border); background: var(--bg); color: var(--ink-2);
-  font: inherit; font-size: .78rem; padding: 5px 6px; border-radius: var(--radius); cursor: pointer;
+  font: inherit; font-size: var(--t-xs); padding: 5px 6px; border-radius: var(--radius); cursor: pointer;
 }
 .app-user__themebtn:hover { border-color: var(--brand); color: var(--brand); }
 .app-user__themebtn.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
@@ -104,12 +104,12 @@
    assistant éteint reste lisible, mais son icône s'estompe : on voit d'un coup
    d'œil ce qui s'affiche et ce qui ne s'affiche pas. */
 .app-user__assist { padding: 4px 10px 6px; }
-.app-user__assistlabel { display: flex; align-items: center; gap: 6px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
+.app-user__assistlabel { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin-bottom: 6px; }
 .app-user__assists { display: flex; gap: 4px; }
 .app-user__assistbtn {
   flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 5px;
   border: 1px solid var(--border); background: var(--bg); color: var(--ink-2);
-  font: inherit; font-size: .78rem; padding: 4px 6px; border-radius: var(--radius); cursor: pointer;
+  font: inherit; font-size: var(--t-xs); padding: 4px 6px; border-radius: var(--radius); cursor: pointer;
 }
 .app-user__assistbtn:hover { border-color: var(--brand); color: var(--brand); }
 .app-user__assistbtn.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }

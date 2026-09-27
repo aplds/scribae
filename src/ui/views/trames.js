@@ -6,8 +6,8 @@ import { targetLabel, servicesInScope, coversAllServices, authorLabel } from "..
 import { download, pickBinaryFile } from "../../lib/util.js";
 import { exampleTrameFile, readTrameFile } from "../../lib/trame-format.js";
 import { importerTrameDocument } from "../import-trame.js";
-import { boutonDisponibilite } from "../mise-a-disposition.js";
-import { confirmDialog, promptDialog, statusBadge, emptyState, textField, choiceField, orgFields } from "../components.js";
+import { actionDisponibilite } from "../mise-a-disposition.js";
+import { confirmDialog, promptDialog, statusBadge, emptyState, textField, choiceField, orgFields, mentions, menuButton, pageTitle } from "../components.js";
 import { helpLink } from "../components.js";
 import { modal } from "../dom.js";
 import { countNotes } from "../annotations.js";
@@ -25,8 +25,7 @@ export function renderTrames(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Trames d'actes" }),
-      h("p", { class: "page-head__sub", text: "Modèles préparés par les administrateurs : structure, champs, règles et commentaires. Les services les remplissent sans jamais repartir d'une page blanche." }),
+      pageTitle("Trames d'actes" , "Modèles préparés par les administrateurs : structure, champs, règles et commentaires. Les services les remplissent sans jamais repartir d'une page blanche." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("ouvrir", "Comment ça marche ?"),
@@ -143,6 +142,9 @@ function trameCard(t, redraw) {
   const scoped = (t.entityIds || []).length
     ? t.entityIds.map((id) => config.entities.find((e) => e.id === id)?.code).filter(Boolean).join(", ")
     : "toutes entités";
+  const dispo = actionDisponibilite(t);
+  const nbChamps = (t.fields || []).length;
+  const nbRegles = (t.rules || []).length;
 
   return h("div", { class: "fr-card fr-card--pied" },
     h("div", { class: "fr-row" },
@@ -151,39 +153,35 @@ function trameCard(t, redraw) {
     ),
     h("p", { class: "fr-card__sub", text: [family?.label, "v" + t.version, scoped].filter(Boolean).join(" · ") }),
     t.description ? h("p", { class: "fr-small fr-muted", text: t.description }) : null,
-    h("div", { class: "fr-row", style: { gap: "6px", margin: "8px 0" } },
-      t.serviceId
-        ? h("span", { class: "fr-badge fr-badge--info", text: targetLabel(config, t.serviceId, t.bureauId) })
-        : h("span", { class: "fr-badge", text: "Trame générale" }),
-      !tramePublishable(t)
-        ? h("span", { class: "fr-badge fr-badge--warning", title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels).", text: "Non publiable" })
-        : null,
-      h("span", { class: "fr-badge", text: `${(t.fields || []).length} champ${(t.fields || []).length > 1 ? "s" : ""}` }),
-      h("span", { class: "fr-badge", text: `${(t.rules || []).length} règle${(t.rules || []).length > 1 ? "s" : ""}` }),
-      noteCount ? h("span", { class: "fr-badge fr-badge--info", text: `${noteCount} commentaire${noteCount > 1 ? "s" : ""}` }) : null,
-    ),
+    // Les compteurs et le service ne sont plus des pastilles : ils décrivent la
+    // trame, ils ne la signalent pas (voir components.js, `mentions`).
+    mentions([
+      t.serviceId ? targetLabel(config, t.serviceId, t.bureauId) : "Trame générale",
+      `${nbChamps} champ${nbChamps > 1 ? "s" : ""}`,
+      nbRegles ? `${nbRegles} règle${nbRegles > 1 ? "s" : ""}` : null,
+      noteCount ? `${noteCount} commentaire${noteCount > 1 ? "s" : ""}` : null,
+      !tramePublishable(t) ? { text: "non publiable", alerte: true, title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels)." } : null,
+    ]),
     // Un brouillon ne sort pas de l'atelier : on le dit là où on le voit, plutôt
     // que de laisser croire qu'un service peut déjà s'en servir.
     !trameEstDisponible(t)
-      ? h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" }, text: t.status === "archived"
+      ? h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" }, text: t.status === "archived"
         ? "Trame archivée : elle n'est proposée à personne. Retirez-la des archives pour la remettre à disposition."
         : "Brouillon : les services ne la voient pas encore. Mettez-la à disposition quand elle sera prête." })
       : null,
-    // Les gestes sont rangés en deux groupes : à gauche ce qui part du modèle
-    // (l'ouvrir, rédiger, l'offrir aux services ou le retirer), à droite les
-    // gestes secondaires, réduits à leur icône. Sans cela, cinq boutons sur une
-    // ligne se cassent en trois lignes bancales dans une carte étroite.
-    h("div", { class: "fr-row", style: { justifyContent: "space-between", rowGap: "6px" } },
-      h("div", { class: "fr-row" },
-        gerer ? button("Ouvrir l'éditeur", { variant: "primary", icon: "doc", onClick: () => navigate("trame/" + t.id) }) : null,
-        button("Rédiger", { variant: gerer ? "secondary" : "primary", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
-        gerer ? boutonDisponibilite(t, { size: "sm", variant: "secondary", court: true }) : null,
-      ),
-      h("div", { class: "fr-row" },
-        gerer ? button("", { variant: "tertiary", icon: "copy", title: "Dupliquer", onClick: () => duplicate(t, redraw) }) : null,
-        gerer ? button("", { variant: "tertiary", icon: "download", title: "Exporter (JSON)", onClick: () => exportTrame(t) }) : null,
-        gerer ? button("", { variant: "tertiary", icon: "trash", title: "Supprimer", onClick: () => remove(t, redraw) }) : null,
-      ),
+    // UN SEUL GESTE MIS EN AVANT (revue d'interface, P2) : « Rédiger », celui
+    // pour lequel on vient sur cette liste. Les cinq autres se rangent dans le
+    // menu « ⋯ » — ils ne disparaissent pas, ils cessent de se disputer l'œil.
+    h("div", { class: "fr-row", style: { justifyContent: "space-between", rowGap: "6px", marginTop: "10px" } },
+      button("Rédiger", { variant: "primary", icon: "note", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
+      gerer ? menuButton([
+        { label: "Ouvrir l'éditeur", icon: "doc", onClick: () => navigate("trame/" + t.id) },
+        { label: dispo.label, icon: dispo.icon, title: dispo.title, onClick: () => dispo.onClick({ redraw }) },
+        { separator: true },
+        { label: "Dupliquer", icon: "copy", onClick: () => duplicate(t, redraw) },
+        { label: "Exporter (JSON)", icon: "download", onClick: () => exportTrame(t) },
+        { label: "Supprimer", icon: "trash", danger: true, onClick: () => remove(t, redraw) },
+      ], { title: "Autres gestes sur cette trame" }) : null,
     ),
   );
 }

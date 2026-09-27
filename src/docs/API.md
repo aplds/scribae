@@ -9,7 +9,7 @@ Cette référence est **engendrée depuis le code** (`src/lib/api-reference.js`,
 Les routes se rangent en deux familles, servies par la même façade et le même contrôle d'accès :
 
 - la **persistance partagée** — `/v1/db/…` : le référentiel, les trames, les actes et les comptes, enregistrement par enregistrement, avec révisions et détection de conflits. C'est ce que le navigateur synchronise en continu ;
-- le **domaine** — `/v1/actes/…`, `/v1/signatures/…`, `/v1/publications/…` : le dépôt d'un acte finalisé, l'ouverture d'un circuit de signature, la publication au recueil et les identifiants persistants (ELI). C'est ce qu'un script ou un prestataire appelle.
+- le **domaine** — `/v1/actes/…`, `/v1/signatures/…`, `/v1/publications/…`, `/v1/pieces/…` : le dépôt d'un acte finalisé, l'ouverture d'un circuit de signature, la publication au recueil, les identifiants persistants (ELI) et les fichiers conservés avec les actes. C'est ce qu'un script ou un prestataire appelle.
 
 S'y ajoutent les routes de **service** (`/v1/config`, `/v1/auth/…`, `/v1/courriel`) et les **adresses publiques du site** (`/recueil`, `/robots.txt`, `/llms.txt`, `/sitemap.xml`), qui ne passent pas par `/v1/`.
 
@@ -76,7 +76,7 @@ curl -X GET 'https://api.exemple.fr/v1/' \
 
 ### `GET /v1/config` — Réglages de référentiel et état du prestataire
 
-Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.
+Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé), et celui du COFFRE DE SIGNATURE INTERNE (`signatureInterne` : disponible ou non, motif, niveau, algorithme, nombre de certificats émis, horodatage) — c'est ce qui permet à l'application de n'offrir que les circuits que ce service peut réellement mener. Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.
 
 - **Authentification** : publique
 - **Service** : auto-hébergé
@@ -632,6 +632,28 @@ curl -X POST 'https://api.exemple.fr/v1/db/collections/actes/sync' \
 | 413 | Trop d'enregistrements |
 | 507 | Base pleine |
 
+### `GET /v1/db/flux` — Suivre les changements en temps réel
+
+Ouvre un flux SSE sur lequel le service pousse chaque changement : `{ type: "collection", collection, revision, n, ids }` — le nom de la collection, sa révision, le nombre d'enregistrements touchés et leurs identifiants, JAMAIS leur contenu. Le poste relit ensuite la collection par la route de lecture, avec ses droits. Un poste lent (tampon plein) n'est pas attendu : il reçoit `{ type: "resync" }` et relit tout. Un commentaire de battement est émis toutes les 20 secondes pour tenir la connexion ouverte — un reverse-proxy qui tamponne la réponse (`proxy_buffering off` dans nginx) rendrait le flux muet.
+
+- **Authentification** : lecteur
+- **Service** : auto-hébergé
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/db/flux' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Flux ouvert (text/event-stream) |
+| 401 | Session absente (mode mot de passe) |
+| 429 | Trop de flux ouverts depuis cette adresse |
+| 503 | Limite de flux ouverts atteinte (flux_sature) |
+
 ## Actes
 
 Dépôt des actes finalisés, suivi, dossier interne.
@@ -772,6 +794,101 @@ curl -X GET 'https://api.exemple.fr/v1/actes/ACT-12/dossier-signature' \
 | 200 | Le dossier interne |
 | 404 | Aucun dossier interne (dossier_absent) |
 
+## Pièces jointes
+
+Les fichiers conservés avec un acte : l'original signé d'une reprise, la version signée d'un circuit externe.
+
+### `POST /v1/pieces` — Déposer une pièce (fichier joint)
+
+Range un fichier joint à un acte — l'original signé d'une reprise d'acte ancien, ou la version signée d'un acte du circuit externe — et rend son ADRESSE de lecture. Le contenu voyage en base64 dans un corps JSON : le canal temps réel de l'édition en ligne ne transporte pas de binaire, et l'API lit ses corps en UTF-8. Les métadonnées — nom, type, taille, empreinte SHA-256 — sont DÉCLARÉES par le client : c'est lui qui lit le fichier, et c'est son empreinte que le recueil affichera ; le service les range, il ne les juge pas. L'APPLICATION y recourt quand l'hébergement n'offre pas de dépôt de fichiers de son côté (`root.uploadPlugin`) — c'est-à-dire en auto-hébergement. La taille est bornée par `MAX_BODY` du service (8 Mio par défaut, soit environ 5,5 Mo de fichier une fois le base64 passé) ; le plafond se relève dans le `.env`, et la façade doit suivre (`client_max_body_size`).
+
+- **Authentification** : redacteur
+- **Service** : les deux
+
+**Corps de la requête**
+
+```json
+{
+  "nom": "1998-042.pdf",
+  "type": "application/pdf",
+  "taille": 182345,
+  "sha256": "…",
+  "base64": "JVBERi0xLjQK…"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/pieces' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON' \
+  -H 'content-type: application/json' \
+  -d '{"nom":"1998-042.pdf","type":"application/pdf","taille":182345,"sha256":"…","base64":"JVBERi0xLjQK…"}'
+```
+
+| Code | Signification |
+|---|---|
+| 201 | Pièce déposée : son identifiant et son adresse de lecture |
+| 400 | Contenu illisible (piece_illisible) |
+| 413 | Pièce trop volumineuse (piece_trop_volumineuse) |
+| 422 | Nom ou contenu absent (piece_sans_nom, piece_absente) |
+| 507 | Le rangement n'a pas pu conserver la pièce |
+
+| Champ | Type | Description |
+|---|---|---|
+| id | string | L'identifiant de la pièce (il EST son adresse de lecture) |
+| url | string | L'adresse à citer sur l'acte (le service auto-hébergé rend `/v1/pieces/{id}`) |
+| sha256 | string | L'empreinte déclarée, conservée telle quelle |
+
+### `GET /v1/pieces/{id}` — Lire une pièce (fichier joint)
+
+Rend la pièce déposée. Route PUBLIQUE, et ce n'est pas un oubli : le recueil public cite cette adresse — c'est elle qui montre l'original signé d'un acte ancien, ou la version signée d'un acte du circuit externe. L'identifiant, tiré au hasard à la taille d'une clé, est le seul droit d'entrée. Le service auto-hébergé rend les OCTETS de la pièce avec son type MIME (elle s'ouvre dans un lien, un cadre de lecture, ou se télécharge) ; le service embarqué, qui n'a pas de façade HTTP, rend le même contenu en JSON + base64. Une pièce inconnue est un 404.
+
+- **Authentification** : publique
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant de la pièce |
+
+**Exemple**
+
+```bash
+curl -X GET 'https://api.exemple.fr/v1/pieces/ACT-12' \
+  -H 'accept: application/json'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | La pièce (octets, ou JSON + base64 selon le service) |
+| 404 | Pièce inconnue (piece_inconnue) |
+
+### `DELETE /v1/pieces/{id}` — Retirer une pièce
+
+Retire une pièce déposée. Geste de PROPRETÉ — le rédacteur qui venait de joindre un original et se ravise —, jamais une dépublication. Refusé tant qu'un acte déposé ou une publication cite la pièce : la retirer laisserait une page du recueil avec un lien mort. C'est le pendant du bouton « Retirer » qui accompagne l'original joint à une reprise.
+
+- **Authentification** : redacteur
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant de la pièce |
+
+**Exemple**
+
+```bash
+curl -X DELETE 'https://api.exemple.fr/v1/pieces/ACT-12' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Pièce retirée |
+| 404 | Pièce inconnue (piece_inconnue) |
+| 409 | Pièce citée par un acte ou une publication (piece_referencee) |
+
 ## Signature
 
 Circuits de signature, notification du prestataire, circuits externes.
@@ -836,6 +953,67 @@ curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/signature' \
 | signatureId | string | Identifiant du circuit (SIG-…) |
 | lienSignature | string | Le lien de signature chez le prestataire, quand il est branché |
 | simulation | booléen | true : aucun appel n'est sorti |
+
+### `POST /v1/actes/{id}/signature` — Signer un acte avec le service (signature interne)
+
+Avec `mode: "interne"`, la route change de nature : ce n'est plus un prestataire qui signera, c'est LE SERVICE. Il détient la clé privée du signataire, scellée au repos (AES-256-GCM) sous la clé de scellement du déploiement (`SCRIBA_SIGNATURE_KV_KEY`), et signe avec elle : la clé ne quitte jamais le serveur, et le poste ne reçoit que l'original signé — document figé, signature, certificat, horodatage. La réponse porte donc l'original signé (`documentSigne`), et l'acte est « signé » dans la foulée : il n'y a ni lien de signature, ni webhook, ni relève de statut. C'est la définition eIDAS de la signature avancée (clé sous le contrôle exclusif du signataire, certificat émis par une autorité, signature liée au document) — sans être qualifiée, faute d'autorité de confiance qualifiée. Ce circuit n'existe qu'en AUTO-HÉBERGEMENT : sans clé de scellement — et sur le service de démonstration, qui ne tient aucun coffre —, la route refuse (409 `signature_interne_indisponible`) plutôt que de simuler une signature que le service ne peut pas produire.
+
+- **Authentification** : redacteur
+- **Service** : les deux
+
+| Paramètre | Type | Description |
+|---|---|---|
+| id | string | Identifiant de l'acte déposé |
+
+**Corps de la requête**
+
+```json
+{
+  "mode": "interne",
+  "signataires": [
+    {
+      "nom": "Jeanne Mercier",
+      "courriel": "j.mercier@exemple.fr",
+      "fonction": "Le maire",
+      "ordre": 1,
+      "personId": "per-004",
+      "compteId": "u-12",
+      "entite": "Ville de Valmont-sur-Loire"
+    }
+  ],
+  "operateur": {
+    "id": "u-12",
+    "nom": "Jeanne Mercier",
+    "courriel": "j.mercier@exemple.fr",
+    "compte": "j.mercier"
+  },
+  "poste": "Mozilla/5.0 (poste de l'agent)"
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/signature' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON' \
+  -H 'content-type: application/json' \
+  -d '{"mode":"interne","signataires":[{"nom":"Jeanne Mercier","courriel":"j.mercier@exemple.fr","fonction":"Le maire","ordre":1,"personId":"per-004","compteId":"u-12","entite":"Ville de Valmont-sur-Loire"}],"operateur":{"id":"u-12","nom":"Jeanne Mercier","courriel":"j.mercier@exemple.fr","compte":"j.mercier"},"poste":"Mozilla/5.0 (poste de l'agent)"}'
+```
+
+| Code | Signification |
+|---|---|
+| 201 | Acte signé : la réponse porte l'original signé |
+| 409 | Circuit interne indisponible (signature_interne_indisponible), ou acte déjà signé |
+| 502 | La signature interne a échoué (signature_interne_echec) |
+
+| Champ | Type | Description |
+|---|---|---|
+| documentSigne | object | L'original signé complet : `document` (Akoma Ntoso et son empreinte SHA-256), `signatures` (valeur, certificat, signeLe), `horodatage`, `prestataire` et `interne` (part non diffusée) |
+| certificat | object | Le certificat du signataire : sujet, émetteur, numéro de série, validité, clé publique (JWK), empreinte |
+| horodatage | object | L'horodatage du service, signé par sa propre clé d'horodatage |
+| prestataire | object | { id: « scribae-interne », nom, niveau } — l'émetteur est le service lui-même |
+| empreinte | string | L'empreinte SHA-256 du document signé |
 
 ### `GET /v1/signatures` — Lister les circuits de signature
 
@@ -1020,9 +1198,9 @@ curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/conformite' \
 |---|---|
 | 200 | Certification enregistrée |
 
-### `POST /v1/actes/{id}/transmission` — Transmettre au contrôle de légalité
+### `POST /v1/actes/{id}/transmission` — Transmettre au contrôle de légalité (API, ou déclaration)
 
-L'acte signé part vers l'API d'envoi de la préfecture, qui en accuse réception. L'accusé vaut certificat informatique de transmission, déposé sur le document. Un acte déclaré soumis au contrôle de légalité ne peut PAS être publié avant sa transmission (409 `transmission_absente`).
+Trois voies. DÉCLARATION : le corps porte `declaration` (`at` et `destinataire` requis) — la transmission a été faite hors application, et une personne l'atteste ; aucune requête n'est adressée à l'API, le certificat conservé est une déclaration, et sa mention nomme son auteur. C'est la voie du régime déclaratif, et celle de l'acte transmis autrement en régime API. Quand le service identifie les personnes (session), la déclaration est opposée à l'opérateur : `declaration.personId` doit être celui du compte connecté, et l'acte peut exiger un réviseur compétent (`403 declaration_non_habilitée`). APPEL RÉEL : sans `declaration`, quand l'API est branchée (SCRIBA_CONTROLE_LEGALITE_URL et _CLE dans le .env du service), l'appel a lieu et le certificat est celui que l'API rend ; un refus échoue en 502 (`transmission_echec`) sans rien enregistrer. SIMULATION : sans `declaration` et sans API branchée, le certificat est fabriqué localement et porte `demonstration: true`, avec une mention qui le dit. Un acte déclaré soumis au contrôle de légalité ne peut PAS être publié avant sa transmission (409 `transmission_absente`).
 
 - **Authentification** : redacteur
 - **Service** : les deux
@@ -1031,18 +1209,38 @@ L'acte signé part vers l'API d'envoi de la préfecture, qui en accuse réceptio
 |---|---|---|
 | id | string | Identifiant de l'acte |
 
+**Corps de la requête**
+
+```json
+{
+  "declaration": {
+    "at": "2026-09-22",
+    "destinataire": "Préfecture — contrôle de légalité",
+    "reference": "2026-09-DELEG-0184",
+    "motif": "API injoignable",
+    "personId": "p-roussel"
+  }
+}
+```
+
 **Exemple**
 
 ```bash
 curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/transmission' \
   -H 'accept: application/json' \
-  -H 'authorization: Bearer VOTRE_JETON'
+  -H 'authorization: Bearer VOTRE_JETON' \
+  -H 'content-type: application/json' \
+  -d '{"declaration":{"at":"2026-09-22","destinataire":"Préfecture — contrôle de légalité","reference":"2026-09-DELEG-0184","motif":"API injoignable","personId":"p-roussel"}}'
 ```
 
 | Code | Signification |
 |---|---|
-| 200 | Transmission enregistrée |
+| 201 | Transmis : certificat de transmission (accusé réel, déclaration, ou simulation marquée demonstration: true) ; pour une déclaration, la réponse porte `attribution` (`verifiee` \| `declaree`) et `auteur` — ce que le service a pu attester |
+| 200 | Acte déjà transmis (idempotent) |
 | 409 | Acte non signé (acte_non_signe) |
+| 403 | Déclaration engageant une autre personne, ou hors compétence (declaration_non_habilitée) |
+| 422 | Déclaration incomplète ou illisible (declaration_incomplete, declaration_invalide) |
+| 502 | L'API de contrôle de légalité a refusé ou n'a pas répondu (transmission_echec) |
 
 ### `GET /v1/actes/{id}/transmission` — Lire la transmission
 
@@ -1820,6 +2018,10 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | acte_non_signe | Publication ou transmission demandée avant la signature. |
 | acte_non_publiable | L'acte a été déposé non publiable (acte individuel). |
 | transmission_absente | L'acte est soumis au contrôle de légalité, mais n'a pas été transmis. |
+| declaration_incomplete | La déclaration de transmission n'indique pas à quelle date, ou à qui, l'acte a été transmis. |
+| declaration_invalide | La déclaration de transmission est illisible. |
+| declaration_non_habilitée | La déclaration engage une autre personne que l'opérateur, ou un compte qui n'est pas un réviseur compétent de l'acte. |
+| transmission_echec | L'API de contrôle de légalité a refusé ou n'a pas répondu : rien n'est enregistré, la transmission se rejoue. |
 | conformite_non_certifiee | Le circuit externe attend la certification de conformité du réviseur. |
 | validation_incomplete | Le circuit de validation (parapheur) n'est pas achevé. |
 | revision_incomplete | La révision n'est pas achevée : la signature ne peut pas s'ouvrir. |
@@ -1827,6 +2029,10 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | signature_rejetee | L'empreinte du document signé ne correspond pas à celle du document déposé. |
 | prestataire_indisponible | Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse). |
 | circuit_non_externe | L'acte ne suit pas le circuit externe. |
+| piece_inconnue | Aucune pièce (fichier joint) ne porte cet identifiant. |
+| piece_referencee | La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort. |
+| piece_absente | Le corps de la requête ne porte pas le contenu de la pièce (`base64`). |
+| piece_trop_volumineuse | La pièce dépasse le plafond du service (MAX_BODY). |
 | publication_inconnue | Aucune publication ne porte cette clé. |
 | bulletin_inconnu | Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique). |
 | bulletin_provisoire | Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés. |
@@ -1865,19 +2071,24 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/db/health` | public | État de la base de données |
 | GET | `/v1/db/collections/{collection}` | lecteur | Lire une collection |
 | POST | `/v1/db/collections/{collection}/sync` | redacteur | Synchroniser une collection |
+| GET | `/v1/db/flux` | lecteur | Suivre les changements en temps réel |
 | GET | `/v1/actes` | lecteur | Lister les actes déposés |
 | POST | `/v1/actes` | redacteur | Déposer un acte finalisé |
 | GET | `/v1/actes/{id}` | lecteur | Lire un acte déposé |
 | GET | `/v1/actes/{id}/document` | lecteur | Lire le document déposé |
 | GET | `/v1/actes/{id}/dossier-signature` | administrateur | Lire le dossier de signature interne |
+| POST | `/v1/pieces` | redacteur | Déposer une pièce (fichier joint) |
+| GET | `/v1/pieces/{id}` | public | Lire une pièce (fichier joint) |
+| DELETE | `/v1/pieces/{id}` | redacteur | Retirer une pièce |
 | POST | `/v1/actes/{id}/signature` | redacteur | Envoyer un acte en signature |
+| POST | `/v1/actes/{id}/signature` | redacteur | Signer un acte avec le service (signature interne) |
 | GET | `/v1/signatures` | lecteur | Lister les circuits de signature |
 | GET | `/v1/signatures/{id}` | lecteur | Suivre un circuit |
 | GET | `/v1/signatures/{id}/document-signe` | lecteur | Récupérer l'acte signé |
 | POST | `/v1/webhooks/signature` | prestataire | Notification du prestataire (retour signé) |
 | POST | `/v1/actes/{id}/signature-externe` | redacteur | Déposer la version signée (circuit externe) |
 | POST | `/v1/actes/{id}/conformite` | redacteur | Certifier (ou refuser) la conformité de la pièce signée |
-| POST | `/v1/actes/{id}/transmission` | redacteur | Transmettre au contrôle de légalité |
+| POST | `/v1/actes/{id}/transmission` | redacteur | Transmettre au contrôle de légalité (API, ou déclaration) |
 | GET | `/v1/actes/{id}/transmission` | lecteur | Lire la transmission |
 | POST | `/v1/actes/{id}/publication` | redacteur | Publier un acte au recueil |
 | GET | `/v1/publications` | public | Lister le recueil |

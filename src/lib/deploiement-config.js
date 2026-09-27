@@ -39,6 +39,18 @@ let deploiement = null;
 // branché : lui seul détient la clé. L'Administration › Signature s'en sert
 // pour le dire, plutôt que de laisser croire à une simulation.
 let prestataire = null;
+// L'ÉTAT DU COFFRE DE SIGNATURE INTERNE, tel que le service le rend (`ETAT` de la
+// réponse : disponible, motif, niveau, nombre de signataires munis d'un
+// certificat) — jamais une clé. C'est ce qui permet à l'application de n'offrir
+// le circuit « interne » que là où le service peut réellement le mener.
+let signatureInterne = null;
+// L'ÉTAT DU CONTRÔLE DE LÉGALITÉ (télétransmission @ctes), tel que le service le
+// rend : transport, adresse, chemin, destinataire — et `cle`, un booléen, jamais
+// la clé. C'est le SERVICE qui sait si la télétransmission est réellement
+// branchée : lui seul détient la clé d'API. L'Administration › Expérimentale s'en
+// sert pour le dire, plutôt que de laisser croire à une transmission réelle
+// (voir NC-IV-004).
+let controleLegalite = null;
 
 const estObjet = (o) => !!o && typeof o === "object" && !Array.isArray(o);
 
@@ -46,6 +58,8 @@ const estObjet = (o) => !!o && typeof o === "object" && !Array.isArray(o);
 // déploiement retenu, ou `null` si la source ne dit rien d'exploitable.
 export function setDeploiementConfig(source) {
   prestataire = estObjet(source) && estObjet(source.prestataire) ? source.prestataire : null;
+  signatureInterne = estObjet(source) && estObjet(source.signatureInterne) ? source.signatureInterne : null;
+  controleLegalite = estObjet(source) && estObjet(source.controleLegalite) ? source.controleLegalite : null;
   if (!estObjet(source) || !estObjet(source.variables)) { deploiement = null; return null; }
   const variables = {};
   for (const [chemin, valeur] of Object.entries(source.variables)) {
@@ -70,6 +84,13 @@ export const aDesOptionsDeployees = () => !!deploiement && Object.keys(deploieme
 // L'état du prestataire de signature tel que le SERVICE le voit, ou null quand
 // aucun service ne parle (aperçu en ligne, page statique).
 export const prestataireDeploye = () => prestataire;
+// L'état du COFFRE de signature interne tel que le SERVICE le voit, ou null quand
+// aucun service ne parle — ou quand il n'en tient pas (`disponible: false`).
+export const signatureInterneDeploye = () => signatureInterne;
+// L'état de la TÉLÉTRANSMISSION telle que le SERVICE la voit, ou null quand aucun
+// service ne parle : `actif` dit si l'appel sortira réellement, `motif` dit
+// pourquoi il ne sortira pas.
+export const controleLegaliteDeploye = () => controleLegalite;
 
 // Le réglage est-il POSÉ par le déploiement (et non par le référentiel) ? Sert à
 // l'interface : un champ fixé par le `.env` se signale plutôt que de laisser

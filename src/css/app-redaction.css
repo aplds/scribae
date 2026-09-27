@@ -19,6 +19,9 @@
    par les administrateurs dans le registre et la fiche de l'acte.
    ========================================================================== */
 .redaction-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
+/* LE TIROIR (P6) : fermé par défaut, le panneau rend sa largeur au document. */
+.redaction-grid--ferme { grid-template-columns: minmax(0, 1fr); }
+.redaction-col--side[hidden] { display: none; }
 .redaction-hint { padding: 10px 12px; }
 .redaction-entity .fr-select { width: auto; max-width: 280px; }
 .paper--edit { padding: var(--paper-pad, 1.7cm 1.5cm); }
@@ -56,7 +59,7 @@
 .rw-tok--flash { animation: rwflash 1.4s ease-out; }
 @keyframes rwflash { 0%, 100% { box-shadow: inset 0 -1px 0 rgba(0, 0, 145, .35); } 25% { box-shadow: 0 0 0 4px rgba(224, 168, 0, .55); } }
 .rw-hint-inline { font-family: var(--font-ui); font-size: .78em; color: var(--ink-muted); font-style: italic; }
-.rw-tagmini { display: inline-block; background: #fff4d6; border: 1px solid #e0a800; border-radius: 3px; padding: 0 4px; font-size: .74rem; }
+.rw-tagmini { display: inline-block; background: #fff4d6; border: 1px solid #e0a800; border-radius: 3px; padding: 0 4px; font-size: var(--t-xs); }
 
 /* bulle d'édition d'un champ */
 .rw-pop {
@@ -65,36 +68,36 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, .18); font-family: var(--font-ui);
 }
 .rw-pop__head { padding: 10px 12px 7px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
-.rw-pop__title { font-weight: 700; font-size: .9rem; }
+.rw-pop__title { font-weight: 700; font-size: var(--t-md); }
 .rw-pop__body { padding: 12px; }
-.rw-pop__value { background: var(--bg-alt); border-radius: var(--radius); padding: 6px 8px; font-size: .85rem; margin: 0 0 8px; }
+.rw-pop__value { background: var(--bg-alt); border-radius: var(--radius); padding: 6px 8px; font-size: var(--t-sm); margin: 0 0 8px; }
 .rw-pop__foot { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 
 /* panneau de droite */
-.rx-group { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 12px 0 6px; }
+.rx-group { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 12px 0 6px; }
 .rx-field { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
 .rx-field--empty { border-left: 3px solid var(--warning); }
 .rx-field__head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-.rx-field__label { font-size: .85rem; font-weight: 600; }
+.rx-field__label { font-size: var(--t-sm); font-weight: 600; }
 .rx-jump { border: 1px solid var(--border-strong); background: var(--bg); border-radius: var(--radius); padding: 2px 6px; cursor: pointer; color: var(--brand); display: inline-flex; align-items: center; }
 .rx-jump:hover { background: var(--brand-soft); }
-.rx-out { font-size: .66rem; color: var(--ink-muted); border: 1px dashed var(--border-strong); border-radius: 999px; padding: 0 6px; }
-.rx-opt { font-size: .66rem; color: var(--ink-muted); font-style: italic; }
-.rx-hidden { margin-top: 10px; font-size: .82rem; }
+.rx-out { font-size: var(--t-xs); color: var(--ink-muted); border: 1px dashed var(--border-strong); border-radius: 999px; padding: 0 6px; }
+.rx-opt { font-size: var(--t-xs); color: var(--ink-muted); font-style: italic; }
+.rx-hidden { margin-top: 10px; font-size: var(--t-sm); }
 .rx-hidden summary { cursor: pointer; color: var(--brand); }
-.rx-h3 { font-size: .92rem; margin: 0 0 8px; }
+.rx-h3 { font-size: var(--t-md); margin: 0 0 8px; }
 .rx-ecart { border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
 .rx-ecart__head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.rx-ecart__where { font-size: .78rem; font-weight: 600; }
-.rx-ecart__line { margin: 0 0 3px; font-size: .76rem; display: flex; gap: 6px; }
-.rx-ecart__k { flex: none; width: 46px; color: var(--ink-muted); text-transform: uppercase; font-size: .64rem; padding-top: 2px; }
+.rx-ecart__where { font-size: var(--t-xs); font-weight: 600; }
+.rx-ecart__line { margin: 0 0 3px; font-size: var(--t-xs); display: flex; gap: 6px; }
+.rx-ecart__k { flex: none; width: 46px; color: var(--ink-muted); text-transform: uppercase; font-size: var(--t-xs); padding-top: 2px; }
 .rx-ecart__was { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: rgba(206, 5, 0, .5); }
 .rx-ecart__now { color: var(--ink); background: rgba(24, 117, 60, .10); }
 .rx-signature { margin-top: 8px; border-top: 1px dashed var(--border-strong); padding-top: 7px; }
-.rx-signature__label { margin: 0 0 4px; font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
-.rx-signature .doc-signature-role { font-size: .8rem; line-height: 1.4; color: var(--ink-2); }
-.rx-signature .doc-signature-name { margin-top: 3px; font-size: .85rem; font-weight: 600; letter-spacing: .02em; }
-.rx-signature__note { margin: 5px 0 0; font-size: .72rem; color: var(--ink-muted); }
+.rx-signature__label { margin: 0 0 4px; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); }
+.rx-signature .doc-signature-role { font-size: var(--t-xs); line-height: 1.4; color: var(--ink-2); }
+.rx-signature .doc-signature-name { margin-top: 3px; font-size: var(--t-sm); font-weight: 600; letter-spacing: .02em; }
+.rx-signature__note { margin: 5px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
 
 /* --- le bloc désigné, et les outils de structure ---------------------------
    Cliquer un bloc, c'est le désigner : il se marque dans la page et ses
@@ -130,24 +133,25 @@ li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { 
 .piece__add {
   display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
   border: 1px dashed var(--border-strong); border-radius: 999px; background: none;
-  color: var(--brand); font: inherit; font-size: .72rem; font-family: var(--font-ui);
+  color: var(--brand); font: inherit; font-size: var(--t-xs); font-family: var(--font-ui);
   cursor: pointer; opacity: .55; transition: opacity .12s, background .12s;
 }
 .piece--ajout:hover .piece__add, .piece__add:focus-visible { opacity: 1; background: var(--brand-soft); }
 
-/* --- la bibliothèque de variables (panneau de droite) --------------------
-   Elle reste ouverte au-dessus des onglets : les variables du document ne se
-   cherchent pas, elles se glissent. */
+/* --- la bibliothèque de variables (second onglet du tiroir) ---------------
+   Elle n'est plus ouverte en permanence au-dessus des onglets (P6) : sa place
+   est dans le tiroir, à côté des champs à compléter, et elle se cherche comme
+   les autres onglets. */
 .var-lib { padding: 0; }
 .var-lib__head {
   display: flex; align-items: center; gap: 6px; padding: 9px 12px; cursor: pointer;
   font-family: var(--font-ui); list-style: none;
 }
 .var-lib__head::-webkit-details-marker { display: none; }
-.var-lib__title { font-weight: 700; font-size: .84rem; }
-.var-lib__aide { font-size: .7rem; color: var(--ink-muted); }
-.var-lib__search { margin: 0 12px 8px; width: auto; }
-.var-lib__chips { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 9px; max-height: 176px; overflow: auto; }
+.var-lib__title { font-weight: 700; font-size: var(--t-sm); }
+.var-lib__aide { font-size: var(--t-xs); color: var(--ink-muted); }
+.var-lib__search { margin: 0 0 8px; width: auto; }
+.var-lib__chips { display: flex; flex-direction: column; gap: 9px; max-height: 46vh; overflow: auto; }
 /* Dans la bibliothèque, une variable se lit EN ENTIER : « Nom de la
    collectivité » doit s'afficher en toutes lettres, quitte à passer à la ligne.
    (Ailleurs, les puces sont des raccourcis qu'un libellé tronqué suffit à
@@ -155,10 +159,91 @@ li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { 
 .var-lib .puce__label { max-width: none; white-space: normal; overflow: visible; }
 /* Le panneau est étroit : un libellé d'onglet ne se coupe pas au milieu d'un
    mot, la barre passe à la ligne. */
-.redaction-col--side .fr-tabs .fr-tab { padding: 7px 10px; font-size: .82rem; white-space: nowrap; }
+.redaction-col--side .fr-tabs .fr-tab { padding: 7px 10px; font-size: var(--t-sm); white-space: nowrap; }
 .var-lib__groupe { display: flex; flex-direction: column; gap: 5px; }
-.var-lib__titre { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.var-lib__titre { font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
 .puce.is-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+
+/* ==========================================================================
+   LES LIGNES DE L'ÉTAT ET LE TIROIR (P6).
+
+   L'écran de rédaction disait son état par un chapelet de pastilles en tête ;
+   il le dit maintenant par TROIS lignes et un panneau :
+     • sous le titre, l'état de l'acte — « Enregistré à 14 h 32 · brouillon ·
+       il reste 2 champs » (`.rediger-etat`, des mentions en gris) ;
+     • sous le titre encore, le fil du parcours et le geste qu'il appelle
+       (`.rediger-parcours__ligne`) ;
+     • au bas du document, le contrôle — « ✓ Rien à signaler · 1 passage
+       réécrit » (`.rediger-controle`) ;
+     • dans le tiroir, l'avancement et UN champ à la fois (`.rx-un-champ`).
+   ========================================================================== */
+.rediger-etat .app-mentions { margin: 6px 0 0; }
+.rediger-parcours__ligne { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rediger-controle {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.rediger-controle .app-mentions { margin: 0; }
+/* --- LA BARRE DE DROITE SE NOMME ET SE FERME ------------------------------
+   Le panneau de rédaction n'est plus une colonne de cartes sans nom : c'est une
+   BARRE — un en-tête qui la nomme et la referme, ses onglets, son contenu —,
+   encadrée et d'un seul tenant. Ouverte, elle entre en glissant depuis la
+   droite, dans le sens du geste ; son bouton d'ouverture l'annonce
+   (`aria-expanded`, couleur d'action). Sans cela, ouvrir la barre ne changeait
+   rien à ce que l'agent regardait — le document —, et le clic semblait perdu. */
+.redaction-grid .redaction-col--side {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+.rx-tiroir__entete {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px 6px 11px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-ui);
+}
+.rx-tiroir__icone { display: inline-flex; color: var(--ink-2); }
+.rx-tiroir__icone svg { display: block; }
+.rx-tiroir__nom { font-size: var(--t-sm); }
+.rx-tiroir__entete .fr-btn { margin-left: auto; }
+.redaction-col--side #redaction-panel { border: 0; border-radius: 0; }
+/* L'entrée de la barre : courte, et dans le sens du geste (elle vient de la
+   droite). ELLE NE JOUE QUE SUR LA POSITION : un onglet en arrière-plan ne fait
+   pas courir l'horloge des animations, et une entrée en fondu laisserait alors
+   la barre invisible — c'est-à-dire, pour l'agent, un bouton qui ne fait rien,
+   exactement ce qu'on répare ici. */
+.redaction-col--side--entree { animation: rx-tiroir-entree .22s ease-out; }
+@keyframes rx-tiroir-entree {
+  from { transform: translateX(12px); }
+  to { transform: none; }
+}
+/* Ouvert, le bouton le dit : c'est ce qui manquait pour comprendre qu'une barre
+   apparaît à droite. */
+.rx-tiroir__bouton[aria-expanded="true"] {
+  border-color: var(--brand); background: var(--brand-soft); color: var(--brand);
+}
+@media (prefers-reduced-motion: reduce) {
+  .redaction-col--side--entree { animation: none; }
+}
+@media print {
+  /* La barre est de la chrome, pas de l'acte. */
+  .redaction-col--side { display: none !important; }
+}
+/* Le panneau étroit : un contrôle de champ y prend toute la largeur. */
+.redaction-col--side .fr-row { flex-wrap: wrap; }
+.rx-tiroir__titre { font-size: var(--t-md); }
+.rx-avancement { height: 6px; border-radius: 999px; background: var(--bg-alt); border: 1px solid var(--border); overflow: hidden; margin: 8px 0 2px; }
+.rx-avancement__fait { display: block; height: 100%; background: var(--brand); transition: width .18s ease; }
+.rx-un-champ { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); padding: 10px; margin-top: 12px; }
+.rx-un-champ__rang { margin: 0 0 8px; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
+.rx-un-champ__gestes { margin-top: 10px; gap: 8px; }
+.rx-reste { margin: 12px 0 0; font-size: var(--t-sm); line-height: 1.6; }
+.rx-reste__lien { border: 0; background: none; padding: 0; color: var(--brand); font: inherit; font-size: var(--t-sm); cursor: pointer; text-decoration: underline; }
+.rx-reste__lien:hover { text-decoration: none; }
 
 /* Choix du signataire : la fonction d'abord, la personne ensuite (voir
    src/ui/signer-picker.js). Les deux listes tiennent sur une ligne quand la

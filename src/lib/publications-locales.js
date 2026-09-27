@@ -27,6 +27,7 @@
 // ============================================================================
 
 import { niveauDepuisCircuit } from "./qualification-signature.js";
+import { PRESTATAIRE_INTERNE } from "./externe.js";
 
 const texte = (v) => String(v == null ? "" : v);
 const cmp = (a, b) => (texte(a) < texte(b) ? -1 : texte(a) > texte(b) ? 1 : 0);
@@ -44,15 +45,16 @@ function signatureDe(acte, p) {
   if (p && p.signature) return p.signature;
   const circuit = acte.signatureSimple || acte.signatureMode === "simple" || (acte.api && acte.api.niveau === "simple") ? "simple"
     : acte.externe || (acte.publication && acte.publication.originalExterne) ? "externe"
+    : acte.signatureInterne || acte.signatureMode === "interne" || (acte.api && acte.api.niveau === "interne") ? "interne"
     : acte.api && acte.api.acteId ? "electronique"
     : "";
   const niveau = niveauDepuisCircuit(circuit);
   if (!niveau) return null;
   return {
     niveau,
-    prestataire: null,
+    prestataire: circuit === "interne" ? PRESTATAIRE_INTERNE : null,
     signataires: acte.signeParNom ? [{ nom: acte.signeParNom, fonction: "" }] : [],
-    signeLe: acte.signeLe || (acte.signatureSimple && acte.signatureSimple.signeLe) || "",
+    signeLe: acte.signeLe || (acte.signatureSimple && acte.signatureSimple.signeLe) || (acte.signatureInterne && acte.signatureInterne.signeLe) || "",
     algorithme: "",
   };
 }

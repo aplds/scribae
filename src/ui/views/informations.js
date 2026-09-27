@@ -19,7 +19,7 @@
 // ============================================================================
 import { state, touch, redrawView, can, navigate } from "../state.js";
 import { h, button, toast, icon } from "../dom.js";
-import { textField, confirmDialog, emptyState } from "../components.js";
+import { textField, confirmDialog, emptyState, pageTitle } from "../components.js";
 import { renderMarkdown } from "../markdown.js";
 import { formatDate } from "../../lib/util.js";
 import { fullName } from "../../lib/users.js";
@@ -65,9 +65,8 @@ function pageHead(gerer, liste) {
   const brouillons = liste.length - publiees;
   return h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Informations publiées" }),
-      h("p", { class: "page-head__sub", text: "Les nouvelles que la collectivité affiche sur son recueil public : actualités, avis, communications. "
-        + "Un billet se publie sans être signé ni numéroté — il apparaît sur le site public dès qu'il est publié, à son adresse propre." })),
+      pageTitle("Informations publiées" , "Les nouvelles que la collectivité affiche sur son recueil public : actualités, avis, communications. "
+        + "Un billet se publie sans être signé ni numéroté — il apparaît sur le site public dès qu'il est publié, à son adresse propre." )),
     h("div", { class: "page-head__actions" },
       h("span", { class: "fr-small fr-muted", text: `${publiees} publiée${publiees > 1 ? "s" : ""}${brouillons ? ", " + brouillons + " brouillon" + (brouillons > 1 ? "s" : "") : ""}` }),
       button("Voir le recueil public", { variant: "secondary", icon: "globe", onClick: () => navigate("recueil") }),

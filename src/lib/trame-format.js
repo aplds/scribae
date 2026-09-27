@@ -17,6 +17,7 @@ import {
   newNode, newField, newRule, newNote, newTrame,
   NODE_MAP, NODE_TYPES, FIELD_TYPES, RULE_LEVELS, NOTE_KINDS,
 } from "./schema.js";
+import { MODES_TRAME } from "./externe.js";
 
 const list = (items, sep = " ; ") => items.map((x) => (typeof x === "string" ? x : `${x.id} — ${x.label}`)).join(sep);
 
@@ -40,7 +41,7 @@ const AIDE = {
     entityIds: "Tableau d'identifiants d'entités concernées ; [] = toutes les entités.",
     nature: "\"acte\" (défaut) ou \"annexe\". Une trame d'ANNEXE produit un document adopté par un autre (un règlement intérieur adopté par une délibération) : il ne se signe pas — c'est l'acte qui l'adopte qui est signé, et l'original de cet acte est suivi du texte de l'annexe. adoptionVisa (true par défaut) fait rappeler l'acte d'adoption dans les visas de l'annexe.",
     reglement: "true ou false (défaut : false). N'a de sens que sur une ANNEXE : déclare le document comme un RÈGLEMENT — un texte NORMATIF, que le recueil publie AUSSI pour lui-même, à titre informatif, sous son propre identifiant. Un règlement se consulte comme un code : son texte en vigueur est accessible directement, et les actes qui l'adoptent ou le modifient en publient les versions successives. Une annexe ordinaire (un tableau, une grille) ne le reçoit pas.",
-    signature: "\"\" (défaut : suit le réglage général, Administration › Signature), \"externe_impose\" (le circuit externe — papier ou outil tiers, sans API — est obligatoire pour cette trame), \"externe_autorise\" (il est possible, au choix du rédacteur, acte par acte), ou \"electronique\" (le circuit électronique est imposé). Dans le circuit externe : le rédacteur télécharge le document prêt à signer, le fait signer hors de l'application, dépose la version signée en PDF, et le réviseur certifie sa conformité avec la version numérique avant publication.",
+    signature: "\"\" (défaut : suit le réglage général, Administration › Signature), ou l'un des circuits — imposé ou seulement autorisé : \"electronique\", \"simple_impose\", \"simple_autorise\", \"interne_impose\", \"interne_autorise\", \"externe_impose\", \"externe_autorise\". Le circuit externe se signe hors de l'application (le rédacteur télécharge le document prêt à signer, le fait signer, dépose la version signée en PDF, et le réviseur certifie sa conformité). La signature simple se donne dans l'application, avec le compte du signataire. La signature interne est produite par le SERVICE, avec la clé du signataire gardée scellée dans son coffre — auto-hébergement seulement. Le circuit électronique passe par le parapheur du prestataire.",
     divisions: "L'échelle des divisions de CETTE trame : [ { level (entier croissant, 1 = le plus haut), label (mot imprimé, libre — « Livre », « Titre », « Partie », « Chapitre », « Section »…), num (\"roman\" | \"decimal\" | \"letter\" | \"aucun\") } ]. Vide = l'échelle livrée (Livre, Titre, Chapitre, Section).",
     fields: "Tableau de champs du formulaire de rédaction (voir « champ »).",
     rules: "Tableau de règles de contrôle (voir « règle »).",
@@ -268,7 +269,7 @@ export function normalizeTrame(raw) {
   t.nature = raw.nature === "annexe" ? "annexe" : "acte";
   t.adoptionVisa = raw.adoptionVisa !== false;
   t.reglement = t.nature === "annexe" && raw.reglement === true;
-  t.signature = ["externe_impose", "externe_autorise", "electronique"].includes(raw.signature) ? raw.signature : "";
+  t.signature = MODES_TRAME.some((m) => m.id === raw.signature) ? raw.signature : "";
   t.divisions = Array.isArray(raw.divisions)
     ? raw.divisions
       .filter((d) => d && typeof d === "object")

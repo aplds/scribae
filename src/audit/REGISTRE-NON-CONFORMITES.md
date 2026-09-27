@@ -1,8 +1,8 @@
 ---
 titre: Registre des non-conformités — Scribae
-version: 5
+version: 3
 cree_le: 2026-09-21
-mis_a_jour: 2026-09-30 (**5e campagne** : NC-I-015 et NC-I-016 ouvertes pour le verrou de dépendances et le chemin des tests à la racine ; NC-II-015 ouverte pour la balise noindex non déployée ; 39 fiches au total)
+mis_a_jour: 2026-09-27 (1.6.1r et 1.6.1s : NC-II-014 ouverte et levée aussitôt ; 1.6.1t et 1.6.1u : aucune fiche ouverte ; 1.6.1v : aucune fiche ouverte — le deadlock des écritures est corrigé et couvert par des épreuves ; 1.6.1w : aucune fiche nouvelle — la porte de signature de NC-II-006 est renforcée (le titulaire seul, porteur de la qualité) et son parcours complet est rejoué ; 1.6.1x : aucune fiche ouverte — le circuit de signature INTERNE est livré, et il apporte à NC-IV-001 sa première preuve dans l'autre sens ; les dates des notes 1.6.1u à 1.6.1w sont ramenées au 2026-09-26, la date d'une note étant celle de son achèvement ; 1.6.2 : aucune fiche ouverte — le travail à deux est livré (flux de changements `GET /v1/db/flux`, fusion des écritures concurrentes au lieu de l'écrasement, brouillons partagés par la présence), le contrat des deux services est rejoué, et son parcours gagne deux épreuves ; au passage, un défaut du service de démonstration est corrigé — ses billets de recueil échouaient en 500 dès le deuxième billet, `localeCompare` n'existant pas dans le moteur du service ; 1.6.3 : NC-IV-004 passée en LEVÉE — la télétransmission est RÉELLE quand le service est branché (`src/server/mysql/controle-legalite.mjs`, variables `SCRIBA_CONTROLE_LEGALITE_*`, `502 transmission_echec` sur refus, rien d'enregistré), la simulation restant marquée quand aucun appel n'a lieu ; NC-II-006 renforcée — la porte de signature est désormais tenue par le SERVICE (opposition opérateur / signataire, `attribution` vérifiée / déclarée / reprise / compilation, certification de conformité opposée au réviseur) ; 4e campagne d'audit (2026-09-27, version 1.6.3) : NC-IV-004 passée en LEVÉE (télétransmission réelle quand le service est branché), quatre fiches nouvelles — NC-I-017 (les deux copies ont divergé), NC-II-016 (court-circuit de la transmission par une `reference` fournie), NC-II-017 (aucune identité opposable sur le service de démonstration, statut ACCEPTÉE), NC-IV-006 (refus du contrôle de légalité non traités) — et l'historique des audits incrémenté ; 1.6.3a : NC-II-016 passée en LEVÉE — le champ `reference` non documenté qui court-circuitait la transmission au contrôle de légalité est remplacé par une DÉCLARATION nommée, datée et opposée à son auteur, documentée au contrat OpenAPI et journalisée (la transmission se règle désormais en TROIS RÉGIMES : désactivée, déclarative, ou API @ctes avec déclaration par acte) ; NC-II-017 atténuée — le service dit ce qu'il a pu ATTESTER (verifiee / declaree) et l'application ne présente plus comme vérifiée une déclaration simplement enregistrée) ; 1.6.3b : aucune fiche ouverte — la MÉTHODE de travail entre dans le dépôt (`src/docs/ATELIER.md`, le harnais `scripts/harnais-atelier.mjs`), aucune règle métier n'est touchée ; au passage, une affirmation devenue fausse est corrigée dans `README.md` et `docs/INDUSTRIALISATION.md` (le banc d'essai de l'atelier n'est plus « hors du dépôt »))
 cadre: src/audit/PROMPT-AUDIT-SCRIBAE.md
 ---
 
@@ -34,13 +34,13 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 
 ## Synthèse
 
-| Cote | Nombre | Ouvertes | En cours | Levées |
-|---|---|---|---|---|
-| Bloquante | 3 | 0 | 0 | 3 |
-| Majeure | 13 | 0 | 5 | 8 |
-| Mineure | 11 | 0 | 3 | 8 |
-| Observation | 15 | 1 | 4 | 10 |
-| **Total** | **39** | **1** | **12** | **26** |
+| Cote | Nombre | Ouvertes | En cours | Levées | Acceptées |
+|---|---|---|---|---|---|
+| Bloquante | 3 | 0 | 0 | 3 | 0 |
+| Majeure | 12 | 1 | 3 | 8 | 0 |
+| Mineure | 13 | 2 | 2 | 9 | 0 |
+| Observation | 13 | 1 | 2 | 9 | 1 |
+| **Total** | **41** | **4** | **7** | **29** | **1** |
 
 > Les nombres de cette synthèse sont **recalculés sur les fiches** à chaque campagne *et* à chaque
 > traitement d'une proposition du plan d'action. Le premier traitement du 2026-09-23 (livraison
@@ -142,6 +142,49 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 > fichier éprouvé isolément — dont `src/tests/reprise.test.mjs` (9 épreuves) et deux épreuves de plus
 > pour le service (`src/server/mysql/actes.test.mjs`).
 
+> La livraison **1.6.3** — les **accès API réels**, et la signature qu'on ne peut pas prendre —
+> porte **une fiche en « Levée »**, **NC-IV-004** : la télétransmission au contrôle de légalité
+> n'est plus simulée quand le service est branché (`src/server/mysql/controle-legalite.mjs`, un vrai
+> `POST` vers l'API d'envoi du `.env`, la clé restant au serveur, un refus rendant `502
+> transmission_echec` sans rien enregistrer) ; la simulation, quand aucun appel n'a lieu, reste
+> **marquée** (`demonstration: true` et sa réserve). Elle **renforce NC-II-006** sans le rouvrir : la
+> porte de signature est désormais tenue par le **SERVICE** (`porteSignature`, opposition opérateur /
+> signataire dès que le service identifie les personnes, `403 signature_non_habilitée` sinon), la
+> **certification de conformité** est opposée de même au réviseur, et la reprise comme la compilation
+> — qui ne sont pas des signatures — sont **réservées à l'administration** avec leur attribution
+> (`reprise` / `compilation`). Elle ne change le statut d'aucune autre fiche, et n'en ouvre aucune :
+> ce qui reste — les **refus du contrôle de légalité** (rejet, demande d'observations) — est un
+> périmètre futur, consigné au `TODO.md`. Épreuves ajoutées : `controle-legalite.test.mjs` (9) et
+> cinq cas d'`actes.test.mjs` ; le parcours gagne **`signature-hors-competence`** (26e), qui balaie
+> les **759 paires** acte × compte et vérifie qu'aucun bouton de signature ne s'offre hors
+> compétence.
+
+> **4e campagne d'audit (2026-09-27, version 1.6.3).** Elle porte **NC-IV-004 en « Levée »** (la
+> télétransmission est réelle quand le service est branché) et **renforce NC-II-006** (la porte de
+> signature est tenue par le service, non plus seulement par l'interface). Elle ouvre **quatre
+> fiches** : **NC-I-017** (la copie de travail et la copie publiée ont divergé — versions,
+> changelogs et registres d'audit différents ; Majeure), **NC-II-016** (la formalité de
+> télétransmission se court-circuite par une `reference` fournie ; Mineure), **NC-II-017** (sur le
+> service de démonstration, aucune identité ne peut être opposée au signataire — limite **Acceptée**
+> du démonstrateur ; Observation) et **NC-IV-006** (les refus du contrôle de légalité ne sont pas
+> traités, et le client n'a jamais parlé à une vraie passerelle ; Mineure). Le rapport est
+> `rapports/AUDIT-SCRIBAE-2026-09-27.md`.
+
+> La livraison **1.6.3a** — la **transmission au contrôle de légalité se règle en trois régimes** —
+> ferme **une fiche : NC-II-016** passe en « Levée ». Le champ `reference` non documenté, qui
+> permettait à un appel direct de fabriquer un certificat simulé **sans aucun appel** et de lever
+> ainsi la porte de publication, est **retiré**. Il est remplacé par une **déclaration** — nommée,
+> datée, portant son auteur et un motif facultatif —, exigée pour publier un acte soumis à la
+> formalité, **documentée au contrat OpenAPI des deux services**, et **opposée à son auteur** par le
+> service quand il identifie les personnes (`403 declaration_non_habilitée`) comme à la liste des
+> réviseurs de l'acte. Le même chantier répond à l'instruction « trois voies possibles » : la
+> transmission est **désactivée**, **déclarative** (un réviseur atteste, avant publication, à qui et
+> à quelle date — aucun appel sortant), ou **par API @ctes** — chaque acte pouvant en outre être
+> déclaré. La fiche NC-II-016 garde son constat et sa preuve ; seule sa **recommandation** (nommer ou
+> retirer le champ) est satisfaite, et par sa première branche. Ce qui reste de NC-IV-006 — les
+> **refus** du contrôle de légalité — reste ouvert, consigné au `TODO.md`. Au passage, **NC-II-017** (limite acceptée du démonstrateur) est **atténuée dans ses effets** : le service dit ce qu'il a pu attester (`attribution: "verifiee"` quand il oppose la déclaration à l'opérateur, `"declaree"` quand il ne le peut pas), et l'application cesse de présenter comme vérifiée une déclaration qu'il n'a pu qu'enregistrer — la limite demeure (le démonstrateur n'identifie pas les personnes), mais elle ne se déguise plus en garantie. Épreuves ajoutées :
+> `controle-legalite.test.mjs` (9) et deux cas d'`actes.test.mjs` (32).
+
 ## Historique des audits
 
 | Date | Rapport | Auditeur | Version outil | NC ouvertes | NC levées | NC nouvelles |
@@ -149,6 +192,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21.md` | Audit initial (quatre regards : DSI, RSSI, qualiticien, DAJ) | 1.2.0 | 0 | 0 | 27 |
 | 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21b.md` | Audit 2e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), parcours par l'interface | 1.2.0 | 6 | 18 | 3 |
 | 2026-09-23 | `rapports/AUDIT-SCRIBAE-2026-09-23.md` | Audit 3e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), dépôt GitHub, démonstration publiée et chaîne d'intégration | 1.6.0 | 16 | 0 | 6 |
+| 2026-09-27 | `rapports/AUDIT-SCRIBAE-2026-09-27.md` | Audit 4e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), accès réseau réels et porte de signature (interface et service) | 1.6.3 | 11 | 1 | 4 |
 
 ---
 
@@ -313,41 +357,24 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Élevé (extraction du domaine) ; faible pour l'épreuve de conformité |
 | Priorité | Moyenne |
 | Échéance | 90–180 jours |
-| Statut | **Levée** (2026-09-23, livraison 1.6.1i) — la recommandation est satisfaite par sa **branche « à défaut »** : un **jeu d'appels commun** (`src/tests/conformite-service.mjs`, 13 appels dont la dépublication) est joué **contre les deux implémentations** — en Node sur le service auto-hébergé, et dans le navigateur sur le service de démonstration —, et peut être comparé à une installation réelle par la variable `SCRIBA_CONFORMITE_URL`. Une divergence de réponse entre les deux devient donc visible mécaniquement. Réserve assumée : les deux implémentations **subsistent** (la démonstration n'est pas devenue un adaptateur du domaine) — c'est le choix de ne pas extraire le domaine côté démonstration qui reste consigné ici. |
+| Statut | **Levée** (2026-09-23, livraison 1.6.1i) — la recommandation est satisfaite par sa **branche « à défaut »** : un **jeu d'appels commun** (`src/tests/conformite-service.mjs`, 13 appels dont la dépublication) est joué **contre les deux implémentations** — en Node sur le service auto-hébergé, et dans le navigateur sur le service de démonstration —, et peut être comparé à une installation réelle par la variable `SCRIBA_CONFORMITE_URL`. Une divergence de réponse entre les deux devient donc visible mécaniquement. Réserve assumée : les deux implémentations **subsistent** (la démonstration n'est pas devenue un adaptateur du domaine) — c'est le choix de ne pas extraire le domaine côté démonstration qui reste consigné ici. **Complément (1.6.2)** : la couverture du jeu laissait **deux routes** hors de son champ — `POST /v1/actes/{id}/signature-externe` et `POST /v1/actes/{id}/conformite` —, et le service Node les ignorait (404) alors que la démonstration les servait : une divergence de la classe visée ici a donc vécu sans être vue, et a été trouvée par un contrôle manuel du circuit externe sur un déploiement. Le service auto-hébergé porte désormais les deux routes, et le jeu les couvre des deux côtés (15 appels). |
 | Origine | Audit 2026-09-23 (3e campagne) |
 
-### NC-I-015 — Absence de verrou de dépendances à la racine pour l'outillage
+### NC-I-017 — La copie de travail et la copie publiée ont divergé (version, changelog, registre d'audit)
 
 | Champ | Valeur |
 |---|---|
 | Gravité | Majeure |
-| Chapitre / section | I.3 — Industrialisation ; I.4 — Chaîne d'approvisionnement |
-| Constat | Aucun `package-lock.json` à la racine du dépôt. Le service auto-hébergé a son verrou (`src/server/mysql/package-lock.json`), mais l'outillage à la racine (`scripts/`, `tests/`) n'a pas de verrou pour ses dépendances (aucune dépendance directe, mais `npm ci` échouerait sans verrou). |
-| Exigence de référence | ISO/IEC 27002 (gestion des dépendances), bonne pratique de reproductibilité. |
-| Preuve | `ls -la package-lock.json` — b No root lock file b. `cat package.json` — pas de dépendances directes, mais `npm install` pourrait épingler des versions. |
-| Recommandation | Exécuter `npm install` à la racine et committer le `package-lock.json` généré. Voir P-31. |
-| Effort | Faible |
-| Priorité | Haute |
-| Échéance | 0—30 jours |
-| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
-| Origine | Audit 2026-09-30 |
-
-### NC-I-016 — Le chemin des tests dans `package.json` à la racine est incorrect pour la CI
-
-| Champ | Valeur |
-|---|---|
-| Gravité | Majeure |
-| Chapitre / section | I.3 — Industrialisation ; I.3 — Environnements, tests |
-| Constat | `package.json` à la racine définit `"test": "node --test tests/ src/server/mysql/ src/server/charge/"`. Or `src/server/mysql/` et `src/server/charge/` ne sont pas à la racine, mais sous `src/`. La CI GitHub échoue car elle ne trouve pas ces chemins. |
-| Exigence de référence | ISO/IEC 25010 (fiabilité, maintenabilité), bonne pratique d'intégration continue. |
-| Preuve | `.github/workflows/ci.yml` — `run: npm test` — échec car `Cannot find module '/workspace/github__aplds__scribae/src/server/mysql'`. `node --test tests/ src/server/mysql/ src/server/charge/` — même erreur locale. |
-| Recommandation | Corriger le chemin dans `package.json` : `"test": "node --test tests/ ./src/server/mysql/ ./src/server/charge/"`. Voir P-32. |
-| Effort | Faible |
+| Chapitre / section | I.5 — Gouvernance du code ; I.3 — Reproductibilité ; I.8 — Documentation |
+| Constat | La **copie publiée** (dépôt `aplds/scribae`, servie aussi par `https://demo.scribae.eu`) et la **copie de travail** (celle qui a été auditée) ne racontent pas la même histoire. La copie publiée sert `APP_VERSION = "1.6.1w"` (`APP_RELEASED = "2026-09-29"`), dont la première entrée datée de changelog est `[1.6.1w] — 2026-09-29`, et son **registre d'audit est en version 5** (`mis_a_jour: 2026-09-30`, **39 fiches**, annonçant des campagnes 4 et 5 et des fiches `NC-I-015`, `NC-I-016`, `NC-II-015`). La copie de travail est en **1.6.3** (`2026-09-27`), avec un registre **version 3** (37 fiches, trois campagnes). Une **lignée** de développement et d'audit existe donc du côté publié que la copie de travail ne contient pas — et réciproquement. Le README prescrit pourtant de **comparer** avant d'écrire et de ne jamais livrer deux fois le même numéro : la divergence rend ces règles inopérantes. |
+| Exigence de référence | ISO/IEC 27001 (maîtrise de la configuration) ; ISO/IEC 25010 (maintenabilité, exactitude) ; règle interne « Flux de travail : Perchance ↔ GitHub » (`src/README.md`). |
+| Preuve | `raw.githubusercontent.com/aplds/scribae/main/src/lib/version.js` → `APP_VERSION = "1.6.1w"` (`2026-09-29`) ; première entrée datée de `.../src/CHANGELOG.md` → `## [1.6.1w] — 2026-09-29` (le changelog publié ne contient **ni `1.6.2` ni `1.6.3`**) ; `https://demo.scribae.eu/src/audit/REGISTRE-NON-CONFORMITES.md` → `version: 5`, `mis_a_jour: 2026-09-30 … 39 fiches`, fiches `NC-I-015`, `NC-I-016`, `NC-II-015` ; copie de travail : `src/lib/version.js` → `1.6.3`, `src/CHANGELOG.md` → `## [1.6.3] — 2026-09-27`, registre `version: 3`, 37 fiches. |
+| Recommandation | **Choisir la lignée qui fait foi**, récupérer de l'autre ce qui manque (registre et rapports des campagnes absentes, ou les livraisons `1.6.2`/`1.6.3` selon l'arbitrage), republier **une seule** copie, puis vérifier que `APP_VERSION` et la première entrée datée du changelog concordent **des deux côtés**. Voir P-48. |
+| Effort | Moyen |
 | Priorité | Très haute |
-| Échéance | 0—30 jours |
-| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
-| Origine | Audit 2026-09-30 |
-
+| Échéance | 0–30 jours |
+| Statut | **Ouverte** (2026-09-27) |
+| Origine | Audit 2026-09-27 (4e campagne) — vu en cadrant la campagne sur le dépôt publié. *Note : les identifiants `NC-I-011` à `NC-I-016` sont employés par la lignée publiée pour d'autres objets ; la présente fiche prend le numéro suivant libre (`017`) pour ne pas recouvrir une fiche existante ailleurs.* |
 
 ## Chapitre II — Sécurité des systèmes d'information (RSSI)
 
@@ -439,12 +466,12 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Chapitre / section | II.2 — Habilitations ; II.5 — Signature, confusion d'identité |
 | Constat | Le geste de signature (« signature simple », dans l'application) repose sur `auteurDe(acte, doc)`, qui prend le **signataire désigné par l'acte** (`doc.meta.signataire`) — il ne consulte jamais le compte connecté. La fenêtre de signature affiche cette identité et fait attester « En signant, vous engagez votre signature sur ce document » : un opérateur qui n'est ni le signataire ni un délégataire peut donc apposer la signature **au nom d'un autre**. Le contrôle amont (`engagerSignatureSimple`) ne vérifie que le parapheur et la révision, jamais la compétence de l'opérateur. L'action n'est gardée que par la permission `actes.signer`, accordée notamment au rôle **Rédacteur**. Le certificat produit est engendré dans le navigateur de l'opérateur, au nom déclaré (cf. NC-IV-001). |
 | Exigence de référence | OWASP ASVS V2/V4 ; exigence de non-répudiation ; principe de séparation des pouvoirs. |
-| Preuve | `src/ui/views/signature.js:1412` (`auteurDe` — lit `doc.meta.signataire`) ; `src/ui/views/signature.js:1248` (`signerSimple` — `signataire: auteur`) ; `src/ui/views/signature.js:1133` (`engagerSignatureSimple` — aucune vérification de compétence) ; `src/ui/app.js:90` (`signature: "actes.signer"`) ; `src/lib/users.js` (`actes.signer` inclut `redacteur`). Vérifié en direct : l'écran « Signature & publication » est ouvert au compte rédacteur (page_eval). Non vérifié : exécution complète du scénario d'usurpation (l'acte de test du périmètre était soumis à révision, ce qui a interrompu le parcours). |
+| Preuve | `src/ui/views/signature.js:1412` (`auteurDe` — lit `doc.meta.signataire`) ; `src/ui/views/signature.js:1248` (`signerSimple` — `signataire: auteur`) ; `src/ui/views/signature.js:1133` (`engagerSignatureSimple` — aucune vérification de compétence) ; `src/ui/app.js:90` (`signature: "actes.signer"`) ; `src/lib/users.js` (`actes.signer` inclut `redacteur`). Vérifié en direct : l'écran « Signature & publication » est ouvert au compte rédacteur (page_eval). Non vérifié : exécution complète du scénario d'usurpation (l'acte de test du périmètre était soumis à révision, ce qui a interrompu le parcours). **1.6.3** : `src/server/mysql/actes.mjs` (`porteSignature`, `hWebhookSignature`, certificat de conformité) ; `src/ui/views/signature.js` (`enregistrerCertification`, `certifierConformite`, `publierConsolide`, `retablirActe`) ; parcours `signature-hors-competence` (`src/tests/parcours.mjs`). |
 | Recommandation | Comparer l'identité de l'opérateur à la chaîne de signature de l'acte (le module `competenceDuCompte` existe déjà) et **refuser** la signature hors compétence ; journaliser l'opérateur distinctement du signataire. Voir P-06. |
 | Effort | Moyen |
 | Priorité | Très haute |
 | Échéance | 30–90 jours |
-| Statut | **Levée** (2026-09-21b) — porte de compétence posée sur les trois chemins de signature (`src/ui/views/signature.js:1150`, `:1264`, `:2187`), opérateur tracé dans le dossier interne. Parcours complet non rejoué (aucun acte en attente de signature au jeu de démonstration) : le refus est établi par les messages et la lecture de code. **Renforcée (1.6.1w)** — la porte ne se contentait pas d'« être dans la chaîne » : elle exige désormais d'être le **titulaire** (dernier étage) **et** de porter la qualité de signataire (`peutSignerEffectivement`, `src/lib/signataires.js`), et l'outil du prestataire comme la fenêtre de signature simple ne s'ouvrent que pour lui. Le parcours complet est cette fois **rejoué dans l'aperçu** : un administrateur lié à l'autorité de tête, et un délégant, se voient **refuser** la signature de l'acte d'un autre (journal `essai` de séance) ; un acte validé par son réviseur part bien en signature, et le titulaire la donne. |
+| Statut | **Levée** (2026-09-21b) — porte de compétence posée sur les trois chemins de signature (`src/ui/views/signature.js:1150`, `:1264`, `:2187`), opérateur tracé dans le dossier interne. Parcours complet non rejoué (aucun acte en attente de signature au jeu de démonstration) : le refus est établi par les messages et la lecture de code. **Renforcée (1.6.1w)** — la porte ne se contentait pas d'« être dans la chaîne » : elle exige désormais d'être le **titulaire** (dernier étage) **et** de porter la qualité de signataire (`peutSignerEffectivement`, `src/lib/signataires.js`), et l'outil du prestataire comme la fenêtre de signature simple ne s'ouvrent que pour lui. Le parcours complet est cette fois **rejoué dans l'aperçu** : un administrateur lié à l'autorité de tête, et un délégant, se voient **refuser** la signature de l'acte d'un autre (journal `essai` de séance) ; un acte validé par son réviseur part bien en signature, et le titulaire la donne. **Renforcée (1.6.3)** — la porte est désormais tenue par le **SERVICE** lui-même, et non seulement par l'interface : dès que le service identifie les personnes (`AUTH_MODE=password` ou `oidc`), `porteSignature` (`src/server/mysql/actes.mjs`) **oppose l'opérateur au signataire** — un `POST /v1/webhooks/signature` joué hors de l'interface avec un jeton valide ne peut plus engager la signature d'autrui (`403 signature_non_habilitée`, circuit `rejetee` ; `signataire_non_identifie` / `signature_sans_identite` dans les cas voisins), et le **nom** imprimé vient du référentiel du service, jamais du corps. La **certification de conformité** a la même porte (`403 conformite_non_habilitée`), et la reprise comme la compilation — qui ne sont pas des signatures — sont **réservées à l'administration** (`attribution` : `reprise` / `compilation`). Le parcours **`signature-hors-competence`** (26e) balaie les **759 paires** acte × compte du jeu de démonstration et vérifie qu'aucun bouton de signature ne s'offre sur un acte hors compétence. |
 | Origine | Audit 2026-09-21 (confirme et qualifie le point d'entrée « usurpation du signataire » du prompt §4.2) |
 
 ### NC-II-007 — Injection HTML stockée dans le recueil public (XSS)
@@ -573,25 +600,39 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Priorité | Haute |
 | Échéance | Faite |
 | Statut | **Levée** (2026-09-25, livraison 1.6.1s) — les dossiers `informations` et `reprises` sont déclarés, `dossierDe` ne renvoie plus d'alias pour une collection inconnue, et les données héritées du dossier commun sont reprises une fois (`HERITAGE`, `reprendreHeritage`). |
-| Origine | Constat de développement
-### NC-II-015 — La balise `noindex` est présente dans `index.html` mais non déployée sur demo.scribae.eu
+| Origine | Constat de développement (ajout de la collection `reprises`), hors campagne |
+
+### NC-II-016 — La télétransmission au contrôle de légalité se court-circuite par une référence fournie
 
 | Champ | Valeur |
 |---|---|
-| Gravité | Majeure |
-| Chapitre / section | II.1 — Cartographie ; II.6 — Segmentation |
-| Constat | `index.html:45-49` pose une balise `<meta name="robots" content="noindex, nofollow">` si `location.hostname === "demo.scribae.eu"`. Or cette condition n'est **pas vérifiée** : la balise n'apparaît pas dans le DOM de `https://demo.scribae.eu`. |
-| Exigence de référence | ISO/IEC 27002 (classification de l'information), loyauté de la présentation. |
-| Preuve | `index.html:45-49` (condition `if (location.hostname === "demo.scribae.eu")`), inspection du DOM de `https://demo.scribae.eu` — aucune balise `meta[name="robots"]`. |
-| Points conformes | La balise est présente dans le code source. NC-III-008 presque levée. |
-| Recommandation | Vérifier que la condition `location.hostname === "demo.scribae.eu"` est bien évaluée à `true` lors du chargement de `demo.scribae.eu`. Si la page est servie par GitHub Pages, `location.hostname` devrait bien valoir `demo.scribae.eu`. Vérifier avec `console.log(location.hostname)` dans l'aperçu. Priorité haute, échéance 0—30 jours. |
+| Gravité | Mineure |
+| Chapitre / section | II.4 — Sécurité de l'API ; IV.1 — Cycle réglementaire (transmission) |
+| Constat | La route `POST /v1/actes/{id}/transmission` (rôle `redacteur`) honore un champ `reference` du corps : quand il est fourni, l'appel réel à l'API du contrôle de légalité **n'a pas lieu**, et le certificat est fabriqué localement avec `demonstration: true`. Comme l'acte se retrouve doté d'une `transmission`, le contrôle de publication (`409 transmission_absente`) est **levé** : un acte soumis au contrôle de légalité peut donc être publié **sans que la formalité ait été accomplie**, par un appel d'API direct, hors de l'interface. Le certificat porte la réserve « simulée » (un lecteur n'est pas trompé), mais la formalité obligatoire est contournée, et le corps de cette route n'est pas décrit dans `docs/API.md` : le champ est **non documenté**. |
+| Exigence de référence | CGCT (L. 2131-1 s. : transmission obligatoire) ; OWASP ASVS V4 (contrôle d'accès fonctionnel) ; cohérence entre le contrat OpenAPI et le comportement. |
+| Preuve | **Au constat (1.6.3)** : `src/server/mysql/actes.mjs` (`hTransmettre` : `if (!reference && controleLegalite && controleLegalite.actif())` et `const demonstration = !appelReel;`) ; `src/lib/api-reference.js` (la route de transmission **n'avait pas** de champ `corps` décrivant `reference`) ; `src/docs/API.md` (idem). Non reproduit dynamiquement (l'aperçu sert un service non branché) : établi par lecture de code. **Après correction (1.6.3a)** : le champ `reference` a **disparu** de `hTransmettre` (les deux services) au profit de `declaration`, décrite au contrat OpenAPI ; tenu par `src/server/mysql/actes.test.mjs` (32/32, dont un cas de déclaration sans API et un cas d'opposition identité / compétence) et `src/server/mysql/controle-legalite.test.mjs` (9/9). |
+| Recommandation | **Retirer** le champ, ou le **nommer** et l'exiger comme une « constatation hors application » explicite (champ dédié, motif, journal, et refus de lever `transmission_absente` sans cette déclaration), puis l'inscrire au contrat OpenAPI. Voir P-47. |
 | Effort | Faible |
 | Priorité | Haute |
-| Échéance | 0—30 jours |
-| Statut | **Nouvelle** (2026-09-30, 5e campagne) |
-| Origine | Audit 2026-09-30 |
+| Échéance | Faite |
+| Statut | **Levée** (2026-09-27, livraison 1.6.3a) — le champ `reference` non documenté est **retiré** : la transmission se **DÉCLARE** désormais (`POST /v1/actes/{id}/transmission`, corps `declaration`), avec date et destinataire **requis** (`422 declaration_incomplete` sinon), un auteur **nommé** et opposé à l'opérateur — et à la liste `revision.reviseurs` de l'acte — par le service (`403 declaration_non_habilitée`), un motif consigné et une mention de certificat qui nomme le déclarant. La route est **décrite au contrat OpenAPI des deux services**, la déclaration est **journalisée**, et la publication d'un acte soumis reste refusée sans transmission (`409 transmission_absente`) : la porte ne se lève donc plus que sur une déclaration **habilitée**, documentée et attribuée. La transmission se règle en outre en trois régimes (`config.controleLegalite.mode` : `desactive`, `declaratif`, `api`). |
+| Origine | Audit 2026-09-27 (4e campagne) |
 
- (ajout de la collection `reprises`), hors campagne |
+### NC-II-017 — Sur le service de démonstration, aucune identité ne peut être opposée au signataire
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Observation |
+| Chapitre / section | II.2 — Comptes, authentification, habilitations ; II.5 — Usurpation du signataire ; II.6 — Segmentation |
+| Constat | La porte de signature (`porteSignature`) n'oppose l'opérateur au signataire que quand le **service identifie les personnes** (`ctx.sessionRequise === true`, c'est-à-dire un déploiement à `AUTH_MODE=password` ou par annuaire). Sur le service de **démonstration** de la plateforme, les comptes vivent dans le navigateur : le service n'a **aucune** identité à opposer. Un appelant muni d'une **clé de service** y dépose donc un paquet signé **au nom de n'importe quelle personne**, et la signature porte l'attribution `declaree` (le service dit qu'il n'a rien pu vérifier, non que c'est vrai). C'est la seule limite qui subsiste du point d'entrée « usurpation du signataire » du cadre ; elle est **propre au démonstrateur** et disparaît sur le service auto-hébergé. |
+| Exigence de référence | OWASP ASVS V2/V4 ; règlement eIDAS (UE) n° 910/2014 (identification du signataire) ; §2.3 du cadre (distinguer démonstration et déploiement cible). |
+| Preuve | `src/server/mysql/actes.mjs` (`porteSignature` : `if (!ctx || ctx.sessionRequise !== true) return { ...brut, attribution: "declaree" }`) ; `GET /v1/auth/etat` sur l'aperçu → `mode: "demonstration"` (vérifié dynamiquement) ; bienfait symétrique : `actes.test.mjs` (30/30) exerce la branche à session (opposition effective). |
+| Recommandation | Limite **assumée** pour la démonstration (jeu fictif, bandeau, attribution `declaree`). La **nommer partout où une signature s'affiche** (pastille « signature déclarée (démonstration) » portée par l'acte, en plus du bandeau), et rappeler dans le guide et le README que la garantie n'existe qu'avec un service qui identifie les personnes. Voir P-53. |
+| Effort | Faible |
+| Priorité | Moyenne |
+| Échéance | 30–90 jours |
+| Statut | **Acceptée** (2026-09-27) — limite du **démonstrateur**, assumée par l'éditeur du logiciel et **documentée** (SPEC § 2.7.2 ter, `GET /v1/config`, attribution `declaree`) ; elle ne s'applique **pas** au service auto-hébergé, où `porteSignature` oppose l'opérateur au signataire. |
+| Origine | Audit 2026-09-27 (4e campagne) — instruction du second point d'entrée du cadre (§4.2). |
 
 ## Chapitre III — Qualité, accessibilité et expérience (qualiticien)
 
@@ -738,7 +779,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Élevé |
 | Priorité | Haute |
 | Échéance | 90–180 jours |
-| Statut | **En cours** (2026-09-23 ; complété en 1.6.1g) — la recommandation « **adoucir le vocabulaire** » est **livrée** : `src/lib/qualification-signature.js` qualifie chaque signature, et l'acte publié porte sous son texte un encadré **« Signature simple — non qualifiée »** (`src/ui/views/acte-publie.js`, `src/lib/eli.js`) ; le recueil public reprend la mention et le JSON-LD la transporte (`eli:signature_level`), le prestataire **simulé** étant nommé de la même façon (`src/wiki.js`). Le fond demeure : le certificat reste **auto-engendré dans le navigateur** et la clé privée conservée en clair dans l'enregistrement local (`src/lib/signature.js`, export JWK) ; l'opérateur est tracé et sa compétence vérifiée, la **non-répudiation n'est pas établie** — seule une signature **qualifiée**, adossée à un prestataire de confiance, la donnerait. |
+| Statut | **En cours** (2026-09-23 ; complété en 1.6.1g, puis en 1.6.1x) — la recommandation « **adoucir le vocabulaire** » est **livrée** : `src/lib/qualification-signature.js` qualifie chaque signature, et l'acte publié porte sous son texte un encadré **« Signature simple — non qualifiée »** (`src/ui/views/acte-publie.js`, `src/lib/eli.js`) ; le recueil public reprend la mention et le JSON-LD la transporte (`eli:signature_level`), le prestataire **simulé** étant nommé de la même façon (`src/wiki.js`). En **1.6.1x**, un quatrième circuit répond au constat par l'autre bout : la **signature interne** (`src/server/mysql/signature-interne.mjs`) fait signer le SERVICE — la clé privée du signataire est engendrée côté serveur, **scellée au repos** (AES-256-GCM sous `SCRIBA_SIGNATURE_KV_KEY`) et **ne quitte jamais le serveur**, le poste ne recevant que la clé publique, le certificat et l'horodatage. C'est la première signature du logiciel dont la clé n'est pas dans le navigateur. Le service de **démonstration**, qui ne tient pas de coffre, refuse alors franchement de signer « au nom du service » (`409 signature_interne_indisponible`, `index.html` — `hEnvoyerEnSignature`) au lieu de simuler, comme le fait l'auto-hébergé sans clé de scellement (`src/server/mysql/actes.mjs`, `hSignerInterne`) ; l'Administration › Signature dit « Coffre fermé » avec son motif. Le fond demeure pour les autres circuits : dans le circuit **simple** et dans le circuit électronique **simulé**, le certificat reste **auto-engendré dans le navigateur** et la clé privée conservée en clair dans l'enregistrement local (`src/lib/signature.js`, export JWK) ; l'opérateur est tracé et sa compétence vérifiée, la **non-répudiation n'est pas établie** — seule une signature **qualifiée**, adossée à un prestataire de confiance, la donnerait (la signature interne est **avancée** au sens d'eIDAS, mais l'autorité d'émission est interne, donc elle n'est pas qualifiée). |
 | Origine | Audit 2026-09-21 |
 
 ### NC-IV-002 — Absence de licence de réutilisation au recueil, et licence logicielle indéfinie
@@ -786,7 +827,7 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Effort | Moyen |
 | Priorité | Moyenne |
 | Échéance | 90–180 jours |
-| Statut | **En cours** (2026-09-23 ; complété en 1.6.1g) — la télétransmission reste simulée : aucun appel sortant, certificat porteur de `demonstration: true` (`src/lib/legalite.js`). En revanche la mention produite est désormais **distinctement marquée** : `mentionDeTransmissionSimulee` rend « (mention de démonstration — transmission simulée, sans appel sortant) », et la version publiée reprend cette précision (`src/lib/recueil.js`). L'exigence d'une **preuve de l'appel réel** demeure. |
+| Statut | **Levée** (2026-09-27, 1.6.3) — la transmission est **réelle quand le service est branché** : `src/server/mysql/controle-legalite.mjs` (`createControleLegalite`) appelle l'API d'envoi du `.env` (`SCRIBA_CONTROLE_LEGALITE_URL`, `SCRIBA_CONTROLE_LEGALITE_API_CLE`, chemin, destinataire, délai), en `Authorization: Bearer` et sous `AbortController` ; le certificat conservé est **celui que l'API a rendu**, et un refus rend `502 transmission_echec` — **rien n'est enregistré**, la transmission se rejoue, l'échec n'est jamais converti en certificat. Sans adresse ni clé — et sur le service de démonstration —, l'appel n'a pas lieu : le certificat porte `demonstration: true` et sa mention porte la réserve (`mentionDeTransmissionSimulee`, 1.6.1g), et la version publiée reprend cette précision (`src/lib/recueil.js`). `GET /v1/config` publie l'état (`controleLegalite`), Administration › Expérimentale l'affiche. Épreuves : `src/server/mysql/controle-legalite.test.mjs` (9) et cinq cas d'`actes.test.mjs` (transmission réelle, refus sans enregistrement, rejeu). Reste hors de cette fiche — et suivi au `TODO.md` — la gestion des **refus** de la préfecture (rejet, demande d'observations), aujourd'hui réduits à un `502` rejouable. |
 | Origine | Audit 2026-09-21 |
 
 ### NC-IV-005 — Version consolidée : opposabilité et articulation à clarifier
@@ -803,16 +844,20 @@ Cotation : `Bloquante` · `Majeure` · `Mineure` · `Observation` (voir
 | Priorité | Faible |
 | Échéance | 180 jours et au-delà |
 | Statut | **Levée** (2026-09-21b) — la version consolidée porte la mention « Version consolidée — ne fait pas foi » et un lien ELI vers l'original ; vérifié à l'écran. |
+
+### NC-IV-006 — Les refus du contrôle de légalité ne sont pas traités, et le client n'a jamais parlé à une vraie passerelle
+
+| Champ | Valeur |
+|---|---|
+| Gravité | Mineure |
+| Chapitre / section | IV.1 — Cycle réglementaire (transmission) ; IV.3 — Sécurité juridique |
+| Constat | La télétransmission est désormais **réelle** quand le service est branché (NC-IV-004 levée), mais l'aller-retour s'arrête à l'accusé de réception. Or la préfecture ne se contente pas d'accuser réception : elle peut **rejeter** l'acte, ou **demander des observations**, dans un délai et selon un format qui n'est pas traité. Aujourd'hui, tout refus rend un `502 transmission_echec` **rejouable** : l'agent n'a aucun état de dossier (« rejeté », « observations demandées »), aucun motif à porter au certificat, aucun geste prescrit. Par ailleurs, le client (`controle-legalite.mjs`) n'a jamais été confronté à une **vraie** passerelle @ctes : la lecture des champs d'accusé (`reference`, `recuLe`, `destinataire`) est **défensive** (elle essaie plusieurs noms de champs), ce qui est sage, mais non validé. |
+| Exigence de référence | Vadémécum du contrôle de légalité (rejet, demande d'observations, délais) ; procédures de télétransmission ; exigence de preuve et de traçabilité. |
+| Preuve | `src/server/mysql/controle-legalite.mjs` (`transmettre` : lève sur `!res.ok` et sur l'absence de référence ; `premier(res.data, ["reference", "accuseReception", …])`) ; `src/server/mysql/actes.mjs` (`hTransmettre` : `return err(502, … { code: "transmission_echec" })`) ; `TODO.md` (chantier « Télétransmission : les refus du contrôle de légalité »). Aucun accès @ctes dans l'atelier : **non vérifié** contre une vraie passerelle. |
+| Recommandation | Traiter les **refus** : un état du dossier (transmis / rejeté / observations demandées), le motif porté au certificat, un geste de l'agent (correction, nouvelle transmission, abandon motivé), et sa trace au journal. Puis **éprouver** le client contre une vraie passerelle ou un banc reproduisant le format @ctes. Voir P-46 et P-49. |
+| Effort | Moyen |
+| Priorité | Moyenne |
+| Échéance | 30–90 jours (P-46) ; 90–180 jours (P-49) |
+| Statut | **Ouverte** (2026-09-27) |
+| Origine | Audit 2026-09-27 (4e campagne) |
 | Origine | Audit 2026-09-21 |
-
----
-
-## Historique des audits
-
-| Date | Rapport | Auditeur | Version outil | NC ouvertes | NC levées | NC nouvelles |
-|---|---|---|---|---|---|---|
-| 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21.md` | Audit initial (quatre regards : DSI, RSSI, qualiticien, DAJ) | 1.2.0 | 0 | 0 | 27 |
-| 2026-09-21 | `rapports/AUDIT-SCRIBAE-2026-09-21b.md` | Audit 2e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), parcours par l'interface | 1.2.0 | 6 | 18 | 3 |
-| 2026-09-23 | `rapports/AUDIT-SCRIBAE-2026-09-23.md` | Audit 3e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), dépôt GitHub, démonstration publiée et chaîne d'intégration | 1.6.0 | 16 | 0 | 6 |
-| 2026-09-29 | `rapports/AUDIT-SCRIBAE-2026-09-29.md` | Audit 4e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), version 1.6.1w, outillage à la racine, chaîne CI locale verte | 1.6.1w | 2 | 28 | 0 |
-| 2026-09-30 | `rapports/AUDIT-SCRIBAE-2026-09-30.md` | Audit 5e campagne (quatre regards : DSI, RSSI, qualiticien, DAJ), version 1.6.1w, CI locale verte, 3 nouvelles NC | 1.6.1w | 1 | 26 | 3 |

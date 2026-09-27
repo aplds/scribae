@@ -54,8 +54,11 @@ import { annuairePublic } from "./annuaire.mjs";
 import { annuaireAccepte, annuaireEffectif } from "./annuaire-service.mjs";
 import { verifierJws } from "./jws.mjs";
 import { createPrestataire } from "./signature.mjs";
+import { createControleLegalite } from "./controle-legalite.mjs";
+import { createSignatureInterne, portWebcrypto } from "./signature-interne.mjs";
 import { creerMagasinMysql } from "./magasin-mysql.mjs";
 import { creerMagasinFichier } from "./magasin-fichier.mjs";
+import { creerFlux, FLUX_BATTEMENT_MS } from "./flux.mjs";
 import { CLE_IPS, CLE_MESSAGE, etat as etatAtelier, corpsRefus, resume as resumeAtelier, adresseDeLEntete } from "./atelier.mjs";
 
 // Le NOM vient de l'identité du logiciel (`src/lib/logiciel.js`, par le miroir
@@ -225,6 +228,16 @@ const magasin = STOCKAGE === "fichier"
   })
   : await creerMagasinMysql({ DB });
 
+// --- LE FLUX (temps réel) -----------------------------------------------------
+// Le hub des flux ouverts : chaque poste qui écoute y est abonné, et chaque
+// écriture réussie lui pousse « la collection X a bougé, révision N ». Il ne
+// porte jamais de contenu (voir flux.mjs) : le poste relit par le chemin
+// autorisé. Un abonné lent est abandonné puis remis d'aplomb par un `resync` —
+// le service ne bloque jamais sur un poste en veille.
+const flux = creerFlux({
+  journal: (message) => console.warn("[flux] " + message),
+});
+
 // Rôles d'une clé d'API. Les quatre premiers forment une hiérarchie ; le
 // `prestataire` est hors hiérarchie (notification de signature seulement).
 const ROLES_CONNUES = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire"];
@@ -386,6 +399,42 @@ const prestataireSignature = createPrestataire({
   journal: (e) => console.log("[prestataire]", JSON.stringify(e)),
 });
 
+// ------------------------------------------ le contrôle de légalité (@ctes)
+// La télétransmission : c'est le même montage que le prestataire de signature —
+// les réglages du `.env` (variables `SCRIBA_CONTROLE_LEGALITE_*`, validées au
+// démarrage), la clé lue à la source et remise au seul module qui appelle
+// l'API (controle-legalite.mjs). Branché, le service TRANSMET réellement et le
+// certificat est celui de l'accusé de réception ; non branché, la transmission
+// reste simulée et le certificat le dit (`demonstration: true`). Voir NC-IV-004.
+const legaliteOpt = (k) => OPTIONS.valeurs["controleLegalite." + k];
+const CONTROLE_LEGALITE_API = {
+  transport: legaliteOpt("transport") || "service",
+  url: legaliteOpt("url") || "",
+  chemin: legaliteOpt("chemin") || "/transmissions",
+  destinataire: legaliteOpt("destinataire") || "Préfecture — contrôle de légalité",
+  mode: "ctes",
+  timeoutMs: legaliteOpt("timeoutMs") || 20000,
+};
+const controleLegalite = createControleLegalite({
+  api: CONTROLE_LEGALITE_API,
+  cle: env("SCRIBA_CONTROLE_LEGALITE_API_CLE"),
+  journal: (e) => console.log("[controle-legalite]", JSON.stringify(e)),
+});
+
+// -------------------------------------------- la signature interne (le coffre de
+// Les clés privées des signataires, scellées au repos (AES-256-GCM) sous une clé
+// du `.env` (`SCRIBA_SIGNATURE_KV_KEY`) : c'est le SEUL circuit où la clé privée
+// vit ailleurs que dans le navigateur, et c'est ce qui en fait une signature
+// avancée au sens d'eIDAS (voir signature-interne.mjs). Le coffre est rangé dans
+// l'ÉTAT du service (`sb_etat`) : il se crée donc avec lui, dans `instancierApi`.
+//
+// Sans clé de scellement — et sans WebCrypto —, la signature interne reste
+// ÉTEINTE : elle le DIT (motif), et la route refuse (409). Le service de
+// démonstration de la plateforme n'en tient aucun coffre : c'est ce qui fait que
+// ce circuit n'existe qu'en auto-hébergement.
+const WEB_CRYPTO = globalThis.crypto && globalThis.crypto.subtle ? portWebcrypto(globalThis.crypto.subtle) : null;
+let signatureInterne = null;
+
 // La session d'une requête HTTP (mode « mot de passe »), ou null. Toute la
 // vérification — expiration, compte désactivé, compte de démonstration — vit
 // dans `comptes.mjs` : le serveur HTTP ne fait que transporter le cookie.
@@ -538,8 +587,14 @@ function corsHeaders(req) {
 
 function send(req, res, status, body, extra = {}) {
   // Le corps peut être une chaîne : certaines routes publiques servent du texte
-  // (robots.txt, llms.txt), du XML ou du HTML, pas du JSON.
-  const payload = body === null || body === undefined ? "" : (typeof body === "string" ? body : JSON.stringify(body));
+  // (robots.txt, llms.txt), du XML ou du HTML, pas du JSON. Il peut aussi être
+  // un BUFFER : la route des pièces sert un fichier tel quel (un PDF, un scan).
+  // Le passer par `JSON.stringify` en ferait un objet `{ type: "Buffer", … }`,
+  // et le convertir en chaîne abîmerait ses octets (l'encodage UTF-8 remplacerait
+  // tout ce qui dépasse 127) : on écrit donc l'un comme l'autre tel quel.
+  const payload = Buffer.isBuffer(body) ? body
+    : body === null || body === undefined ? ""
+      : typeof body === "string" ? body : JSON.stringify(body);
   const entetes = entetesSurs({
     "content-type": "application/json; charset=utf-8",
     "x-service": SERVICE_ID,
@@ -615,6 +670,32 @@ function roleRefuse(role, regle) {
   return { status: 403, headers: {}, body: err("Rôle insuffisant pour cette opération (rôle : « " + role + " »).", { code: "role_insuffisant", role }) };
 }
 
+// L'IDENTITÉ que la requête porte, telle que le domaine la reçoit : le COMPTE
+// d'une session (mode « mot de passe » ou annuaire) — avec la PERSONNE qu'il
+// tient, `personId` —, ou une CLÉ de service (rôle, libellé), ou rien.
+//
+// C'est ce qui permet au domaine de répondre à « QUI signe ? » : une clé de
+// service ne porte aucune personne (elle ne peut donc pas signer au nom de
+// quelqu'un), et une session porte la personne de son compte. L'audit relevait
+// qu'aucune pièce de la chaîne ne reliait l'identité de l'opérateur à celle du
+// signataire (NC-II-006) ; c'est cette identité qui la relie.
+function identiteDe(session, cle) {
+  const compte = session && session.compte;
+  if (compte) {
+    return {
+      type: "session",
+      id: String(compte.id || ""),
+      login: String(compte.login || ""),
+      email: String(compte.email || ""),
+      personId: String(compte.personId || ""),
+      role: roleDeCompte(compte),
+      roles: Array.isArray(compte.roles) && compte.roles.length ? compte.roles : [compte.role].filter(Boolean),
+    };
+  }
+  if (cle) return { type: "cle", role: cle.role, label: cle.label || "", cleId: cle.cleId || "" };
+  return null;
+}
+
 // L'autorisation d'une route, telle que la reçoit le domaine : une SESSION
 // (mode « mot de passe »), ou une CLÉ — du déploiement ou de l'administration.
 function autoriser(req, session, regle) {
@@ -623,6 +704,14 @@ function autoriser(req, session, regle) {
     // clé d'API ne s'accompagne pas d'un cookie, et n'a donc rien à prouver de
     // ce côté.
     if (comptes.csrfObligatoire(req) && !comptes.csrfValide(req)) return refusCsrf();
+    // LA PORTE DE COMPÉTENCE SE FRANCHIT PLUS BAS. Certaines routes (la
+    // notification de signature, la certification de conformité) ne se gardent
+    // pas par un RÔLE mais par l'IDENTITÉ : n'importe quel agent compétent peut
+    // les appeler, à condition d'être celui qu'il prétend. Leur règle porte
+    // `sessionAutorisee`, et c'est le GESTIONNAIRE qui refuse hors compétence —
+    // il fallait sinon donner au rédacteur un rôle d'administration pour qu'il
+    // puisse poster le retour signé de SA propre signature.
+    if (regle && regle.sessionAutorisee) return null;
     return roleRefuse(roleDeCompte(session.compte), regle);
   }
   const id = cleValide(req);
@@ -779,6 +868,21 @@ async function sync(collection, body, actor, ip, estAdmin = false) {
     collection, upserts, deletes, force, actor, ip,
     trace: !SILENT_COLLECTIONS.has(collection),
   });
+  // LE FLUX : les postes qui écoutent apprennent que cette collection a bougé.
+  // On publie seulement s'il y a eu un changement effectif (une synchronisation
+  // qui n'a produit que des conflits n'a rien écrit), et l'on n'y met AUCUN
+  // contenu — le nom de la collection, sa révision, et l'identifiant des
+  // enregistrements touchés (bornés) : de quoi savoir si cela nous concerne, pas
+  // de quoi lire la donnée sans autorisation.
+  if (r.applied && r.applied.length) {
+    flux.publier({
+      type: "collection",
+      collection,
+      revision: r.revision,
+      n: r.applied.length,
+      ids: r.applied.map((a) => a.id).slice(0, 64),
+    });
+  }
   return { status: 200, body: { collection, revision: r.revision, applied: r.applied, conflicts: r.conflicts } };
 }
 
@@ -808,6 +912,7 @@ function dbPaths() {
     ? "En mode « mot de passe » (AUTH_MODE=password), les lectures comme les écritures exigent une session ouverte par /v1/auth/connexion ; les collections `users` et `config` ne sont écrites que par un administrateur."
     : "Les lectures sont publiques ; les écritures exigent un jeton d'API (Authorization: Bearer).";
   return {
+    "/v1/db/flux": { get: { operationId: "fluxDesChangements", summary: "Flux des changements (temps réel)", description: `Ouvre un flux SSE sur lequel le service pousse chaque changement : \`{ type: "collection", collection, revision, n, ids }\` — le NOM de la collection, sa révision et l'identifiant des enregistrements touchés, JAMAIS leur contenu. Le poste relit ensuite la collection par la route de lecture, avec ses droits. Un poste lent (tampon plein) est ABANDONNÉ pour cet évènement et reçoit \`{ type: "resync" }\` : il relit tout. Un battement (commentaire SSE) est émis toutes les ${Math.round(FLUX_BATTEMENT_MS / 1000)} secondes. Même autorisation que la LECTURE. ${garde}`, tags: ["Base de données"], responses: { 200: { description: "Flux ouvert (text/event-stream)" }, 401: { description: "Session absente (mode mot de passe)" }, 429: { description: "Trop de flux ouverts depuis cette adresse" }, 503: { description: "Limite de flux ouverts atteinte (code `flux_sature`)" } } } },
     "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
     "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: `Renvoie tous les enregistrements d'une collection, chacun avec sa révision. ${garde}`, tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: COLLECTIONS } }], responses: { 200: { description: "Les enregistrements de la collection" }, 401: { description: "Session absente (mode mot de passe)" }, 404: { description: "Collection inconnue" } } } },
     "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: `Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé. ${garde}`, security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object" } }, deletes: { type: "array", items: { type: "object" } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données). Réservé à l'administrateur : toute autre clé ou session reçoit 403 `force_reserve_admin`." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Session ou jeton absent" }, 403: { description: "Session, jeton ou rôle insuffisant (ou `force` sans le rôle administrateur)" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
@@ -845,7 +950,7 @@ function authPaths() {
 // Le contrat des réglages déclaratifs, tel qu'il apparaît dans la description.
 function deploiementPaths() {
   return {
-    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif), et l'ÉTAT DU PRESTATAIRE DE SIGNATURE (`prestataire` : transport, adresse, niveau, délai, chemins, et `cle` — un booléen, jamais la clé elle-même —, avec le `motif` quand le circuit électronique est simulé). Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés, valeurs refusées, et état du prestataire" } } } },
+    "/v1/config": { get: { operationId: "reglagesDeploiement", summary: "Réglages de référentiel posés par le déploiement", description: "Rend les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement (identité, vocabulaire, numérotation, délais, recueil, fonctions), sous forme de chemins pointés — `{ \"brand.name\": \"…\", \"numbering.pad\": 3 }` — accompagnées des valeurs REFUSÉES (`erreurs` : variable, valeur, motif), et l'ÉTAT DU PRESTATAIRE DE SIGNATURE (`prestataire` : transport, adresse, niveau, délai, chemins, et `cle` — un booléen, jamais la clé elle-même —, avec le `motif` quand le circuit électronique est simulé), et l'ÉTAT DU CONTRÔLE DE LÉGALITÉ (`controleLegalite` : transport, adresse, chemin, destinataire, délai, et `cle` — un booléen —, avec le `motif` quand la télétransmission est simulée). Porte également l'ÉTAT DU COFFRE DE SIGNATURE INTERNE (`signatureInterne` : `disponible`, `motif` quand il est éteint, `niveau`, `algorithme`, nombre de `signataires` munis d'un certificat, `horodatage`) — jamais une clé : c'est ce qui permet à l'application de n'offrir que les circuits que ce service peut réellement mener. Le navigateur s'en sert au démarrage : il applique ces réglages par-dessus le référentiel, si bien qu'une variable posée ici l'emporte sur la valeur réglée dans l'interface. Route PUBLIQUE : ces informations sont celles que le recueil public affiche déjà, et l'écran de connexion en a besoin avant toute session ; aucun secret n'y figure (voir src/server/mysql/variables.mjs).", tags: ["Service"], responses: { 200: { description: "Réglages posés, valeurs refusées, et état du prestataire" } } } },
     "/v1/atelier/acces": { get: { operationId: "accesAtelier", summary: "L'accès à l'atelier depuis cette adresse", description: "Route PUBLIQUE. Dit si l'accès à l'atelier est restreint (`actif`), si l'adresse de l'appelant y est autorisée (`autorise`), d'où vient l'adresse (`ip`, `interne`), quelle liste s'applique (`liste`, `source` : `deploiement` ou `referentiel`) et le message à montrer en cas de refus. Le paramètre `ip` permet de DEMANDER « et si j'arrivais de là ? » — c'est le simulateur de l'écran d'administration —, et la réponse porte alors `simulation: true` sans valeur de décision. La restriction est appliquée par le service à toutes les routes de l'atelier (`/v1/db/…`, `/v1/actes/…`, `/v1/signatures/…`, `/v1/auth/…`) : depuis une adresse non autorisée, elles répondent 403 `atelier_hors_reseau`. Elle vaut aussi pour les publications RÉSERVÉES AUX AGENTS, qui ne sont servies qu'aux personnes connectées venant d'une adresse autorisée (voir `SCRIBA_ATELIER_IPS`).", tags: ["Service"], responses: { 200: { description: "État de l'accès depuis cette adresse" }, 403: { description: "Adresse non autorisée (code `atelier_hors_reseau`)" } } } },
   };
 }
@@ -858,6 +963,21 @@ function courrielPaths() {
     "/v1/courriel": { get: { operationId: "etatCourriel", summary: "État du service de courriel", description: "Rend la configuration SMTP du déploiement — hôte, port, chiffrement, adresse d'expédition, envoi actif ou non — et les derniers envois tentés. **Aucun secret** : le mot de passe SMTP ne quitte jamais le serveur.", tags: ["Courriel"], responses: { 200: { description: "État du service et derniers envois" }, ...garde } } },
     "/v1/courriel/envoi": { post: { operationId: "envoyerCourriel", summary: "Envoyer un courriel de notification", description: "Envoie un message par le serveur SMTP de la collectivité, via `SMTP_*` du `.env`, et le consigne au journal `sb_courriel`. Le corps du message est fourni par l'application ; le service n'invente rien. Répond 502 quand le serveur SMTP refuse — le motif est alors rendu tel quel.", tags: ["Courriel"], security: [{ bearerAuth: [] }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["destinataires", "sujet"], properties: { evenement: { type: "string" }, acteId: { type: "string" }, cible: { type: "string" }, destinataires: { type: "array", items: { type: "object" } }, copie: { type: "array", items: { type: "string" } }, sujet: { type: "string" }, texte: { type: "string" }, html: { type: "string" }, expediteurNom: { type: "string" }, repondreA: { type: "string" } } } } } }, responses: { 200: { description: "Message remis au serveur SMTP" }, 422: { description: "Requête incomplète" }, 502: { description: "Le serveur SMTP a refusé" }, ...garde } } },
     "/v1/courriel/test": { post: { operationId: "testerCourriel", summary: "Envoyer un courriel de test", description: "Vérifie que le service joint bien le serveur SMTP : envoie un message d'essai aux destinataires indiqués, sans passer par la politique de notification de l'application.", tags: ["Courriel"], security: [{ bearerAuth: [] }], responses: { 200: { description: "Message d'essai remis au serveur SMTP" }, 422: { description: "Destinataires manquants" }, 502: { description: "Le serveur SMTP a refusé" }, ...garde } } },
+  };
+}
+
+// ---------------------------------------------------------------- les pièces
+// Le contrat des routes de PIÈCES (les fichiers joints à un acte), décrites ici
+// parce que c'est `handle` qui les sert : elles ne dépendent pas du domaine
+// signature/publication. Voir src/lib/fichiers.js (côté application) et
+// docs/ADMINISTRATION.md (où sont rangées les pièces, et comment les sauver).
+function piecesPaths() {
+  return {
+    "/v1/pieces": { post: { operationId: "deposerPiece", summary: "Déposer une pièce (fichier joint)", description: "Range un fichier joint à un acte — l'original signé d'une reprise d'acte ancien, ou la version signée d'un acte du circuit externe — et rend son adresse de lecture. Le contenu voyage en base64 dans un corps JSON (le canal temps réel de l'édition en ligne ne transporte pas de binaire, et l'API lit ses corps en UTF-8). Les métadonnées — nom, type, taille, empreinte SHA-256 — sont DÉCLARÉES par le client : c'est lui qui lit le fichier. L'application y recourt quand l'hébergement n'offre pas de dépôt de fichiers de son côté, c'est-à-dire en auto-hébergement (voir src/lib/fichiers.js).", security: [{ bearerAuth: [] }], tags: ["Pièces"], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["nom", "base64"], properties: { nom: { type: "string" }, type: { type: "string" }, taille: { type: "integer" }, sha256: { type: "string" }, base64: { type: "string", description: "Le contenu du fichier, en base64" } } } } } }, responses: { 201: { description: "Pièce déposée : son identifiant et son adresse de lecture" }, 400: { description: "Contenu illisible (code `piece_illisible`)" }, 401: { description: "Session ou jeton absent" }, 403: { description: "Rôle rédacteur requis" }, 413: { description: "Pièce trop volumineuse (code `corps_trop_volumineux`)" }, 422: { description: "Nom ou contenu absent (codes `piece_sans_nom`, `piece_absente`)" }, 507: { description: "Le rangement n'a pas pu conserver la pièce" } } } },
+    "/v1/pieces/{id}": {
+      get: { operationId: "lirePiece", summary: "Lire une pièce (fichier joint)", description: "Rend les OCTETS de la pièce, avec le type MIME que le client a déclaré : elle s'ouvre donc dans un lien, dans le cadre de lecture du recueil, ou se télécharge. Route PUBLIQUE — le recueil public cite cette adresse pour montrer l'original signé d'un acte ancien ou la version signée d'un acte du circuit externe : l'identifiant, tiré au hasard, est le seul droit d'entrée. Une pièce inconnue est un 404 `piece_inconnue`.", tags: ["Pièces"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "La pièce (octets)" }, 404: { description: "Pièce inconnue (code `piece_inconnue`)" } } },
+      delete: { operationId: "supprimerPiece", summary: "Retirer une pièce", description: "Retire une pièce déposée. Geste de PROPRETÉ — le rédacteur qui venait de joindre un original et se ravise —, jamais une dépublication. Refusé (409 `piece_referencee`) tant qu'un acte déposé ou une publication cite la pièce : la retirer laisserait une page du recueil avec un lien mort.", security: [{ bearerAuth: [] }], tags: ["Pièces"], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Pièce retirée" }, 401: { description: "Session ou jeton absent" }, 403: { description: "Rôle rédacteur requis" }, 404: { description: "Pièce inconnue (code `piece_inconnue`)" }, 409: { description: "Pièce citée par un acte ou une publication (code `piece_referencee`)" } } },
+    },
   };
 }
 
@@ -1030,7 +1150,7 @@ async function handle(req, res) {
 
   if (pathname === "/" || pathname === "/v1" || pathname === "/v1/") {
     const doc = api.openapi();
-    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...deploiementPaths(), ...courrielPaths() };
+    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...deploiementPaths(), ...piecesPaths(), ...courrielPaths() };
     doc.paths = Object.fromEntries(Object.entries(doc.paths).sort((a, b) => a[0].localeCompare(b[0])));
     send(req, res, 200, doc);
     return;
@@ -1053,6 +1173,18 @@ async function handle(req, res) {
       // pour annoncer si le circuit électronique est réellement branché, ou
       // s'il est simulé, et pourquoi.
       prestataire: prestataireSignature.etat(),
+      // L'état du COFFRE de la signature interne — jamais une clé non plus : le
+      // nombre de certificats émis, la présence de l'horodatage, et le motif
+      // quand le circuit est éteint (pas de clé de scellement). C'est ce qui
+      // permet à l'application de n'OFFRIR que les circuits que ce service peut
+      // réellement mener.
+      signatureInterne: signatureInterne
+        ? signatureInterne.etat()
+        : { disponible: false, motif: "Le service n'a pas encore instancié son coffre de signature.", niveau: "", algorithme: "", signataires: 0, horodatage: false },
+      // L'état du CONTRÔLE DE LÉGALITÉ (télétransmission @ctes) — jamais la clé :
+      // « cle » dit seulement si elle est là. L'application s'en sert pour dire
+      // si la transmission est réelle, ou simulée — et pourquoi (NC-IV-004).
+      controleLegalite: controleLegalite.etat(),
     });
     return;
   }
@@ -1214,6 +1346,69 @@ async function handle(req, res) {
     return;
   }
 
+  // --- LE FLUX : /v1/db/flux ------------------------------------------------
+  // Une réponse HTTP TENUE OUVERTE (SSE). Le poste s'y abonne une fois, et le
+  // service lui pousse chaque changement — c'est ce qui fait qu'une trame
+  // enregistrée sur un poste apparaît sur les autres en une seconde, au lieu
+  // d'attendre un rechargement ou un sondage.
+  //
+  // CE QU'IL FAUT POUR QUE CELA MARCHE À TRAVERS UN MANDATAIRE : un type
+  // `text/event-stream`, pas de mise en tampon (`x-accel-buffering: no`, et la
+  // coupure correspondante dans nginx.conf), et un battement régulier — une
+  // connexion inactive se fait couper par un proxy d'entreprise au bout d'une
+  // minute. Les trois sont ici, et le battement est un COMMENTAIRE : il ne
+  // réveille aucun traitement côté poste.
+  if (pathname === "/v1/db/flux" && req.method === "GET") {
+    // Même porte que les LECTURES : une session quand le service tient les
+    // comptes (mode mot de passe), rien en mode « démonstration » — où la
+    // lecture est déjà publique. Le flux ne transporte aucun contenu : le
+    // garder sur la même règle que la lecture est donc suffisant, et suffisant
+    // est ici exactement ce qu'il faut.
+    if (MOT_DE_PASSE && !(await sessionHTTP(req))) { send(req, res, 401, refusSession().body); return; }
+    if (tooMany("flux:" + ip, 8, RATE_WINDOW_MS)) {
+      send(req, res, 429, err("Trop de flux ouverts depuis cette adresse : ralentissez.", { code: "trop_de_requetes", retryAfter: 30 }));
+      return;
+    }
+    const abonne = flux.abonner({
+      ecrire: (texte) => res.write(texte),
+      fermer: () => { try { res.end(); } catch (e) { /* déjà fermé */ } },
+    });
+    if (!abonne) {
+      // Le service a atteint sa borne : on le DIT (503 + délai), pour que le
+      // poste retombe proprement sur le sondage au lieu de tourner en boucle.
+      send(req, res, 503, err("Le service a atteint sa limite de flux ouverts. Le poste reprendra le sondage périodique.", { code: "flux_sature", retryAfter: 60 }), { "retry-after": "60" });
+      return;
+    }
+    ecrireEntetes(res, 200, entetesSurs({
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+      "x-service": SERVICE_ID,
+      "x-content-type-options": "nosniff",
+      ...corsHeaders(req),
+    }));
+    // Le délai d'inactivité de la socket est levé : le flux vit aussi longtemps
+    // que le poste le veut, c'est le battement qui le tient en vie.
+    try { res.setTimeout?.(0); res.socket?.setTimeout?.(0); } catch (e) { /* sans conséquence */ }
+    res.write(": flux ouvert\n\n");
+    let detache = false;
+    const detacher = () => {
+      if (detache) return;
+      detache = true;
+      abonne.retirer();
+    };
+    // Le poste ferme son onglet, son réseau tombe : on retire l'abonné tout de
+    // suite, plutôt que de pousser dans une connexion morte jusqu'au prochain
+    // battement.
+    res.on("close", detacher);
+    res.on("error", detacher);
+    // Le tampon s'est vidé : si l'abonné avait manqué des évènements, il reçoit
+    // sa reprise maintenant.
+    res.on("drain", () => flux.rendre(abonne.id));
+    return;
+  }
+
   const mCol = /^\/v1\/db\/collections\/([A-Za-z]+)$/.exec(pathname);
   if (mCol && req.method === "GET") {
     const name = mCol[1];
@@ -1333,6 +1528,127 @@ async function handle(req, res) {
     return;
   }
 
+  // --- les PIÈCES : les fichiers joints à un acte ----------------------------
+  // L'application déposait ces fichiers chez l'hôte de la plateforme
+  // (`root.uploadPlugin`), qui n'existe pas dans une installation auto-hébergée :
+  // elle les range donc DANS le service (voir src/lib/fichiers.js), et c'est ce
+  // que servent ces trois routes.
+  //
+  // LA LECTURE EST PUBLIQUE, et ce n'est pas un oubli : l'adresse d'une pièce
+  // (`/v1/pieces/{id}`) est citée par le recueil public, qui montre ainsi
+  // l'original signé d'un acte ancien ou la version signée d'un acte du circuit
+  // externe. L'identifiant — 32 caractères tirés au hasard — EST le seul droit
+  // d'entrée. Le dépôt et le retrait, eux, exigent une identité et le rôle
+  // rédacteur, comme le dépôt d'un acte. La restriction d'accès à l'atelier ne
+  // s'applique pas ici, pour la même raison : une pièce publiée doit se lire
+  // comme la publication qui la cite.
+  const mPiece = /^\/v1\/pieces(?:\/([^/]+))?$/.exec(pathname);
+  if (mPiece) {
+    const idPiece = mPiece[1];
+    const pieceInconnue = () => send(req, res, 404, err("Pièce inconnue : " + String(idPiece || ""), { code: "piece_inconnue" }));
+
+    if (req.method === "GET" && idPiece) {
+      if (!/^[A-Za-z0-9_-]{8,64}$/.test(idPiece)) { pieceInconnue(); return; }
+      let piece = null;
+      try { piece = await magasin.lirePiece(idPiece); }
+      catch (e) { noterBaseSelonErreur(e); send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" })); return; }
+      if (!piece) { pieceInconnue(); return; }
+      // Les OCTETS, tels quels : le navigateur ouvre alors un PDF dans son
+      // lecteur, une image dans une page. Aucun type n'est inventé — et un type
+      // refusé (caractère hors ASCII) ne doit pas abattre la réponse : on le
+      // filtre, `send` écarterait sinon l'en-tête.
+      send(req, res, 200, Buffer.from(String(piece.base64 || ""), "base64"), {
+        "content-type": String(piece.type || "application/octet-stream").slice(0, 80).replace(/[^\x20-\x7e]/g, ""),
+        // Une pièce peut encore n'être citée par rien : pas de cache partagé.
+        "cache-control": "private, max-age=300",
+      });
+      return;
+    }
+
+    if (req.method === "POST" && !idPiece) {
+      // Le corps porte la pièce en base64 : sa taille est bornée par `MAX_BODY`
+      // (voir `readBody`), et par `max_allowed_packet` de la base pour le
+      // rangement MySQL. Les métadonnées — nom, type, taille, empreinte — sont
+      // DÉCLARÉES par le client : c'est lui qui lit le fichier, et c'est son
+      // empreinte que le recueil affichera. Le service les range, il ne les juge
+      // pas.
+      const session = MOT_DE_PASSE ? await sessionHTTP(req) : null;
+      const refus = autoriser(req, session, { min: "redacteur" });
+      if (refus) { send(req, res, refus.status, refus.body, refus.headers || {}); return; }
+      if (tooMany("w:" + ip + ":/v1/pieces", RATE_MAX_WRITES, RATE_WINDOW_MS)) {
+        send(req, res, 429, err("Trop d'écritures : ralentissez.", { code: "trop_de_requetes" }), { "retry-after": String(Math.ceil(RATE_WINDOW_MS / 1000)) });
+        return;
+      }
+      let corps = null;
+      try {
+        const raw = await readBody(req);
+        corps = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        const status = e.status || 400;
+        send(req, res, status, err(status === 413
+          ? "Pièce trop volumineuse : le service accepte au plus " + MAX_BODY + " octets par requête (variable MAX_BODY)."
+          : "Requête illisible (JSON attendu).", { code: status === 413 ? "corps_trop_volumineux" : "json_invalide" }));
+        return;
+      }
+      const nom = String(corps.nom || "").slice(0, 240);
+      const base64 = String(corps.base64 || "");
+      if (!nom) { send(req, res, 422, err("Le nom de la pièce est requis (`nom`).", { code: "piece_sans_nom" })); return; }
+      if (!base64) { send(req, res, 422, err("Le contenu de la pièce est requis (`base64`).", { code: "piece_absente" })); return; }
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) { send(req, res, 400, err("Le contenu de la pièce n'est pas du base64 lisible.", { code: "piece_illisible" })); return; }
+      const id = randomBytes(16).toString("hex");
+      const piece = {
+        id, nom, base64,
+        type: String(corps.type || "").slice(0, 80) || "application/octet-stream",
+        taille: Number(corps.taille) || 0,
+        sha256: String(corps.sha256 || "").slice(0, 128),
+        deposeLe: new Date().toISOString(),
+        deposePar: String(corps.deposePar || "").slice(0, 80),
+        deposeParNom: String(corps.deposeParNom || "").slice(0, 120),
+      };
+      try { await magasin.ecrirePiece(piece); }
+      catch (e) {
+        // 507 : « Insufficient Storage ». Le motif est rendu tel quel — c'est
+        // souvent la base elle-même qui parle (paquet trop gros, disque plein).
+        noterBaseSelonErreur(e);
+        send(req, res, 507, err("Le rangement n'a pas pu conserver la pièce : " + e.message, { code: "piece_non_ecrite" }));
+        return;
+      }
+      console.log(`[pièce] ${nom} (${piece.taille} octets) rangée sous ${id}.`);
+      // L'ADRESSE que l'application garde sur l'acte : celle de CE service, telle
+      // que le visiteur l'a demandée (`originePublique` suit `SCRIBA_PUBLIQUE_URL`,
+      // ou les en-têtes de la façade).
+      const base = originePublique(req);
+      send(req, res, 201, {
+        id, nom: piece.nom, type: piece.type, taille: piece.taille, sha256: piece.sha256,
+        deposeLe: piece.deposeLe, url: (base || "") + "/v1/pieces/" + id,
+      }, { location: "/v1/pieces/" + id });
+      return;
+    }
+
+    if (req.method === "DELETE" && idPiece) {
+      const session = MOT_DE_PASSE ? await sessionHTTP(req) : null;
+      const refus = autoriser(req, session, { min: "redacteur" });
+      if (refus) { send(req, res, refus.status, refus.body, refus.headers || {}); return; }
+      let piece = null;
+      try { piece = await magasin.lirePiece(idPiece); }
+      catch (e) { noterBaseSelonErreur(e); send(req, res, 500, err("Lecture impossible : " + e.message, { code: "lecture_impossible" })); return; }
+      if (!piece) { pieceInconnue(); return; }
+      // Une pièce CITÉE ne se retire pas : la retirer laisserait une page du
+      // recueil (ou un acte déposé) avec un lien mort.
+      const citee = api.pieceReferencee(idPiece);
+      if (citee) { send(req, res, 409, err("Cette pièce est citée par " + citee + " : la retirer laisserait un lien mort. Retirez ou dépubliez d'abord ce qui la cite.", { code: "piece_referencee" })); return; }
+      try { await magasin.supprimerPiece(idPiece); }
+      catch (e) { send(req, res, 500, err("Retrait impossible : " + e.message, { code: "piece_non_retiree" })); return; }
+      send(req, res, 200, { id: idPiece, supprimee: true });
+      return;
+    }
+
+    // Toute autre méthode sur ces adresses : le même refus que le service de
+    // démonstration (`methode_non_autorisee`), jamais un 404 muet.
+    send(req, res, 405, err("Méthode " + req.method + " non autorisée sur " + pathname, { code: "methode_non_autorisee" }));
+    return;
+  }
+
   // --- courriel : le service parle au serveur SMTP de la collectivité --------
   // L'application n'a jamais accès au serveur SMTP : elle demande, le service
   // envoie. Ces routes exigent la même autorisation que le reste.
@@ -1413,12 +1729,18 @@ async function handle(req, res) {
     // ne se lit qu'avec une session. Les publications, les identifiants ELI, le
     // recueil et la santé du service restent, eux, ouverts à tous.
     const session = await sessionHTTP(req);
+    // L'identité portée par la requête (compte de session, ou clé de service) :
+    // c'est elle qui décide des lectures réservées aux agents, et c'est elle que
+    // le domaine reçoit pour opposer l'opérateur au signataire (voir
+    // `identiteDe`, et src/server/mysql/actes.mjs).
+    const cleIdent = cleValide(req);
+    const identite = identiteDe(session, cleIdent);
     // En mode « mot de passe », ce qui n'est pas encore publié au recueil ne se
     // lit pas sans identité — une SESSION (l'agent), ou une CLÉ d'API (le compte
     // de service d'un script ou d'un outil tiers). Les publications, les
     // identifiants ELI, le recueil et la santé du service restent, eux, ouverts à
     // tous.
-    if (MOT_DE_PASSE && /^\/v1\/(actes|signatures)(\/|$)/.test(pathname) && !session && !cleValide(req)) {
+    if (MOT_DE_PASSE && /^\/v1\/(actes|signatures)(\/|$)/.test(pathname) && !identite) {
       send(req, res, 401, refusSession().body);
       return;
     }
@@ -1430,7 +1752,13 @@ async function handle(req, res) {
       // `agent` : la requête porte-t-elle une session, ou une clé de service ?
       // Les publications RÉSERVÉES AUX AGENTS ne se servent qu'à celles-là (voir
       // src/server/mysql/actes.mjs).
-      agent: !!session || !!cleValide(req),
+      agent: !!identite,
+      // L'IDENTITÉ et la CAPACITÉ du service à en exiger une : le domaine s'en
+      // sert pour ne pas attribuer une signature à quelqu'un d'autre, et pour
+      // le dire quand il ne peut pas (mode « demo » — des comptes sans mot de
+      // passe, gérés par le navigateur : aucune personne n'est authentifiée).
+      identite,
+      sessionRequise: MOT_DE_PASSE,
       authorize: (headers, regle) => autoriser(request, session, regle),
       rate: (r) => tooMany("w:" + ip + ":" + pathname, RATE_MAX_WRITES, RATE_WINDOW_MS),
       base: originePublique(req),
@@ -1730,13 +2058,37 @@ function instancierApi(state) {
     baseUrl: PUBLIQUE_URL,
     journal: (m) => console.log("[bulletin] " + m),
   });
+  const coffre = createSignatureInterne({
+    crypto: WEB_CRYPTO,
+    cle: env("SCRIBA_SIGNATURE_KV_KEY"),
+    coffre: state.coffre || (state.coffre = {}),
+    brand: OPTIONS.valeurs["brand.name"] || "",
+    autorite: OPTIONS.valeurs["signature.interne.autorite"] || "",
+    niveau: OPTIONS.valeurs["signature.interne.niveau"] || "avancee",
+    journal: (e) => console.log("[signature-interne]", JSON.stringify(e)),
+  });
+  signatureInterne = coffre;
   api = createActesApi({
     state,
     sha256,
     save: (json) => json.length <= MAX_STATE_CHARS,
     maxDoc: MAX_DOC, maxPublies: MAX_PUBLIES, maxSignatures: MAX_SIGNATURES, maxActes: MAX_ACTES,
     prestataire: prestataireSignature,
+    // LE CONTRÔLE DE LÉGALITÉ : le seul composant qui adresse l'acte signé à
+    // l'API d'envoi @ctes, avec la clé — qui ne quitte pas le serveur. Absent ou
+    // non configuré, la télétransmission reste simulée, et le certificat le dit.
+    controleLegalite,
+    // LE COFFRE DE LA SIGNATURE INTERNE : il vit dans l'état du service, sous
+    // `coffre`. Créé ici, avec l'état, pour qu'un rechargement de la base le
+    // retrouve — et que les certificats déjà émis continuent de signer.
+    signatureInterne: coffre,
     authMode: AUTH_MODE,
+    // LE RÉFÉRENTIEL, tel que le SERVICE le lit (collection `config`) : c'est
+    // lui qui donne le NOM du signataire quand une signature est attribuée —
+    // jamais le nom déclaré par l'appelant, qu'un compte habilité pourrait
+    // forger (voir `porteSignature`, actes.mjs). Lecture PARESSEUSE : elle n'a
+    // lieu que sur le geste de signature.
+    referentiel: () => magasin.lireConfig().catch(() => null),
     bulletins,
   });
   const b = bulletins.compter();
@@ -1902,9 +2254,15 @@ async function main() {
   console.log(etatSig.actif
     ? `Signature : prestataire « ${etatSig.prestataire} » branché — ${etatSig.url} (niveau ${etatSig.niveau}, délai ${etatSig.timeoutMs} ms, notification ${etatSig.urlNotification || "par défaut"}).`
     : `Signature : circuit électronique SIMULÉ — ${etatSig.motif}.`);
+  // Le contrôle de légalité : branché, ou simulé — et POURQUOI. Même raison :
+  // une adresse posée sans la clé laisse la télétransmission en simulation, et
+  // l'exploitant doit le lire ici (NC-IV-004).
+  const etatLegalite = controleLegalite.etat();
+  console.log(etatLegalite.actif
+    ? `Contrôle de légalité : télétransmission BRANCHÉE — ${etatLegalite.url}${etatLegalite.chemin} (destinataire ${etatLegalite.destinataire}, délai ${etatLegalite.timeoutMs} ms).`
+    : `Contrôle de légalité : télétransmission SIMULÉE — ${etatLegalite.motif}.`);
   if (MOT_DE_PASSE) {
-    console.log(AUTH_MODE === "oidc"
-      ? "Authentification : annuaire de la collectivité (OIDC), ET comptes locaux (mot de passe) — le compte d'administration du .env reste accessible. Les jetons d'API ne sont PAS acceptés dans ce mode."
+    console.log(AUTH_MODE === "oidc"      ? "Authentification : annuaire de la collectivité (OIDC), ET comptes locaux (mot de passe) — le compte d'administration du .env reste accessible. Les jetons d'API ne sont PAS acceptés dans ce mode."
       : "Authentification : comptes locaux (mot de passe). Les jetons d'API ne sont PAS acceptés dans ce mode.");
     if (DEMO_EFFECTIF) {
       console.warn("DEMO_ACCOUNTS=true : les comptes de démonstration peuvent ouvrir une session sans mot de passe. À éteindre en service.");
@@ -1940,9 +2298,15 @@ async function main() {
   console.log(magasin.type === "fichier"
     ? `Rangement : FICHIERS — dossier « ${DATA_DIR} » (sauvegarde = copie du dossier ; un seul service à la fois).`
     : "Rangement : base de données MySQL / MariaDB.");
+  // LE BATTEMENT DU FLUX : un commentaire SSE toutes les vingt secondes, pour
+  // qu'un mandataire ne coupe pas une connexion inactive. Le minuteur ne retient
+  // pas le processus (comme celui du Bulletin).
+  const minuteurFlux = setInterval(() => flux.battement(), FLUX_BATTEMENT_MS);
+  if (minuteurFlux.unref) minuteurFlux.unref();
   server.listen(PORT, HOST, () => {
     console.log(`${SERVICE} à l'écoute sur http://${HOST}:${PORT}`);
     console.log(`Collections : ${COLLECTIONS.join(", ")}`);
+    console.log(`Flux temps réel : ouvert sur /v1/db/flux (les postes qui écoutent reçoivent chaque changement).`);
   });
 }
 

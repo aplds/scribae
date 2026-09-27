@@ -353,6 +353,7 @@ export function dossierSignatureInterne({ signataire, courriels, ip, poste, oper
       nom: operateur?.nom || "",
       courriel: operateur?.courriel || "",
       compte: operateur?.compte || "",
+      personId: operateur?.personId || "",
     },
     authentification: "Compte de l'application — session ouverte (Scribae)",
     poste: poste || "",

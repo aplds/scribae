@@ -28,9 +28,20 @@ export function etapeRevision(titre, fait, ligne) {
   );
 }
 
+// L'alerte de la révision CADUQUE, écrite UNE fois : l'écran « Révision » la
+// remonte sous la décision (revue d'interface, P2), le dossier la porte quand
+// c'est lui qui l'explique. Deux endroits, un seul texte.
+export function alerteRevisionCaduque(etat, { style = {} } = {}) {
+  if (!etat?.caduque) return null;
+  return h("div", { class: "fr-alert fr-alert--warning", style },
+    h("p", { class: "fr-alert__title", text: "Révision caduque" }),
+    h("p", { class: "fr-small", text: "Le texte de l'acte a été modifié après sa soumission : ce qui a été révisé n'est plus ce que porte l'acte. La révision doit être reprise sur le texte actuel." }));
+}
+
 // Le dossier : qui a soumis l'acte, qui a statué, ce qui a été corrigé, et le
 // motif d'un rejet — le motif est COMMUNIQUÉ au rédacteur, il est ici chez lui.
-export function carteDossierRevision(a, etat) {
+// `alerteCaduque: false` quand l'appelant l'a déjà affichée plus haut.
+export function carteDossierRevision(a, etat, { alerteCaduque = true } = {}) {
   const r = a.revision || {};
   return h("div", { class: "fr-card" },
     h("h2", { class: "fr-card__title", text: "Dossier de révision" }),
@@ -48,9 +59,7 @@ export function carteDossierRevision(a, etat) {
     r.motif ? h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
       h("p", { class: "fr-alert__title", text: "Motif du rejet — communiqué au rédacteur" }),
       h("p", { class: "fr-small", text: r.motif })) : null,
-    etat?.caduque ? h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
-      h("p", { class: "fr-alert__title", text: "Révision caduque" }),
-      h("p", { class: "fr-small", text: "Le texte de l'acte a été modifié après sa soumission : ce qui a été révisé n'est plus ce que porte l'acte. La révision doit être reprise sur le texte actuel." })) : null,
+    alerteCaduque ? alerteRevisionCaduque(etat, { style: { marginTop: "10px" } }) : null,
   );
 }
 

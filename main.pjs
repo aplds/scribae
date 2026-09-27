@@ -1,7 +1,17 @@
 // ============================================================================
 // Scribae — trames, rédaction et publication des actes administratifs.
 //
-// FLUX DE TRAVAIL (consigne permanente, détaillée dans src/README.md,
+// AVANT D'ÉCRIRE UNE LIGNE (consigne permanente) : lire src/docs/ATELIER.md —
+// la méthode de travail, les dix garde-fous, comment vérifier SANS TERMINAL
+// (src/scripts/harnais-atelier.mjs : syntaxe, style, épreuves et générateurs),
+// et ce qui compte comme « terminé ». L'architecture est dans src/README.md,
+// les règles du projet dans src/AGENTS.md, la spécification dans src/SPEC.md.
+//
+// On ne modifie JAMAIS à la main un document engendré (src/docs/VARIABLES.md,
+// src/docs/API.md, src/server/mysql/logiciel-engendre.mjs) : on corrige sa
+// source, puis on régénère. On n'enregistre NI ne publie sans demande explicite.
+//
+// FLUX DE TRAVAIL (détaillé dans src/README.md,
 // section « Flux de travail : Perchance ↔ GitHub ») :
 //   • le développement se fait ICI, sur Perchance : main.pjs + index.html + src/ ;
 //   • les versions finalisées sont déposées sur GitHub, qui est la référence

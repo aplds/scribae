@@ -13,7 +13,7 @@
 // ============================================================================
 import { state, navigate } from "../state.js";
 import { h, clear, button, toast } from "../dom.js";
-import { emptyState } from "../components.js";
+import { emptyState, pageTitle } from "../components.js";
 import { renderMarkdown, outlineOf } from "../markdown.js";
 import { copyText, download } from "../../lib/util.js";
 import { printHtml } from "../../lib/export.js";
@@ -73,6 +73,11 @@ const DOCUMENTS = [
     desc: "Architecture du code, rôle de chaque module, partis pris techniques.",
   },
   {
+    id: "atelier", group: "Conception",
+    path: "src/docs/ATELIER.md", title: "Travailler dans l'atelier",
+    desc: "La méthode, les dix garde-fous, la vérification sans terminal (le harnais d'épreuves), et ce qui compte comme « terminé ».",
+  },
+  {
     id: "todo", group: "Conception",
     path: "src/TODO.md", title: "Chantiers ouverts",
     desc: "Ce qui reste à faire, par ordre d'importance, et pourquoi.",
@@ -105,8 +110,7 @@ export function renderDocs(root, params) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Documentation technique" }),
-      h("p", { class: "page-head__sub", text: "Les documents livrés avec le logiciel : exploitation, installation, conception. Lecture directe, sans dépôt ni éditeur de texte." }),
+      pageTitle("Documentation technique" , "Les documents livrés avec le logiciel : exploitation, installation, conception. Lecture directe, sans dépôt ni éditeur de texte." ),
     ),
     h("div", { class: "page-head__actions" },
       h("span", {
@@ -120,8 +124,13 @@ export function renderDocs(root, params) {
 
   const grid = h("div", { class: "docs-grid" });
   const side = h("div", { class: "docs-side" });
+  // --- le sommaire du document ouvert (P5, revue d'interface) : une COLONNE
+  // collante à part entière, plutôt qu'un bloc en tête qui disparaît dès les
+  // premières lignes — un document de référence en compte plusieurs milliers.
+  const tocCol = h("div", { class: "docs-toc-col" });
   const body = h("div", { class: "docs-body" });
   grid.appendChild(side);
+  grid.appendChild(tocCol);
   grid.appendChild(body);
   root.appendChild(grid);
 
@@ -142,6 +151,8 @@ export function renderDocs(root, params) {
     ));
   }
   side.appendChild(sideCard);
+
+  tocCol.hidden = true;
 
   // --- document courant
   const head = h("div", { class: "fr-card fr-card--soft docs-head" },
@@ -167,6 +178,7 @@ export function renderDocs(root, params) {
   load(doc).then((text) => {
     clear(view);
     const outline = outlineOf(text);
+    clear(tocCol);
     if (outline.length) {
       const som = h("nav", { class: "docs-toc" }, h("strong", { text: "Sommaire" }));
       for (const o of outline) {
@@ -179,11 +191,19 @@ export function renderDocs(root, params) {
           },
         }));
       }
-      view.appendChild(som);
+      tocCol.appendChild(som);
+      tocCol.hidden = false;
+      grid.classList.remove("docs-grid--sanstoc");
+    } else {
+      tocCol.hidden = true;
+      grid.classList.add("docs-grid--sanstoc");
     }
     view.appendChild(h("article", { class: "md" }, renderMarkdown(text)));
   }).catch((err) => {
     clear(view);
+    clear(tocCol);
+    tocCol.hidden = true;
+    grid.classList.add("docs-grid--sanstoc");
     view.appendChild(emptyState(
       "Le document « " + doc.path + " » n'a pas pu être lu (" + err.message + ").",
       null,

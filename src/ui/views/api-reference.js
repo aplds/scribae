@@ -19,7 +19,7 @@
 // ============================================================================
 import { state, navigate } from "../state.js";
 import { h, clear, button, toast } from "../dom.js";
-import { textField, sectionHeader } from "../components.js";
+import { textField, sectionHeader, pageTitle } from "../components.js";
 import { copyText } from "../../lib/util.js";
 import { call, apiStatus } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
@@ -54,8 +54,7 @@ export function renderApiReference(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "API REST" }),
-      h("p", { class: "page-head__sub", text: "Toute la surface du service : les routes, qui peut les appeler, ce qu'elles attendent et ce qu'elles répondent — et un panneau pour les jouer réellement. Les appels partent au service avec les mêmes règles que l'application : ils apparaissent dans « API & journal » avec leur requête, leur réponse et leur durée." })),
+      pageTitle("API REST" , "Toute la surface du service : les routes, qui peut les appeler, ce qu'elles attendent et ce qu'elles répondent — et un panneau pour les jouer réellement. Les appels partent au service avec les mêmes règles que l'application : ils apparaissent dans « API & journal » avec leur requête, leur réponse et leur durée." )),
     h("div", { class: "page-head__actions" },
       h("span", {
         class: "fr-badge fr-badge--" + (apiStatus().state === "online" ? "success" : "warning"),

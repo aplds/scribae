@@ -14,7 +14,7 @@
 // identifiant ELI que l'acte d'origine et le supplante, sans jamais le faire
 // disparaître : l'acte d'origine reste accessible dans l'historique des versions.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne, controleLegaliteActif, peutDeclarerTransmission } from "../state.js";
 import { h, clear, button, toast, modal, fitPaper, icon } from "../dom.js";
 import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase, annexesRestantesPhrase } from "../components.js";
 import { openActe } from "./rediger.js";
@@ -1462,23 +1462,32 @@ function executionCard(a) {
       h("strong", { text: f.label }),
       h("span", { class: "fr-badge fr-badge--" + (f.fait ? "success" : f.requis ? "warning" : "info"), text: f.fait ? "Accomplie" : f.requis ? "À accomplir" : "Non requise" })),
     h("p", { class: "fr-small" + (f.fait ? "" : " fr-muted"), text: f.fait
-      ? ["le " + formatDate(f.at), f.ref ? "réf. " + f.ref : "", f.parEli ? "constatée par la chaîne ELI" : "", f.byName ? "par " + f.byName : ""].filter(Boolean).join(" · ")
+      ? ["le " + formatDate(f.at), f.ref ? "réf. " + f.ref : "", f.parEli ? "constatée par la chaîne ELI" : "", f.declaration && f.declaration.parNom ? "déclarée par " + f.declaration.parNom : "", f.declaration && f.declaration.attribution === "declaree" ? "identité non vérifiée" : "", f.demonstration ? "transmission simulée (sans appel sortant)" : "", f.destinataire ? "à " + f.destinataire : "", f.byName && !(f.declaration && f.declaration.parNom) ? "par " + f.byName : ""].filter(Boolean).join(" · ")
       : (f.id === "signature" ? "L'acte n'est pas signé." : f.requis ? "Aucune constatation enregistrée." : "Formalité non requise : elle peut tout de même être constatée au dossier.") }),
-    // Certificat de transmission au contrôle de légalité, s'il y en a un : il a
-    // été déposé sur le document par l'API d'envoi (voir src/lib/legalite.js).
+    // Certificat de transmission : accusé de réception de l'API, DÉCLARATION d'un
+    // réviseur, ou simulation marquée (voir src/lib/legalite.js).
     f.certificat ? h("p", { class: "fr-small exec-certificat" },
-      h("strong", { text: "Certificat de transmission" }),
+      h("strong", { text: f.certificat.declaration ? "Déclaration de transmission" : f.certificat.demonstration ? "Certificat de transmission (démonstration)" : "Certificat de transmission" }),
       h("span", { text: f.certificat.mention || "" }),
       h("span", { class: "fr-muted", text: [
         f.certificat.reference ? " · réf. " + f.certificat.reference : "",
         f.certificat.sceau ? " · sceau " + String(f.certificat.sceau).slice(0, 16) + "…" : "",
       ].filter(Boolean).join("") })) : null,
-    f.id !== "signature" && !(f.id === "publication" && f.parEli) && (can("signature.gerer") || can("actes.gerer"))
+    f.id !== "signature" && !(f.id === "publication" && f.parEli)
       ? h("div", { class: "fr-row" },
-        button(f.fait ? "Corriger" : "Enregistrer", {
-          variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
-          onClick: () => ouvrirFormulaireFormalite(a, f),
-        }))
+        (f.id === "transmission" && controleLegaliteActif())
+          ? (peutDeclarerTransmission(a)
+            ? button(f.fait ? "Corriger la déclaration" : "Déclarer la transmission", {
+              variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
+              onClick: () => ouvrirFormulaireFormalite(a, f),
+            })
+            : h("span", { class: "fr-small fr-muted", text: "Déclaration de transmission réservée à un réviseur compétent (ou à l'administration)." }))
+          : ((can("signature.gerer") || can("actes.gerer"))
+            ? button(f.fait ? "Corriger" : "Enregistrer", {
+              variant: f.fait ? "tertiary" : "secondary", size: "sm", icon: f.fait ? "refresh" : "check",
+              onClick: () => ouvrirFormulaireFormalite(a, f),
+            })
+            : null))
       : null,
   ))));
 

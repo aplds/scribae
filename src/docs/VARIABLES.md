@@ -101,7 +101,15 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
 |---|---|---|---|---|---|
-| `SCRIBA_SIGNATURE_MODE` | référentiel | **Circuit de signature** — « electronique » : prestataire par API. « simple » : signature dans l'application. « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement. | choix : electronique ou simple ou externe |  | electronique |
+| `SCRIBA_SIGNATURE_MODE` | référentiel | **Circuit de signature** — « electronique » : prestataire par API. « simple » : signature dans l'application, avec la clé du poste. « interne » : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — auto-hébergement seulement (SCRIBA_SIGNATURE_KV_KEY). « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement. | choix : electronique ou simple ou interne ou externe |  | electronique |
+
+## Signature — interne
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_SIGNATURE_INTERNE_NIVEAU` | référentiel | **Niveau de la signature interne** — Ce que le service annonce quand il signe lui-même. « avancee » : la clé privée est sous le contrôle exclusif du signataire (elle ne quitte pas le coffre) et le certificat est émis par une autorité — c'est la définition eIDAS de la signature avancée. « simple » : le service déclare ne produire qu'une signature simple. Ni l'un ni l'autre n'est QUALIFIÉ au sens du règlement (UE) n° 910/2014. | choix : simple ou avancee |  | avancee |
+| `SCRIBA_SIGNATURE_INTERNE_AUTORITE` | référentiel | **Autorité d'émission des certificats internes** — Le nom porté par l'émetteur des certificats que le service délivre lui-même (champ `emetteur` du certificat de l'original signé). Vide : « Autorité de certification interne — <nom de la collectivité> ». Ce n'est PAS une autorité de confiance qualifiée : la mention le dit dans l'acte publié. | texte |  | AC interne — Ville de Valmont-sur-Loire |
+| `SCRIBA_SIGNATURE_KV_KEY` | service | **Clé de scellement du coffre de signature interne** — 32 octets, en hexadécimal (64 caractères) ou en base64, qui scellent au repos (AES-256-GCM) les clés privées que le service détient pour la signature interne. Sans elle, la signature interne est ÉTEINTE — la route refuse, et l'application n'offre pas ce circuit. La perdre ou la changer n'invalide pas les actes déjà signés (leur certificat voyage avec l'original) : elle oblige seulement à réémettre des clés. SECRET. | texte |  | (secret) |
 
 ## Signature — API
 
@@ -118,6 +126,17 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `SCRIBA_SIGNATURE_API_CHEMIN_DEMARRER` | référentiel | **Chemin — démarrage du circuit** — Point de terminaison qui lance le circuit de signature. Jeton {document}. | texte |  | /documents/{document}/demarrer |
 | `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | référentiel | **Chemin — suivi du circuit** — Point de terminaison interrogé pour relire le statut d'un circuit. Jeton {document}. | texte |  | /documents/{document} |
 | `SCRIBA_SIGNATURE_API_CLE` | service | **Clé d'API du prestataire de signature** — La clé que le service présente au prestataire (en-tête Authorization). Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, le service n'appelle pas le prestataire en production. SECRET. | texte |  | (secret) |
+
+## Contrôle de légalité
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_CONTROLE_LEGALITE_TRANSPORT` | référentiel | **Transport de la télétransmission** — « service » : c'est le service de la collectivité qui adresse l'acte à l'API d'envoi — seul moyen de garder la clé côté serveur. « demonstration » : la transmission est simulée localement (aucun appel sortant), et le certificat porte la mention de démonstration. | choix : service ou demonstration |  | service |
+| `SCRIBA_CONTROLE_LEGALITE_URL` | référentiel | **Adresse de base de l'API de contrôle de légalité** — Racine de l'API d'envoi (@ctes, ou le concentrateur de la collectivité). Vide, la télétransmission reste simulée : aucun acte ne sort, et le certificat le dit. | url |  | https://api.ctes.exemple.fr/v1 |
+| `SCRIBA_CONTROLE_LEGALITE_CHEMIN` | référentiel | **Chemin — envoi d'une transmission** — Point de terminaison qui reçoit l'acte signé, relatif à l'adresse de base. | texte |  | /transmissions |
+| `SCRIBA_CONTROLE_LEGALITE_DESTINATAIRE` | référentiel | **Destinataire porté au certificat** — Le libellé de l'autorité destinataire, tel qu'il figurera sur le certificat de transmission (« Préfecture — contrôle de légalité »). | texte |  | Préfecture — contrôle de légalité |
+| `SCRIBA_CONTROLE_LEGALITE_TIMEOUT` | référentiel | **Délai d'attente de l'API (ms)** — Temps maximal accordé à l'appel de télétransmission avant abandon. | entier (min 1000, max 120000) |  | 20000 |
+| `SCRIBA_CONTROLE_LEGALITE_API_CLE` | service | **Clé d'API du contrôle de légalité** — La clé que le service présente à l'API d'envoi du contrôle de légalité (@ctes), en-tête Authorization. Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, la télétransmission reste simulée. SECRET. | texte |  | (secret) |
 
 ## Annuaire (OIDC)
 
@@ -150,7 +169,7 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |
 |---|---|---|---|---|---|
-| `SCRIBA_CONTROLE_LEGALITE` | référentiel | **Contrôle de légalité** — Active la transmission de l'acte signé au représentant de l'État par API. Éteint par défaut. | booleen |  | false |
+| `SCRIBA_CONTROLE_LEGALITE_MODE` | référentiel | **Régime de transmission au contrôle de légalité** — TROIS RÉGIMES. « desactive » : rien n'est géré par l'application, la transmission se constate à la main. « declaratif » : avant sa publication, l'acte signé attend qu'un RÉVISEUR compétent déclare à qui, et à quelle date, il a été transmis — aucun appel sortant. « api » : le service adresse l'acte à l'API d'envoi @ctes (voir SCRIBA_CONTROLE_LEGALITE_TRANSPORT), et chaque acte peut en outre être déclaré transmis. Dans les deux régimes actifs, la publication est refusée tant que la transmission n'est pas enregistrée. L'ancien booléen SCRIBA_CONTROLE_LEGALITE (vrai = « api ») est replié dans le référentiel à la première lecture. | choix : desactive ou declaratif ou api |  | desactive |
 | `SCRIBA_ASSISTANT_ATELIER` | référentiel | **Assistant de l'atelier (« Plume »)** — Allumé, l'assistant d'aide à l'atelier est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
 | `SCRIBA_ASSISTANT_PUBLIC` | référentiel | **Assistant du recueil (« Publia »)** — Allumé, l'assistant du recueil public est proposé ; éteint, il n'apparaît pas. | booleen |  | true |
 

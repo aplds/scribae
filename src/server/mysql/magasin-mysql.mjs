@@ -183,6 +183,58 @@ export async function creerMagasinMysql({ DB, mysql: mysqlInjecte = null }) {
       return rows.length ? Number(rows[0].revision) || 0 : 0;
     },
 
+    // ------------------------------------------------------------- les pièces
+    // Les fichiers joints : l'original signé d'une reprise d'acte ancien, la
+    // version signée d'un acte du circuit externe (voir src/lib/fichiers.js).
+    //
+    // POURQUOI UNE TABLE À PART. L'état du service (`sb_etat`) est un document
+    // JSON relu et réécrit EN ENTIER à chaque écriture : y loger des mégaoctets
+    // de scan ferait payer ce poids à chaque dépôt, à chaque publication et à
+    // chaque redémarrage. Une pièce est donc une ligne, écrite une fois et lue à
+    // la demande — exactement ce que fait le rangement par fichiers, qui range
+    // chaque pièce dans son propre fichier (`pieces/<id>.json`).
+    //
+    // LE CONTENU EST EN BASE64, et non en binaire : c'est la forme que l'API
+    // échange (le canal temps réel de l'édition en ligne ne transporte pas de
+    // binaire), et les deux rangements conservent donc exactement la même chose.
+    async ecrirePiece(piece) {
+      await pool.query(
+        `INSERT INTO sb_piece (id, nom, type, taille, sha256, base64, depose_par)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE nom = VALUES(nom), type = VALUES(type), taille = VALUES(taille),
+           sha256 = VALUES(sha256), base64 = VALUES(base64), depose_par = VALUES(depose_par)`,
+        [
+          String(piece.id).slice(0, 32),
+          String(piece.nom || "").slice(0, 240),
+          String(piece.type || "application/octet-stream").slice(0, 80),
+          Number(piece.taille) || 0,
+          String(piece.sha256 || "").slice(0, 128),
+          String(piece.base64 || ""),
+          piece.deposePar || null,
+        ],
+      );
+      return true;
+    },
+
+    async lirePiece(id) {
+      const [rows] = await pool.query(
+        "SELECT id, nom, type, taille, sha256, base64, depose_le, depose_par FROM sb_piece WHERE id = ?",
+        [String(id || "").slice(0, 32)],
+      );
+      if (!rows.length) return null;
+      const r = rows[0];
+      return {
+        id: r.id, nom: r.nom, type: r.type, taille: Number(r.taille) || 0,
+        sha256: r.sha256 || "", base64: r.base64,
+        deposeLe: r.depose_le, deposePar: r.depose_par || "",
+      };
+    },
+
+    async supprimerPiece(id) {
+      const [r] = await pool.query("DELETE FROM sb_piece WHERE id = ?", [String(id || "").slice(0, 32)]);
+      return !!(r && r.affectedRows);
+    },
+
     async synchroniser(opts) {
       // File par collection, puis reprise : voir le commentaire des deux
       // mécanismes en tête de fichier. La transaction est rejouée ENTIÈRE

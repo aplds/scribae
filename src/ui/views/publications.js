@@ -13,7 +13,7 @@
 // ============================================================================
 import { state, navigate, redrawView, can, currentUser, touch, journaliser } from "../state.js";
 import { h, button, toast, modal, icon } from "../dom.js";
-import { emptyState, helpLink } from "../components.js";
+import { emptyState, helpLink, pageTitle } from "../components.js";
 import { get, post, apiStatus, errorMessage, beginFlow, bodyOf } from "../../lib/remote.js";
 import { verifySignedPackage } from "../../lib/signature.js";
 import { download, copyText, formatDate } from "../../lib/util.js";
@@ -33,8 +33,7 @@ function renderRegistre(root) {
   const st = (state.pubRegistre = state.pubRegistre || { chargement: false });
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Publications" }),
-      h("p", { class: "page-head__sub", text: "Recueil des actes publiés : versions en ligne, identifiants ELI, dates d'opposabilité et originaux signés." }),
+      pageTitle("Publications" , "Recueil des actes publiés : versions en ligne, identifiants ELI, dates d'opposabilité et originaux signés." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("publication", "Comment faire ?"),
@@ -133,8 +132,7 @@ function renderConsultation(root, params) {
   const cle = decodeURIComponent(params.id);
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Acte publié" }),
-      h("p", { class: "page-head__sub", text: "Le texte publié au recueil, tel que le public le consulte — l'administration y ajoute les métadonnées, les formats et l'original signé." }),
+      pageTitle("Acte publié" , "Le texte publié au recueil, tel que le public le consulte — l'administration y ajoute les métadonnées, les formats et l'original signé." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("publication", "Comment faire ?"),

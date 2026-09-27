@@ -877,11 +877,13 @@ function attacherConsignes(page, rx) {
   }
 }
 
-// Fait défiler jusqu'à la pastille d'un champ et la met en évidence.
-export function focusFieldWidget(paper, fieldId) {
+// Fait défiler jusqu'à la pastille d'un champ et la met en évidence. `defiler`
+// sert quand l'appelant veut seulement MONTRER la pastille (ouvrir le panneau de
+// rédaction) sans emmener la page ailleurs : le repère clignote là où il est.
+export function focusFieldWidget(paper, fieldId, { defiler = true } = {}) {
   const el = paper.querySelector(`[data-field="${cssEscape(fieldId)}"]`);
   if (!el) return false;
-  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (defiler) el.scrollIntoView({ block: "center", behavior: "smooth" });
   el.classList.add("rw-tok--flash");
   setTimeout(() => el.classList.remove("rw-tok--flash"), 1400);
   return true;

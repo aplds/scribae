@@ -18,11 +18,11 @@
 // ============================================================================
 import { state, navigate, redrawView, can, trameById, fileRevision, fileCertification, peutTrancher, peutCertifier, actePubliable, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
 import { h, button } from "../dom.js";
-import { emptyState, helpLink } from "../components.js";
+import { emptyState, helpLink, mentions, menuButton, pageTitle } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { etatRevision } from "../../lib/revision.js";
 import { rapportConformite } from "../../lib/conformite.js";
-import { carteRapport, carteDecision, carteDossierRevision } from "../revision-cartes.js";
+import { carteRapport, carteDecision, carteDossierRevision, alerteRevisionCaduque } from "../revision-cartes.js";
 import { parcoursDeActe } from "../../lib/parcours.js";
 import { bandeauParcours } from "../parcours.js";
 import { docOfActe } from "./modifier.js";
@@ -52,8 +52,7 @@ export function renderRevision(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Révision" }),
-      h("p", { class: "page-head__sub", text: "Le contrôle des actes avant leur signature. Le réviseur reçoit un rapport de conformité, peut corriger l'acte, le valider — il part alors en signature — ou le rejeter, et l'acte revient en brouillon chez son rédacteur avec le motif." }),
+      pageTitle("Révision" , "Le contrôle des actes avant leur signature. Le réviseur reçoit un rapport de conformité, peut corriger l'acte, le valider — il part alors en signature — ou le rejeter, et l'acte revient en brouillon chez son rédacteur avec le motif." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("revision", "Comment faire ?"),
@@ -149,12 +148,33 @@ function carteCertification(a, doc, paint) {
     h("div", { class: "fr-row" },
       h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: (a.numero || "acte sans numéro") + " — " + (a.objet || doc?.meta?.objet || "") }),
       h("span", { class: "fr-badge fr-badge--" + badge[0], text: badge[1] })),
-    h("p", { class: "fr-small fr-muted", text: [trame?.name || "trame absente", "signé hors application (circuit externe)", a.serviceId ? targetLabel(config, a.serviceId, a.bureauId) : "acte général"].filter(Boolean).join(" · ") }),
+    mentions([trame?.name || "trame absente", "signé hors application (circuit externe)", a.serviceId ? targetLabel(config, a.serviceId, a.bureauId) : "acte général"]),
     h("p", { class: "fr-small", text: "Cet acte a été signé HORS de l'application. Votre contrôle ne porte pas sur le texte avant signature : il porte sur la PIÈCE signée déposée, que vous comparez à la version numérique qui sera publiée." }),
     h("div", { class: "fr-row" },
-      button("Voir la version signée (PDF)", { variant: "primary", icon: "lock", onClick: () => voirVersionSignee(a) }),
+      button("Voir la version signée (PDF)", { variant: "secondary", icon: "lock", onClick: () => voirVersionSignee(a) }),
       button("Voir la version numérique", { variant: "secondary", icon: "note", onClick: () => navigate("acte/" + a.id) }),
-      can("actes.rediger") ? button("Ouvrir en rédaction", { variant: "tertiary", size: "sm", icon: "edit", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null)));
+      menuButton(can("actes.rediger") ? [{ label: "Ouvrir en rédaction", icon: "edit", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }] : []),
+    )));
+
+  // ------------------------------------------------ LA DÉCISION, EN PREMIER
+  // La certification remplace ici la révision : c'est elle que le réviseur
+  // vient rendre, elle remonte donc sous l'identité de l'acte (P2).
+  if (cert.statut === "conforme" || cert.statut === "non_conforme") {
+    box.appendChild(h("div", { class: "fr-alert fr-alert--" + (cert.statut === "conforme" ? "success" : "error") },
+      h("p", { class: "fr-alert__title", text: cert.statut === "conforme" ? "Conformité certifiée" : "Conformité refusée" }),
+      h("p", { class: "fr-small", text: [cert.parNom ? "Par " + cert.parNom : "", cert.le ? "le " + formatDate(String(cert.le).slice(0, 10)) : ""].filter(Boolean).join(" · ") }),
+      cert.motif ? h("p", { class: "fr-small", text: "Motif : " + cert.motif }) : null,
+      cert.remarque && cert.remarque !== cert.motif ? h("p", { class: "fr-small fr-muted", text: "Observation : " + cert.remarque }) : null));
+  } else if (peutCertifier(a)) {
+    box.appendChild(h("div", { class: "fr-card parapheur-decision" },
+      h("h3", { class: "fr-card__title", text: "Votre décision" }),
+      h("p", { class: "fr-small fr-muted", text: "Ouvrez la pièce signée, comparez-la à la version numérique, puis certifiez la conformité — ou refusez-la, en disant ce qui ne concorde pas (l'acte attendra alors une version signée conforme)." }),
+      h("div", { class: "fr-row" },
+        button("Certifier la conformité…", { variant: "primary", icon: "check", onClick: () => certifierConformite(a, doc, { docs: new Map([[a.id, doc]]), paint }) }))));
+  } else {
+    box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+      h("p", { class: "fr-small", style: { margin: 0 }, text: "La version signée attend la décision d'un autre réviseur compétent : vous n'êtes pas compétent pour cet acte (ou vous n'avez pas la qualité de réviseur)." })));
+  }
 
   // Le fil de parcours : dans le circuit externe, la certification prend la
   // place de la révision, APRÈS la signature — le fil le montre, pour que le
@@ -173,27 +193,6 @@ function carteCertification(a, doc, paint) {
   box.appendChild(h("div", { class: "fr-card fr-card--soft" },
     h("h3", { class: "fr-card__title", text: "La pièce signée" }),
     dl));
-
-  if (cert.statut === "conforme" || cert.statut === "non_conforme") {
-    box.appendChild(h("div", { class: "fr-alert fr-alert--" + (cert.statut === "conforme" ? "success" : "error") },
-      h("p", { class: "fr-alert__title", text: cert.statut === "conforme" ? "Conformité certifiée" : "Conformité refusée" }),
-      h("p", { class: "fr-small", text: [cert.parNom ? "Par " + cert.parNom : "", cert.le ? "le " + formatDate(String(cert.le).slice(0, 10)) : ""].filter(Boolean).join(" · ") }),
-      cert.motif ? h("p", { class: "fr-small", text: "Motif : " + cert.motif }) : null,
-      cert.remarque && cert.remarque !== cert.motif ? h("p", { class: "fr-small fr-muted", text: "Observation : " + cert.remarque }) : null));
-  }
-
-  if (cert.statut !== "conforme") {
-    if (peutCertifier(a)) {
-      box.appendChild(h("div", { class: "fr-card" },
-        h("h3", { class: "fr-card__title", text: "Votre décision" }),
-        h("p", { class: "fr-small fr-muted", text: "Ouvrez la pièce signée, comparez-la à la version numérique, puis certifiez la conformité — ou refusez-la, en disant ce qui ne concorde pas (l'acte attendra alors une version signée conforme)." }),
-        h("div", { class: "fr-row" },
-          button("Certifier la conformité…", { variant: "primary", icon: "check", onClick: () => certifierConformite(a, doc, { docs: new Map([[a.id, doc]]), paint }) }))));
-    } else {
-      box.appendChild(h("div", { class: "fr-card fr-card--soft" },
-        h("p", { class: "fr-small", text: "La version signée attend la décision d'un autre réviseur compétent : vous n'êtes pas compétent pour cet acte (ou vous n'avez pas la qualité de réviseur)." })));
-    }
-  }
 
   if (rapport) box.appendChild(carteRapport(rapport));
   return box;
@@ -219,35 +218,53 @@ function carteActe(a, paint) {
         text: (a.numero || "acte sans numéro") + " — " + (a.objet || doc?.meta?.objet || "") }),
       h("span", { class: "fr-badge fr-badge--" + (etat.caduque ? "warning" : etat.color || "info"), text: etat.caduque ? "révision caduque" : etat.label || "—" }),
     ),
-    h("p", { class: "fr-small fr-muted", text: [
+    mentions([
       trame?.name || "trame absente",
       a.serviceId ? targetLabel(config, a.serviceId, a.bureauId) : "acte général",
       a.createdByName ? "rédigé par " + a.createdByName : "",
-    ].filter(Boolean).join(" · ") }),
+      r.demandeeParNom ? "soumis par " + r.demandeeParNom : "",
+    ]),
     h("div", { class: "fr-row" },
-      button("Voir l'acte", { variant: "tertiary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
-      can("actes.rediger") ? button("Ouvrir en rédaction (corriger)", { variant: "tertiary", size: "sm", icon: "note", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } }) : null,
-      can("actes.signer") && r.statut === "valide" ? button("Suite du circuit", { variant: "tertiary", size: "sm", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } }) : null,
+      button("Voir l'acte", { variant: "secondary", size: "sm", icon: "eye", onClick: () => navigate("acte/" + a.id) }),
+      menuButton([
+        can("actes.rediger") ? { label: "Ouvrir en rédaction (corriger)", icon: "note", onClick: () => { state.ui = { ...(state.ui || {}), openActeId: a.id }; navigate("rediger/" + a.trameId); } } : null,
+        can("actes.signer") && r.statut === "valide" ? { label: "Suite du circuit", icon: "lock", onClick: () => { state.signature = { tab: "circuit", acteId: a.id }; navigate("signature"); } } : null,
+      ].filter(Boolean)),
     ),
   ));
 
-  // ------------------------------------------------ la trace de la révision
-  // Le FIL DE PARCOURS d'abord : il montre où la révision se situe — après le
+  // ------------------------------------------------ LA DÉCISION, EN PREMIER
+  // Le réviseur vient ICI pour trancher : sa décision remonte donc sous
+  // l'identité de l'acte (revue d'interface, P2), et tout ce qui l'éclaire — le
+  // parcours, le dossier, le rapport de conformité — vient dessous. Il ne
+  // descend plus chercher ses boutons sous le rapport.
+  const alerteCaduque = alerteRevisionCaduque(etat);
+  if (alerteCaduque) box.appendChild(alerteCaduque);
+  if (r.statut === "en_attente" && peutTrancher(a)) {
+    box.appendChild(carteDecision(a, rapport));
+  } else if (r.statut === "en_attente") {
+    box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+      h("p", { class: "fr-small", style: { margin: 0 }, text: "L'acte attend la décision d'un autre réviseur compétent. Vous n'êtes pas compétent pour celui-ci (ou vous n'avez pas la qualité de réviseur)." })));
+  } else if (r.statut === "valide") {
+    box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+      h("p", { class: "fr-small", style: { margin: 0 }, text: etat.caduque
+        ? `Révision rendue le ${formatDate(String(r.valideLe || "").slice(0, 10))}${r.valideParNom ? " par " + r.valideParNom : ""} — mais elle ne vaut plus : l'acte doit être de nouveau soumis au réviseur.`
+        : `Révisé le ${formatDate(String(r.valideLe || "").slice(0, 10))}${r.valideParNom ? " par " + r.valideParNom : ""}${r.corrige ? " — le réviseur a corrigé le texte" : ""}. L'acte peut partir en signature.` })));
+  } else if (r.statut === "rejete") {
+    box.appendChild(h("div", { class: "fr-card fr-card--soft" },
+      h("p", { class: "fr-small", style: { margin: 0 }, text: `Rejeté le ${formatDate(String(r.rejeteLe || "").slice(0, 10))}${r.rejeteParNom ? " par " + r.rejeteParNom : ""}. L'acte est revenu en brouillon chez son rédacteur, qui a reçu le motif.` })));
+  }
+
+  // ------------------------------------------------ ce qui éclaire la décision
+  // Le FIL DE PARCOURS : il montre où la révision se situe — après le
   // parapheur, avant la signature (voir src/lib/parcours.js). Le réviseur voit
   // ainsi ce qui a déjà été franchi, et ce que sa décision va débloquer.
   box.appendChild(h("div", { class: "fr-card fr-card--soft" },
     h("h3", { class: "fr-card__title", text: "Le parcours de l'acte" }),
     bandeauParcours(parcoursDeActe(a, { config, trames: state.trames, users: state.users, trame }), { nu: true })));
-  box.appendChild(carteDossierRevision(a, etat));
+  box.appendChild(carteDossierRevision(a, etat, { alerteCaduque: false }));
 
   // ------------------------------------------------------- rapport
   if (rapport) box.appendChild(carteRapport(rapport));
-
-  // ------------------------------------------------------- décision
-  if (r.statut === "en_attente" && peutTrancher(a)) box.appendChild(carteDecision(a, rapport));
-  else if (r.statut === "en_attente") {
-    box.appendChild(h("div", { class: "fr-card fr-card--soft" },
-      h("p", { class: "fr-small", text: "L'acte attend la décision d'un autre réviseur compétent. Vous n'êtes pas compétent pour celui-ci (ou vous n'avez pas la qualité de réviseur)." })));
-  }
   return box;
 }

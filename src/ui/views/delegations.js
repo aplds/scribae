@@ -22,7 +22,7 @@
 
 import { state, touch, redrawView, can, personById, entityById, navigate, journaliser, setUsers, currentUser } from "../state.js";
 import { h, clear, button, toast, modal, field as frField } from "../dom.js";
-import { textField, selectField, choiceField, confirmDialog, sectionHeader, helpLink, emptyState } from "../components.js";
+import { textField, selectField, choiceField, confirmDialog, sectionHeader, helpLink, emptyState, pageTitle } from "../components.js";
 import { formatDate, todayIso } from "../../lib/util.js";
 import { get } from "../../lib/remote.js";
 import {
@@ -185,8 +185,7 @@ export function renderDelegations(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Organigramme des délégations" }),
-      h("p", { class: "page-head__sub", text: "Qui peut signer à la place de qui. Chaque chaîne descend d'une autorité de tête, de délégation en sous-délégation, et l'acte signé au bout porte toutes les qualités traversées. Chaque délégation s'établit par deux décisions — celle qui nomme le délégataire, celle qui le délègue — désignées d'un acte publié au recueil ou d'un lien externe : l'acte signé les vise, et publie leur lien. Cliquez un acteur pour ouvrir sa fiche." }),
+      pageTitle("Organigramme des délégations" , "Qui peut signer à la place de qui. Chaque chaîne descend d'une autorité de tête, de délégation en sous-délégation, et l'acte signé au bout porte toutes les qualités traversées. Chaque délégation s'établit par deux décisions — celle qui nomme le délégataire, celle qui le délègue — désignées d'un acte publié au recueil ou d'un lien externe : l'acte signé les vise, et publie leur lien. Cliquez un acteur pour ouvrir sa fiche." ),
     ),
     h("div", { class: "page-head__actions" },
       peutGerer ? button("Nouvelle délégation", { variant: "primary", icon: "plus", onClick: () => creer() }) : null,

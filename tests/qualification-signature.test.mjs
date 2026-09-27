@@ -83,4 +83,35 @@ test("niveauDepuisCircuit : chaque circuit donne son niveau", async (t) => {
   assert.equal(mod.niveauDepuisCircuit("electronique", ""), "avancee");
   assert.equal(mod.niveauDepuisCircuit("electronique", "n'importe quoi"), "avancee");
   assert.equal(mod.niveauDepuisCircuit("", ""), "");
+  // Signature interne : avancée par construction — jamais qualifiée.
+  assert.equal(mod.niveauDepuisCircuit("interne"), "avancee");
+});
+
+test("qualification : la signature interne dit que le service en est l auteur", async (t) => {
+  const mod = await charger("../src/lib/qualification-signature.js");
+  if (!mod) return t.skip("module indisponible hors navigateur");
+
+  // Le prestataire « interne » n'est pas un tiers : c'est le service lui-même, et
+  // sa clé ne quitte jamais le serveur. La mention ne doit donc pas se lire comme
+  // celle d'un prestataire branché — ni, surtout, comme celle d'un tiers qualifié.
+  const q = mod.qualificationSignature({
+    niveau: "avancee", simule: false,
+    prestataire: { id: "scribae-interne", nom: "Signature interne du service", niveau: "avancee" },
+  });
+  assert.equal(q.niveau, "avancee");
+  assert.equal(q.interne, true);
+  assert.equal(q.simulee, false);
+  assert.equal(q.avertissement, true, "non qualifiée : l acte publié doit le dire");
+  assert.equal(q.qualifiee, false);
+  assert.match(q.label, /par le service/);
+  assert.match(q.mention, /SERVICE de la collectivité/);
+  assert.match(q.mention, /ne quitte jamais le serveur/);
+  assert.ok(q.mention.includes("910/2014"), "la mention cite le règlement eIDAS");
+  assert.doesNotMatch(q.mention, /SIMULÉ/);
+  // Un prestataire de démonstration reste, lui, dit « simulé » : les deux
+  // situations ne se confondent pas.
+  const demo = mod.qualificationSignature({ niveau: "avancee", simule: true, prestataire: { id: "esup", nom: "ESUP" } });
+  assert.equal(demo.interne, false);
+  assert.equal(demo.simulee, true);
+  assert.match(demo.mention, /SIMULÉ/);
 });

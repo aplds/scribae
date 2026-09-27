@@ -12,7 +12,7 @@
 // a été déposée : elle le tient de l'agent qui a reçu la pièce, avec sa date
 // d'introduction — celle qui ferme le délai de recours contentieux.
 // ============================================================================
-import { state, touch, journaliser, redrawView, actePubliable, trameById } from "./state.js";
+import { state, touch, journaliser, redrawView, actePubliable, trameById, modeControleLegalite, peutDeclarerTransmission } from "./state.js";
 import { h, button, toast, modal } from "./dom.js";
 import { textField, selectField } from "./components.js";
 import {
@@ -21,6 +21,9 @@ import {
   TRANSMISSION_MODES, PUBLICATION_MODES, NOTIFICATION_MODES, RECOURS_TYPES, recoursTypeLabel,
 } from "../lib/execution.js";
 import { envoyerNotification } from "../lib/courriel.js";
+import { post, errorMessage } from "../lib/remote.js";
+import { CONTROLE_LEGALITE, certificatTransmission } from "../lib/legalite.js";
+import { publicationSettings } from "../lib/eli.js";
 
 const nom = (u) => (u ? [u.firstName, u.lastName].filter(Boolean).join(" ") : "");
 
@@ -32,7 +35,20 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
     mode: e.mode || "",
     destinataires: e.destinataires || "",
     courriel: e.courriel || "",
+    destinataire: e.destinataire || "",
+    motif: (e.declaration && e.declaration.motif) || "",
   };
+  // LA DÉCLARATION DE TRANSMISSION est un geste de RÉVISEUR (ou de
+  // l'administration) : dans les régimes « declaratif » et « api », c'est lui qui
+  // atteste à qui l'acte a été transmis, et à quelle date. Dans le régime
+  // « desactive », la constatation ordinaire reste ouverte aux mêmes comptes
+  // qu'avant (voir src/lib/legalite.js).
+  const mode = modeControleLegalite();
+  const declarative = f.id === "transmission" && mode !== "desactive";
+  if (declarative && !peutDeclarerTransmission(a)) {
+    toast("Seul un réviseur compétent pour cet acte — ou l'administration — peut déclarer sa transmission au contrôle de légalité.", "warning");
+    return;
+  }
   // Le courriel de notification, quand la formalité le permet : l'agent qui
   // notifie un acte individuel à l'intéressé le fait ordinairement par courriel.
   // Le message part par le serveur SMTP du déploiement ; sans serveur configuré,
@@ -62,6 +78,22 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
       onChange: (v) => { data.ref = v; },
     }),
     selectField({ label: "Modalité", value: data.mode, options: optionsMode, onChange: (v) => { data.mode = v; } }),
+    f.id === "transmission" ? h("div", { class: "fr-stack" },
+      textField({
+        label: declarative ? "Destinataire (requis)" : "Destinataire",
+        value: data.destinataire || CONTROLE_LEGALITE.destinataire,
+        help: "L'autorité à qui l'acte a été transmis — « Préfecture — contrôle de légalité », la sous-préfecture, ou le destinataire prévu par votre convention.",
+        onChange: (v) => { data.destinataire = v; },
+      }),
+      declarative ? textField({
+        label: "Motif de la déclaration (facultatif)", rows: 2, value: data.motif,
+        help: "Pourquoi la transmission est déclarée plutôt que constatée par l'API : envoi hors application, API injoignable, remise contre récépissé…",
+        onChange: (v) => { data.motif = v; },
+      }) : null,
+      declarative ? h("p", { class: "fr-hint", text: mode === "declaratif"
+        ? "Régime déclaratif : votre déclaration engage votre qualité de réviseur, et c'est elle qui lève la porte de publication. Le nom inscrit au certificat est le vôtre."
+        : "Régime API : la télétransmission est adressée par le service. Cette déclaration sert à l'acte transmis autrement (hors application)." }) : null,
+    ) : null,
     f.id === "notification" ? textField({ label: "Destinataire(s)", value: data.destinataires, help: "La personne ou les personnes à qui l'acte a été notifié.", onChange: (v) => { data.destinataires = v; } }) : null,
     blocMail,
     f.id === "publication" ? h("p", { class: "fr-hint", text: "Renseignez ce formulaire pour une publication constatée hors de la chaîne ELI (recueil papier, affichage, site internet). Lorsque l'acte est publié depuis l'écran « Signature & publication », la formalité se constate d'elle-même." }) : null,
@@ -74,10 +106,13 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
         variant: "tertiary",
         onClick: async () => {
           effacerFormalite(a, f.id);
+          if (f.id === "transmission" && a.original) delete a.original.transmission;
           a.updatedAt = new Date().toISOString();
           touch("actes", { rerender: false });
           await journaliser({ action: "formalite.effacement", cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id, detail: "constatation effacée : " + f.label, to: [] });
-          toast("Constatation effacée", "warning");
+          toast(f.id === "transmission" && e.declaration
+            ? "Déclaration effacée dans l'application : le service garde, lui, la transmission qu'il a enregistrée."
+            : "Constatation effacée", "warning");
           close();
           paint();
         },
@@ -87,14 +122,50 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
         variant: "primary", icon: "check",
         onClick: async () => {
           if (f.id === "notification") data.courriel = String(courrielInput.value || "").trim();
-          enregistrerFormalite(a, f.id, { ...data, by: state.user?.id, byName: nom(state.user) });
+          let formalite = { ...data, by: state.user?.id, byName: nom(state.user) };
+          // LA DÉCLARATION de transmission : le SERVICE est la source de vérité
+          // du certificat, et c'est lui qui oppose le déclarant à son identité —
+          // on l'interroge d'abord. L'attestation locale ne sert qu'à un acte non
+          // déposé (le rétablissement la portera au service plus tard).
+          if (declarative) {
+            const decl = {
+              at: data.at, destinataire: String(data.destinataire || "").trim(),
+              reference: String(data.ref || "").trim(), motif: String(data.motif || "").trim(),
+              mode: data.mode, personId: state.user?.personId || "", auteur: nom(state.user), entite: a.entityName || "",
+            };
+            if (!decl.at || !decl.destinataire) { toast("Date et destinataire sont requis pour déclarer la transmission.", "warning"); return; }
+            let certificat = null, attribution = "declaree", parNom = decl.auteur;
+            if (a.api?.acteId) {
+              const jeton = publicationSettings(state.config).jetonDemonstration;
+              const res = await post(`/v1/actes/${a.api.acteId}/transmission`, { declaration: decl }, { token: jeton, label: "Déclaration de transmission au contrôle de légalité" });
+              if (!res.ok) { toast("Déclaration refusée par le service : " + errorMessage(res), "error"); return; }
+              certificat = res.body.certificat || null;
+              // C'est le SERVICE qui dit ce qu'il a pu attester : « verifiee »
+              // quand il a opposé la déclaration à l'identité de l'opérateur,
+              // « declaree » quand il n'a pas pu l'opposer (service de
+              // démonstration, qui n'identifie pas les personnes).
+              attribution = res.body.attribution || "declaree";
+              parNom = res.body.auteur || parNom;
+            } else {
+              certificat = await certificatTransmission({ reference: decl.reference, recuLe: decl.at, destinataire: decl.destinataire, empreinte: a.original?.document?.sha256 || a.api?.sha256 || "", declaration: { parNom: decl.auteur, motif: decl.motif } });
+            }
+            formalite = {
+              at: decl.at, ref: decl.reference || certificat?.reference || "", mode: decl.mode,
+              destinataire: decl.destinataire, certificat,
+              declaration: { par: state.user?.id || "", parNom, personId: decl.personId, motif: decl.motif, attribution, le: new Date().toISOString() },
+              by: state.user?.id, byName: nom(state.user),
+            };
+            // Le certificat est déposé SUR LE DOCUMENT, comme celui de l'API.
+            if (a.original && certificat) a.original.transmission = certificat;
+          }
+          enregistrerFormalite(a, f.id, formalite);
           a.updatedAt = new Date().toISOString();
           const opts = { publiable: actePubliable(a), trame: trameById(a.trameId) };
           const exe = dateExecutoire(a, opts);
           touch("actes", { rerender: false });
           await journaliser({
             action: "formalite." + f.id, cible: "acte", cibleLabel: a.numero || a.id, acteId: a.id,
-            detail: `${f.label} : ${data.at}${data.ref ? " (réf. " + data.ref + ")" : ""}${exe ? " — acte exécutoire" : ""}`,
+            detail: `${f.label} : ${data.at}${data.ref ? " (réf. " + data.ref + ")" : ""}${declarative ? " — déclarée par " + nom(state.user) : ""}${exe ? " — acte exécutoire" : ""}`,
             to: [a.createdBy || "", "role:editeur"],
           });
           // Le courriel de notification : il part APRÈS la constatation, et son

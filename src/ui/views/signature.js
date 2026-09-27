@@ -11,9 +11,9 @@
 // notification (webhook) revient au service, qui vérifie l'empreinte du
 // document avant d'accepter la signature.
 // ============================================================================
-import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, parapheurActif, controleLegaliteActif, revisionPour, revisionRequisePour, visibleActes, trameById, reviseursDe, modeSignatureDe, circuitSignatureDe, peutCertifier, estCircuitExterne } from "../state.js";
+import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, parapheurActif, controleLegaliteActif, controleLegaliteParApi, controleLegaliteDeclaratif, peutDeclarerTransmission, revisionPour, revisionRequisePour, visibleActes, trameById, reviseursDe, modeSignatureDe, circuitSignatureDe, peutCertifier, estCircuitExterne, isAdmin } from "../state.js";
 import { h, clear, button, toast, modal, icon, badge } from "../dom.js";
-import { textField, selectField, emptyState, helpLink } from "../components.js";
+import { textField, selectField, emptyState, helpLink, pageTitle } from "../components.js";
 import { docOfActe } from "./modifier.js";
 import { natureOfActe, appellationAnnexe, estReglement } from "../../lib/annexes.js";
 import { parcoursDeActe, etapesDuCircuit } from "../../lib/parcours.js";
@@ -30,7 +30,7 @@ import {
   publicationSettings, eliUri as eliUriOf, opposability, opposabilityRule,
   buildWebVersion, publicationJsonLd, normalizeUrl,
 } from "../../lib/eli.js";
-import { PRESTATAIRE, prestataire, buildSignedPackage, partiePublique, dossierInterne } from "../../lib/signature.js";
+import { PRESTATAIRE, prestataire, buildSignedPackage, partiePublique, dossierInterne, pageOriginalSigne } from "../../lib/signature.js";
 import {
   envoyerNotification, tracesCourriel, dossierSignatureInterne,
   destinataireDeCompte,
@@ -39,15 +39,18 @@ import { validationPourSignature, avancement, empreinteTexte } from "../../lib/v
 import {
   circuitPour, circuitsDisponibles, modeLabel, trameModeLabel,
   versionSignee, certificationDe, publicationExternePossible, dossierSimple, signeeSimple,
+  dossierInterneSignature, signeeInterne,
   reglagesPrestataire, circuitElectroniqueSimule,
-  signatureSettings,
+  signatureSettings, signatureInterneDisponible, motifSignatureInterne,
 } from "../../lib/externe.js";
 import { niveauDepuisCircuit } from "../../lib/qualification-signature.js";
-import { enregistrerFormalite } from "../../lib/execution.js";
+import { enregistrerFormalite, formalites, transmissionRequisePour } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE, verifierCertificatTransmission } from "../../lib/legalite.js";
 import { get, post, connect, apiStatus, errorMessage, beginFlow, onStatus, recordExternal } from "../../lib/remote.js";
+import { deposerPiece, verifierTaille, limiteLisible } from "../../lib/fichiers.js";
 import { renderApiTab } from "./api-console.js";
 import { soumettreARevision } from "../revision-actions.js";
+import { ouvrirFormulaireFormalite } from "../execution-actions.js";
 import { appliquerAbrogations, emporterAnnexes } from "../abrogations-apply.js";
 import { hasRole, fullName } from "../../lib/users.js";
 import {
@@ -151,10 +154,9 @@ export function renderSignature(root, params) {
   if (!actes.length) {
     root.appendChild(h("div", { class: "page-head" },
       h("div", { class: "page-head__text" },
-        h("h1", { class: "page-head__title", text: "Signature & publication" }),
-        h("p", { class: "page-head__sub", text: signataire
+        pageTitle("Signature & publication" , signataire
           ? "Les actes dont la signature relève de vous apparaissent ici, et nulle part ailleurs dans l'atelier."
-          : "Envoi des actes finalisés en signature, puis publication et attribution de l'identifiant ELI." }),
+          : "Envoi des actes finalisés en signature, puis publication et attribution de l'identifiant ELI." ),
       ),
       h("div", { class: "page-head__actions" }, helpLink("signature", "Comment faire ?")),
     ));
@@ -167,10 +169,9 @@ export function renderSignature(root, params) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Signature & publication" }),
-      h("p", { class: "page-head__sub", text: signataire
+      pageTitle("Signature & publication" , signataire
         ? "Vous signez avec votre compte, rapproché de votre compte sur l'outil de signature. L'acte signé part au recueil, où il reçoit son identifiant ELI : un acte qui fait droit y devient opposable, un document s'y donne à lire."
-        : "L'acte signé part au recueil, où le service lui attribue son identifiant ELI : un acte qui fait droit y devient opposable, un document s'y donne à lire." }),
+        : "L'acte signé part au recueil, où le service lui attribue son identifiant ELI : un acte qui fait droit y devient opposable, un document s'y donne à lire." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("signature", "Comment faire ?"),
@@ -351,6 +352,11 @@ function elementSignature(a, docs, paint, config) {
         onClick: () => engagerSignatureSimple(a, doc, { docs, paint }),
       }));
   }
+  // Signature INTERNE : c'est le SERVICE qui signe, avec la clé du signataire
+  // qu'il garde scellée dans son coffre. Le signataire vérifie le document ici,
+  // puis déclenche le geste : il n'y a aucun outil à ouvrir, aucune clé sur le
+  // poste, et rien à déposer depuis lui.
+  if (modeSignatureDe(a) === "interne") return elementSignatureInterne(a, doc, paint, raison);
   return h("div", { class: "sig-file__item sig-file__item--action" },
     h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
     h("span", { class: "sig-file__obj", text: a.objet || doc?.meta?.objet || "—" }),
@@ -394,6 +400,24 @@ function elementSignatureExterne(a, doc, paint, blocking, raison) {
           onClick: () => ajouterVersionSignee(a, doc, ctx),
         })
         : button("Voir la version signée", { variant: "secondary", size: "sm", icon: "eye", onClick: () => voirVersionSignee(a) }));
+
+}
+
+// La ligne d'un acte du circuit interne dans la file du signataire : le geste se
+// fait ici, mais la signature n'est pas produite ici — le service s'en charge.
+function elementSignatureInterne(a, doc, paint, raison) {
+  const dispo = signatureInterneDisponible();
+  const dejaOuvert = !!(a.api?.acteId && a.api?.signatureId);
+  return h("div", { class: "sig-file__item sig-file__item--action" },
+    h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
+    h("span", { class: "sig-file__obj", text: a.objet || doc?.meta?.objet || "—" }),
+    h("span", { class: "fr-small fr-muted", text: !dispo ? "coffre du service indisponible" : dejaOuvert ? "circuit ouvert — prêt à signer" : "signature par le service" }),
+    button("Vérifier et faire signer", {
+      variant: "primary", size: "sm", icon: "lock",
+      disabled: apiStatus().status !== "online" || !!raison || !dispo,
+      title: !dispo ? motifSignatureInterne() : (raison || "Vérifier le document, puis le faire signer par le service"),
+      onClick: () => engagerSignatureInterne(a, doc, { docs: new Map([[a.id, doc]]), paint }),
+    }));
 }
 
 // Les portes que l'acte doit avoir franchies avant la signature : parapheur
@@ -463,6 +487,10 @@ function renderCircuit(root, ctx) {
   const modeSig = modeSignatureDe(acte);
   const externe = modeSig === "externe";
   const simple = modeSig === "simple";
+  // Le circuit INTERNE suit les mêmes portes que le circuit simple (parapheur,
+  // révision), et s'affiche avec les mêmes marches : ce qui change est QUI signe —
+  // le service, avec la clé du signataire gardée scellée dans son coffre.
+  const interne = modeSig === "interne";
   // Le passage au parapheur conditionne l'envoi en signature : le service
   // refuse d'ouvrir un circuit sur un acte dont le circuit de validation n'est
   // pas achevé (voir hEnvoyerEnSignature dans index.html).
@@ -476,9 +504,11 @@ function renderCircuit(root, ctx) {
   // réviseur compétent pour l'acte ; `rev.requise` dit si la marche existe.
   const rev = revisionPour(acte);
   const enRevision = acte.revision?.statut === "en_attente";
-  // Transmission au contrôle de légalité : fonction expérimentale, éteinte par
-  // défaut. Active, elle ajoute une marche ENTRE la signature et la
-  // publication, et l'acte signé y passe automatiquement (voir plus bas).
+  // Transmission au contrôle de légalité : elle se règle par un RÉGIME
+  // (« desactive », « declaratif », « api »), Administration › Expérimentale.
+  // Gérée, elle ajoute une marche ENTRE la signature et la publication : l'acte
+  // y passe automatiquement (régime « api »), ou bien il attend la DÉCLARATION
+  // d'un réviseur compétent (régime « declaratif »). Voir src/lib/legalite.js.
   const controleLegalite = controleLegaliteActif();
   // Le PARCOURS de l'acte, calculé une seule fois (src/lib/parcours.js) : c'est
   // lui qui montre, d'un bout à l'autre, l'ordre réel des portes — parapheur,
@@ -519,10 +549,10 @@ function renderCircuit(root, ctx) {
         parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
         blocking, doc, acte, publiable, config,
       })
-      : simple
+      : (simple || interne)
         ? etapesSimple({
           parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
-          blocking, doc, acte, publiable, rev, config,
+          blocking, doc, acte, publiable, rev, config, interne,
         })
         : etapesCircuit({
           parapheur, validation: acte.validation, para, paraAvancement, circuit: circuitDe(acte),
@@ -580,6 +610,8 @@ function renderCircuit(root, ctx) {
     actionsExterne(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur, publiable });
   } else if (simple && !signed) {
     actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur, publiable });
+  } else if (interne && !signed) {
+    actionsInterne(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur });
   } else if (!signed) {
     const libelle = enRevision ? "Transmis au réviseur" : (rev.requise && !rev.ok ? "Soumettre au réviseur" : (acte.api?.acteId ? "Reprendre le circuit" : "Envoyer en signature"));
     row.appendChild(button(libelle, {
@@ -625,6 +657,29 @@ function renderCircuit(root, ctx) {
     // (signature simple, ou circuit électronique).
     if (dossierInterne(acte.original)) {
       row.appendChild(button("Dossier de signature (interne)…", { variant: "tertiary", icon: "lock", title: "Les mentions nominatives conservées au registre — non diffusées au public", onClick: () => voirDossierInterne(acte) }));
+    }
+    // LA DÉCLARATION DE TRANSMISSION (régimes « declaratif » et « api ») : tant
+    // qu'elle manque, l'acte signé ne peut pas être publié — le service refuse
+    // (409 transmission_absente). Le geste est offert au RÉVISEUR compétent, comme
+    // depuis l'échéancier (voir src/lib/legalite.js et state.peutDeclarerTransmission).
+    const soumisTransmission = controleLegaliteActif()
+      && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) })
+      && !acte.execution?.transmission;
+    if (soumisTransmission) {
+      if (peutDeclarerTransmission(acte)) {
+        row.appendChild(button("Déclarer la transmission", {
+          variant: "secondary", icon: "check",
+          title: "Attester à qui l'acte a été transmis, et à quelle date",
+          onClick: () => ouvrirFormulaireFormalite(acte, formalites(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) }).find((f) => f.id === "transmission"), { paint }),
+        }));
+      }
+      actions.appendChild(h("div", { class: "fr-alert fr-alert--" + (controleLegaliteParApi() ? "warning" : "info"), style: { marginTop: "10px" } },
+        h("p", { class: "fr-alert__title", text: controleLegaliteParApi() ? "Transmission au contrôle de légalité en attente" : "Déclaration de transmission attendue" }),
+        h("p", { class: "fr-small", text: controleLegaliteParApi()
+          ? "L'acte signé part vers l'API d'envoi dès la signature ; si la télétransmission n'a pas abouti (API injoignable, refus), l'acte reste signé, non transmis. Un réviseur compétent peut aussi DÉCLARER une transmission faite hors application."
+          : "Régime déclaratif : avant sa publication, l'acte attend qu'un réviseur compétent déclare à qui, et quand, il a été transmis. La déclaration engage son auteur, et c'est elle qui lève la porte de publication." }),
+        peutDeclarerTransmission(acte) ? null : h("p", { class: "fr-small fr-muted", text: "Seul un réviseur compétent pour cet acte — ou l'administration — peut déclarer cette transmission." }),
+      ));
     }
     if (publiable && acte.statut !== "publie") {
       row.appendChild(button("Publier maintenant", { variant: "primary", icon: "check", onClick: () => { state.signature.tab = "publication"; paint(); } }));
@@ -823,14 +878,18 @@ function etapesCircuit({ parapheur, validation, para, paraAvancement, circuit, b
       : ["En attente de la signature"],
   });
   // La transmission au contrôle de légalité s'intercale ICI : après le retour
-  // signé, avant la publication. Elle n'existe que si la fonction est active.
+  // signé, avant la publication. Elle n'existe que si la fonction est active, et
+  // son attente dit le RÉGIME : l'API d'envoi, ou la déclaration du réviseur.
   if (controleLegalite) {
+    const attendu = controleLegaliteParApi() ? "En attente de la télétransmission (API @ctes)"
+      : controleLegaliteDeclaratif() ? "En attente de la déclaration de transmission du réviseur"
+        : "En attente de la constatation de la transmission";
     etapes.push({
       title: "Transmis au contrôle de légalité",
       done: !!transmission,
       lines: transmission
-        ? [transmission.certificat?.mention || `Transmis le ${formatDate(transmission.at)}`, transmission.ref ? `réf. ${transmission.ref}` : "", transmission.certificat?.sceau ? `sceau ${String(transmission.certificat.sceau).slice(0, 16)}…` : ""].filter(Boolean)
-        : ["En attente de la télétransmission (API @ctes)"],
+        ? [transmission.certificat?.mention || `Transmis le ${formatDate(transmission.at)}`, transmission.destinataire ? `à ${transmission.destinataire}` : "", transmission.ref ? `réf. ${transmission.ref}` : "", transmission.certificat?.sceau ? `sceau ${String(transmission.certificat.sceau).slice(0, 16)}…` : ""].filter(Boolean)
+        : [attendu],
     });
   }
   etapes.push(publiable
@@ -981,17 +1040,12 @@ function actionsExterne(actions, row, { acte, doc, trame, circuitSig, paint, blo
       envoyerEnSignature(acte, ctx, { ouvrirOutil: false });
     };
     if (circuitSig.choix) {
-      actions.appendChild(h("p", { class: "fr-small", text: "La trame autorise les deux circuits : choisissez celui de cet acte." }));
-      row.appendChild(button("Signer dans l'application (électronique)", {
-        variant: "secondary", icon: "lock", disabled: !pret,
-        title: pret ? "Déposer l'acte et ouvrir le circuit du prestataire" : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
-        onClick: () => envoi("electronique"),
-      }));
-      row.appendChild(button("Envoyer à signature (circuit externe)", {
-        variant: "primary", icon: "download", disabled: !pret,
-        title: pret ? "Télécharger le document prêt à signer : il sera signé hors de l'application" : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
-        onClick: () => envoi("externe"),
-      }));
+      // La trame ouvre plusieurs circuits : le choix se fait avec les MÊMES
+      // boutons que pour les autres circuits (voir `choixCircuit`), pour que
+      // l'inventaire des circuits offerts soit celui de `circuitsDisponibles` —
+      // et que la signature interne y figure quand le service en tient le coffre.
+      actions.appendChild(h("p", { class: "fr-small", text: "La trame ouvre plusieurs circuits : choisissez celui de cet acte." }));
+      choixCircuit(row, { acte, doc, ctx, pret, signataire: peutSignerEffectivement(state.config, state.user, acte, trame).ok });
     } else {
       row.appendChild(button("Envoyer à signature — télécharger le document", {
         variant: "primary", icon: "download", disabled: !pret,
@@ -1095,10 +1149,12 @@ function destinatairesAdministration(acte) {
     .map((u) => destinataireDeCompte(u)).filter(Boolean);
 }
 
-// Les marches du circuit simple : pas de remise, pas de dépôt de PDF, pas de
-// certification. Le document est vérifié puis signé, et le dossier interne est
-// la dernière marche avant la publication.
-function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable, rev, config }) {
+// Les marches du circuit simple — et du circuit INTERNE, qui suit les mêmes
+// portes : pas de remise, pas de dépôt de PDF, pas de certification. Le document
+// est vérifié puis signé, et le dossier interne est la dernière marche avant la
+// publication. Ce qui les distingue tient en un mot : DANS l'application, la clé
+// est sur le poste du signataire ; par le SERVICE, elle est dans son coffre.
+function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, blocking, doc, acte, publiable, rev, config, interne = false }) {
   const etapes = [{
     title: "Acte finalisé",
     done: !!(acte.values || acte.doc),
@@ -1142,17 +1198,20 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
       ].filter(Boolean),
     });
   }
-  const d = dossierSimple(acte) || {};
+  const d = (interne ? dossierInterneSignature(acte) : dossierSimple(acte)) || {};
   etapes.push({
-    title: "Signé dans l'application",
-    done: signeeSimple(acte),
-    lines: signeeSimple(acte)
+    title: interne ? "Signé par le service (coffre interne)" : "Signé dans l'application",
+    done: interne ? signeeInterne(acte) : signeeSimple(acte),
+    lines: (interne ? signeeInterne(acte) : signeeSimple(acte))
       ? [
         `Signé le ${formatDate(String(d.signeLe || "").slice(0, 10), "date-long")}`,
-        d.parNom ? "Par " + d.parNom : "",
+        d.parNom ? (interne ? "Par " : "Par ") + d.parNom : "",
         d.empreinte ? "Empreinte SHA-256 " + String(d.empreinte).slice(0, 16) + "…" : "",
+        interne ? "La clé privée n'a jamais quitté le coffre du service." : "",
       ].filter(Boolean)
-      : ["En attente : le signataire vérifie le document, puis le signe avec son compte."],
+      : [interne
+        ? "En attente : le signataire vérifie le document, puis le service signe avec la clé qu'il détient."
+        : "En attente : le signataire vérifie le document, puis le signe avec son compte."],
   });
   etapes.push({
     title: "Dossier de signature (interne)",
@@ -1163,7 +1222,9 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
         d.interne.authentification || "",
         "Ces mentions ne sont pas diffusées : le public ne voit que le nom, la fonction et la date.",
       ].filter(Boolean)
-      : ["Constitué à la signature (adresse, compte, moyen d'authentification)."],
+      : [interne
+        ? "Constitué par le service à la signature (identité, certificat, poste de l'opérateur, authentification)."
+        : "Constitué à la signature (adresse, compte, moyen d'authentification)."],
   });
   etapes.push({
     title: "Déposé au service",
@@ -1184,6 +1245,65 @@ function etapesSimple({ parapheur, validation, para, paraAvancement, circuit, bl
   return etapes;
 }
 
+// Le signataire est-il PRÊT à signer ? Trois pièces doivent être en place : son
+// COMPTE (rattaché à sa personne), son ADRESSE (la trace nominative), et la
+// QUALITÉ de signataire (le droit d'apposer la signature — voir src/lib/users.js).
+// Ce qui manque est nommé, avec l'écran où le régler. Le contrôle vaut pour les
+// deux circuits où c'est une PERSONNE qui signe (simple et interne) : le service
+// signe au nom d'un signataire identifié, pas au nom d'un numéro de compte.
+function blocSignatairePret(actions, auteur) {
+  const etat = auteur.personId ? etatRapprochement(state.config, state.users, auteur.personId) : null;
+  const compte = etat?.compte || null;
+  const qualite = !!compte && hasRole(compte, ROLE_SIGNATAIRE);
+  const qui = auteur.nom || "ce signataire";
+  const manque = !compte
+    ? `Aucun compte de l'application n'est rattaché à ${qui} : un signataire signe avec son compte. Dans « Comptes et rôles », ouvrez son compte (ou créez-le), rattachez-le à sa personne du référentiel, puis renseignez son courriel — c'est cette adresse qui identifie le signataire.`
+    : !auteur.courriel
+      ? `Le compte de ${qui} (${compte.login || compte.id}) n'a pas de courriel : sa trace nominative serait incomplète. Renseignez-le dans « Comptes et rôles », puis rapprochez le compte depuis « Ma signature ».`
+      : !qualite
+        ? `Le compte de ${qui} (${compte.login || compte.id}) ne porte pas la qualité de signataire : il peut envoyer l'acte en signature, non l'engager. Cochez « Signataire » sur ce compte, dans « Comptes et rôles » — ou désignez la personne dans l'organigramme des Délégations, qui l'attribue d'elle-même.`
+        : "";
+  const titre = !compte ? "Signataire sans compte" : !auteur.courriel ? "Signataire sans adresse" : "Signataire sans qualité";
+  if (manque) {
+    actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: titre }),
+      h("p", { class: "fr-small", text: manque }),
+      h("div", { class: "fr-row", style: { marginTop: "6px" } },
+        can("comptes.gerer")
+          ? button("Ouvrir « Comptes et rôles »", { variant: "secondary", size: "sm", icon: "lock", onClick: () => navigate("comptes") })
+          : h("p", { class: "fr-small fr-muted", text: "Demandez à un administrateur de mettre ce compte en état (Administration › Comptes et rôles)." }))));
+  }
+  if (auteur.nom) {
+    actions.appendChild(h("div", { class: "sig-cert" },
+      h("h3", { text: "Le signataire" }),
+      kv("Nom", auteur.nom),
+      kv("Fonction", auteur.fonction),
+      kv("Adresse", auteur.courriel),
+      kv("Compte de l'application", auteur.compteOutil || auteur.compteId || "")));
+  }
+}
+
+// Le choix du circuit, quand la trame en ouvre plusieurs. Les mêmes boutons pour
+// le circuit simple et pour le circuit interne : c'est le geste qui diffère —
+// « Vérifier et signer » (la clé est sur le poste) ou « Vérifier et faire
+// signer » (le service signe avec la clé du coffre).
+function choixCircuit(row, { acte, doc, ctx, pret, signataire }) {
+  for (const m of circuitsDisponibles(state.config, trameById(acte.trameId))) {
+    const libelle = (m === "simple" || m === "interne") && !signataire
+      ? "Envoyer en signature (" + libelleCourt(m).toLowerCase() + ")"
+      : libelleCourt(m);
+    row.appendChild(button(libelle, {
+      variant: m === "simple" ? "primary" : "secondary", icon: "lock", disabled: !pret,
+      title: pret ? libelleCourt(m) : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
+      onClick: async () => {
+        acte.signatureMode = m;
+        if (m === "simple") await engagerSignatureSimple(acte, doc, ctx);
+        else await envoyerEnSignature(acte, ctx);
+      },
+    }));
+  }
+}
+
 // Les actions du circuit simple : le geste de signature, et le choix du circuit
 // quand la trame en ouvre plusieurs. Le libellé dit le geste RÉEL de
 // l'opérateur : « Vérifier et signer » pour le titulaire, « Envoyer en
@@ -1199,53 +1319,11 @@ function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, bloc
     actions.appendChild(h("p", { class: "fr-small fr-muted", text: "Vous n'êtes pas le titulaire de cette signature : vous pouvez envoyer l'acte, non l'engager. Une fois envoyé, il attend la signature de son titulaire, qui la donne depuis son onglet « Ma signature »." }));
   }
 
-  // Le signataire est-il PRÊT à signer ? Trois pièces doivent être en place :
-  // son COMPTE (rattaché à sa personne), son ADRESSE (la trace nominative), et
-  // la QUALITÉ de signataire (le droit d'apposer la signature — voir
-  // src/lib/users.js). Ce qui manque est nommé, avec l'écran où le régler.
-  {
-    const etat = auteur.personId ? etatRapprochement(state.config, state.users, auteur.personId) : null;
-    const compte = etat?.compte || null;
-    const qualite = !!compte && hasRole(compte, ROLE_SIGNATAIRE);
-    const qui = auteur.nom || "ce signataire";
-    const manque = !compte
-      ? `Aucun compte de l'application n'est rattaché à ${qui} : un signataire signe avec son compte. Dans « Comptes et rôles », ouvrez son compte (ou créez-le), rattachez-le à sa personne du référentiel, puis renseignez son courriel — c'est cette adresse qui identifie le signataire.`
-      : !auteur.courriel
-        ? `Le compte de ${qui} (${compte.login || compte.id}) n'a pas de courriel : sa trace nominative serait incomplète. Renseignez-le dans « Comptes et rôles », puis rapprochez le compte depuis « Ma signature ».`
-        : !qualite
-          ? `Le compte de ${qui} (${compte.login || compte.id}) ne porte pas la qualité de signataire : il peut envoyer l'acte en signature, non l'engager. Cochez « Signataire » sur ce compte, dans « Comptes et rôles » — ou désignez la personne dans l'organigramme des Délégations, qui l'attribue d'elle-même.`
-          : "";
-    const titre = !compte ? "Signataire sans compte" : !auteur.courriel ? "Signataire sans adresse" : "Signataire sans qualité";
-    if (manque) {
-      actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
-        h("p", { class: "fr-alert__title", text: titre }),
-        h("p", { class: "fr-small", text: manque }),
-        h("div", { class: "fr-row", style: { marginTop: "6px" } },
-          can("comptes.gerer")
-            ? button("Ouvrir « Comptes et rôles »", { variant: "secondary", size: "sm", icon: "lock", onClick: () => navigate("comptes") })
-            : h("p", { class: "fr-small fr-muted", text: "Demandez à un administrateur de mettre ce compte en état (Administration › Comptes et rôles)." }))));
-    }
-  }
-  if (auteur.nom) {
-    actions.appendChild(h("div", { class: "sig-cert" },
-      h("h3", { text: "Le signataire" }),
-      kv("Nom", auteur.nom),
-      kv("Fonction", auteur.fonction),
-      kv("Adresse", auteur.courriel),
-      kv("Compte de l'application", auteur.compteOutil || auteur.compteId || "")));
-  }
+  blocSignatairePret(actions, auteur);
 
   if (circuitSig.choix) {
-    const dispo = circuitsDisponibles(state.config, trame);
     actions.appendChild(h("p", { class: "fr-small", text: "La trame ouvre plusieurs circuits : choisissez celui de cet acte." }));
-    for (const m of dispo) {
-      const libelle = m === "simple" && !signataire ? "Envoyer en signature (signature simple)" : libelleCourt(m);
-      row.appendChild(button(libelle, {
-        variant: m === "simple" ? "primary" : "secondary", icon: "lock", disabled: !pret,
-        title: pret ? libelleCourt(m) : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
-        onClick: async () => { acte.signatureMode = m; if (m !== "simple") await envoyerEnSignature(acte, ctx); else await engagerSignatureSimple(acte, doc, ctx); },
-      }));
-    }
+    choixCircuit(row, { acte, doc, ctx, pret, signataire });
   } else {
     row.appendChild(button(signataire ? "Vérifier et signer" : "Envoyer en signature", {
       variant: "primary", icon: "lock", disabled: !pret,
@@ -1268,11 +1346,63 @@ function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, bloc
   }
 }
 
+// Les actions du circuit INTERNE. Même déroulé que le circuit simple — parapheur,
+// révision, déclaration du signataire —, mais c'est le SERVICE qui produit la
+// signature : la clé privée du signataire est dans SON coffre, scellée, et le
+// poste n'y a jamais accès. Ce que l'écran doit dire, et qu'aucun autre circuit
+// ne dit : sans coffre (donc sur le service de démonstration), le circuit est
+// éteint — et l'est pour de bon, pas en simulation.
+function actionsInterne(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur }) {
+  const pret = !blocking.length && para.ok;
+  const ctx = { docs: new Map([[acte.id, doc]]), paint };
+  const auteur = auteurDe(acte, doc);
+  const signataire = peutSignerEffectivement(state.config, state.user, acte, trame).ok;
+  const dispo = signatureInterneDisponible();
+  actions.appendChild(h("p", { class: "fr-small", text: "Signature interne : c'est le SERVICE qui signe, avec la clé privée du signataire — détenue et scellée par le service, jamais remise au poste — et un certificat émis par la collectivité. C'est une signature avancée au sens d'eIDAS, mais NON qualifiée (l'acte publié le dit). Les mentions nominatives restent dans l'ORIGINAL INTERNE : le recueil public ne montre que le nom, la fonction et la date." }));
+  if (!dispo) {
+    actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: "Circuit indisponible sur ce service" }),
+      h("p", { class: "fr-small", text: motifSignatureInterne() }),
+      h("p", { class: "fr-small fr-muted", text: "Pour l'ouvrir : posez la clé de scellement du coffre (SCRIBA_SIGNATURE_KV_KEY, 32 octets en hexadécimal ou en base64) dans le .env du service auto-hébergé, puis redémarrez-le. Le coffre se suit dans Administration › Signature. Choisissez sinon un autre circuit pour cet acte." })));
+  }
+  if (!signataire) {
+    actions.appendChild(h("p", { class: "fr-small fr-muted", text: "Vous n'êtes pas le titulaire de cette signature : vous pouvez envoyer l'acte, non l'engager. Une fois envoyé, il attend la signature de son titulaire, qui l'engage depuis son onglet « Ma signature » — c'est le service qui signera." }));
+  }
+  blocSignatairePret(actions, auteur);
+
+  if (circuitSig.choix) {
+    actions.appendChild(h("p", { class: "fr-small", text: "La trame ouvre plusieurs circuits : choisissez celui de cet acte." }));
+    choixCircuit(row, { acte, doc, ctx, pret, signataire });
+  } else {
+    row.appendChild(button(signataire ? "Vérifier et faire signer" : "Envoyer en signature", {
+      variant: "primary", icon: "lock", disabled: !pret || !dispo,
+      title: !dispo ? motifSignatureInterne()
+        : pret ? (signataire ? "Vérifier le document, puis le faire signer par le service" : "Déposer l'acte : il attendra la signature de son titulaire, donnée par le service")
+          : "L'acte comporte un contrôle bloquant ou un parapheur non achevé",
+      onClick: () => engagerSignatureInterne(acte, doc, ctx),
+    }));
+  }
+  if (parapheur && !para.ok) {
+    row.appendChild(button("Ouvrir le parapheur", {
+      variant: "secondary", icon: "check",
+      onClick: () => { state.parapheur = { tab: "enCours", acteId: acte.id }; navigate("parapheur"); },
+    }));
+  }
+  const rev = revisionPour(acte);
+  if (rev.requise) {
+    row.appendChild(button("Ouvrir la révision", {
+      variant: "secondary", icon: "eye",
+      onClick: () => { state.revision = { tab: rev.ok ? "rejets" : "aReviser", acteId: acte.id }; navigate("revision"); },
+    }));
+  }
+}
+
 // Le corps du dépôt : les mêmes métadonnées que le circuit électronique, mais
 // déclarées « simple » pour que le service sache à quel circuit il a affaire.
 function corpsDepot(acte, doc, { signatureMode }) {
   const parapheur = parapheurActif();
   const rev = revisionPour(acte);
+  const trame = trameById(acte.trameId);
   return {
     akn: aknOf(acte, doc),
     numero: acte.numero || doc.meta?.numero || "",
@@ -1283,7 +1413,11 @@ function corpsDepot(acte, doc, { signatureMode }) {
     trameId: acte.trameId || "", ecarts: (acte.ecarts || []).length,
     ...themeDe(acte, doc),
     publishable: actePubliable(acte),
-    controleLegalite: controleLegaliteActif(),
+    // La porte du contrôle de légalité : le service refuse de publier un acte
+    // qu'elle déclare soumis et qui n'a pas été transmis (409
+    // transmission_absente). Elle n'existe que dans les régimes « declaratif »
+    // et « api », et seulement pour un acte que sa trame n'en dispense pas.
+    controleLegalite: controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame }),
     signatureMode,
     validation: parapheur && acte.validation ? {
       statut: acte.validation.statut, circuitLabel: acte.validation.circuitLabel || "",
@@ -1293,6 +1427,9 @@ function corpsDepot(acte, doc, { signatureMode }) {
     revision: rev.requise && acte.revision ? {
       statut: acte.revision.statut, empreinte: acte.revision.empreinte || "",
       valideLe: acte.revision.valideLe || "", corrige: acte.revision.corrige === true, par: acte.revision.valideParNom || "",
+      // Les RÉVISEURS COMPÉTENTS (personnes), pour que le service oppose le
+      // déclarant d'une transmission à sa compétence (voir hTransmettre).
+      reviseurs: reviseursDe(acte).map((u) => u.personId).filter(Boolean),
     } : null,
   };
 }
@@ -1338,7 +1475,7 @@ async function engagerSignatureSimple(acte, doc, ctx) {
     }
     if (!acte.api?.signatureId) {
       const sig = await post(`/v1/actes/${acte.api.acteId}/signature`, {
-        signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, compte: auteur.compteOutil || "" }],
+        signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, compte: auteur.compteOutil || "", personId: auteur.personId || "" }],
         niveau: "simple",
         urlNotification: "https://api.valmont-sur-loire.fr/v1/webhooks/signature",
       }, { token, flow, label: "Ouverture du circuit de signature simple" });
@@ -1455,7 +1592,7 @@ async function signerSimple(acte, doc, ctx) {
       akn, pageHtml: bodyHtml, pageCss: documentCss(config, styleForDoc(config, doc)),
       numero: acte.numero || doc.meta?.numero || "", objet: acte.objet || doc.meta?.objet || "",
       signataire: auteur, prestataire: null, brand: config.brand.name,
-      interne: dossierSignatureInterne({ signataire: auteur, courriels: tracesCourriel(acte), poste: navigator.userAgent, operateur: { id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "", compte: state.user?.login || "" } }),
+      interne: dossierSignatureInterne({ signataire: auteur, courriels: tracesCourriel(acte), poste: navigator.userAgent, operateur: { id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "", compte: state.user?.login || "", personId: state.user?.personId || "" } }),
     });
   } catch (e) { toast("Signature impossible : " + String((e && e.message) || e), "error"); return false; }
 
@@ -1502,6 +1639,216 @@ async function signerSimple(acte, doc, ctx) {
   return true;
 }
 
+// ------------------------------------------------------- la signature interne
+//
+// Le déroulé est celui de la signature simple — le document sous les yeux, une
+// déclaration, puis la signature —, à une différence près, et elle est de fond :
+// ce n'est pas le POSTE qui signe. La demande part au service avec l'identité du
+// signataire ; c'est le service qui signe, avec la clé qu'il détient et garde
+// scellée dans son coffre, et qui rend l'original signé. Le poste, lui, ne verra
+// jamais la clé : c'est ce qui fait la valeur de ce circuit (voir
+// src/server/mysql/signature-interne.mjs).
+async function engagerSignatureInterne(acte, doc, ctx) {
+  const config = state.config;
+  const parapheur = parapheurActif();
+  const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
+  if (!para.ok) { toast(para.raison, "warning"); return; }
+  const rev = revisionPour(acte);
+  if (rev.requise && !rev.ok) {
+    if (acte.revision?.statut === "en_attente") { toast("L'acte est déjà en attente de révision.", "info"); return; }
+    await soumettreARevision(acte, { paint: ctx.paint });
+    return;
+  }
+  // LE SERVICE TIENT-IL UN COFFRE ? On le demande AVANT tout dépôt : un acte
+  // déposé pour un circuit que le service ne peut pas mener resterait en plan.
+  if (!signatureInterneDisponible()) {
+    toast("La signature interne n'est pas disponible : " + motifSignatureInterne(), "warning");
+    return;
+  }
+  const competence = peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId));
+  const auteur = auteurDe(acte, doc);
+  if (!auteur.courriel) { toast("Le signataire n'a pas d'adresse électronique : sa trace nominative serait incomplète.", "warning"); return; }
+  const settings = publicationSettings(config);
+  const token = settings.jetonDemonstration;
+  const flow = beginFlow(`Signature interne — ${acte.numero || acte.id}`);
+  try {
+    if (!acte.api?.acteId) {
+      const dep = await post("/v1/actes", corpsDepot(acte, doc, { signatureMode: "interne" }), { token, flow, label: "Dépôt de l'acte (signature interne)" });
+      if (!dep.ok) { toast(errorMessage(dep), "error"); return; }
+      acte.api = { ...(acte.api || {}), acteId: dep.body.id, sha256: dep.body.sha256, deposeLe: dep.body.deposeLe };
+      acte.signatureMode = "interne";
+      acte.statut = "en_signature";
+      acte.updatedAt = new Date().toISOString();
+      touch("actes", { rerender: false });
+    }
+  } catch (e) { toast(String((e && e.message) || e), "error"); return; }
+
+  // La demande de signature : elle part par courriel quand le service de courriel
+  // est configuré (sinon elle est tracée « non envoyée »).
+  await envoyerNotification("demande_signature", {
+    config, acte, doc, brand: config.brand.name,
+    destinataires: [{ nom: auteur.nom, courriel: auteur.courriel }],
+    complement: `L'acte ${acte.numero ? "n° " + acte.numero : ""} « ${acte.objet || ""} » vous est présenté pour signature. Ouvrez Scribae, vérifiez le document, puis engagez votre signature : c'est le service qui la produira, avec la clé qu'il détient pour vous — elle n'est pas sur votre poste.`,
+  });
+  ctx.paint();
+  if (!competence.ok) {
+    // L'envoi est fait : l'acte est déposé, le titulaire est prévenu. On n'ouvre
+    // PAS la fenêtre de signature — elle engagerait la signature d'un autre.
+    toast(competence.motif + " L'acte est envoyé : il attend la signature de son titulaire, que le service produira.", "info");
+    return;
+  }
+  fenetreSignatureInterne(acte, doc, ctx);
+}
+
+// La fenêtre de signature interne : le document, l'identité du signataire,
+// l'empreinte, et la déclaration à cocher. Le signataire y lit une chose qu'aucun
+// autre circuit ne lui dit : sa clé n'est pas là, et ne le sera jamais.
+function fenetreSignatureInterne(acte, doc, ctx) {
+  const config = state.config;
+  const auteur = auteurDe(acte, doc);
+  const empreinte = acte.api?.sha256 || empreinteTexte(acte);
+
+  const paperBox = h("div", { class: "paper-box sig-paper" });
+  const paper = h("div", { class: "paper" });
+  paper.style.fontFamily = config.brand.documentFont || "";
+  applyPaper(paper, doc, config);
+  paper.appendChild(renderDocument(doc, config, {}));
+  paperBox.appendChild(paper);
+
+  const caseVerifie = h("input", { type: "checkbox" });
+  const bouton = button("Signer l'acte", { variant: "primary", icon: "lock", disabled: true, title: "Cochez la déclaration pour signer" });
+  caseVerifie.addEventListener("change", () => { bouton.disabled = !caseVerifie.checked; bouton.title = ""; });
+
+  const body = h("div", { class: "fr-stack" },
+    h("div", { class: "fr-alert fr-alert--info" },
+      h("p", { class: "fr-alert__title", text: "Signature interne — c'est le SERVICE qui signe" }),
+      h("p", { class: "fr-small", text: "Votre clé privée est détenue et scellée par le service de la collectivité : elle ne se trouve pas sur ce poste, et ne vous sera jamais transmise. En signant, vous demandez au service de signer ce document en votre nom. C'est une signature avancée (la clé est sous votre contrôle exclusif, un certificat est émis), sans être qualifiée au sens d'eIDAS." })),
+    h("div", { class: "fr-grid fr-grid--2" },
+      h("div", { class: "fr-card fr-card--soft" },
+        h("h3", { class: "fr-card__title", text: "Vous signez en tant que" }),
+        kv("Nom", auteur.nom),
+        kv("Fonction", auteur.fonction),
+        kv("Adresse", auteur.courriel),
+        kv("Compte", auteur.compteOutil || auteur.compteId || ""),
+        auteur.rapproche ? null : h("p", { class: "fr-small fr-muted", text: "Le compte n'est pas rapproché de l'annuaire : la signature restera valable, mais la traçabilité du rapprochement est incomplète." })),
+      h("div", { class: "fr-card fr-card--soft" },
+        h("h3", { class: "fr-card__title", text: "Ce qui est signé" }),
+        kv("Acte", (acte.numero || "") + (acte.objet ? " — " + acte.objet : "")),
+        kv("Entité", doc?.meta?.entity?.name || ""),
+        kv("Empreinte SHA-256", empreinte, true),
+        kv("Qui détient la clé", "Le service (coffre scellé)"))),
+    h("div", { class: "sig-doc-view", style: { height: "38vh" } }, paperBox),
+    h("label", { class: "fr-check" }, caseVerifie,
+      "Je déclare avoir vérifié le document ci-dessus et j'engage ma signature sur son contenu."));
+
+  const m = modal({
+    title: "Signer l'acte — " + (acte.numero || ""),
+    wide: true,
+    body,
+    actions: (close) => [
+      button("Renoncer", { variant: "secondary", onClick: close }),
+      bouton,
+    ],
+  });
+  bouton.addEventListener("click", async () => {
+    bouton.disabled = true;
+    bouton.textContent = "Signature en cours…";
+    const ok = await signerInterne(acte, doc, ctx);
+    if (ok) m.close();
+    else { bouton.disabled = false; bouton.textContent = "Signer l'acte"; }
+  });
+  requestAnimationFrame(() => {
+    const r = paperBox.getBoundingClientRect();
+    paper.style.transform = `scale(${Math.min(1, (r.width * 0.9) / (paper.offsetWidth || 794))})`;
+    paper.style.transformOrigin = "top left";
+  });
+}
+
+// Le geste : demander au service de signer, et recevoir l'original signé. La
+// cryptographie n'est PAS faite ici — c'est tout l'intérêt du circuit : le poste
+// ne détient aucune clé. On garde en revanche la trace du geste et le dossier
+// interne rendu par le service, comme pour la signature simple.
+async function signerInterne(acte, doc, ctx) {
+  const config = state.config;
+  // Le contrôle est rejoué ici : `signerInterne` est aussi atteignable sans
+  // passer par `engagerSignatureInterne`.
+  if (!peutSignerEffectivement(config, state.user, acte, trameById(acte.trameId)).ok) {
+    toast("Seul le titulaire de la signature peut engager cet acte, et il faut la qualité de signataire : signature refusée.", "error");
+    return false;
+  }
+  if (!acte.api?.acteId) { toast("L'acte n'est pas déposé au service : la signature interne ne peut pas être demandée.", "error"); return false; }
+  const flow = beginFlow(`Signature interne — ${acte.numero || acte.id}`);
+  const auteur = auteurDe(acte, doc);
+  const settings = publicationSettings(config);
+  const token = settings.jetonDemonstration;
+  let res;
+  try {
+    res = await post(`/v1/actes/${acte.api.acteId}/signature`, {
+      mode: "interne",
+      signataires: [{
+        nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1,
+        personId: auteur.personId || "", compteId: auteur.compteId || "",
+        compte: auteur.compteOutil || auteur.compteId || "", entite: auteur.entite || "",
+      }],
+      // L'opérateur est le compte CONNECTÉ : il diffère du signataire quand une
+      // délégation est en jeu. Le service les consigne tous les deux.
+      operateur: { id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "", compte: state.user?.login || "", personId: state.user?.personId || "" },
+      poste: navigator.userAgent,
+    }, { token, flow, label: "Signature interne (c'est le service qui signe)" });
+  } catch (e) { toast(String((e && e.message) || e), "error"); return false; }
+  if (!res.ok) { toast(errorMessage(res), "error"); return false; }
+
+  const pack = res.body.documentSigne;
+  if (!pack || !pack.document) { toast("Le service n'a pas rendu d'original signé : la signature est refusée.", "error"); return false; }
+  // La PAGE de l'original manque au paquet rendu par le service : il ne sait pas
+  // rendre un acte dont il n'a que l'Akoma Ntoso. C'est l'application, qui a le
+  // document sous les yeux, qui l'habille — la page n'est pas signée, elle est
+  // présentée (voir `pageOriginalSigne`, src/lib/signature.js).
+  try {
+    const bodyHtml = renderDocument(doc, config, {}).outerHTML.replace(/^<article[^>]*>/, "").replace(/<\/article>$/, "");
+    pack.pageHtml = pageOriginalSigne(pack, bodyHtml, config.brand.name, documentCss(config, styleForDoc(config, doc)));
+  } catch (e) { /* la page est une commodité : son échec ne défait pas la signature */ }
+
+  const sig = (pack.signatures || [])[0] || {};
+  const at = sig.signeLe || res.body.signeLe || new Date().toISOString();
+  acte.original = pack;
+  acte.signatureInterne = {
+    signeLe: at,
+    empreinte: pack.document.sha256,
+    algorithme: sig.algorithme,
+    valeur: String(sig.valeur || ""),
+    par: state.user?.id || "",
+    parNom: auteur.nom,
+    parCourriel: auteur.courriel,
+    niveau: "avancee",
+    circuit: "interne",
+    prestataire: pack.prestataire || null,
+    certificat: sig.certificat || null,
+    interne: pack.interne || null,
+  };
+  acte.api = { ...(acte.api || {}), signatureId: res.body.signatureId || acte.api?.signatureId || "", niveau: "interne", statut: "signee", signataire: auteur.nom };
+  acte.signatureMode = "interne";
+  acte.statut = "signee";
+  acte.signeLe = at;
+  acte.updatedAt = new Date().toISOString();
+  touch("actes", { rerender: false });
+
+  await journaliser({
+    action: "signature.interne", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
+    detail: `signé par le SERVICE (coffre interne) au nom de ${auteur.nom}${auteur.courriel ? " <" + auteur.courriel + ">" : ""} — empreinte ${String(pack.document.sha256).slice(0, 16)}… ; la clé privée n'a pas quitté le serveur`,
+    to: [acte.createdBy, "role:editeur"].filter(Boolean),
+  });
+  toast("Acte signé par le service : la signature est horodatée et vérifiable.", "success");
+
+  await envoyerNotification("signature_donnee", {
+    config, acte, doc, brand: config.brand.name,
+    destinataires: destinatairesAdministration(acte),
+    complement: `L'acte ${acte.numero ? "n° " + acte.numero : ""} a été signé par le service de la collectivité, au nom de ${auteur.nom}.`,
+  });
+  await publierApresSignature(acte, ctx.paint);
+  return true;
+}
+
 // La part INTERNE de l'original, telle qu'elle est déposée avec la publication :
 // ce que le service conservera au registre sans jamais le diffuser. Elle ne
 // transporte pas de copie du texte — le public a déjà le document ; elle porte
@@ -1529,7 +1876,10 @@ function originalInterneDe(acte) {
 // administrateur) — et jamais d'un lecteur du recueil public.
 export function voirDossierInterne(acte) {
   const pack = acte.original || {};
-  const d = dossierInterne(pack) || (acte.signatureSimple && acte.signatureSimple.interne) || {};
+  // Trois circuits peuvent avoir laissé un dossier : la signature simple, la
+  // signature interne, et l'original du circuit électronique (qui n'en porte pas
+  // toujours). On lit le premier qui en a un.
+  const d = dossierInterne(pack) || (acte.signatureInterne && acte.signatureInterne.interne) || (acte.signatureSimple && acte.signatureSimple.interne) || {};
   const s = d.signataire || {};
   const sig = (pack.signatures || [])[0] || {};
   const traces = tracesCourriel(acte);
@@ -1616,6 +1966,17 @@ const libelleActe = (acte) => acte.numero || acte.objet || acte.id;
 
 // Qui agit : le nom du compte connecté, tel qu'il s'inscrit dans le dossier.
 const nomDeCompte = () => fullName(state.user) || state.user?.login || "";
+
+// L'OPÉRATEUR du geste, tel qu'il part au service : le compte CONNECTÉ, avec sa
+// personne du référentiel (`personId`). C'est lui que le service oppose au
+// signataire quand il identifie les personnes — une signature ne s'appose pas
+// au nom d'un autre (voir src/server/mysql/actes.mjs, `porteSignature` et
+// `hWebhookSignature`). Il diffère du signataire quand une délégation est en
+// jeu ; le dossier interne conserve les deux.
+const operateurDeCompte = () => ({
+  id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "",
+  compte: state.user?.login || "", personId: state.user?.personId || "",
+});
 
 // Qui signe : la personne désignée par l'acte, son compte, et le compte que
 // l'outil de signature lui connaît. C'est cet ensemble que le prestataire
@@ -1769,7 +2130,7 @@ async function assurerActeDepose(acte, doc, { token, flow }) {
     ecarts: (acte.ecarts || []).length,
     ...themeDe(acte, doc),
     publishable: actePubliable(acte),
-    controleLegalite: controleLegaliteActif(),
+    controleLegalite: controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) }),
     signatureMode: "externe",
     certificationRequise: !!(acte.externe && acte.externe.certificationRequise),
   }, { token, flow, label: "Dépôt de l'acte (circuit externe)" });
@@ -1804,6 +2165,9 @@ function ajouterVersionSignee(acte, doc, ctx) {
     }
     info.appendChild(h("p", { class: "fr-small fr-muted", text: "Calcul de l'empreinte…" }));
     try {
+      // La taille se refuse AVANT de hacher : un PDF trop lourd ne partira pas,
+      // et on le dit tout de suite (voir src/lib/fichiers.js).
+      verifierTaille(fichier);
       empreinte = await sha256Fichier(fichier);
       clear(info);
       info.appendChild(h("div", { class: "sig-cert" },
@@ -1821,7 +2185,7 @@ function ajouterVersionSignee(acte, doc, ctx) {
     title: "Ajouter la version signée — " + (acte.numero || ""),
     wide: true,
     body: h("div", { class: "fr-stack" },
-      h("p", { class: "fr-small", text: "Déposez le document signé hors de l'application, au format PDF (signature manuscrite scannée, ou PDF produit par l'outil tiers). Il devient la pièce de référence de l'acte, et c'est lui qui sera montré comme l'original dans le recueil public." }),
+      h("p", { class: "fr-small", text: "Déposez le document signé hors de l'application, au format PDF (signature manuscrite scannée, ou PDF produit par l'outil tiers). Il devient la pièce de référence de l'acte, et c'est lui qui sera montré comme l'original dans le recueil public. Taille maximale : " + limiteLisible() + "." }),
       h("div", { class: "fr-field" },
         h("label", { class: "fr-label", text: "Version signée (PDF)" }),
         fichierInput),
@@ -1850,15 +2214,15 @@ async function deposerVersionSignee(acte, doc, fichier, empreinte, ctx) {
   const flow = beginFlow(`Dépôt de la version signée — ${acte.numero || acte.id}`);
   try {
     dire("Téléversement de la version signée…", "info");
-    const up = await root.uploadPlugin(fichier);
-    if (!up || up.error || !up.url) {
-      dire("Le dépôt de la version signée a échoué" + (up && up.error ? " (" + up.error + ")" : "") + " : l'acte n'a pas été déclaré signé.", "error");
-      return false;
-    }
+    // Le dépôt choisit son hôte : le service de fichiers de l'hébergement quand
+    // il en offre un, le service de Scribae sinon — une installation
+    // auto-hébergée n'a pas de plateforme de fichiers sous la main (voir
+    // src/lib/fichiers.js).
+    const piece = await deposerPiece(fichier, { sha256: empreinte, token });
     const at = new Date().toISOString();
     const signe = {
-      url: up.url, sha256: empreinte, nom: fichier.name, taille: fichier.size,
-      type: "application/pdf", deposeLe: at, deposePar: state.user?.id || "", deposeParNom: nomDeCompte(),
+      ...piece, type: "application/pdf", deposeLe: at,
+      deposePar: state.user?.id || "", deposeParNom: nomDeCompte(),
     };
     const requise = acte.externe ? !!acte.externe.certificationRequise : revisionRequisePour(acte);
     acte.signatureMode = "externe";
@@ -1928,6 +2292,10 @@ export function voirVersionSignee(acte) {
 // Il a sous les yeux la pièce signée (le PDF) et la version numérique dont
 // l'empreinte est rappelée ; il déclare que les deux concordent.
 export function certifierConformite(acte, doc, ctx) {
+  if (!peutCertifier(acte)) {
+    toast("La certification de conformité appartient au réviseur compétent de cet acte : elle ne peut pas être donnée à sa place.", "error");
+    return;
+  }
   const sg = versionSignee(acte) || {};
   const cert = certificationDe(acte) || {};
   const empreinte = empreinteTexte(acte);
@@ -1998,6 +2366,15 @@ export function certifierConformite(acte, doc, ctx) {
 
 async function enregistrerCertification(acte, doc, decision, ctx) {
   const config = state.config;
+  // La porte est REJOUÉE ici : `certifierConformite` n'est offerte qu'au
+  // réviseur compétent (peutCertifier), mais ce chemin est aussi celui du
+  // rétablissement. On ne certifie pas la conformité à la place d'un autre —
+  // le service oppose d'ailleurs l'opérateur à la personne déclarée quand il
+  // identifie les personnes (voir src/server/mysql/actes.mjs, `hConformite`).
+  if (!peutCertifier(acte)) {
+    toast("Vous n'êtes pas le réviseur compétent pour cet acte : la conformité de sa pièce signée ne peut pas être certifiée par vous.", "error");
+    return false;
+  }
   const settings = publicationSettings(config);
   const token = settings.jetonDemonstration;
   const flow = beginFlow(`Certification de conformité — ${acte.numero || acte.id}`);
@@ -2006,6 +2383,11 @@ async function enregistrerCertification(acte, doc, decision, ctx) {
   const certification = {
     statut: decision.statut,
     par: state.user?.id || "",
+    // LA PERSONNE du réviseur : c'est elle que le service oppose au compte
+    // connecté quand il identifie les personnes (déploiement à session). On ne
+    // certifie pas la conformité à la place d'un autre — voir
+    // src/server/mysql/actes.mjs, `hConformite`.
+    personId: state.user?.personId || "",
     parNom: nomDeCompte(),
     le: at,
     empreinte: empreinteTexte(acte),
@@ -2052,8 +2434,8 @@ async function enregistrerCertification(acte, doc, decision, ctx) {
 
 // La suite de la version signée : la publication, quand elle est automatique.
 // Mêmes règles que le retour de signature électronique — l'étape du contrôle de
-// légalité d'abord (fonction expérimentale), puis la publication d'un acte
-// publiable ; un acte individuel s'arrête au registre.
+// légalité d'abord (selon son RÉGIME, voir src/lib/legalite.js), puis la
+// publication d'un acte publiable ; un acte individuel s'arrête au registre.
 async function publierApresVerification(acte, paint) {
   const doc = docOfActe(acte);
   const possible = publicationExternePossible(acte);
@@ -2078,9 +2460,15 @@ async function publierApresVerification(acte, paint) {
     paint();
     return;
   }
-  if (controleLegaliteActif() && !acte.execution?.transmission) {
-    dire("Version signée — transmission au contrôle de légalité…", "info");
-    if (!(await transmettreAuControleDeLegalite(acte, doc))) { paint(); return; }
+  if (controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) }) && !acte.execution?.transmission) {
+    if (controleLegaliteParApi() && acte.api?.acteId) {
+      dire("Version signée — transmission au contrôle de légalité…", "info");
+      if (!(await transmettreAuControleDeLegalite(acte, doc))) { paint(); return; }
+    } else if (controleLegaliteDeclaratif()) {
+      dire("Version signée. Régime déclaratif : l'acte attend la déclaration de transmission du réviseur avant d'être publié.", "info");
+      paint();
+      return;
+    }
   }
   const settings = publicationSettings(state.config);
   await publier(acte, doc, {
@@ -2149,11 +2537,19 @@ export async function envoyerEnSignature(acte, ctx, { ouvrirOutil: ouvrir = true
     await engagerSignatureSimple(acte, doc, ctx);
     return;
   }
+  // CIRCUIT INTERNE : le service signe. Le geste dépose l'acte, prévient le
+  // signataire, et ouvre la fenêtre de signature pour le titulaire — c'est LUI
+  // qui engage sa signature, même si la clé est au coffre.
+  if (modeSignatureDe(acte) === "interne") {
+    await engagerSignatureInterne(acte, doc, ctx);
+    return;
+  }
   return envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir });
 }
 
 async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } = {}) {
   const config = state.config;
+  const trame = trameById(acte.trameId);
   const settings = publicationSettings(config);
   const token = settings.jetonDemonstration;
   // Porte du parapheur : l'acte signé doit être l'acte approuvé. Le service
@@ -2189,10 +2585,12 @@ async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } 
       // La publication est une propriété de la trame : le service ne connaît pas
       // les trames, donc on la lui transmet au dépôt, et il la fera respecter.
       publishable: actePubliable(acte),
-      // L'étape de transmission au contrôle de légalité est demandée au dépôt
-      // (fonction expérimentale) : le service refusera alors de publier l'acte
-      // tant que sa transmission n'aura pas été enregistrée.
-      controleLegalite: controleLegaliteActif(),
+      // La porte du contrôle de légalité est demandée au dépôt : le service
+      // refusera alors de publier l'acte tant que sa transmission n'aura pas
+      // été enregistrée (409 transmission_absente). Elle n'existe que dans les
+      // régimes « declaratif » et « api », et seulement si la trame de l'acte ne
+      // l'en dispense pas.
+      controleLegalite: controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame }),
       // L'état du parapheur accompagne l'acte : le service peut ainsi refuser
       // d'ouvrir un circuit sur un acte non validé, et l'empreinte du texte
       // validé reste attachée à l'acte signé.
@@ -2212,6 +2610,9 @@ async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } 
         valideLe: acte.revision.valideLe || "",
         corrige: acte.revision.corrige === true,
         par: acte.revision.valideParNom || "",
+        // Les RÉVISEURS COMPÉTENTS (personnes) : le service s'en sert pour
+        // opposer le déclarant d'une transmission à sa compétence.
+        reviseurs: reviseursDe(acte).map((u) => u.personId).filter(Boolean),
       } : null,
     }, { token, flow, label: "Dépôt de l'acte finalisé" });
     if (!dep.ok) { toast(errorMessage(dep), "error"); return; }
@@ -2453,7 +2854,7 @@ async function signer(acte, doc, ctx) {
     // Le dossier interne voyage AVEC l'original, comme pour la signature simple :
     // l'original est scindé en deux à la publication (part publique / part
     // interne), quel que soit le circuit.
-    interne: dossierSignatureInterne({ signataire: auteur, courriels: tracesCourriel(acte), poste: navigator.userAgent, operateur: { id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "", compte: state.user?.login || "" } }),
+    interne: dossierSignatureInterne({ signataire: auteur, courriels: tracesCourriel(acte), poste: navigator.userAgent, operateur: { id: state.user?.id || "", nom: nomDeCompte(), courriel: state.user?.email || "", compte: state.user?.login || "", personId: state.user?.personId || "" } }),
   });
   const notif = await post("/v1/webhooks/signature", {
     signatureId: acte.api.signatureId, statut: "signee", documentSigne: pack,
@@ -2505,13 +2906,31 @@ async function publierApresSignature(acte, paint) {
     paint();
     return;
   }
-  // 1. L'étape de transmission au contrôle de légalité. Tant qu'elle n'a pas
-  // abouti, l'acte n'est pas publié : c'est l'ordre « signé → transmis →
-  // publié », que le service applique lui aussi (409 transmission_absente).
-  if (controleLegaliteActif() && doc && acte.api?.acteId) {
-    toast("Acte signé — transmission au contrôle de légalité…", "info");
-    const transmis = await transmettreAuControleDeLegalite(acte, doc);
-    if (!transmis) { paint(); return; }
+  // 1. La porte du contrôle de légalité, entre la signature et la publication.
+  //    Deux régimes la font exister, et ils ne se confondent pas :
+  //      • « api » : le service adresse l'acte à l'API d'envoi — on le fait dès
+  //        le retour signé, et l'on ne publie qu'une fois l'accusé revenu ;
+  //      • « declaratif » : la transmission se DÉCLARE. Ce n'est pas au retour
+  //        signé de la faire : l'acte attend que le réviseur compétent atteste
+  //        à qui, et quand, il a été transmis. On s'arrête donc ici.
+  //      • « desactive » : la porte n'existe pas.
+  //    La porte ne concerne que les actes que leur trame ne dispense pas.
+  const soumis = controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) });
+  if (soumis && !acte.execution?.transmission && doc) {
+    if (controleLegaliteParApi() && acte.api?.acteId) {
+      toast("Acte signé — transmission au contrôle de légalité…", "info");
+      const transmis = await transmettreAuControleDeLegalite(acte, doc);
+      if (!transmis) { paint(); return; }
+    } else if (controleLegaliteDeclaratif()) {
+      toast("Acte signé. Régime déclaratif : il attend la déclaration de transmission du réviseur avant d'être publié.", "info");
+      await journaliser({
+        action: "transmission.declaration_attendue", cible: "acte", cibleLabel: libelleActe(acte), acteId: acte.id,
+        detail: "acte signé — déclaration de transmission attendue du réviseur (régime déclaratif)",
+        to: [acte.createdBy, "role:reviseur"],
+      });
+      paint();
+      return;
+    }
   }
   // 2. La publication.
   if (!publiable) {
@@ -2571,8 +2990,10 @@ async function transmettreAuControleDeLegalite(acte, doc) {
     enregistrerFormalite(acte, "transmission", {
       at: String(res.body.recuLe || at).slice(0, 10),
       ref: res.body.reference, mode: res.body.mode || CONTROLE_LEGALITE.mode,
+      destinataire: res.body.destinataire || certificat?.destinataire || CONTROLE_LEGALITE.destinataire,
       certificat,
-      api: { url: CONTROLE_LEGALITE.apiUrl, statut: res.status, recuLe: res.body.recuLe },
+      demonstration: res.body.demonstration === true || certificat?.demonstration === true,
+      api: { url: CONTROLE_LEGALITE.apiUrl, statut: res.status, recuLe: res.body.recuLe, simule: res.body.demonstration === true },
       by: state.user?.id, byName: [state.user?.firstName, state.user?.lastName].filter(Boolean).join(" ") || auteur.nom,
     });
     // Le certificat est déposé SUR LE DOCUMENT : l'original signé le porte, et
@@ -3195,6 +3616,18 @@ async function publierConsolide(cons, form, { token, flow }) {
   const config = state.config;
   const doc = docOfActe(cons);
   if (!doc) { toast("Version consolidée introuvable.", "error"); return; }
+  // QUI POSE LA VERSION CONSOLIDÉE ? La consolidation est une COMPILATION : elle
+  // est signée du signataire de l'acte modifié, non d'un geste de l'opérateur.
+  // Elle n'est donc posée au registre que par le TITULAIRE de cette signature —
+  // qui compile son propre texte —, ou par l'ADMINISTRATION, qui agit alors comme
+  // autorité de registre : le service l'attribue « compilation », avec
+  // l'opérateur qui l'a posée (voir src/server/mysql/actes.mjs,
+  // `hWebhookSignature`). Un rédacteur ne signe pas à la place du signataire.
+  const competence = peutSignerEffectivement(config, state.user, cons, trameById(cons.trameId));
+  if (!competence.ok && !isAdmin()) {
+    dire(competence.motif + " La version consolidée sera posée au registre par le titulaire de la signature, ou par l'administration.", "warning");
+    return;
+  }
   const akn = exportAkn(doc, config, null);
   const auteur = auteurDe(cons, doc);
   const eliU = eliUriOf({ config, actTypeId: doc.meta?.actTypeId, numero: doc.meta?.numero, entityCode: doc.meta?.entity?.code });
@@ -3211,7 +3644,7 @@ async function publierConsolide(cons, form, { token, flow }) {
     if (!dep.ok) { toast("Version consolidée — dépôt : " + errorMessage(dep), "error"); return; }
 
     const circ = await post(`/v1/actes/${dep.body.id}/signature`, {
-      signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1 }],
+      signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, personId: auteur.personId || "" }],
       niveau: "avancee",
     }, { token, flow, label: "Circuit de signature de la version consolidée" });
     if (!circ.ok) { toast("Version consolidée — circuit : " + errorMessage(circ), "error"); return; }
@@ -3232,8 +3665,11 @@ async function publierConsolide(cons, form, { token, flow }) {
     await prestataire.ajouterSignataire({ docId: d.id, signataire: auteur, flow });
     await prestataire.demarrer({ docId: d.id, flow });
     const bodyHtml = renderDocument(doc, config, {}).outerHTML.replace(/^<article[^>]*>/, "").replace(/<\/article>$/, "");
-    const pack = await prestataire.signer({ docId: d.id, signataire: auteur, pageHtml: bodyHtml, brand: config.brand.name, pageCss: documentCss(config, styleForDoc(config, doc)), flow });
-    const notif = await post("/v1/webhooks/signature", { signatureId: circ.body.signatureId, statut: "signee", documentSigne: pack }, { token, flow, label: "Signature de la version consolidée" });
+    const pack = await prestataire.signer({ docId: d.id, signataire: auteur, pageHtml: bodyHtml, brand: config.brand.name, pageCss: documentCss(config, styleForDoc(config, doc)), flow, interne: dossierSignatureInterne({ signataire: auteur, courriels: tracesCourriel(cons), poste: navigator.userAgent, operateur: operateurDeCompte() }) });
+    // `compilation` NOMME le geste sans l'élever : le service ne l'accepte que
+    // d'un administrateur qui n'est pas le signataire, et l'attribue
+    // « compilation » avec l'opérateur. Le titulaire, lui, signe en son nom.
+    const notif = await post("/v1/webhooks/signature", { signatureId: circ.body.signatureId, statut: "signee", documentSigne: pack, compilation: true }, { token, flow, label: "Signature de la version consolidée" });
     if (!notif.ok) { toast("Version consolidée — signature : " + errorMessage(notif), "error"); return; }
 
     const record = {
@@ -3330,36 +3766,57 @@ async function publierConsolide(cons, form, { token, flow }) {
 async function retablirActe(acte, doc, { token, flow }) {
   const akn = acte.original?.document?.akn || acte.api?.akn || aknOf(acte, doc);
   const auteur = auteurDe(acte, doc);
+  // Le rétablissement REPOSE au registre l'original signé d'une autre personne :
+  // il ne se fait que par le titulaire de la signature, ou par l'administration
+  // (le service l'attribue alors « reprise », avec l'opérateur). Voir
+  // src/server/mysql/actes.mjs, `hWebhookSignature`.
+  const interne = dossierInterne(acte.original) || {};
+  const titulaire = String((interne.signataire && interne.signataire.personId) || "");
+  if (titulaire && titulaire !== String(state.user?.personId || "") && !isAdmin()) {
+    dire("Le rétablissement replace au registre l'original signé d'une autre personne : il se fait par le titulaire de la signature, ou par l'administration.", "warning");
+    return false;
+  }
   const dep = await post("/v1/actes", {
     akn, numero: acte.numero || doc?.meta?.numero || "", objet: acte.objet || doc?.meta?.objet || "",
     nature: doc?.meta?.actTypeId || "Décision", entityId: doc?.meta?.entity?.id || "", entityName: doc?.meta?.entity?.name || "",
     dateSignature: acte.dateSignature || doc?.meta?.dateSignature || "", trameId: acte.trameId || "",
     ecarts: (acte.ecarts || []).length, publishable: actePubliable(acte),
-    controleLegalite: controleLegaliteActif(),
+    controleLegalite: controleLegaliteActif() && transmissionRequisePour(acte, { publiable: actePubliable(acte), trame: trameById(acte.trameId) }),
     ...themeDe(acte, doc),
   }, { token, flow, label: "Redépôt de l'acte signé" });
   if (!dep.ok) { dire(errorMessage(dep), "error"); return false; }
   const apiActeId = dep.body.id;
   const circ = await post(`/v1/actes/${apiActeId}/signature`, {
-    signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1 }],
+    signataires: [{ nom: auteur.nom, courriel: auteur.courriel, fonction: auteur.fonction, ordre: 1, personId: auteur.personId || "" }],
     niveau: "avancee",
   }, { token, flow, label: "Rétablissement du circuit de signature" });
   if (!circ.ok) { dire(errorMessage(circ), "error"); return false; }
   const signatureId = circ.body.signatureId;
+  // `reprise` NOMME le geste : ce n'est pas une signature, c'est la REPOSE au
+  // registre d'un original déjà signé (le service a perdu la mémoire de
+  // l'acte). Le service ne l'accepte que du titulaire, ou d'un administrateur —
+  // qui l'attribue « reprise », avec l'opérateur (voir src/server/mysql/
+  // actes.mjs, `hWebhookSignature`).
   const notif = await post("/v1/webhooks/signature", {
-    signatureId, statut: "signee", documentSigne: acte.original,
+    signatureId, statut: "signee", documentSigne: acte.original, reprise: true,
   }, { token, flow, label: "Notification de la signature déjà approuvée" });
   if (!notif.ok) { dire(errorMessage(notif), "error"); return false; }
   // L'acte déclaré soumis au contrôle de légalité ne peut pas être publié par le
   // service sans une transmission enregistrée — et un redépôt efface cet état.
-  // On le rétablit avec la référence et la date DÉJÀ constatées sur l'acte : la
-  // même transmission est rejouée, il ne s'en produit pas une seconde.
+  // On la rétablit en la DÉCLARANT : la transmission a eu lieu hors du service
+  // (elle est déjà constatée sur l'acte), et la même déclaration est rejouée — il
+  // ne s'en produit pas une seconde.
   const transmission = acte.execution?.transmission;
   if (controleLegaliteActif() && transmission) {
     const tr = await post(`/v1/actes/${apiActeId}/transmission`, {
-      at: transmission.at, reference: transmission.ref, mode: transmission.mode,
-      destinataire: transmission.destinataire || transmission.certificat?.destinataire,
-      auteur: auteur.nom, entite: auteur.entite,
+      declaration: {
+        at: transmission.at, reference: transmission.ref, mode: transmission.mode,
+        destinataire: transmission.destinataire || transmission.certificat?.destinataire || CONTROLE_LEGALITE.destinataire,
+        motif: "Transmission rétablie : l'acte est rejoué au service, la transmission était déjà constatée.",
+        personId: state.user?.personId || "",
+        auteur: (transmission.declaration && transmission.declaration.parNom) || transmission.byName || auteur.nom,
+        entite: auteur.entite,
+      },
     }, { token, flow, label: "Rétablissement de la transmission au contrôle de légalité" });
     if (!tr.ok) { dire(errorMessage(tr), "error"); return false; }
   }

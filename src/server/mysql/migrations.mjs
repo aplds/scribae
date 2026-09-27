@@ -39,6 +39,7 @@ export const SQL_TABLE_MIGRATIONS = `CREATE TABLE IF NOT EXISTS sb_migrations (
 // instruction écrite ici, sans fichier.
 export const MIGRATIONS = [
   { version: 1, nom: "socle", fichier: "schema.sql" },
+  { version: 2, nom: "pièces", fichier: "migrations/002-pieces.sql" },
 ];
 
 // Les migrations déjà appliquées, indexées par version. La table est créée au

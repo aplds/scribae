@@ -13,6 +13,7 @@ Il expose **deux familles de ressources** :
 | **Courriel** | `GET /v1/courriel`, `POST /v1/courriel/envoi`, `POST /v1/courriel/test` | `sb_courriel` (+ `SMTP_*` du `.env`) |
 | **Réglages** | `GET /v1/config` (réglages de référentiel posés par le `.env`, voir § 9) | — |
 | **Public** | `GET /v1/atelier/acces` (l'accès à l'atelier depuis cette adresse — voir § 10), `GET /v1/informations` (les billets publiés au recueil) | collection `informations` (`sb_record`) |
+| **Pièces** | `POST /v1/pieces` (dépôt), `GET /v1/pieces/{id}` (lecture **publique**), `DELETE /v1/pieces/{id}` (retrait, refusé si citée) — les fichiers déposés : original signé d'une reprise, version signée d'un circuit externe (`sb_piece`) | `sb_piece` |
 
 Le contrat de la famille « données » est **le même** que celui du service de
 démonstration : l'application ne voit aucune différence et
@@ -206,9 +207,14 @@ vise la même base. La **session** de connexion, elle, reste locale.
 - **Journalisation** : conservez `sb_journal` (purge annuelle possible) — c'est la piste
   d'audit des modifications d'actes.
 - **Dimensionnement** : un acte pèse quelques dizaines de Kio ; quelques milliers d'actes
-  tiennent dans quelques centaines de Mio.
+  tiennent dans quelques centaines de Mio. Les **pièces jointes** (fichiers déposés), elles,
+  pèsent leur poids réel : elles vivent dans `sb_piece` et entrent dans la sauvegarde de la
+  base. Une pièce est plafonnée à environ **5,5 Mo** (le plafond utile de `MAX_BODY` une fois
+  le contenu encodé en base64).
 - **Reverse-proxy** : `client_max_body_size 16m;` côté nginx (les envois de collections
-  passent en une requête, plafonnée par `MAX_BODY`).
+  passent en une requête, plafonnée par `MAX_BODY`) — c'est aussi la borne de la façade pour
+  le dépôt d'une **pièce** ; pour recevoir une pièce plus grosse, relevez les **deux**
+  (`client_max_body_size` et `MAX_BODY`).
 
 ## 6. Explorer en SQL
 
@@ -273,6 +279,17 @@ SELECT acte_id, numero, objet FROM v_acte WHERE service_id = 'svc-regie';
   la part **interne** (`originalInterne`) — mentions nominatives du signataire et trace des
   courriels — est conservée avec l'acte et ne se sert que par `GET /v1/actes/{id}/dossier-signature`,
   protégée par le jeton.
+- **Le coffre de la signature interne vit dans l'état du service.** `signature-interne.mjs` est un
+  module **pur** (le port WebCrypto lui est injecté, comme le reste) : il engendre la clé privée d'un
+  signataire, la **scelle** (AES-256-GCM, sous `SCRIBA_SIGNATURE_KV_KEY`), la range dans le coffre —
+  une fiche **par signataire** (la clé suit la personne, donc son certificat lui reste), une pour
+  l'**horodatage** du service — et **signe**. Le coffre est un objet ordinaire de l'état
+  (`state.coffre`) : il suit les sauvegardes et survit au remplacement d'un conteneur, et il ne
+  contient que des clés scellées et des certificats **publics**. Sans clé de scellement, le circuit
+  est **ÉTEINT** : `actes.mjs` refuse alors de signer (`409 signature_interne_indisponible`, avec son
+  motif) au lieu de simuler une signature « au nom du service », et `GET /v1/config` le déclare
+  (`signatureInterne`) pour que l'application n'offre pas un circuit que ce service ne peut pas
+  mener. C'est ce qui fait que la signature interne n'existe qu'en **auto-hébergement**.
 - **La bannière dit la version RÉELLE, et rien d'autre.** `banniere.mjs` est un module **pur** :
   il compose une chaîne, ne l'écrit nulle part (c'est `server.mjs` qui l'imprime), et ne touche ni
   au réseau, ni à la base, ni à la console — il s'éprouve donc seul (`banniere.test.mjs`, cadre

@@ -3,11 +3,11 @@ import {
   mettreALaCorbeille, journaliser, circuitDe, parapheur as fileParapheur, parapheurActif,
   competenceDeSignature, redrawView, currentUser,
 } from "../state.js";
-import { h, button, toast, modal, icon } from "../dom.js";
+import { h, button, toast, modal, icon, select, textInput, clear } from "../dom.js";
 import { post, errorMessage, beginFlow } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { download, formatDate } from "../../lib/util.js";
-import { confirmDialog, emptyState, isDraftable, abrogationBadge, acteStatutLabel as statutLabel, acteStatutColor as statutColor } from "../components.js";
+import { confirmDialog, emptyState, isDraftable, abrogationBadge, acteStatutLabel as statutLabel, acteStatutColor as statutColor, mentions, menuButton, pageTitle } from "../components.js";
 import { helpLink } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { openActe, redigerAbrogation } from "./rediger.js";
@@ -27,12 +27,11 @@ export function renderActes(root) {
   const signataire = list.some((a) => !tous && a.createdBy !== state.user?.id && competenceDeSignature(a).ok);
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Actes" }),
-      h("p", { class: "page-head__sub", text: tous
+      pageTitle("Actes" , tous
         ? "Registre local : actes rédigés, actes importés, actes modificatifs et versions consolidées."
         : signataire
           ? "Vos actes, et ceux dont la signature relève de vous (la vôtre, ou celle que vous avez déléguée). Un administrateur ou un éditeur voit l'ensemble du registre."
-          : "Vos actes : les actes que vous avez rédigés dans votre périmètre (service et bureaux). Un administrateur ou un éditeur voit l'ensemble du registre." }),
+          : "Vos actes : les actes que vous avez rédigés dans votre périmètre (service et bureaux). Un administrateur ou un éditeur voit l'ensemble du registre." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("retrouver", "Retrouver un acte"),
@@ -48,93 +47,213 @@ export function renderActes(root) {
     return;
   }
 
+  // ========================================================= LE REGISTRE
+  // Quatre cents actes ne se lisent pas d'un seul défilement : on y CHERCHE.
+  // La barre d'outils reste en haut (recherche, filtres, compte), vingt-cinq
+  // lignes s'affichent, et le reste de ce qu'un acte savait dire — sa trame, son
+  // service, son entité, sa signature, ses écarts, où il en est au parapheur, à
+  // l'exécution et au recueil — se déplie sous la ligne, à la demande. La ligne,
+  // elle, ne porte plus qu'un statut, une ligne de mentions et un geste.
+  // (Revue d'interface, P3 et P5.)
+  const ui = (state.ui.registre = state.ui.registre || { q: "", statut: "", service: "", annee: "", affiches: 25 });
+  const ouverts = ui.ouverts instanceof Set ? ui.ouverts : (ui.ouverts = new Set());
+
+  const anneeDe = (a) => {
+    const an = String(a.dateSignature || a.createdAt || a.updatedAt || "").slice(0, 4);
+    return /^\d{4}$/.test(an) ? an : "";
+  };
+  const annees = [...new Set(list.map(anneeDe).filter(Boolean))].sort().reverse();
+  const servicesPresents = [...new Set(list.map((a) => a.serviceId).filter(Boolean))]
+    .map((id) => ({ id, label: targetLabel(state.config, id, "") }))
+    .sort((x, y) => x.label.localeCompare(y.label));
+  const statutsPresents = [...new Set(list.map((a) => a.statut || "brouillon"))];
+  const trameDe = (a) => state.trames.find((t) => t.id === a.trameId);
+  const execDe = (a) => (a.original || a.statut === "signee" || a.statut === "publie")
+    ? resumeExecution(a, state.config, { publiable: actePubliable(a), trame: trameDe(a) })
+    : null;
+
+  function filtrer() {
+    const q = (ui.q || "").trim().toLowerCase();
+    return list.filter((a) => {
+      if (ui.statut && (a.statut || "brouillon") !== ui.statut) return false;
+      if (ui.service && a.serviceId !== ui.service) return false;
+      if (ui.annee && anneeDe(a) !== ui.annee) return false;
+      if (!q) return true;
+      const texte = [
+        a.numero, a.objet, a.values?.objet, trameDe(a)?.name, a.createdByName,
+        a.serviceId ? targetLabel(state.config, a.serviceId, a.bureauId) : "",
+        natureOf(a).label,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return texte.includes(q);
+    });
+  }
+
+  // La barre d'outils : la recherche d'abord (c'est ce qu'on fait d'un registre),
+  // puis trois filtres qui répondent aux trois questions qu'on se pose — quel
+  // statut, quel service, quelle année —, et le compte sous la barre.
+  const champ = (label, control) => h("div", { class: "liste-barre__champ" },
+    h("label", { class: "fr-label", text: label }), control);
+  const barre = h("div", { class: "liste-barre no-print" },
+    champ("Rechercher", textInput(ui.q, (v) => { ui.q = v; ui.affiches = 25; peindre(); }, { placeholder: "numéro, objet, trame, service…" })),
+    statutsPresents.length > 1 ? champ("Statut", select([{ value: "", label: "Tous les statuts" }, ...statutsPresents.map((s) => ({ value: s, label: statutLabel(s) }))], ui.statut, (v) => { ui.statut = v; ui.affiches = 25; peindre(); })) : null,
+    servicesPresents.length > 1 ? champ("Service", select([{ value: "", label: "Tous les services" }, ...servicesPresents.map((s) => ({ value: s.id, label: s.label }))], ui.service, (v) => { ui.service = v; ui.affiches = 25; peindre(); })) : null,
+    annees.length > 1 ? champ("Année", select([{ value: "", label: "Toutes les années" }, ...annees.map((an) => ({ value: an, label: an }))], ui.annee, (v) => { ui.annee = v; ui.affiches = 25; peindre(); })) : null,
+  );
+
+  const tb = h("tbody");
+  const compteEl = h("p", { class: "liste-compte" });
+  const plusEl = h("div", { class: "liste-plus" });
   const table = h("table", { class: "fr-table" },
     h("thead", {}, h("tr", {},
-      h("th", { text: "Numéro" }), h("th", { text: "Objet" }), h("th", { text: "Nature" }),
-      h("th", { text: "Trame" }), h("th", { text: "Service" }),
-      h("th", { text: "Entité" }), h("th", { text: "Signature" }), h("th", { text: "Statut" }),
-      parapheurActif() ? h("th", { text: "Parapheur" }) : null,
-      h("th", { text: "Exécution" }), h("th", { text: "Publication" }), h("th", {}),
+      h("th", { scope: "col", text: "Numéro" }),
+      h("th", { scope: "col", text: "Objet" }),
+      h("th", { scope: "col", text: "Statut" }),
+      h("th", { scope: "col", class: "registre__gestes-col", text: "Actions" }),
     )),
   );
-  const tb = h("tbody");
-  let withEcarts = 0;
-  for (const a of list) {
+
+  // CE QUE LA LIGNE NE DIT PLUS, et qu'on lit à la demande : la fiche dépliée.
+  function detailsDe(a) {
     const entity = state.config.entities?.find((e) => e.id === a.entityId);
-    const n = natureOf(a);
     const doc = docOfActe(a);
     const editable = canEdit(a);
     const ec = editable ? ecartsOfActe(a) : { count: 0, list: [] };
-    if (ec.count) withEcarts++;
-    tb.appendChild(h("tr", { title: a.createdByName ? "Rédigé par " + a.createdByName : "" },
-      // Une annexe n'a pas de numéro : la colonne renvoie à la décision qui
-      // l'adopte (voir `numeroAffiche`, src/lib/annexes.js).
-      h("td", { class: "fr-mono", text: numeroAffiche(a, state.config, state.trames) || "—" }),
-      h("td", { text: a.objet || doc?.meta?.objet || "—" }),
-      h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
-      h("td", {}, !editable
-        ? h("span", { class: "fr-small fr-muted", text: "—" })
-        : ec.count
-          ? h("span", {
-            class: "fr-badge fr-badge--warning",
-            title: ec.list.map((e) => e.label).join(" · "),
-            text: `${ec.count} écart${ec.count > 1 ? "s" : ""}`,
-          })
-          : h("span", { class: "fr-badge fr-badge--success", text: "conforme" })),
-      h("td", { class: "fr-small", text: a.serviceId ? targetLabel(state.config, a.serviceId, a.bureauId) : "Général" }),
-      h("td", { class: "fr-small", text: entity?.code || "" }),
-      h("td", { class: "fr-small", text: a.dateSignature ? formatDate(a.dateSignature) : "—" }),
-      h("td", {}, h("span", { class: "fr-badge fr-badge--" + statutColor(a.statut), text: statutLabel(a.statut) }), abrogationBadge(a)),
-      // Où en est l'acte au parapheur : validé, en attente, caduc (le texte a
-      // changé depuis la validation), ou hors circuit.
-      parapheurActif() ? h("td", {}, celluleParapheur(a)) : null,
-      h("td", {}, celluleExecution(a)),
-      h("td", {}, [
-        a.publication
-          ? h("span", { class: "fr-small" },
-            h("span", { class: "fr-mono", text: a.publication.eliUri || a.eli || "" }),
-            h("br"),
-            h("span", { class: "fr-muted", text: a.publication.juridique === false ? "document non opposable" : "opposable le " + formatDate(a.publication.dateOpposabilite) }))
-          : !actePubliable(a)
-            ? (natureOfActe(a, state.trames) === "annexe"
-              ? h("span", { class: "fr-badge fr-badge--info", title: "Annexe : elle ne se signe ni ne se publie pour elle-même. Son texte suit l'acte qui l'adopte, dans l'original signé.", text: "annexe" })
-              : h("span", { class: "fr-badge fr-badge--warning", title: "Trame non publiable : l'acte est signé et conservé, mais jamais déposé au recueil.", text: "non publiable" }))
-            : h("span", { class: "fr-small fr-muted", text: "—" }),
-        // Mis en avant sur l'accueil du recueil public (voir `basculerEpinglage`).
-        // Le repère n'est posé qu'une fois l'acte PUBLIÉ : épingler un acte encore
-        // en circuit prépare la une, il ne la tient pas — le bouton, lui, reste
-        // allumé, et son infobulle dit ce qui va se passer.
-        acteEpingle(a) && a.publication ? h("span", { class: "fr-badge fr-badge--info", style: { marginLeft: "6px" }, title: "Mis en avant dans la bande « À la une » du recueil public.", text: "à la une" }) : null,
-      ]),
-      h("td", {}, h("div", { class: "fr-row" },
-        editable ? button("Reprendre", { variant: "secondary", size: "sm", icon: "note", title: "Rouvrir le document pour le modifier", onClick: () => openActe(a) }) : null,
-        button(doc ? "Voir" : "Ouvrir", { variant: "tertiary", size: "sm", onClick: () => (doc ? navigate("acte/" + a.id) : openActe(a)) }),
-        can("actes.gerer")
-          ? ((actePubliable(a) || natureOfActe(a, state.trames) === "annexe")
-            ? button(natureOfActe(a, state.trames) === "annexe" ? "Modifier l'annexe" : "Modifier", { variant: "tertiary", size: "sm", icon: "refresh", title: natureOfActe(a, state.trames) === "annexe" ? "Rédiger l'acte modificatif qui adoptera la nouvelle rédaction de l'annexe" : "Rédiger un acte modificatif", onClick: () => modifierFromActe(a) })
-            // Un acte non publiable ne se modifie pas par acte modificatif (qui
-            // n'existe que pour le texte publié) : on corrige l'acte lui-même.
-            : button("Corriger", { variant: "tertiary", size: "sm", icon: "note", title: "Acte non publiable : correction directe, sans acte modificatif", onClick: () => openActe(a) }))
-          : null,
-        can("actes.signer") ? button("", { variant: "tertiary", icon: "lock", size: "sm", title: "Signer l'acte (ou suivre son circuit)", onClick: () => signer(a) }) : null,
-        can("signature.gerer") ? button("", { variant: "tertiary", icon: "check", size: "sm", title: "Enregistrer une formalité d'exécution (transmission, publication, notification)", onClick: () => { state.execution = { ...(state.execution || {}), acteId: a.id }; navigate("execution"); } }) : null,
-        button("", { variant: "tertiary", icon: "download", size: "sm", title: "Exporter", onClick: () => quickExport(a) }),
-        // ÉPINGLER l'acte : le mettre en avant dans la bande « À la une » du
-        // recueil public. La distinction se pose et se retire du même geste.
-        peutEpingler(a) ? boutonEpinglage(a) : null,
-        can("actes.gerer")
-          // Seul un BROUILLON va à la corbeille : un acte signé ou publié est une
-          // pièce du dossier. Il ne s'efface pas — il s'ABROGE, par un acte
-          // nouveau qui le vise expressément (voir `retirerOuAbroger`).
-          ? (isDraftable(a.statut)
-            ? button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Mettre à la corbeille", onClick: () => remove(a) })
-            : button("", { variant: "tertiary", icon: "x", size: "sm", title: "Retirer du recueil, ou abroger", onClick: () => retirerOuAbroger(a) }))
-          : null,
-      )),
-    ));
+    const exec = execDe(a);
+    const php = parapheurActif() ? etatParapheur(a) : null;
+    const fait = (label, valeur) => h("div", { class: "registre__fait" },
+      h("dt", { text: label }), h("dd", {}, valeur || h("span", { class: "fr-muted", text: "—" })));
+    return h("tr", { class: "registre__details" },
+      h("td", { colspan: "4" },
+        h("dl", { class: "registre__fiche" },
+          fait("Nature", natureOf(a).label),
+          fait("Trame", trameDe(a)?.name),
+          fait("Service", a.serviceId ? targetLabel(state.config, a.serviceId, a.bureauId) : "Général"),
+          fait("Entité", entity?.name || entity?.code),
+          fait("Signature", a.dateSignature ? formatDate(a.dateSignature, "date-long") : null),
+          fait("Parapheur", php ? (a.validation?.circuitLabel ? a.validation.circuitLabel + " — " + php.label : php.label) : "aucun circuit applicable"),
+          fait("Exécution", exec?.texte),
+          fait("Publication", a.publication
+            ? [
+              h("span", { class: "fr-mono", text: a.publication.eliUri || a.eli || "" }),
+              h("span", { class: "fr-muted", text: a.publication.juridique === false ? " · document non opposable" : " · opposable le " + formatDate(a.publication.dateOpposabilite) }),
+            ]
+            : (natureOfActe(a, state.trames) === "annexe"
+              ? "annexe : elle suit l'acte qui l'adopte"
+              : (actePubliable(a) ? "pas encore déposé au recueil" : "acte non publiable : il n'est jamais déposé"))),
+          fait("Écarts", ec.count ? ec.list.map((e) => e.label).join(" · ") : "aucun passage réécrit"),
+          doc ? fait("Document", a.updatedAt ? "mis à jour le " + formatDate(a.updatedAt, "date-long") : null) : null,
+        ),
+      ));
   }
+
+  function ligneDe(a) {
+    const entity = state.config.entities?.find((e) => e.id === a.entityId);
+    const doc = docOfActe(a);
+    const editable = canEdit(a);
+    const ec = editable ? ecartsOfActe(a) : { count: 0, list: [] };
+    const exec = execDe(a);
+    const php = parapheurActif() ? etatParapheur(a) : null;
+    const annexe = natureOfActe(a, state.trames) === "annexe";
+    const ouvert = ouverts.has(a.id);
+    return h("tr", { class: "registre__ligne" + (ouvert ? " is-ouvert" : ""), title: a.createdByName ? "Rédigé par " + a.createdByName : "" },
+      h("td", { class: "fr-mono registre__numero" },
+        h("button", {
+          class: "registre__deplie", type: "button", "aria-expanded": ouvert ? "true" : "false",
+          title: ouvert ? "Masquer le détail" : "Afficher le détail de l'acte",
+          on: { click: () => { if (ouvert) ouverts.delete(a.id); else ouverts.add(a.id); peindre(); } },
+        }, icon(ouvert ? "down" : "right", 15)),
+        h("span", { text: numeroAffiche(a, state.config, state.trames) || "—" })),
+      h("td", { class: "registre__objet-cell" },
+        h("span", { class: "registre__objet", text: a.objet || doc?.meta?.objet || "—" }),
+        mentions([
+          natureOf(a).label,
+          trameDe(a)?.name,
+          a.serviceId ? targetLabel(state.config, a.serviceId, a.bureauId) : "Général",
+          entity?.code,
+          a.dateSignature ? "signé le " + formatDate(a.dateSignature) : null,
+          ec.count ? { text: ec.count + " écart" + (ec.count > 1 ? "s" : ""), alerte: true, title: ec.list.map((e) => e.label).join(" · ") } : null,
+          php ? { text: php.label, alerte: php.color === "error", title: a.validation?.circuitLabel ? "Circuit : " + a.validation.circuitLabel : "" } : null,
+          exec && exec.code === "en_attente" ? { text: "formalité à faire", alerte: true, title: exec.texte } : null,
+          a.publication
+            ? "publié"
+            : (!actePubliable(a)
+              ? { text: annexe ? "annexe" : "non publiable", alerte: !annexe, title: annexe ? "Elle ne se signe ni ne se publie pour elle-même : son texte suit l'acte qui l'adopte." : "Trame non publiable : l'acte est signé et conservé, mais jamais déposé au recueil." }
+              : null),
+          acteEpingle(a) && a.publication ? "à la une" : null,
+        ])),
+      h("td", {}, h("span", { class: "fr-badge fr-badge--" + statutColor(a.statut), text: statutLabel(a.statut) }), abrogationBadge(a)),
+      h("td", { class: "registre__gestes" }, h("div", { class: "fr-row", style: { justifyContent: "flex-end" } },
+        editable
+          ? button("Reprendre", { variant: "secondary", size: "sm", icon: "note", title: "Rouvrir le document pour le modifier", onClick: () => openActe(a) })
+          : button(doc ? "Voir" : "Ouvrir", { variant: "secondary", size: "sm", onClick: () => (doc ? navigate("acte/" + a.id) : openActe(a)) }),
+        menuButton([
+          editable ? { label: doc ? "Voir l'acte" : "Ouvrir l'acte", icon: "eye", onClick: () => (doc ? navigate("acte/" + a.id) : openActe(a)) } : null,
+          can("actes.gerer")
+            ? ((actePubliable(a) || annexe)
+              ? { label: annexe ? "Modifier l'annexe" : "Modifier", icon: "refresh", title: annexe ? "Rédiger l'acte modificatif qui adoptera la nouvelle rédaction de l'annexe" : "Rédiger un acte modificatif", onClick: () => modifierFromActe(a) }
+              : { label: "Corriger", icon: "note", title: "Acte non publiable : correction directe, sans acte modificatif", onClick: () => openActe(a) })
+            : null,
+          can("actes.signer") ? { label: "Signer", icon: "lock", title: "Signer l'acte (ou suivre son circuit)", onClick: () => signer(a) } : null,
+          can("signature.gerer") ? { label: "Formalité d'exécution", icon: "check", title: "Enregistrer une formalité (transmission, publication, notification)", onClick: () => { state.execution = { ...(state.execution || {}), acteId: a.id }; navigate("execution"); } } : null,
+          { label: "Exporter", icon: "download", onClick: () => quickExport(a) },
+          peutEpingler(a) ? {
+            label: acteEpingle(a) ? "Retirer de la une du recueil" : "Mettre à la une du recueil",
+            icon: "pin", title: "La bande « À la une » du recueil public", onClick: () => basculerEpinglage(a),
+          } : null,
+          can("actes.gerer") ? { separator: true } : null,
+          can("actes.gerer")
+            ? (isDraftable(a.statut)
+              ? { label: "Mettre à la corbeille", icon: "trash", danger: true, onClick: () => remove(a) }
+              : { label: "Retirer du recueil, ou abroger", icon: "x", danger: true, onClick: () => retirerOuAbroger(a) })
+            : null,
+        ], { title: "Autres gestes sur cet acte" }),
+      )),
+    );
+  }
+
+  function peindre() {
+    clear(tb);
+    const lignes = filtrer();
+    const vues = lignes.slice(0, ui.affiches);
+    for (const a of vues) {
+      tb.appendChild(ligneDe(a));
+      if (ouverts.has(a.id)) tb.appendChild(detailsDe(a));
+    }
+    if (!vues.length) {
+      tb.appendChild(h("tr", {}, h("td", { colspan: "4" },
+        emptyState("Aucun acte ne correspond à cette recherche.", button("Effacer les filtres", {
+          variant: "secondary",
+          onClick: () => { ui.q = ""; ui.statut = ""; ui.service = ""; ui.annee = ""; ui.affiches = 25; redrawView(); },
+        })))));
+    }
+    const restants = lignes.length - vues.length;
+    const nom = " acte" + (lignes.length > 1 ? "s" : "");
+    compteEl.textContent = restants > 0
+      ? lignes.length + nom + " — " + vues.length + " affiché" + (vues.length > 1 ? "s" : "")
+      : lignes.length + nom;
+    clear(plusEl);
+    if (restants > 0) {
+      plusEl.appendChild(button("Afficher les " + Math.min(25, restants) + " suivants", {
+        variant: "secondary", size: "sm", icon: "down",
+        onClick: () => { ui.affiches += 25; peindre(); },
+      }));
+      plusEl.appendChild(button("Tout afficher (" + lignes.length + ")", {
+        variant: "tertiary", size: "sm",
+        onClick: () => { ui.affiches = lignes.length; peindre(); },
+      }));
+    }
+  }
+
+  root.appendChild(barre);
+  root.appendChild(compteEl);
   table.appendChild(tb);
   root.appendChild(h("div", { class: "fr-table-wrap" }, table));
+  root.appendChild(plusEl);
+  let withEcarts = 0;
+  for (const a of list) {
+    if (canEdit(a) && ecartsOfActe(a).count) withEcarts++;
+  }
+  peindre();
   root.appendChild(h("p", { class: "fr-small fr-muted", text: `${list.length} acte(s) · stockage local (IndexedDB). Un acte modifié donne deux nouvelles entrées : l'acte modificatif et la version consolidée. Exportez régulièrement pour partager ou archiver.` }));
   root.appendChild(h("p", { class: "fr-small fr-muted", text: withEcarts
     ? `⚠ ${withEcarts} acte(s) comportent des passages réécrits par rapport à la trame (« Reprendre » pour voir le détail). Un écart n'est pas une faute : adaptez la trame si l'adaptation se répète.`

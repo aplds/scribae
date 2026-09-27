@@ -21,7 +21,7 @@
 // ============================================================================
 import { state, redrawView, can, navigate, oublierBulletinsRecueil } from "../state.js";
 import { h, button, toast, badge } from "../dom.js";
-import { confirmDialog, emptyState } from "../components.js";
+import { confirmDialog, emptyState, pageTitle } from "../components.js";
 import { copyText, formatDate } from "../../lib/util.js";
 import { publicationSettings } from "../../lib/eli.js";
 import {
@@ -60,9 +60,8 @@ function pageHead(u, gerer) {
   const actif = bs.etat.tableau ? bs.etat.tableau.actif : null;
   return h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Bulletin" }),
-      h("p", { class: "page-head__sub", text: "Le Journal des actes : le recueil rassemblé par période, adressé à ses abonnés et suivi par un flux. "
-        + "Les actes y sont classés par entité, puis par thématique — l'ordre de lecture d'un bulletin officiel. Une période sans publication ne donne aucun numéro." })),
+      pageTitle("Bulletin" , "Le Journal des actes : le recueil rassemblé par période, adressé à ses abonnés et suivi par un flux. "
+        + "Les actes y sont classés par entité, puis par thématique — l'ordre de lecture d'un bulletin officiel. Une période sans publication ne donne aucun numéro." )),
     h("div", { class: "page-head__actions" },
       actif === null ? null : badge(actif ? "Bulletin ouvert" : "Bulletin éteint", actif ? "success" : "info"),
       u.chargement ? h("span", { class: "fr-small fr-muted", text: "Lecture…" }) : null,

@@ -10,6 +10,13 @@
 //     Au-delà de 70 secondes sans battement, le poste est considéré parti — un
 //     navigateur fermé net ne laisse donc pas de verrou définitif.
 //
+//     Depuis la 1.6.2, il porte aussi le BROUILLON partagé : les seules
+//     clés qu'un poste vient de toucher dans l'acte qu'il rédige, pour qu'un
+//     collègue les voie arriver. C'est un fait ÉPHÉMÈRE, borné (voir
+//     BROUILLON_MAX) et jamais enregistré — il disparaît avec la présence. Un
+//     poste en rédaction partagée écrit plus souvent qu'une fois toutes les
+//     25 secondes : c'est le battement « vif » (BROUILLON_MS).
+//
 //   • `journal` : le registre des faits — qui a créé, soumis, validé, signé,
 //     publié, transmis, supprimé quoi. Chaque entrée peut DÉSIGNER des
 //     destinataires (un compte, un rôle, un service) : c'est ce qui alimente
@@ -45,7 +52,17 @@ let journal = [];
 let canal = null;
 let battement = null;
 let sondage = null;
-let vue = { acteId: "", acteLabel: "", ecran: "" };
+let vue = { acteId: "", acteLabel: "", ecran: "", trameId: "", trameLabel: "", brouillon: null };
+// Le flux temps réel est-il ouvert (voir ui/flux.js) ? C'est lui qui rend les
+// brouillons partagés utiles : sans lui, la présence se lit toutes les trente
+// secondes, et un brouillon publié arriverait trop tard pour être « en même
+// temps ». Hors temps réel, on ne publie donc RIEN.
+let fluxActif = false;
+// Le poste a-t-il un brouillon à publier ? Le battement ordinaire suffit quand
+// rien ne bouge ; quand quelqu'un écrit, on bat plus vite, le temps de la
+// rédaction (voir `planifierBattement`).
+let brouillonEnAttente = false;
+let battementVif = null;
 let derniereErreur = "";
 const ecouteurs = new Set();
 
@@ -62,6 +79,57 @@ export const enLigne = () => presencesActives().length;
 // Le poste qui rédige cet acte, s'il n'est pas le mien.
 export const quiRedige = (acteId) =>
   presencesActives().find((p) => p.acteId === acteId && p.userId !== moi?.id) || null;
+
+// Le poste qui a cette TRAME ouverte dans l'éditeur, s'il n'est pas le mien.
+export const quiRedigeTrame = (trameId) =>
+  presencesActives().find((p) => p.trameId === trameId && p.userId !== moi?.id) || null;
+
+// ----------------------------------------------------------- brouillons partagés
+// CE QUE LES AUTRES POSTES SONT EN TRAIN D'ÉCRIRE dans cet acte. Le brouillon
+// voyage DANS l'enregistrement de présence (voir `presenceDuPoste`) : il n'y a
+// donc ni collection nouvelle, ni route nouvelle — et le flux (1.6.2) le
+// transporte vers les autres postes en une seconde.
+//
+// Un brouillon est ÉPHÉMÈRE, comme la présence : il vit le temps d'une
+// rédaction, n'entre dans aucun journal, et s'efface au départ du poste (voir
+// `arreter` et `libererRedaction`). Son contenu est borné (voir BROUILLON_MAX) :
+// au-delà, on ne partage pas — mieux vaut pas de partage qu'un service qu'on
+// charge avec des documents entiers.
+export const BROUILLON_MAX = 24000;
+
+export function brouillonsDistants(acteId) {
+  if (!acteId) return [];
+  return presencesActives()
+    .filter((p) => p.userId !== moi?.id && p.brouillon && p.brouillon.acteId === acteId)
+    .map((p) => ({ userId: p.userId, byName: p.byName, role: p.role, at: p.brouillon.at || p.at, valeurs: p.brouillon.valeurs || {}, ecarts: p.brouillon.ecarts || {} }));
+}
+
+// Publie ce que CE poste vient d'écrire dans l'acte ouvert. `valeurs` et
+// `ecarts` ne contiennent que les clés que l'agent a touchées : le reste du
+// document n'a pas à circuler (il n'a pas changé, et il peut être long).
+export function publierBrouillon(acteId, { valeurs = {}, ecarts = {}, label = "" } = {}) {
+  if (!moi || !acteId) return false;
+  const taille = JSON.stringify({ valeurs, ecarts }).length;
+  if (taille > BROUILLON_MAX) return false;
+  vue = { ...vue, acteId, acteLabel: label || vue.acteLabel, brouillon: { acteId, at: new Date().toISOString(), valeurs, ecarts, byName: moi.name } };
+  brouillonEnAttente = true;
+  planifierBattement();
+  return true;
+}
+
+// Le battement « vif » : pendant une rédaction partagée, la présence s'écrit plus
+// souvent qu'une fois toutes les vingt-cinq secondes — mais pas à chaque frappe,
+// et jamais deux battements en vol (voir `battre`, qui fusionne déjà).
+const BROUILLON_MS = 1600;
+function planifierBattement() {
+  if (battementVif || !fluxActif) return;
+  battementVif = setTimeout(() => {
+    battementVif = null;
+    if (!brouillonEnAttente) return;
+    brouillonEnAttente = false;
+    battre();
+  }, BROUILLON_MS);
+}
 
 export const journalTout = () => [...journal].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
@@ -194,7 +262,13 @@ function presenceDuPoste() {
     at: new Date().toISOString(),
     acteId: vue.acteId || "",
     acteLabel: vue.acteLabel || "",
+    trameId: vue.trameId || "",
+    trameLabel: vue.trameLabel || "",
     ecran: vue.ecran || "",
+    // Le brouillon partagé : ce que ce poste vient d'écrire (voir
+    // `publierBrouillon`). Absent hors temps réel, et absent quand rien n'est en
+    // cours de rédaction — la présence reste alors ce qu'elle était.
+    brouillon: vue.brouillon && fluxActif ? vue.brouillon : null,
   };
 }
 
@@ -261,9 +335,19 @@ export function declarerUtilisateur(user) {
 
 // Annonce l'écran (et l'acte éventuellement en cours de rédaction) au reste de
 // l'installation. Appelée par les vues, jamais par le module lui-même.
-export function signalerEcran(ecran, { acteId = "", acteLabel = "" } = {}) {
+export function signalerEcran(ecran, { acteId = "", acteLabel = "", trameId = "", trameLabel = "" } = {}) {
   const change = vue.ecran !== ecran || vue.acteId !== acteId;
-  vue = { ecran: ecran || "", acteId: acteId || "", acteLabel: acteLabel || "" };
+  vue = {
+    ...vue,
+    ecran: ecran || "",
+    acteId: acteId || "",
+    acteLabel: acteLabel || "",
+    // `trameId` n'est pas remis à zéro ici : c'est l'ÉDITEUR qui le pose, et
+    // `libererRedactionTrame` (appelé en quittant l'écran) qui le retire. Le
+    // remettre à zéro à chaque redessin ferait clignoter la présence.
+    trameId: trameId || vue.trameId || "",
+    trameLabel: trameLabel || vue.trameLabel || "",
+  };
   if (change && moi) battre();
 }
 
@@ -273,10 +357,42 @@ export function signalerRedaction(acteId, acteLabel = "") {
 }
 
 export function libererRedaction() {
-  if (!vue.acteId) return;
-  vue = { ...vue, acteId: "", acteLabel: "" };
+  if (!vue.acteId && !vue.brouillon) return;
+  vue = { ...vue, acteId: "", acteLabel: "", brouillon: null };
   if (moi) battre();
 }
+
+// La même chose pour une TRAME ouverte dans l'éditeur : les autres postes voient
+// qui travaille dessus, dans l'en-tête (voir ui/collab.js) et dans l'éditeur.
+export function signalerRedactionTrame(trameId, trameLabel = "") {
+  vue = { ...vue, trameId: trameId || "", trameLabel: trameLabel || "" };
+  if (moi) battre();
+}
+
+export function libererRedactionTrame() {
+  if (!vue.trameId) return;
+  vue = { ...vue, trameId: "", trameLabel: "" };
+  if (moi) battre();
+}
+
+// Le flux temps réel est-il ouvert ? Réglé par la coquille (ui/state.js), qui
+// seule sait ce que dit ui/flux.js.
+export function setFluxActif(actif) {
+  const avant = fluxActif;
+  fluxActif = !!actif;
+  if (avant && !fluxActif) {
+    // Le temps réel s'arrête : le brouillon partagé n'a plus de sens (il
+    // n'arriverait plus à temps). On le retire de la présence au prochain
+    // battement, sans le laisser traîner.
+    vue = { ...vue, brouillon: null };
+    if (brouillonEnAttente) { brouillonEnAttente = false; }
+    if (battementVif) { clearTimeout(battementVif); battementVif = null; }
+    if (moi) battre();
+  }
+  return fluxActif;
+}
+
+export const fluxOuvert = () => fluxActif;
 
 export async function demarrer(user) {
   declarerUtilisateur(user);
@@ -308,12 +424,15 @@ function onVisible() {
 export async function arreter() {
   if (battement) { clearInterval(battement); battement = null; }
   if (sondage) { clearInterval(sondage); sondage = null; }
+  if (battementVif) { clearTimeout(battementVif); battementVif = null; }
+  brouillonEnAttente = false;
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("pagehide", arreter);
   if (moi) {
     // Départ propre : notre enregistrement est marqué comme ancien, pour que les
-    // autres postes ne nous attendent pas 70 secondes.
-    const parti = { ...(presences.find((p) => p.userId === moi.id) || {}), id: moi.id, userId: moi.id, byName: moi.name, at: new Date(0).toISOString(), acteId: "", ecran: "" };
+    // autres postes ne nous attendent pas 70 secondes. Le brouillon partagé, lui,
+    // est retiré : un poste parti n'écrit plus rien.
+    const parti = { ...(presences.find((p) => p.userId === moi.id) || {}), id: moi.id, userId: moi.id, byName: moi.name, at: new Date(0).toISOString(), acteId: "", acteLabel: "", trameId: "", trameLabel: "", ecran: "", brouillon: null };
     try {
       const liste = (await db.read(PRESENCE)).filter((p) => p.userId !== moi.id);
       liste.push(parti);

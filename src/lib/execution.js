@@ -155,11 +155,17 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
       at: iso(e.transmission?.at),
       ref: e.transmission?.ref || "",
       mode: e.transmission?.mode || "",
+      destinataire: e.transmission?.destinataire || "",
       byName: e.transmission?.byName || "",
       // Certificat informatique de transmission (accusé de réception délivré
       // par le contrôle de légalité) : présent lorsque la transmission a été
       // faite par l'API d'envoi — voir src/lib/legalite.js.
       certificat: e.transmission?.certificat || null,
+      // Une transmission SIMULÉE (aucun appel sortant) ou DÉCLARÉE (attestée
+      // hors application par un réviseur) le dit, et la mention du certificat
+      // le porte : la formalité n'est pas présentée comme un accusé réel.
+      demonstration: e.transmission?.demonstration === true,
+      declaration: e.transmission?.declaration || null,
     },
     {
       // La publication est normalement constatée par la chaîne ELI
@@ -190,6 +196,16 @@ export function formalites(acte, { publiable = true, trame = null } = {}) {
       byName: e.notification?.byName || "",
     },
   ];
+}
+
+// La transmission est-elle REQUISE pour cet acte ? C'est la règle des
+// formalités (`formalites` ci-dessus), exposée pour le dépôt : le service ne
+// connaît pas les trames, et c'est donc au CLIENT de dire si l'acte est soumis
+// à la porte du contrôle de légalité (voir src/ui/views/signature.js, qui en
+// fait le champ `controleLegalite` du dépôt).
+export function transmissionRequisePour(acte, { publiable = true, trame = null } = {}) {
+  const f = formalites(acte, { publiable, trame }).find((x) => x.id === "transmission");
+  return !!(f && f.requis);
 }
 
 // Date à laquelle l'acte devient exécutoire : la plus tardive des formalités
@@ -417,16 +433,19 @@ export function resumeExecution(acte, config, opts = {}) {
 // savoir seule qu'un courrier est parti. Une formalité accomplie par une API
 // (transmission au contrôle de légalité) porte en plus son certificat et les
 // mentions de l'appel : la constatation est alors faite par le service.
-export function enregistrerFormalite(acte, id, { at, ref, mode, destinataires, certificat, api, by, byName } = {}) {
+export function enregistrerFormalite(acte, id, { at, ref, mode, destinataires, destinataire, certificat, api, declaration, demonstration, by, byName } = {}) {
   if (!["transmission", "publication", "notification"].includes(id)) return null;
   acte.execution = acte.execution || {};
   acte.execution[id] = {
     at: at || aujourdhui(),
     ref: String(ref || "").trim(),
     mode: mode || "",
+    ...(destinataire !== undefined ? { destinataire: String(destinataire || "").trim() } : {}),
     ...(destinataires !== undefined ? { destinataires: String(destinataires || "").trim() } : {}),
     ...(certificat ? { certificat } : {}),
     ...(api ? { api } : {}),
+    ...(declaration ? { declaration } : {}),
+    ...(demonstration !== undefined ? { demonstration: demonstration === true } : {}),
     by: by || "",
     byName: byName || "",
     enregistreLe: new Date().toISOString(),

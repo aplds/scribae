@@ -250,6 +250,14 @@ export async function call(method, path, opts = {}) {
 
 export const get = (path, opts) => call("GET", path, opts);
 export const post = (path, body, opts) => call("POST", path, { ...opts, body });
+export const del = (path, opts) => call("DELETE", path, opts);
+
+// Le transport RÉELLEMENT employé (`true` : des appels HTTP ; `false` : le canal
+// temps réel de l'édition en ligne). Il ne se déduit pas de l'environnement par
+// l'appelant : c'est le même que celui de `call`, et il commande les limites de
+// taille (une requête HTTP et un message de canal n'ont pas le même plafond —
+// voir src/lib/fichiers.js).
+export const transportHTTP = () => useHttp();
 
 // Le corps d'une réponse, TOUJOURS exploitable. `r.ok` ne dit rien de la forme
 // du corps : `httpRequest` pose `body = null` quand la réponse n'est pas du JSON

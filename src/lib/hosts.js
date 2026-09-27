@@ -41,6 +41,20 @@ export function hostSuperFetch() {
   return typeof globalThis.root?.superFetch === "function" ? globalThis.root.superFetch : null;
 }
 
+// Dépôt de FICHIERS chez l'hôte (`root.uploadPlugin`, le plugin de fichiers de
+// Perchance). FACULTATIF : c'est l'hébergement de l'édition en ligne qui le
+// fournit, et une installation auto-hébergée n'en a aucun — un dépôt qui ne
+// connaissait que lui échouait là sur « root.uploadPlugin is not a function ».
+// L'application range alors la pièce dans SON service (voir src/lib/fichiers.js,
+// `deposerPiece`). `__SCRIBA_HOST__.upload` permet à une édition statique de
+// brancher un dépôt si elle en a un.
+export function hostUpload() {
+  const host = globalThis.__SCRIBA_HOST__;
+  if (host && typeof host.upload === "function") return host.upload.bind(host);
+  const racine = globalThis.root;
+  return racine && typeof racine.uploadPlugin === "function" ? racine.uploadPlugin.bind(racine) : null;
+}
+
 // Moteur de langage intégré (`generateText`, le plugin ai-text de Perchance).
 // FACULTATIF : il n'existe que sur Perchance. Hors de là — page servie en
 // statique, ou déploiement auto-hébergé — l'application n'a pas de moteur par

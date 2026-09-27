@@ -29,7 +29,7 @@ import {
 } from "../state.js";
 import { inScope } from "../../lib/scope.js";
 import { h, clear, button, toast, fitPaper } from "../dom.js";
-import { textField, selectField, choiceField, emptyState, helpLink, confirmDialog, acteStatutBadge } from "../components.js";
+import { textField, selectField, choiceField, emptyState, helpLink, confirmDialog, acteStatutBadge, pageTitle } from "../components.js";
 import { uid, formatDate } from "../../lib/util.js";
 import {
   KIND_REPRISE, GENRES, genreDe, validerReprise, dateMaxReprise,
@@ -41,6 +41,7 @@ import { renderDocument, applyPaper, documentToText } from "../../lib/render.js"
 import { styleForDoc } from "../../lib/styles.js";
 import { recueilsExternes, mentionsPubliques, licenceReutilisation } from "../../lib/recueil.js";
 import { post, errorMessage, beginFlow } from "../../lib/remote.js";
+import { deposerPiece, supprimerPiece, verifierTaille, limiteLisible } from "../../lib/fichiers.js";
 import { fullName } from "../../lib/users.js";
 
 // Une reprise neuve : tout est vide, et le genre par défaut est « acte ». Le
@@ -103,8 +104,7 @@ function pageHead(liste) {
   const publiees = liste.filter((r) => r.statut === "publie").length;
   return h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Reprises d'actes anciens" }),
-      h("p", { class: "page-head__sub", text: "Les actes antérieurs à la mise en service du recueil : le rédacteur en écrit le texte, règle la date de publication d'origine et joint l'original signé. La reprise est publiée immédiatement, à titre informatif." })),
+      pageTitle("Reprises d'actes anciens" , "Les actes antérieurs à la mise en service du recueil : le rédacteur en écrit le texte, règle la date de publication d'origine et joint l'original signé. La reprise est publiée immédiatement, à titre informatif." )),
     h("div", { class: "page-head__actions" },
       helpLink("reprises", "Comment faire ?"),
       h("span", { class: "fr-small fr-muted", text: `${publiees} publiée${publiees > 1 ? "s" : ""}${liste.length - publiees ? `, ${liste.length - publiees} en préparation` : ""}` }),
@@ -180,8 +180,7 @@ function editeur(r) {
 
   const entete = h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: publie ? "Reprise publiée" : "Reprendre un acte ancien" }),
-      h("p", { class: "page-head__sub", text: "Le texte se compose librement. Les lignes « Article 1er », « # TITRE I » et « - » donnent sa structure au document." })),
+      pageTitle(publie ? "Reprise publiée" : "Reprendre un acte ancien" , "Le texte se compose librement. Les lignes « Article 1er », « # TITRE I » et « - » donnent sa structure au document." )),
     h("div", { class: "page-head__actions" },
       button("Retour aux reprises", { variant: "tertiary", icon: "doc", onClick: () => { state.ui.repriseId = null; redrawView(); } }),
       !publie ? button("Publier au recueil", { variant: "primary", icon: "globe", onClick: () => publier(r) }) : null,
@@ -279,10 +278,10 @@ function champDate({ label, value, onChange, max, required, help }) {
 
 // ------------------------------------------------------------------ l'original
 
-// L'original signé est joint À LA MAIN : on le dépose (upload-plugin) et l'on
-// garde son adresse, son empreinte et sa taille sur la reprise. C'est cette
-// pièce que le recueil montrera comme l'original — la reprise, elle, ne signe
-// rien.
+// L'original signé est joint À LA MAIN : on le dépose (le service de fichiers de
+// l'hébergement, ou celui de Scribae — voir src/lib/fichiers.js) et l'on garde
+// son adresse, son empreinte et sa taille sur la reprise. C'est cette pièce que
+// le recueil montrera comme l'original — la reprise, elle, ne signe rien.
 function carteOriginal(r, paint) {
   const card = h("div", { class: "fr-card fr-stack" });
   const info = h("div", { class: "reprises__original" });
@@ -300,7 +299,17 @@ function carteOriginal(r, paint) {
       o.sha256 ? h("p", { class: "fr-small fr-muted fr-mono reprises__empreinte", text: "SHA-256 " + o.sha256 }) : null,
       h("div", { class: "fr-row" },
         h("a", { class: "fr-btn fr-btn--secondary fr-btn--sm", href: o.url, target: "_blank", rel: "noopener" }, "Ouvrir"),
-        button("Retirer", { variant: "tertiary", size: "sm", icon: "trash", onClick: () => { r.original = null; touch("reprises", { rerender: false }); peindre(); if (paint) paint(); } }))));
+        button("Retirer", { variant: "tertiary", size: "sm", icon: "trash", onClick: async () => {
+          // La pièce déposée n'a plus de raison de rester sur le service : on la
+          // retire, sans y mettre d'importance — le service refuse de la retirer
+          // si un acte ou une publication la cite déjà (voir src/lib/fichiers.js).
+          const pieceId = o.pieceId;
+          r.original = null;
+          touch("reprises", { rerender: false });
+          peindre();
+          if (paint) paint();
+          if (pieceId) await supprimerPiece(pieceId, { token: publicationSettings(state.config).jetonDemonstration });
+        } }))));
   };
 
   input.addEventListener("change", async () => {
@@ -312,10 +321,14 @@ function carteOriginal(r, paint) {
     clear(info);
     info.appendChild(h("p", { class: "fr-small fr-muted", text: "Dépôt de l'original en cours…" }));
     try {
+      // La taille se refuse AVANT tout le reste : on ne hache pas un scan qu'on
+      // s'apprêtera à refuser. Le dépôt, lui, choisit son hôte — le service de
+      // fichiers de l'hébergement quand il en offre un, le service de Scribae
+      // sinon (voir src/lib/fichiers.js).
+      verifierTaille(fichier);
       const sha256 = await sha256Fichier(fichier);
-      const up = await root.uploadPlugin(fichier);
-      if (!up || up.error || !up.url) { throw new Error(up && up.error ? String(up.error) : "dépôt refusé par le service de fichiers"); }
-      r.original = { url: up.url, sha256, nom: fichier.name, taille: fichier.size, type: fichier.type || "", deposeLe: new Date().toISOString(), deposePar: state.user?.id || "", deposeParNom: state.user ? fullName(state.user) : "" };
+      const piece = await deposerPiece(fichier, { sha256, token: publicationSettings(state.config).jetonDemonstration });
+      r.original = { ...piece, deposeLe: new Date().toISOString(), deposePar: state.user?.id || "", deposeParNom: state.user ? fullName(state.user) : "" };
       r.updatedAt = new Date().toISOString();
       touch("reprises", { rerender: false });
       toast("Original joint.", "success");
@@ -331,7 +344,7 @@ function carteOriginal(r, paint) {
   });
 
   card.appendChild(h("h2", { class: "fr-card__title", text: "Original signé" }));
-  card.appendChild(h("p", { class: "fr-small fr-muted", text: "Le document signé tel qu'il a été conservé : un PDF, ou le scan de la pièce papier. C'est lui qui fait foi ; la version en ligne n'en est qu'une lecture." }));
+  card.appendChild(h("p", { class: "fr-small fr-muted", text: "Le document signé tel qu'il a été conservé : un PDF, ou le scan de la pièce papier. C'est lui qui fait foi ; la version en ligne n'en est qu'une lecture. Taille maximale : " + limiteLisible() + "." }));
   card.appendChild(input);
   card.appendChild(info);
   peindre();

@@ -11,7 +11,7 @@ import {
   restaurer, supprimerDefinitivement,
 } from "../state.js";
 import { h, button, toast } from "../dom.js";
-import { confirmDialog, emptyState, helpLink } from "../components.js";
+import { confirmDialog, emptyState, helpLink, pageTitle } from "../components.js";
 import { natureOfActe, appellationAnnexe } from "../../lib/annexes.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
@@ -25,8 +25,7 @@ export function renderCorbeille(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Corbeille" }),
-      h("p", { class: "page-head__sub", text: "Ce qui a été retiré du registre : actes et trames y restent tant qu'ils n'ont pas été supprimés définitivement. Un objet restauré retrouve sa place, son historique et ses formalités." }),
+      pageTitle("Corbeille" , "Ce qui a été retiré du registre : actes et trames y restent tant qu'ils n'ont pas été supprimés définitivement. Un objet restauré retrouve sa place, son historique et ses formalités." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("corbeille", "Comment faire ?"),

@@ -47,7 +47,7 @@ services:
   scribae:
     # L'image publiée de l'application. `latest` suit les livraisons ; pour figer
     # une version, remplacez l'étiquette par une version précise
-    # (`docker.io/aplds/scribae:1.6.1q`) ou par une empreinte.
+    # (`docker.io/aplds/scribae:1.6.2`) ou par une empreinte.
     image: docker.io/aplds/scribae:latest
     restart: unless-stopped
     # TOUT le `.env` entre dans le conteneur. C'est là que s'ajoutent, le moment

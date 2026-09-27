@@ -28,7 +28,624 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
-## [1.6.1w] — 2026-09-29 — Qui signe, et qui accède
+## [1.6.3b] — 2026-09-27 — La méthode de travail entre dans le dépôt
+
+**Un dépôt bien documenté ne suffit pas si la façon d'y travailler n'est écrite nulle part.** Les
+documents de Scribae disent excellemment *ce que fait* l'application et *comment on la déploie* ;
+la **manière de la faire évoluer dans l'atelier**, elle, vivait dans la mémoire de qui l'éditait :
+comment éprouver le code quand il n'y a ni terminal ni processus, comment régénérer un document
+engendré, ce qu'on n'a pas le droit de casser, et ce qui compte comme « terminé ». Qui reprenait le
+dépôt sans cette mémoire refaisait le travail à l'envers — ou concluait trop tôt.
+
+**Ce qui manquait le plus : le banc d'épreuves n'était pas dans le dépôt.** Il vivait dans un
+dossier de travail (`scratch/`) que la plateforme de l'atelier **ne conserve pas d'une séance à
+l'autre** : la séance suivante devait le réécrire. Or une vérification qu'on ne peut pas rejouer
+n'est pas une vérification — c'est une impression.
+
+### Ajouté
+
+- **`docs/ATELIER.md` — la méthode, les dix garde-fous et la vérification sans terminal.** Écrit
+  pour être **suffisant à lui seul** : la boucle de travail en six gestes, les dix garde-fous (avec,
+  pour chacun, l'incident qui l'a fait naître), le harnais et ses chiffres attendus, l'éprouvette du
+  service de l'aperçu, les parcours du navigateur, le regard sur l'écran, la régénération des
+  documents engendrés, les assistants (le moteur de langage), les pièges de l'atelier, et une
+  **définition de « terminé »** qui demande une preuve par ligne.
+- **`scripts/harnais-atelier.mjs` — le banc d'épreuves, désormais DANS le dépôt.** Il **charge les
+  scripts du dépôt eux-mêmes** (`verifier-style.mjs`, les trois générateurs, les épreuves) et leur
+  fournit des doublures de `node:fs`, `node:path`, `node:url`, `node:crypto` : les lectures et les
+  écritures retombent dans `src/`, et **aucune règle n'est recopiée** — c'est l'outillage de la CI,
+  rejoué sur d'autres fondations. Il rend un verdict court (`h.texte(...)`) fait pour être repris
+  tel quel, et **dit ses propres limites** (pas de processus, pas de réseau) au lieu de les taire.
+- **Les garde-fous, en tête d'`AGENTS.md`** (une ligne chacun, le détail et le pourquoi dans
+  `docs/ATELIER.md`), et une section « Avant de dire « terminé » ».
+
+### Modifié
+
+- **Le banc d'essai de l'atelier cesse d'être « hors du dépôt »** : `README.md` (§ repères de
+  vérification) et `docs/INDUSTRIALISATION.md` (§ 2) le nomment, le situent, et écrivent ses
+  **écarts connus** — huit échecs et onze sauts attendus sur 439 épreuves, tous dus à l'absence de
+  Node et de réseau. Ces écarts sont un artefact du harnais, jamais une excuse : la CI, elle,
+  exécute la suite avec un vrai Node.
+- **`tests/README.md`** et **`CLAUDE.md`** renvoient à `docs/ATELIER.md` pour qui travaille dans
+  l'atelier.
+- **`APP_VERSION` suit cette note** (`1.6.3b`), et le miroir du service
+  (`src/server/mysql/logiciel-engendre.mjs`) est régénéré : la bannière de démarrage annonce donc la
+  version réelle.
+
+
+## [1.6.3a] — 2026-09-27 — La transmission au contrôle de légalité se règle en trois régimes
+
+**Un seul interrupteur ne suffisait pas.** Jusqu'ici, la transmission au contrôle de légalité était
+une fonction expérimentale à deux états : éteinte, ou allumée. Allumée, l'application enchaînait la
+télétransmission par API après la signature — ce qui suppose une convention et des identifiants
+auprès de la préfecture. Une collectivité qui n'a pas encore ces accès, ou qui transmet par un autre
+canal (dépôt au guichet, remise contre récépissé, concentrateur de la préfecture), n'avait donc
+**aucun moyen de tenir la formalité** : ni par l'application, ni par un geste attesté. Ce qui
+existait — un champ `reference` glissé dans le corps de la route de transmission, qui fabriquait un
+certificat simulé — n'était **pas documenté**, et il levait le blocage de publication sans qu'aucun
+appel n'ait eu lieu (NC-II-016).
+
+**Trois régimes, réglés dans Administration › Expérimentale** (et publiés par `GET /v1/config`) :
+
+- **Désactivée** — la transmission n'est pas gérée : rien n'est adressé, aucune porte ne s'intercale
+  entre la signature et la publication, et la formalité se constate à la main depuis l'échéancier,
+  comme avant ;
+- **Déclarative** — avant sa **publication**, l'acte signé attend qu'un **réviseur compétent
+  déclare** à qui l'acte a été transmis, et à quelle date. **Aucun appel sortant** : la déclaration
+  vaut attestation, elle nomme son auteur, et c'est elle que le service exige pour publier ;
+- **API (@ctes)** — le service adresse l'acte signé à l'API d'envoi, et l'accusé de réception vaut
+  certificat ; **chaque acte peut en outre être déclaré transmis** (envoi hors application, API
+  injoignable, remise par un autre canal).
+
+**La déclaration est un geste nommé, daté et opposable, non un raccourci.** Elle porte une date et un
+destinataire **requis**, une référence et un motif facultatifs, et **l'identité de son auteur** : le
+nom inscrit au certificat est celui du compte qui déclare. Quand le service **identifie les
+personnes**, il oppose la déclaration à son auteur — un compte ne peut pas déclarer au nom d'un autre
+(`403 declaration_non_habilitée`) — et, si l'acte porte une liste de réviseurs, il faut y figurer.
+L'interface réserve le geste aux mêmes personnes (un réviseur compétent pour l'acte, ou
+l'administration), avant même d'essayer. La déclaration est **journalisée**, et le **certificat dit sa
+nature** : « Transmis au contrôle de légalité le 22 septembre 2026 à 09 h 14 (déclaration de Camille
+Roussel) ». Le service **dit aussi ce qu'il a pu attester** — `verifiee` quand il a opposé la
+déclaration à l'identité de l'opérateur, `declaree` quand il n'a pas pu l'opposer —, et
+l'application **reprend ce mot** au lieu de présenter comme vérifiée une déclaration que le service
+n'a pu qu'enregistrer (NC-II-017).
+
+**Ce qui disparaît.** Le champ `reference` non documenté : il est **supprimé** au profit de la
+déclaration, qui est **documentée** au contrat OpenAPI (les deux services), qui exige la date et le
+destinataire, qui est opposée à son auteur, et dont le motif est consigné. On ne peut donc plus
+**publier un acte soumis au contrôle de légalité sans que la formalité soit accomplie** par un appel
+direct à l'API.
+
+**Ce qu'il faut savoir pour migrer.** Un référentiel enregistré avant cette livraison garde son
+comportement : l'ancien booléen (`experimental.controleLegalite`) est replié **une fois**, à la
+première lecture, en régime `api`. L'ancienne variable de déploiement `SCRIBA_CONTROLE_LEGALITE`
+devient `SCRIBA_CONTROLE_LEGALITE_MODE` (`desactive` | `declaratif` | `api`). Le changement de régime
+ne touche **aucun** acte déjà déposé : une transmission constatée reste au dossier.
+
+### Ajouté
+
+- **Les trois régimes de transmission au contrôle de légalité** (`src/lib/legalite.js`,
+  Administration › Expérimentale, `GET /v1/config`) : `desactive`, `declaratif`, `api`. L'écran
+  d'administration dit, pour chacun, ce qui se passe — et, en régime API, l'état **réel** du service
+  (transmission réelle ou simulée), pour ne pas laisser croire à un appel qui n'aura pas lieu.
+- **La déclaration de transmission**, par acte (`POST /v1/actes/{id}/transmission`, corps
+  `declaration`) : date et destinataire requis, référence et motif facultatifs, auteur nommé,
+  opposition à l'opérateur et compétence de réviseur vérifiées par le service, certificat de nature
+  « déclaration » et journalisation. Elle se pose depuis la fiche de l'acte, l'échéancier et l'écran
+  « Signature & publication ».
+- **`transmissionRequisePour(acte, { publiable, trame })`** (`src/lib/execution.js`) : une seule
+  règle pour savoir si un acte donné est soumis à la transmission, partagée par tous les points de
+  dépôt au service.
+
+### Modifié
+
+- **Le certificat de transmission distingue trois natures** (`certificatTransmission`) :
+  l'**accusé de réception** d'un appel réel, la **simulation** qui le dit (`demonstration: true`), et
+  la **déclaration**, qui porte son auteur. Le sceau et sa vérification sont inchangés.
+- **`SCRIBA_CONTROLE_LEGALITE_MODE`** remplace le booléen `SCRIBA_CONTROLE_LEGALITE` dans le `.env`
+  du service (trois valeurs) ; l'ancien réglage reste lu une fois pour replier les référentiels
+  existants.
+
+### Retiré
+
+- **Le champ `reference` de la route de transmission** (non documenté, NC-II-016) : remplacé par la
+  déclaration.
+
+
+## [1.6.3] — 2026-09-27 — La télétransmission sort vraiment, et personne ne signe à la place d'un autre
+
+Deux reproches de l'audit sont traités au fond.
+
+**La transmission au contrôle de légalité n'est plus une simulation qui se
+présente comme un certificat.** Le service auto-hébergé sait désormais adresser
+l'acte signé à l'API d'envoi @ctes (`src/server/mysql/controle-legalite.mjs`) :
+adresse, chemin, destinataire et délai se posent dans le `.env`
+(`SCRIBA_CONTROLE_LEGALITE_*`), la clé (`SCRIBA_CONTROLE_LEGALITE_API_CLE`) ne
+quitte jamais le serveur, et le certificat conservé est celui de l'accusé de
+réception rendu par l'API. Un refus de l'API n'est **jamais** converti en
+certificat : la transmission échoue en `502` (`transmission_echec`), rien n'est
+enregistré, et l'acte — resté signé — peut être retransmis. Sans adresse ou sans
+clé, la transmission reste **simulée**, et le dit : `demonstration: true`, mention
+de démonstration sur le document, et motif affiché au démarrage du service comme
+dans `GET /v1/config`. L'écran Administration › Expérimentale montre l'état réel
+du service, pour qu'une étape « activée » dans l'application ne laisse pas croire à
+un appel qui n'aura pas lieu.
+
+**La signature ne s'appose plus au nom d'un autre, et le service le vérifie.** La
+porte de compétence de l'application (être le **titulaire** de la chaîne et porter
+la qualité de signataire) ne suffisait pas : le service acceptait encore une
+signature attribuée à une personne par un compte qui n'était pas la sienne. Il
+oppose désormais l'**opérateur identifié** au signataire déclaré, sur le circuit
+simple comme sur le circuit interne, et sur la certification de conformité. Une
+signature est attribuée `verifiee` quand cette confrontation a eu lieu, `declaree`
+quand elle n'a pas pu l'être (mode démonstration, ou clé de service qui affirme la
+signature) — et c'est cette attribution qui est conservée au registre, avec
+l'opérateur.
+
+**Deux gestes de REGISTRE restent ouverts à l'administration, et sont nommés.**
+Reposer au registre un original déjà signé (le service a perdu la mémoire de
+l'acte) et publier la compilation d'une version consolidée ne sont pas des
+signatures : le service ne les accepte que du **titulaire** lui-même, ou d'un
+**administrateur**, et les attribue alors `reprise` ou `compilation`, avec
+l'opérateur consigné. Un rédacteur ou un éditeur n'y a pas accès — l'application
+le lui dit avant même d'essayer, et le service refuse s'il essaie quand même.
+
+**Ce que cela change dans l'atelier.** L'écran de signature d'un acte que vous ne
+pouvez pas signer ne propose plus que l'envoi en signature : le bouton de la
+fenêtre de signature et l'outil du prestataire ne s'ouvrent que pour le titulaire.
+La certification de conformité est re-vérifiée au moment du geste, et non
+seulement à l'affichage. Publier la version consolidée d'un acte modificatif
+suppose la compétence de signature ou le rôle d'administration : sinon, la
+compilation reste en attente, et l'application dit qui doit la poser.
+
+### Ajouté
+
+- **Le client de contrôle de légalité** (`src/server/mysql/controle-legalite.mjs`) :
+  le seul composant qui appelle l'API d'envoi @ctes, avec la clé — lecture
+  défensive du vocabulaire de l'API, délai borné, journal d'une ligne par appel
+  sans jamais la clé.
+- **Les variables `SCRIBA_CONTROLE_LEGALITE_*`** (`transport`, `url`, `chemin`,
+  `destinataire`, `timeoutMs`, et la clé en portée service) : registre, wiki
+  engendré (`src/docs/VARIABLES.md`) et les deux modèles `.env`.
+- **L'état du contrôle de légalité** dans `GET /v1/config` (`controleLegalite` :
+  transport, adresse, chemin, destinataire, délai, `cle` en booléen, `motif`),
+  publié par les deux services et lu par l'application.
+- **Une épreuve de parcours** (`signature-hors-competence`, `src/tests/parcours.mjs`) :
+  la règle de signature est confrontée à **tout** le jeu — chaque acte × chaque
+  compte —, puis l'écran est regardé : aucune offre de signature sur un acte hors
+  compétence.
+
+### Modifié
+
+- **La notification de signature du service** (`hWebhookSignature`) : l'opérateur
+  identifié est opposé au signataire porté par le paquet ; l'attribution et
+  l'opérateur sont consignés au circuit.
+- **La certification de conformité** : la personne déclarée doit être celle de la
+  session, le nom est réécrit depuis le référentiel, et le compte qui atteste est
+  conservé (`parCompte`).
+- **L'identité du signataire dans les paquets** : les circuits simple, électronique,
+  interne, consolidé et rétabli portent la personne du signataire
+  (`signataires[].personId`, `interne.signataire.personId`), et l'opérateur du geste
+  est joint au dossier interne (`operateurDeCompte`, `src/ui/views/signature.js`).
+- **La publication d'une version consolidée** et le **rétablissement au registre**
+  nomment leur geste (`compilation`, `reprise`) et vérifient la compétence avant
+  d'engager quoi que ce soit.
+- **`resumeSignature`** rend `niveau`, `attribution` et `verifie`, des deux côtés :
+  un circuit se relit en disant ce que le service a pu vérifier.
+- **L'écran Administration › Expérimentale** dit si la transmission est réelle ou
+  simulée, et pourquoi, au lieu d'afficher l'adresse d'exemple comme une évidence.
+
+### Corrigé
+
+- **Le rétablissement d'un acte signé par un autre** n'est plus refusé à tort sur
+  un service qui identifie les personnes : le geste porte son nom, et le service
+  l'attribue `reprise` au lieu de le confondre avec une signature.
+- La description OpenAPI de `POST /v1/actes/{id}/transmission` et la référence
+  engendrée (`src/docs/API.md`) décrivent le régime réel — et la réponse `502`
+  qu'un refus de l'API produit.
+
+### Sécurité
+
+- **Usurpation du signataire (NC-II-006)** : une signature ne peut plus être
+  attribuée à une personne par un compte qui n'est pas la sienne — ni par l'API,
+  ni par l'interface —, sauf reprise ou compilation explicitement attribuées à
+  l'administration.
+- **Certificat de télétransmission (NC-IV-004)** : plus aucun certificat
+  d'apparence réelle sans appel réel ; la simulation est marquée sur le document.
+
+
+## [1.6.2] — 2026-09-26 — Deux personnes sur le même acte, en même temps
+
+Scribae servait déjà plusieurs postes, mais chacun travaillait en aveugle : quand
+deux personnes tenaient le même acte, la dernière à enregistrer effaçait le
+travail de l'autre, sans un mot. C'est le reproche qui revenait de tous les
+services qui ont essayé Scribae à deux.
+
+**Le service annonce ses changements, il ne renvoie pas les documents.** Une route
+nouvelle, `GET /v1/db/flux`, tient une connexion ouverte (SSE) et n'y fait passer
+que l'essentiel : quelle collection a changé, et à quelle révision. Chaque poste
+relit de lui-même ce qui lui manque. Un poste trop en retard est invité à tout
+reprendre (`resync`) plutôt que d'accumuler des évènements qu'il ne suivrait plus.
+Un même battement entretient la connexion, pour tous les postes à la fois.
+
+**Le même acte ne s'écrase plus.** Si un autre poste a écrit entre-temps, Scribae
+ne remplace plus l'enregistrement : il **fusionne** les deux versions — champ par
+champ, élément par élément pour les listes —, renvoie le résultat une fois, et ne
+signale que les vrais désaccords : deux personnes qui modifient le même champ
+autrement. Le bandeau dit alors ce qui a été conservé de part et d'autre. Le
+document que vous avez sous les yeux n'est **jamais** remplacé : la version venue
+d'ailleurs est marquée « modifié par untel, à telle heure », et c'est vous qui
+décidez de la reprendre.
+
+**On voit qui travaille.** Le tableau de présence dit quelle trame chacun tient et
+« écrit en ce moment » quand une rédaction est ouverte ; l'en-tête porte un témoin
+« temps réel » qui dit si le flux est ouvert, en veille ou absent du service.
+
+**Les brouillons se partagent.** Ce qu'un collègue tape dans un acte encore non
+enregistré se voit chez l'autre, sur un rythme volontairement lent (1,6 s) et
+seulement quand le flux est ouvert. Le brouillon d'autrui ne touche jamais le
+champ que vous êtes en train de modifier, et il s'efface à l'enregistrement comme
+après quelques minutes d'inactivité.
+
+Ce que l'exploitant doit savoir : la synchronisation ne s'active **que** sur une
+installation auto-hébergée (stockage partagé), jamais sur la démonstration
+statique, dont le stockage est celui du navigateur — là, rien ne change, par
+construction. Le service doit porter la route `/v1/db/flux`, et nginx un bloc
+dédié (`src/server/nginx.conf` et `nginx.standalone.conf` : `proxy_buffering off`,
+`proxy_read_timeout 3600s`) : sans lui, nginx garde la réponse en mémoire et le
+flux reste **muet**, sans la moindre erreur. Aucun réglage nouveau n'est demandé.
+
+### Ajouté
+
+- **Le flux de changements** : le client (`src/lib/flux.js`) lit le SSE sans
+  `EventSource` — par `fetch`, pour pouvoir porter une clé d'API —, découpe les
+  trames et se reconnecte avec un délai qui double ; le branchement
+  (`src/ui/flux.js`) ne s'active que si le stockage est celui du service ; le
+  concentrateur du service auto-hébergé (`src/server/mysql/flux.mjs`) borne ses
+  abonnés (256), n'accumule rien pour un poste lent et entretient la connexion par
+  un commentaire toutes les 20 secondes.
+- **La fusion sans perte** (`src/lib/fusion.js`) : fusion à trois branches (base,
+  la nôtre, la sienne) d'un document JSON, récursive, qui reconnaît les listes
+  identifiées et ne remplace un élément que si les deux côtés y ont touché.
+- **La reprise d'un conflit** (`reprendreConflits` dans `src/lib/db/index.js`) :
+  un seul essai de fusion, puis renvoi ; `onConflict` dit désormais ce qui a été
+  fusionné et ce qui reste en désaccord, et l'application le rapporte.
+- **Les brouillons partagés** (`src/lib/collab.js`, `src/ui/views/rediger.js`) :
+  les champs touchés d'un acte non enregistré voyagent avec la présence du poste
+  (plafond de 24 000 caractères), sur un rythme « vif » de 1,6 s ; chaque poste
+  republie les champs qu'il vient de changer, sans qu'aucun chemin d'édition n'ait
+  à y penser.
+- **Le témoin « temps réel » et la présence enrichie** (`src/ui/collab.js`,
+  `src/css/app-registre.css`) : un témoin d'état du flux dans l'en-tête (ouvert,
+  veille, absent), la trame en cours dans le tableau de présence, et « écrit en ce
+  moment » avec un lien pour ouvrir la trame tenue par un collègue.
+- **La recherche dans les réglages de l'Administration**
+  (`src/ui/views/referentiel.js`, `src/css/app-base.css`) : une barre posée sous le
+  titre de l'écran cherche un mot dans les vingt-trois onglets à la fois, affiche les
+  réglages qui y répondent avec leur chemin (onglet › carte › encart) et mène au
+  champ — l'onglet s'ouvre, le champ vient à l'écran et clignote. Tant qu'un mot est
+  saisi, l'onglet affiché ne montre plus que les réglages qui y répondent. L'index
+  est obtenu en **dessinant chaque onglet une fois, hors du document** : les libellés
+  cherchés sont ceux que l'écran affiche, sans table de correspondance à tenir.
+- **La barre de gauche se replie** (`src/ui/app.js`, `src/lib/prefs.js`,
+  `src/css/app-base.css`) : un bouton au **pied du sommaire** (derrière un filet —
+  en tête, il se disputait la place de la première rubrique) le réduit à une
+  colonne d'icônes de 58 px — 174 px rendus au document — et le poste se souvient
+  du choix. C'est une préférence **propre au poste** (jamais exportée avec le
+  référentiel) ; sans choix posé, un écran étroit part replié. Les libellés
+  restent dans le DOM (le lecteur d'écran les lit) et le bouton les donne au
+  survol, rubrique par rubrique.
+- **Quatre épreuves de parcours** (`src/tests/parcours.mjs`) : « deux postes qui
+  écrivent le même document ne s'effacent plus » (fusion), « le flux lit, découpe
+  et livre les changements poussés par le service » (découpage SSE, reprise,
+  service sans flux), « la recherche des réglages trouve un réglage d'un autre
+  onglet et y mène » (recherche « chat » depuis l'onglet Identité, chemin annoncé,
+  champ atteint et désigné, recherche sans réponse) et « la barre de gauche se
+  replie, et le poste s'en souvient » (bouton, libellés conservés pour les
+  lecteurs d'écran, préférence retenue) — la suite en comptait alors quatorze.
+- **La revue d'interface** (`src/docs/UI-UX.md`) : les vingt-quatre écrans ont été
+  capturés, mesurés et relus (hauteur, nombre de contrôles, de pastilles, tailles
+  de texte réellement affichées). Le document donne les constats chiffrés et huit
+  propositions d'UI/UX — dont les maquettes de l'espace de rédaction simplifié —
+  avec un ordre de mise en œuvre. Les huit propositions ont été **appliquées**
+  (voir ci-dessous).
+- **Les composants de carte** (`src/ui/components.js`, `src/ui/dom.js`) : `mentions`
+  (la ligne de texte secondaire d'une carte, séparée par des points) et `menuButton` (le bouton
+  « ⋯ » et son menu), avec l'icône `dots`. Les cartes de l'atelier s'y
+  ramènent : une **seule pastille** d'état en tête, les mentions, un geste
+  primaire, et le reste derrière « ⋯ » — au lieu de files de boutons de même
+  poids.
+- **L'aide à la demande** (`src/ui/components.js`) : `aideEcran`, `pageTitle` et
+  `notePlier` rangent l'explication d'un écran derrière un bouton « ? » discret,
+  au lieu d'un paragraphe permanent en tête. Les sous-titres de **données** (le
+  nom de la trame ou l'identité du document ouverts) restent affichés, eux. Les
+  vingt-trois écrans de l'atelier ont été convertis.
+- **L'espace de rédaction simplifié** (`src/ui/views/rediger.js`,
+  `src/css/app-redaction.css`) : un **seul geste primaire** (« Enregistrer ») et un
+  menu « ⋯ » ; une **ligne d'état unique** en tête qui dit à la fois le parcours et
+  la révision ; la **complétion des champs dans un tiroir** — fermé par défaut,
+  ouvert par un bouton « Compléter l'acte · N », **un champ à la fois** (« Valider
+  et suivant »), avec repli « Tous les champs (N) », l'onglet des variables et la
+  palette ; une **ligne de contrôle** au bas de l'écran qui suit le défilement.
+- **Le menu « Réglages »** (`src/ui/app.js`, `src/lib/prefs.js`) : « Organisation »
+  et « Configurer » se rangent derrière une **seule rubrique repliable** — cinq
+  rubriques pour le menu du rédacteur au lieu de six —, qui s'ouvre d'elle-même
+  quand l'écran courant en fait partie et dont l'état est une préférence de poste.
+- **Dix épreuves de plus pour la revue d'interface** (`src/tests/parcours.mjs`) :
+  « l'échelle typographique » (aucun texte sous 13 px dans la chrome), « une
+  pastille par carte », « le registre se pagine », « le chrono replie ses
+  colonnes », « le tiroir de rédaction s'ouvre sur un champ à la fois », « la
+  décision est en tête de la carte », « l'aide à la demande » (le bouton « ? »
+  ouvre l'explication), « l'assistant ne s'invite plus » (plus de bulle), « le
+  menu range les réglages » et « l'en-tête tient sur une ligne » (le compte reste
+  le dernier, à droite, et le bouton des notifications porte une cloche) — la
+  suite en compte désormais **vingt-quatre**.
+
+### Modifié
+
+- **La coquille de l'atelier est bornée à la fenêtre, et seule la zone de contenu
+  défile** (`src/css/app-base.css`, `src/ui/app.js`) : l'en-tête, le sommaire et
+  le pied restent en place. Une page de six mille pixels emportait auparavant tout
+  avec elle — au premier défilement, le sommaire sortait de l'écran et il fallait
+  remonter tout en haut pour changer d'écran. C'est le corps de la barre qui
+  défile quand ses vingt-deux entrées dépassent la hauteur, si bien que le bouton
+  de repli, au pied de la barre, reste sous la main. Les écrans qui ne portent pas
+  la coquille (connexion, recueil public, hors-réseau) continuent de faire défiler
+  la fenêtre, et l'impression rouvre la coquille (le document garde sa hauteur).
+- **L'écriture au registre** (`src/lib/db/index.js`) : `ecrire` fusionne au lieu
+  d'écraser, et l'index du service tenu par le poste devient la base de la fusion.
+- **L'état de l'application** (`src/ui/state.js`) : le flux est démarré avec les
+  données et arrêté à la déconnexion ; une collection changée ailleurs n'est relue
+  que si sa révision a bougé, et jamais quand c'est nous qui venons d'écrire ; les
+  enregistrements ouverts dans un éditeur et les fiches locales inconnues du
+  service sont préservés ; `config` et `users` ne sont jamais remplacés tout seuls.
+- **Les épreuves du parcours** : la suite attend que le service de l'aperçu ait
+  ouvert son état durable avant de le juger, et redonne sa chance à un appel que
+  l'hôte de l'aperçu a interrompu (budget de calcul de l'émulateur), sans jamais
+  excuser un 5xx qui persiste.
+- **L'échelle typographique de l'atelier** (`src/css/app-base.css` et les neuf
+  `app-*.css`) : les tailles de texte sont ramenées à une **échelle de jetons**
+  (`--t-xs` à `--t-xl`), et plus aucun texte de l'interface ne descend sous
+  **13 px** — menus, mentions et étiquettes tombaient parfois à 11–12 px.
+- **Le registre des actes** (`src/ui/views/actes.js`) : une barre de commandes qui
+  **suit le défilement**, un compte (« 69 actes — 25 affichés »), quatre colonnes
+  essentielles et une **pagination** de 25 lignes, au lieu d'un tableau de
+  soixante-neuf lignes.
+- **Le chrono de numérotation** (`src/ui/views/chrono.js`) : six colonnes
+  essentielles, les quatorze autres à la demande, filtres et pagination.
+- **La documentation technique** (`src/ui/views/docs.js`) : le sommaire du
+  document ouvert quitte le fil de lecture pour une **colonne collante** à sa
+  gauche, où il reste sous les yeux ; sous 1 280 px, il se replie en un bloc
+  borné en tête de lecture.
+- **La décision en tête des cartes** (`src/ui/views/parapheur.js`,
+  `src/ui/views/revision.js`, `src/ui/revision-cartes.js`) : chaque carte se lit
+  désormais **identité → la décision → parcours → dossier → rapport**, et l'alerte
+  de révision caduque est partagée avec les autres cartes.
+- **L'assistant Plume ne s'invite plus** (`src/ui/assistant.js`,
+  `src/css/app-outils.css`) : la **bulle d'invitation** a disparu — le panneau ne
+  s'ouvre que sur demande — et, au-delà de 1 200 px, il **réserve sa colonne** à
+  droite au lieu de recouvrir le document.
+- **L'en-tête tient sur une seule ligne** (`src/css/app-base.css`, `src/ui/app.js`) :
+  « Scribae » à gauche, la structure et les outils au centre, **le compte tout à
+  droite**. Il ne se replie plus en deux rangées ; ce qui est décoratif s'efface
+  par paliers quand la fenêtre se rétrécit — le compte d'entités, la devise sous
+  « Scribae », les libellés de « Guide » puis « Administration », le texte de la
+  recherche, enfin le nom de la structure —, sans jamais rogner le compte. Sous
+  700 px, l'en-tête repasse sur deux rangées.
+- **La cloche des notifications** (`src/ui/dom.js`, `src/ui/collab.js`) : le bouton
+  portait l'icône de l'aide (un « i » cerclé) ; c'est désormais une **cloche**. Le
+  bouton de la recherche portait la même — c'est une **loupe**.
+- **`nginx`** (`src/server/nginx.conf`, `nginx.standalone.conf`) et la description
+  OpenAPI du service (`/v1/db/flux`).
+
+### Corrigé
+
+- **Ouvrir le panneau de rédaction ne se voyait pas** (`src/ui/views/rediger.js`,
+  `src/css/app-redaction.css`, `src/ui/dom.js`) : deux retours d'usage sur le même
+  geste — « appuyer sur Compléter l'acte sans avoir d'abord choisi une pastille ne
+  fait rien », et « on ne comprend pas que cela fasse apparaître une barre à
+  droite ». Le bouton ne disait pas son état et la barre ne se nommait pas.
+  Désormais le bouton **annonce ce qu'il fait** (icône de panneau, `aria-expanded`,
+  couleur d'action quand la barre est ouverte), la barre **se nomme** (« Panneau
+  de rédaction ») et porte **sa propre fermeture**, elle **entre en glissant** de
+  la droite, et l'ouverture **mène quelque part sans qu'aucune pastille ait été
+  désignée** : elle amène la barre à l'écran quand la mise en page l'empile
+  (≤ 1100 px), met en évidence la pastille du champ à compléter dans le document
+  et place le curseur dans ce champ. L'entrée ne joue que sur la **position** : un
+  onglet en arrière-plan ne fait pas courir l'horloge des animations, et un fondu
+  y aurait laissé la barre invisible — soit le bouton inerte qu'on répare.
+  L'état du tiroir se décide sur ce qui est **réellement affiché** : un désaccord
+  entre le brouillon et l'écran ne peut plus faire du premier clic un geste sans
+  effet. L'épreuve « le tiroir de rédaction s'ouvre sur un champ à la fois » tient
+  en plus ce contrat (bouton qui annonce, barre nommée, fermeture qui referme).
+- **Les billets du recueil (rubrique Informations)** : le service de démonstration
+  échouait — un 500 nu — dès le **deuxième** billet publié. Le tri des billets
+  passait par `localeCompare`, que le moteur du service n'expose pas (le
+  comparateur n'étant appelé qu'à partir du deuxième élément, le défaut ne se
+  voyait pas sur un recueil vide, ni sur un seul billet). Le service trie
+  maintenant ses dates ISO par comparaison directe, comme le faisaient déjà les
+  listes d'actes et de publications.
+- **La composition du bulletin** : le même piège y attendait le classement des
+  entités et des thèmes (« École » ne se rangeait pas avec « ecole »). Le service
+  plie désormais lui-même casse et accents, sans dépendre d'`Intl`.
+- **La barre de gauche sur un petit écran** : sous 760 px elle passe à
+  l'horizontale, mais ses entrées restaient en pleine largeur — `width: 100%`
+  l'emportait sur la règle de la vue étroite, à spécificité égale, par l'ordre des
+  fichiers. Les vingt-deux entrées s'empilaient donc une par ligne : **1 025 px de
+  menu avant le premier mot de la page**. Elles tiennent maintenant sur une seule
+  ligne, que l'on fait défiler du doigt (55 px de haut).
+- **Le dépôt d'un fichier ne fonctionnait pas sur un déploiement Docker** : les
+  deux seuls endroits qui reçoivent un fichier — l'**original signé d'une reprise**
+  et la **version signée** du circuit externe — passaient par l'hébergement de
+  fichiers de la plateforme, qui n'existe qu'ici, dans l'éditeur. Sur un service
+  auto-hébergé, l'appel échouait (« Le dépôt … a échoué ») sans rien dire de plus.
+  Scribae range désormais la pièce **chez le service** : le poste choisit son
+  dépôt (`src/lib/fichiers.js` : l'hôte s'il en a un, sinon le service), l'envoie
+  à `POST /v1/pieces`, la relit à son adresse `/v1/pieces/{id}` — **publique**,
+  puisque le recueil cite la pièce — et la retire du bouton « Retirer » de la
+  carte (le retrait est **refusé** tant qu'un acte ou une publication la cite).
+  L'exploitant doit savoir deux choses : **où** sont rangées les pièces (table
+  `sb_piece` en rangement « MySQL », `DATA_DIR/pieces/` en rangement « par
+  fichiers » — à sauvegarder avec le reste), et **leur taille maximale** —
+  environ **5,5 Mo par pièce** par défaut ; au-delà, relever `MAX_BODY` du `.env`
+  **et** `client_max_body_size` de nginx. Là où il n'y a pas de façade HTTP (le
+  service joint directement), la limite tombe à environ **600 Ko** (plafond d'un
+  message du canal). La migration `002-pieces.sql` crée la table.
+- **Le circuit de signature externe ne fonctionnait pas sur un déploiement
+  auto-hébergé** : le service de démonstration portait les deux gestes du circuit
+  externe — déposer la version signée (`POST /v1/actes/{id}/signature-externe`) et
+  certifier sa conformité (`POST /v1/actes/{id}/conformite`) —, mais le service
+  Node n'en connaissait **aucun** : sur un déploiement Docker, un acte mené par ce
+  circuit ne pouvait ni déclarer sa version signée ni être certifié (404 sur les
+  deux routes), et les règles qui l'encadrent manquaient aussi (refus de publier
+  un acte déclaré non publiable, gardes du parapheur et de la révision à
+  l'ouverture de la signature, refus de publier sans version signée ni conformité
+  certifiée, et mention de la pièce signée au recueil public). Le service
+  auto-hébergé mène désormais le circuit de bout en bout, à l'identique de la
+  démonstration (`src/server/mysql/actes.mjs`). L'écart n'avait pas été vu parce
+  que le **jeu d'appels commun** (`src/tests/conformite-service.mjs`) ne couvrait
+  pas ces deux routes : c'est exactement la dérive qu'il existe pour empêcher, et
+  il les couvre maintenant ; trois cas nouveaux les tiennent dans
+  `src/server/mysql/actes.test.mjs`.
+- **Le banc d'épreuves du flux** (`src/server/mysql/flux.test.mjs`) : l'abonné de
+  laboratoire portait son état sur `this`, alors que le concentrateur garde les
+  fonctions `ecrire`/`fermer` et les appelle **détachées** de l'objet — un abonné
+  « lent » ne refusait donc jamais rien, et `fermer` ne marquait pas la fermeture.
+  Deux épreuves échouaient pour une raison étrangère au module ; l'état vit
+  maintenant dans une closure, et les sept épreuves passent.
+
+### Documentation
+
+- `src/docs/COLLABORATION.md` : le modèle (ce que le flux transporte et ne
+  transporte pas), ce qui est préservé en cas de conflit, et ce que l'exploitant
+  doit avoir pour que le temps réel fonctionne.
+- `src/wiki.js` : le guide suit la revue d'interface — le menu est décrit en
+  **cinq rubriques** (dont « Réglages », repliable), les feuilles de style se
+  trouvent « dans le menu Réglages », et la notice de Plume ne parle plus de bulle
+  d'invitation.
+- `src/docs/UI-UX.md` : les huit propositions sont marquées **livrées**, avec ce
+  qui a réellement été fait ; `src/README.md` décrit les composants et les écrans
+  nouveaux.
+- `src/docs/API.md` et `src/lib/api-reference.js` : les trois routes des pièces
+  jointes (`/v1/pieces`, `/v1/pieces/{id}`), leurs champs et leurs codes d'erreur.
+- `src/docs/ADMINISTRATION.md` et `src/docs/DOCKER.md` : où sont rangées les
+  pièces, leur sauvegarde, et comment relever la taille maximale d'un dépôt.
+- `src/tests/conformite-service.mjs` : le **jeu d'appels commun** couvre désormais
+  les deux routes du circuit de signature externe (`signature-externe`,
+  `conformite`), comme il couvrait déjà la signature interne — la dérive du lot
+  (routes servies d'un seul côté) ne peut plus passer sans être vue. Le banc du
+  flux (`src/server/mysql/flux.test.mjs`) est réparé au passage.
+
+## [1.6.1y] — 2026-09-26 — L'atelier ne s'engorge plus, et l'on sait où l'on en est
+
+Deux retours d'usage, sur le même atelier.
+
+**« L'édition de trames fait planter Scribae ».** Chaque redessin de l'éditeur
+laissait derrière lui un écouteur de redimensionnement, un observateur de taille
+et trois écouteurs du document, jamais défaits. Le pire n'était pas leur nombre :
+l'observateur retenait en vie la feuille DÉTACHÉE du dessin précédent — à chaque
+frappe, une page entière restait en mémoire, et après quelques minutes d'édition
+la mémoire ne redescendait plus. Le zoom (`src/ui/zoom.js`) tient désormais un
+registre : un seul écouteur et un seul observateur pour tous les cadres, dont les
+cadres détachés sortent ; et la veille de sélection de l'éditeur de trame est
+défaite avant d'être réarmée. Le même défaut frappait la rédaction, l'organigramme
+et les délégations, qui partagent ce zoom.
+
+**« Quand il est enregistré, quand il est soumis au circuit, ce n'est pas
+clair ».** L'écran de rédaction disait la conformité, le circuit et la révision —
+jamais si le travail en cours était au registre. Or rien de ce qu'on tape n'y est
+avant « Enregistrer ». Une ligne d'état le dit maintenant sous le titre.
+
+### Ajouté
+
+- **La ligne d'état de l'enregistrement** (`src/ui/views/rediger.js`, classe
+  `.rediger-etat`) : « Pas encore enregistré » pour un brouillon neuf,
+  « Modifications non enregistrées » avec l'heure du dernier enregistrement quand
+  la page a changé depuis, ou « Enregistré » avec cette heure. La phrase rappelle
+  que « Soumettre au circuit » commence par enregistrer : c'est là que le geste
+  de soumission et celui d'enregistrement se confondaient.
+
+### Corrigé
+
+- **L'éditeur ne fuit plus un écouteur par redessin** (`src/ui/zoom.js`,
+  `src/ui/views/editor.js`) : un `resize`, un `ResizeObserver` et trois écouteurs
+  du document étaient posés à chaque dessin et jamais repris ; l'observateur
+  retenait la page détachée du dessin précédent. C'est ce qui figeait l'onglet
+  après quelques minutes d'édition de trames — sur un poste comme sur l'autre, la
+  cause était dans le navigateur, pas dans le service.
+- **Un acte qu'on vient d'ouvrir ne se croit plus modifié** : le brouillon
+  normalise des clés (`__abrogations`, `__annexes`) que l'acte enregistré n'a pas,
+  et la comparaison au tableau enregistré le déclarait donc « modifié » d'emblée.
+  L'état se lit maintenant sur une SIGNATURE du brouillon, prise à l'ouverture puis
+  à chaque enregistrement (l'état « modifications non enregistrées » du circuit de
+  validation reste calculé comme avant, sur les valeurs).
+
+## [1.6.1x] — 2026-09-26 — La signature interne : c'est le SERVICE qui signe
+
+Scribae savait faire signer de trois façons : **dans l'application** (la signature simple — la clé
+privée est engendrée par le poste, avec le compte du signataire), **par un prestataire** (le circuit
+électronique, son API et sa clé, gardée au service), et **hors de l'application** (le circuit
+externe : papier ou outil tiers, la version signée est déposée en PDF). Aucune ne met la clé privée
+à l'abri du poste : dans les trois cas, c'est le navigateur qui la détient, ou qui la voit passer.
+
+Il en existe désormais une quatrième, et c'est son objet même : **c'est le SERVICE qui signe**. La
+clé privée du signataire est détenue par le service, **scellée au repos** (AES-256-GCM, sous la clé
+de scellement `SCRIBA_SIGNATURE_KV_KEY` du `.env`), et elle ne quitte jamais le serveur. Le poste ne
+reçoit que l'original signé — sa clé publique, son certificat, son horodatage. C'est la condition
+eIDAS de la signature **avancée** : la clé est sous le contrôle exclusif du signataire, un
+certificat identifie celui-ci, et la signature porte sur le document. Elle n'est pas **qualifiée**
+pour autant — l'autorité d'émission est interne à la collectivité —, et l'acte publié le dit, comme
+il le dit déjà pour les autres circuits (NC-IV-001).
+
+### Ajouté
+
+- **Un quatrième circuit de signature — « interne »** : il se règle comme les autres, globalement
+  (Administration › Signature) ou par trame (`interne_impose`, `interne_autorise`). Le rédacteur
+  prépare l'acte, le titulaire choisit le circuit, et c'est le service qui produit la signature.
+  Le parcours, les portes (parapheur, révision) et la publication sont ceux des autres circuits : ce
+  qui change est **qui signe**.
+- **Un coffre au service, une clé par SIGNATAIRE** (`src/server/mysql/signature-interne.mjs`) : la
+  clé suit la *personne* (son identifiant de personne, à défaut son compte, son adresse, son nom) —
+  comme un certificat de signature suit son titulaire. Une fiche d'horodatage unique date les actes
+  au nom du service. Le coffre ne contient que des clés scellées et des certificats publics : une
+  sauvegarde de la base ne livre aucune clé privée.
+- **L'original signé est celui des autres circuits** : la même forme (`buildSignedPackage`), si bien
+  que le recueil, la page « original signé », la vérification par empreinte et la part publique
+  (`sansInterne`) s'appliquent sans rien de plus. Le dossier nominatif (adresse, compte, poste de
+  l'opérateur) reste au registre, hors de la route publique.
+- **L'état du coffre se lit et se dit** : `GET /v1/config` rend `signatureInterne` (`disponible`,
+  `motif` quand il est éteint, `niveau`, `algorithme`, nombre de certificats émis, horodatage), et
+  Administration › Signature affiche « Coffre ouvert » ou « Coffre fermé », avec le motif. Jamais
+  une clé : le référentiel s'exporte et se partage.
+
+### Modifié
+
+- **L'application n'offre que les circuits que le service peut mener** : le circuit interne
+  n'apparaît dans le choix que si le service déclare tenir son coffre — offrir un geste que le
+  service refusera ferait perdre la manœuvre à l'agent.
+- **La qualification de la signature** distingue désormais l'émetteur interne : la mention de
+  l'acte publié dit que la signature a été produite par le SERVICE, et non par un prestataire —
+  et ne la présente jamais comme simulée, ni comme qualifiée.
+- **Les trames peuvent imposer ou autoriser la signature simple et la signature interne** comme
+  elles le faisaient du circuit externe ; le format de fichier des trames les accepte désormais
+  toutes (les valeurs `simple_*` étaient lues puis écartées — elles sont maintenant honorées).
+- **Les dates des notes intermédiaires `1.6.1u` à `1.6.1w` sont ramenées au 2026-09-26** : elles
+  annonçaient des livraisons à venir, la date d'une note est celle de son achèvement.
+
+### Sécurité
+
+- **La clé privée ne sort jamais du coffre** : elle est engendrée par le service, scellée aussitôt,
+  et n'existe en clair que le temps d'une signature. Le navigateur ne la reçoit pas, ne la demande
+  pas, et ne peut pas la lire. Une clé de scellement perdue ou changée n'invalide pas les actes déjà
+  signés — leur certificat voyage avec l'original —, elle oblige seulement à engendrer une clé neuve,
+  et le journal le consigne.
+- **Le service de démonstration ne tient pas de coffre, et le dit** : son état vit dans le
+  navigateur, et une clé privée qui vivrait là ne serait à l'abri de personne. La route refuse donc
+  franchement (`409 signature_interne_indisponible`) au lieu de simuler une signature « au nom du
+  service ». Ce circuit n'existe qu'en **auto-hébergement**.
+
+
+## [1.6.1w] — 2026-09-26 — Qui signe, et qui accède
 
 Trois défauts d'un même genre : l'application confondait **figurer dans la chaîne de signature** et
 **être le titulaire de la signature**, et elle refermait l'atelier sur un compte dont une qualité
@@ -102,7 +719,7 @@ l'outil du prestataire comme la fenêtre de signature simple ne s'ouvrent plus q
   « qui accède » (les qualités cumulées d'un visiteur, et ce qu'elles n'ouvrent pas).
 
 
-## [1.6.1v] — 2026-09-28 — Le deadlock des écritures
+## [1.6.1v] — 2026-09-26 — Le deadlock des écritures
 
 Deux écritures d'une **même collection** parties en même temps — deux postes, ou le battement de
 cœur d'un poste pendant qu'il renvoie sa file d'attente — se disputaient la ligne de la collection
@@ -145,7 +762,7 @@ jusqu'à ce qu'un rechargement de page reparte d'un état propre. Le journal le 
   en mémoire de `src/server/charge/faux-mysql.mjs`, sans serveur de base de données.
 
 
-## [1.6.1u] — 2026-09-27 — La saisie, et la touche Entrée
+## [1.6.1u] — 2026-09-26 — La saisie, et la touche Entrée
 
 Deux gestes du quotidien butaient sur le même genre de détail : invisible tant qu'on ne le vit pas,
 et qui fait perdre du travail.

@@ -17,6 +17,269 @@
       connecté d'après `docker info | grep "Username:"` — sortie qui dépend de la version de
       Docker. À reprendre (tenter le push, ou lire `~/.docker/config.json`).
 
+## Version 1.6.3b — la méthode de travail entre dans le dépôt (livré)
+
+Demande : « assure-toi que les sources des fichiers contiennent ta façon de travailler, tes règles
+et tes garde-fous, afin de conserver une bonne qualité de travail, même avec un modèle bien plus
+limité. »
+
+- [x] **`src/docs/ATELIER.md`** : la méthode (la boucle en six gestes), les dix garde-fous et leur
+      pourquoi, la vérification sans terminal, l'éprouvette du service, les parcours, le regard sur
+      l'écran, les documents engendrés, la définition de « terminé ».
+- [x] **`src/scripts/harnais-atelier.mjs`** : le banc d'épreuves **dans le dépôt** — il charge les
+      scripts livrés (`verifier-style.mjs`, les trois générateurs, les épreuves) avec des doublures
+      de `node:fs`/`node:path`/`node:url`/`node:crypto`, et rend un verdict court.
+- [x] **Les garde-fous en tête d'`AGENTS.md`**, et les renvois depuis `README.md`,
+      `docs/INDUSTRIALISATION.md` § 2, `tests/README.md` et `CLAUDE.md`.
+
+Reste ouvert :
+
+- [ ] **Rejouer les parcours en intégration continue** (Playwright ou équivalent) : ils demandent
+      aujourd'hui un navigateur, donc une main — voir `docs/INDUSTRIALISATION.md` § 4. Le harnais de
+      l'atelier ne les remplace pas.
+- [ ] **Le harnais jette-t-il un écran de fumée ?** Il rejoue la CI, il ne la remplace pas : garder
+      la règle « une épreuve qui échoue ici et passe en Node est un écart à documenter », et tenir
+      la liste des écarts connus (`docs/ATELIER.md` § 3.3) à jour à chaque note.
+
+## Version 1.6.3a — la transmission au contrôle de légalité se règle en trois régimes (livré)
+
+Demande : « Assure toi que la transmission puisse être : soit désactivée ; soit déclarative (avant
+publication, un réviseur dit à qui ça a été transmis, et à quelle date) ; soit via API @ctes +
+possibilité de déclaration par acte ».
+
+- [x] **Trois régimes** (`config.controleLegalite.mode`, Administration › Expérimentale,
+      `src/lib/legalite.js`) : `desactive` (rien n'est géré), `declaratif` (un réviseur déclare la
+      transmission avant publication, sans aucun appel sortant), `api` (le service adresse l'acte à
+      l'API d'envoi @ctes, et chaque acte peut en outre être déclaré). Le régime est publié par
+      `GET /v1/config`, et l'ancien booléen `experimental.controleLegalite` est replié en `api` à la
+      première lecture (`src/lib/store.js`).
+- [x] **La déclaration par acte** (`POST /v1/actes/{id}/transmission`, corps `declaration`) : `at` et
+      `destinataire` requis, `reference`/`motif` facultatifs, auteur nommé. Le service oppose le
+      déclarant à la session (`personId`) et à la liste des réviseurs de l'acte
+      (`403 declaration_non_habilitée`) ; l'interface réserve le geste aux mêmes personnes
+      (`peutDeclarerTransmission`), depuis la fiche de l'acte, l'échéancier et l'écran Signature.
+- [x] **Le certificat dit sa nature** (`certificatTransmission`) : accusé de réception réel,
+      **déclaration** (mention nommant son auteur), ou **simulation** marquée. Le champ `reference`
+      non documenté est **retiré** — c'était NC-II-016, portée en « Levée ».
+- [x] **Une règle unique** pour savoir si un acte est soumis — `transmissionRequisePour(acte,
+      { publiable, trame })` (`src/lib/execution.js`) — partagée par tous les dépôts au service.
+- [x] **Variable de déploiement** : `SCRIBA_CONTROLE_LEGALITE_MODE` (trois valeurs) remplace le
+      booléen `SCRIBA_CONTROLE_LEGALITE`, dans les deux `env.example` et le wiki des variables.
+- [x] **Épreuves** : `controle-legalite.test.mjs` (9) et deux cas neufs d'`actes.test.mjs` (32) —
+      déclaration sans API, et opposition identité / compétence.
+
+Reste ouvert :
+
+- [ ] **Les REFUS du contrôle de légalité** (rejet, demande d'observations) ne sont pas traités :
+      l'aller-retour s'arrête à l'accusé de réception, ou à la déclaration. C'est le reste de
+      NC-IV-006.
+
+## Version 1.6.3 — les accès API réels, et la signature qu'on ne prend pas (livré)
+
+Demande : « assure toi que tous les accès API sont réels et fonctionnels, et surtout que personne
+ne peut signer à la place de quelqu'un d'autre, y compris via l'interface, puis tourne un nouvel
+audit ».
+
+- [x] **La télétransmission au contrôle de légalité est RÉELLE quand le service est branché**
+      (`src/server/mysql/controle-legalite.mjs`, `createControleLegalite`) : le service appelle
+      l'API d'envoi du `.env` (`SCRIBA_CONTROLE_LEGALITE_URL`, `SCRIBA_CONTROLE_LEGALITE_API_CLE`,
+      chemin, destinataire, délai), en `Bearer`, et **lève** sur un refus ou une réponse sans
+      référence. Un refus rend `502 transmission_echec` — **rien n'est enregistré**, la
+      transmission se rejoue ; sinon le certificat rendu est celui de l'API. Sans adresse ni clé
+      (et sur le service de démonstration), l'appel n'a pas lieu : le certificat est marqué
+      `demonstration: true` et sa mention porte la réserve. `GET /v1/config` publie l'état, et
+      Administration › Expérimentale l'affiche (voir NC-IV-004).
+- [x] **Personne ne signe à la place d'un autre — côté SERVICE** (`porteSignature`,
+      `src/server/mysql/actes.mjs`) : quand le service identifie les personnes (`AUTH_MODE=password`
+      ou `oidc`) et que l'appelant est une session, la signature n'est acceptée que si le
+      `personId` du signataire est celui de l'opérateur — le **nom** imprimé venant du référentiel
+      du service, jamais du corps. Sinon `403 signature_non_habilitée` (ou
+      `signataire_non_identifie` / `signature_sans_identite`) et le circuit est marqué `rejetee`.
+      Même porte pour la **certification de conformité** (`403 conformite_non_habilitée`). Chaque
+      signature consigne son **opérateur** et son **attribution** (`verifiee` | `declaree` |
+      `reprise` | `compilation`).
+- [x] **La reprise et la compilation ne sont pas des signatures** : deux drapeaux du corps
+      (`reprise: true`, `compilation: true`) les **nomment**, et le service les **réserve à
+      l'administration** — un autre compte qui présente un paquet signé au nom d'un tiers reçoit
+      `403 signature_non_habilitée`.
+- [x] **La même chose dans l'interface** (`src/ui/views/signature.js`) : `enregistrerCertification`
+      et `certifierConformite` rejouent `peutCertifier` ; `publierConsolide` exige
+      `peutSignerEffectivement` **ou** l'administration ; `retablirActe` pré-vérifie le titulaire
+      **ou** l'administration ; les trois gestes joignent le `personId`.
+- [x] **Épreuves** : `controle-legalite.test.mjs` (9), cinq cas neufs d'`actes.test.mjs`,
+      le parcours `signature-hors-competence` (26e) qui balaie les 759 paires acte × compte et
+      vérifie qu'aucun bouton de signature ne s'offre sur un acte hors compétence.
+
+Reste ouvert (limites assumées, dites par l'application) :
+
+- [ ] **Le service de démonstration ne peut rien VÉRIFIER de l'identité d'une personne** : ses
+      comptes vivent dans le navigateur, pas chez lui. Il l'écrit — `attribution: "declaree"`, et
+      une clé de service peut y déposer un paquet signé. C'est une limite du démonstrateur, non du
+      logiciel : l'annuaire ou les comptes locaux (`AUTH_MODE`) ferment la porte. Il n'y a rien à
+      corriger ici ; c'est à redire dans toute présentation.
+- [ ] **La télétransmission ne gère pas encore les REFUS du contrôle de légalité** (rejet, demande
+      d'observations) : l'aller-retour s'arrête à l'accusé de réception (voir ci-dessous).
+
+## Version 1.6.2 — travailler à deux sur le même acte (livré)
+
+Demande : « deux personnes (ou plus) doivent pouvoir travailler en même temps sur la même trame
+ou le même document, avec une synchronisation en temps réel façon Google Drive — une fois
+déployé sur un vrai serveur ».
+
+- [x] **Le flux de changements** (`lib/flux.js`, `ui/flux.js`, `server/mysql/flux.mjs`,
+      `GET /v1/db/flux`) : SSE tenu ouvert, qui n'annonce QUE la collection changée et sa
+      révision ; relance à délai doublant ; `resync` pour un poste en retard ; un battement
+      partagé toutes les 20 s. Le bloc nginx est dans les deux `nginx*.conf`
+      (`proxy_buffering off`).
+- [x] **La fusion sans perte** (`lib/fusion.js`, `reprendreConflits` dans `lib/db/index.js`) :
+      un conflit d'écriture n'écrase plus — fusion à trois branches, un seul renvoi, et seuls les
+      vrais désaccords de champ sont signalés.
+- [x] **Les brouillons partagés** (`lib/collab.js`, `ui/views/rediger.js`) : les champs touchés
+      d'un acte non enregistré voyagent avec la présence (1,6 s, plafond 24 000 caractères), et
+      ne touchent jamais le champ que l'autre est en train de modifier.
+- [x] **On voit qui travaille** (`ui/collab.js`, `ui/views/editor.js`,
+      `ui/views/rediger.js`) : témoin « temps réel » dans l'en-tête, trame tenue et « écrit en ce
+      moment » dans le tableau de présence, bandeau de collaboration dans les deux éditeurs.
+- [x] **Les épreuves** : `fusion-sans-perte` et `flux-temps-reel` ajoutées au parcours (12/12
+      dans l'aperçu), `tests/fusion.test.mjs` et `server/mysql/flux.test.mjs` pour Node.
+- [x] **Deux défauts trouvés au passage** : les billets du recueil (`/v1/informations`)
+      faisaient échouer le service de démonstration dès le deuxième billet, et la composition du
+      bulletin classait mal les entités accentuées — les deux venaient de `localeCompare`, absent
+      du moteur du service (voir CHANGELOG 1.6.2).
+- [ ] **L'essai à deux machines** : la synchronisation n'a été éprouvée que contre le service de
+      l'aperçu et en épreuves. Il reste à la voir à l'œuvre sur une installation réelle, deux
+      navigateurs ouverts sur deux postes — c'est là que le `proxy_buffering` de nginx décide si
+      le flux arrive ou reste muet.
+- [ ] **Le brouillon partagé de la TRAME** : l'éditeur de trame signale qui la tient (« untel
+      travaille sur cette trame »), mais le partage champ par champ n'existe que pour l'acte.
+      À étendre si l'usage le réclame.
+
+## Version 1.6.2 — déposer un fichier sur un déploiement Docker (livré)
+
+Demande : « sur docker, j'ai parfois des soucis, je ne peux pas upload de fichiers ». Les deux
+dépôts de fichiers (original signé d'une reprise, version signée d'un circuit externe) passaient
+par l'hébergement de fichiers de la plateforme, absent en auto-hébergement ; ils passent désormais
+par le **service** (`/v1/pieces`, `lib/fichiers.js`, `sb_piece`, `DATA_DIR/pieces/`).
+
+- [x] **Le dépôt par le service** (`lib/fichiers.js`, `ui/views/reprises.js`,
+      `ui/views/signature.js`, `server/mysql/server.mjs`, les deux magasins, la migration 2) :
+      le poste choisit son dépôt, l'épreuve `piece-depot` (parcours 25/25) et les deux appels de
+      conformité tiennent le contrat ; le retrait est refusé tant qu'un acte cite la pièce.
+- [ ] **Le faux MySQL ne connaît pas `sb_piece`** (`server/charge/faux-mysql.mjs`) : sa table
+      `TABLES`, sa `cleLigne` et ses `DELETE`/`SELECT` ne couvrent pas la table des pièces, si
+      bien que la voie **MySQL** des pièces n'est pas éprouvée en mémoire (seule la voie
+      « fichiers » l'est). À compléter pour que `magasin-mysql.test.mjs` puisse l'éprouver aussi.
+- [x] **Le circuit externe côté service Node** : `signature-externe` et `conformite` étaient
+      servies par le service de démonstration, mais pas par le service Node — la pièce y était
+      rangée (les routes `/v1/pieces` existent) mais l'acte ne pouvait pas la déclarer. Porté
+      dans `server/mysql/actes.mjs` (routes, champs du dépôt, gardes de parapheur/révision et de
+      publication, mention de la pièce au recueil), éprouvé par trois cas d'`actes.test.mjs` et
+      par deux appels ajoutés au jeu commun (`tests/conformite-service.mjs`).
+
+## La revue d'interface, appliquée (1.6.2, livré)
+
+Demande : « go pour le lot et le reste » — après la revue d'interface livrée avec 1.6.2
+(`docs/UI-UX.md`, constats chiffrés et huit propositions), mettre en œuvre **toutes** les
+propositions.
+
+- [x] **P1 — l'échelle typographique** (`css/app-base.css` et les neuf `app-*.css`) : cinq jetons
+      (`--t-xs` … `--t-xl`), plus rien de la chrome sous 13 px.
+- [x] **P2/P3 — une action principale et une seule pastille par carte** (`ui/components.js` :
+      `mentions`, `menuButton`, icône `dots`) : cartes de trame, de choix, du parapheur (cinq
+      états), de la révision et de la certification ; la décision remonte en tête.
+- [x] **P4 — l'aide à la demande** (`aideEcran`, `pageTitle`, `notePlier`) : vingt-trois écrans
+      convertis, les sous-titres de données préservés.
+- [x] **P5 — les listes longues** : registre et chrono (barre collante, compte, colonnes
+      essentielles, pagination de 25 lignes), sommaire latéral de la documentation technique.
+- [x] **P6 — l'espace de rédaction** (`ui/views/rediger.js`) : un seul geste primaire, une ligne
+      d'état, le tiroir « Compléter l'acte » (un champ à la fois), la ligne de contrôle en bas.
+- [x] **P7 — l'assistant discret** (`ui/assistant.js`, `css/app-outils.css`) : bulle d'invitation
+      retirée, panneau ouvert à la demande, colonne réservée au-delà de 1 200 px.
+- [x] **P8 — le menu par métier** (`ui/app.js`) : « Organisation » et « Configurer » rangés sous
+      une rubrique **Réglages** repliable (préférence de poste), atteignable aussi sur téléphone.
+- [x] **Les épreuves** : dix épreuves ajoutées au parcours — la suite en compte **vingt-quatre**.
+- [x] **L'en-tête sur une ligne, et la cloche** (à la demande) : « Scribae » à gauche, la structure,
+      les outils, le compte tout à droite ; ce qui est décoratif s'efface par paliers (devise,
+      compte d'entités, libellés, texte de la recherche, nom de la structure), le compte n'est
+      jamais rogné. Le bouton des notifications portait l'icône de l'aide — c'est une **cloche**,
+      et la recherche une **loupe**.
+
+Reste ouvert (propositions non retenues ou partielles) :
+
+- [ ] **P2, sur le reste du logiciel** : l'essentiel des cartes est passé au modèle « un geste +
+      ⋯ », mais toutes les files de boutons n'ont pas été reprises (les écrans d'administration,
+      notamment).
+- [ ] **Le sommaire latéral de la documentation** ne s'affiche qu'au-delà de 1 280 px de large ;
+      en deçà, il se replie en un bloc borné en tête de lecture (faute de place pour trois
+      colonnes).
+
+## Correctif 1.6.1y — l'atelier qui s'engorge, et l'état d'enregistrement (livré)
+
+Demande : « je trouve que ce n'est pas clair en terme d'interface quand je rédige un document quand
+il est enregistré / soumis au circuit, etc. Ce n'est vraiment pas clair, et je suis perdu. Aussi,
+souvent (en tout cas sur Docker + la démo) l'édition de trames fait planter Scribae »
+
+- [x] **La fuite par redessin** (`ui/zoom.js`, `ui/views/editor.js`) : un écouteur `resize`, un
+      `ResizeObserver` et trois écouteurs du document étaient posés à CHAQUE dessin et jamais
+      repris — et l'observateur retenait la feuille détachée du dessin précédent, donc une page
+      entière par redessin. Le zoom tient désormais un registre (un écouteur, un observateur, et
+      les cadres détachés en sortent), et la veille de sélection est défaite avant d'être réarmée.
+      Contrôlé dans l'aperçu : dix redessins n'ajoutent plus rien (0 `resize`, 0 observateur,
+      0 écouteur document), contre +1 / +1 / +3 par redessin avant.
+- [x] **La ligne d'état de l'enregistrement** (`ui/views/rediger.js`, classe `.rediger-etat`,
+      `css/app-base.css`) : « Pas encore enregistré », « Modifications non enregistrées » (avec
+      l'heure du dernier enregistrement), ou « Enregistré » — et le rappel que « Soumettre au
+      circuit » commence par enregistrer.
+- [x] **Un acte ouvert ne se croit plus modifié** : l'état se lit sur une SIGNATURE du brouillon
+      (prise à l'ouverture et à chaque enregistrement), et non en comparant au tableau
+      `acte.values`, que le brouillon normalise (`__abrogations`, `__annexes`).
+- [x] **Épreuve** : le parcours `editeur-sans-fuite` (dixième épreuve de `tests/parcours.mjs`)
+      ouvre l'éditeur de trame, le redessine dix fois et compte les écouteurs POSÉS MOINS REPRIS
+      (fenêtre, document, observateurs) — écrit depuis, et vert.
+
+## Correctif 1.6.1x — la signature interne (livré)
+
+Chantier ouvert à l'issue de l'audit, sur le constat **NC-IV-001** : dans tous les circuits
+existants, la clé privée du signataire est **engendrée par le navigateur** et conservée en clair sur
+le poste. Le circuit **interne** répond au constat par l'autre bout — le **SERVICE** détient la clé,
+la garde scellée, et signe lui-même. Décisions prises avec l'utilisateur : **une clé par SIGNATAIRE**
+(la clé suit la personne, comme un certificat suit son titulaire), et **auto-hébergement seulement**
+(le service de démonstration n'a pas de coffre : il refuse franchement plutôt que de simuler).
+
+- [x] **Le coffre du service** (`server/mysql/signature-interne.mjs`, module pur, WebCrypto injecté) :
+      clé de scellement lue du `.env` (`SCRIBA_SIGNATURE_KV_KEY`, 32 octets hex ou base64), clés
+      privées **scellées** au repos (AES-256-GCM), certificat émis par le service, horodatage signé
+      à part, et un **journal** des mouvements du coffre. Sans clé de scellement, le circuit est
+      **éteint** — et le dit.
+- [x] **La route** (`server/mysql/actes.mjs`, `hSignerInterne`) : `POST /v1/actes/{id}/signature` avec
+      `mode: "interne"` — le service signe, enregistre la trace, conserve la part **interne**, et
+      rend l'original signé **complet** (même forme que `buildSignedPackage`, donc vérifiable par le
+      recueil sans une ligne de plus).
+- [x] **L'état du coffre** (`GET /v1/config`, `signatureInterne`) et son affichage : Administration ›
+      Signature montre « Coffre ouvert / Coffre fermé » avec le motif, le niveau, le nombre de
+      certificats et l'horodatage — **jamais une clé**. `circuitsDisponibles` n'offre le circuit que
+      si le service déclare tenir son coffre.
+- [x] **Le quatrième circuit dans l'application** (`lib/externe.js`, `ui/views/signature.js`) :
+      réglage global et par trame (`interne_impose`, `interne_autorise`), geste complet (envoi par la
+      rédaction, signature **par le titulaire**, fenêtre de signature, publication automatique),
+      dossier interne, et file « Ma signature ».
+- [x] **La qualification** (`lib/qualification-signature.js`) : le prestataire `scribae-interne` est
+      reconnu, la mention dit que la signature a été produite **par le service** — ni simulée, ni
+      qualifiée.
+- [x] **Le recueil** (`lib/publications-locales.js`, `lib/parcours.js`) : un acte signé par le
+      service se présente comme les autres (niveau avancé, prestataire nommé), et son parcours dit
+      que c'est le service qui signe.
+- [x] **Le balayage des circuits** : le format de fichier des trames accepte enfin les **huit**
+      valeurs (`simple_*` était lue puis écartée — les valeurs valides viennent désormais de
+      `MODES_TRAME`, une seule liste) ; le choix du circuit dans l'écran du circuit **externe**
+      présente les circuits réellement offerts au lieu de deux boutons en dur.
+- [x] **Épreuves** : `signature-interne.test.mjs` (coffre, sceau, certificat stable, original
+      vérifiable) ; une épreuve de `publications-locales.test.mjs` ; un appel **commun aux deux
+      services** dans `tests/conformite-service.mjs` (la route de signature interne existe des deux
+      côtés, et un acte inconnu reste un 404).
+- [x] **Dates** : les notes intermédiaires `1.6.1u` à `1.6.1w` sont ramenées au **2026-09-26** (la
+      date d'une note est celle de son achèvement), et `APP_VERSION` passe à `1.6.1x`.
+
 ## Correctif 1.6.1w — qui signe, et qui accède (livré)
 
 Demande : « les visiteurs qui ont la qualité de signataire devraient pouvoir accéder aux onglets
@@ -137,7 +400,8 @@ publier des annexes autonomes (règlement intérieur, etc.). »
 - [x] **La date de publication d'origine se règle à la main, et reste antérieure au jour**
       (`dateMaxReprise`, `dateRepriseValide`, borne `max` du champ) : le recueil ne date pas un acte
       de 1998 du jour de sa reprise.
-- [x] **L'original signé est joint à la main** : dépôt par `upload-plugin`, empreinte SHA-256
+- [x] **L'original signé est joint à la main** : dépôt par `lib/fichiers.js` (l'hébergement de
+      l'hôte, ou le service à `/v1/pieces`), empreinte SHA-256
       calculée sur le poste, pièce conservée sur la reprise et **montrée au recueil** comme
       l'original qui fait foi.
 - [x] **La publication est immédiate** : dépôt puis publication dans la foulée du bouton, sans
@@ -401,10 +665,11 @@ validé, ni exécutoire, ni retrouvable, ni partagé) :
   l'accusé de réception vaut certificat de transmission (« Transmis au contrôle de légalité
   le … à … », référence, empreinte, sceau) et est déposé sur le document ; l'ordre
   signé → transmis → publié est tenu par le service (`409 transmission_absente`,
-  `409 acte_non_signe`). **Fonction expérimentale, éteinte par défaut**
-  (`experimental.controleLegalite`, Administration › Expérimentale) : la télétransmission
-  suppose une convention et des identifiants auprès de la préfecture ; éteinte, la
-  transmission se constate à la main.
+  `409 acte_non_signe`). Elle se règle par un **régime** (`config.controleLegalite.mode`,
+  Administration › Expérimentale), **à trois valeurs** : **désactivée** (la transmission se
+  constate à la main — le défaut), **déclarative** (un réviseur atteste, avant publication, à
+  qui et à quelle date, sans appel sortant), ou **par API @ctes** (le service adresse l'acte à
+  l'API d'envoi, et chaque acte peut en outre être **déclaré** — voir 1.6.3a).
 - **Registre et recherche** — `src/lib/search.js` + `src/ui/global-search.js`
   (recherche globale Ctrl+K / « / », actes, trames, personnes, services,
   références, comptes, aide) ; corbeille (`src/ui/views/corbeille.js`, suppression
@@ -446,12 +711,14 @@ Reste à faire, par ordre d'intérêt :
       une **clé d'idempotence** portée par la requête, ou la lecture de la dernière ligne
       créée, éviterait de consommer deux numéros. À traiter le jour où une collectivité
       numérote réellement par API.
-- [ ] **Télétransmission : adresse et identifiants du contrôle de légalité.** L'API d'envoi
-      est aujourd'hui une constante du module (`CONTROLE_LEGALITE`, `src/lib/legalite.js`) et
-      une simulation côté service. En exploitation, il faudrait la **configurer dans le
-      référentiel** (adresse, identifiants, format attendu par la préfecture) et gérer les
-      **refus** du contrôle de légalité (rejet, demande d'observations) — l'aller-retour
-      complet, aujourd'hui réduit à l'accusé de réception.
+- [ ] **Télétransmission : les refus du contrôle de légalité, et le format attendu par la
+      préfecture.** L'adresse et les identifiants de l'API d'envoi se règlent désormais dans le
+      `.env` du service (`SCRIBA_CONTROLE_LEGALITE_*`, voir `src/server/mysql/controle-legalite.mjs`
+      et `docs/VARIABLES.md`) et l'appel est **réel** quand ils sont posés. Reste l'aller-retour
+      complet : la préfecture ne répond pas seulement un accusé de réception, elle peut **rejeter**
+      l'acte ou **demander des observations**, et le format de ses accusés n'est pas encore
+      confronté à une vraie passerelle. Aujourd'hui, tout refus est un `502 transmission_echec`
+      rejouable, non un état du dossier.
 - [ ] **Vérifier un certificat de transmission depuis le registre.** Le sceau est vérifié à
       l'affichage de l'**original signé** (`verifierCertificatTransmission` : SHA-256 des
       mentions rapproché de l'empreinte du document). La même vérification depuis la
@@ -867,7 +1134,7 @@ Restent ouverts :
 Livré : le second circuit de signature, celui qui n'appelle **aucune API** (`src/lib/externe.js`),
 réglable globalement et par trame (imposé / autorisé) ; la remise du document prêt à signer
 (bordereau de remise téléchargé), le dépôt de la **version signée** (PDF, empreinte SHA-256,
-`upload-plugin`), la **certification de conformité** du réviseur (avec sa file dans l'onglet
+`lib/fichiers.js` — hôte ou service), la **certification de conformité** du réviseur (avec sa file dans l'onglet
 Révision et sa visibilité hors périmètre), les garde-fous du service
 (`409 version_signee_absente` / `conformite_non_certifiee` / `certification_incoherente`) et la
 présentation du **PDF signé comme « original »** sur le recueil public. Voir `SPEC.md` § 2.6 ter.

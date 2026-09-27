@@ -25,36 +25,54 @@ function bouchon({ deja = [] } = {}) {
 }
 
 const sha256 = (s) => "emp:" + String(s).length + ":" + String(s).slice(0, 8);
-const lireFichier = async (nom) => ({ "schema.sql": "CREATE TABLE socle (id INT);", "002-ajout.sql": "ALTER TABLE socle ADD COLUMN nom TEXT;" }[nom] ?? "");
+const lireFichier = async (nom) => ({
+  "schema.sql": "CREATE TABLE socle (id INT);",
+  "migrations/002-pieces.sql": "CREATE TABLE piece (id CHAR(32));",
+  "002-ajout.sql": "ALTER TABLE socle ADD COLUMN nom TEXT;",
+}[nom] ?? "");
 
 test("une base neuve reçoit le socle, et la migration est enregistrée", async () => {
   const b = bouchon();
   const journal = [];
   const r = await appliquerMigrations({ query: b.query, lireFichier, sha256, journal: (n, m) => journal.push([n, m]) });
-  assert.deepEqual(r.appliquees, [1]);
-  assert.equal(r.total, 1);
-  // La table des migrations est créée avant toute lecture, puis le socle passe.
+  assert.deepEqual(r.appliquees, [1, 2]);
+  assert.equal(r.total, 2);
+  // La table des migrations est créée avant toute lecture, puis les migrations
+  // passent DANS L'ORDRE.
   assert.ok(b.appels[0].sql.startsWith("CREATE TABLE IF NOT EXISTS " + TABLE_MIGRATIONS));
   assert.ok(b.appels.some((a) => a.sql === "CREATE TABLE socle (id INT);"));
+  assert.ok(b.appels.some((a) => a.sql === "CREATE TABLE piece (id CHAR(32));"));
   const inscrit = b.ecritures();
-  assert.equal(inscrit.length, 1);
+  assert.equal(inscrit.length, 2);
   assert.deepEqual(inscrit[0].params, [1, "socle", sha256("CREATE TABLE socle (id INT);")]);
-  assert.deepEqual(journal, [["appliquee", "Migration 1 — socle."]]);
+  assert.deepEqual(inscrit[1].params, [2, "pièces", sha256("CREATE TABLE piece (id CHAR(32));")]);
+  assert.deepEqual(journal, [["appliquee", "Migration 1 — socle."], ["appliquee", "Migration 2 — pièces."]]);
 });
 
 test("une base à jour n'est pas rejouée", async () => {
-  const b = bouchon({ deja: [{ version: 1, nom: "socle", checksum: sha256("CREATE TABLE socle (id INT);") }] });
+  const b = bouchon({
+    deja: [
+      { version: 1, nom: "socle", checksum: sha256("CREATE TABLE socle (id INT);") },
+      { version: 2, nom: "pièces", checksum: sha256("CREATE TABLE piece (id CHAR(32));") },
+    ],
+  });
   const journal = [];
   const r = await appliquerMigrations({ query: b.query, lireFichier, sha256, journal: (n, m) => journal.push([n, m]) });
   assert.deepEqual(r.appliquees, []);
-  assert.equal(r.aJour, 1);
+  assert.equal(r.aJour, 2);
   assert.equal(b.ecritures().length, 0, "rien à réinscrire");
   assert.equal(b.appels.some((a) => a.sql === "CREATE TABLE socle (id INT);"), false, "le socle n'est pas rejoué");
+  assert.equal(b.appels.some((a) => a.sql === "CREATE TABLE piece (id CHAR(32));"), false, "la migration des pièces non plus");
   assert.deepEqual(journal, []);
 });
 
 test("une migration modifiée après coup est signalée, jamais rejouée", async () => {
-  const b = bouchon({ deja: [{ version: 1, nom: "socle", checksum: "une-autre-empreinte" }] });
+  const b = bouchon({
+    deja: [
+      { version: 1, nom: "socle", checksum: "une-autre-empreinte" },
+      { version: 2, nom: "pièces", checksum: sha256("CREATE TABLE piece (id CHAR(32));") },
+    ],
+  });
   const journal = [];
   await appliquerMigrations({ query: b.query, lireFichier, sha256, journal: (n, m) => journal.push([n, m]) });
   assert.equal(journal.length, 1);

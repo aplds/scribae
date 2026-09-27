@@ -38,3 +38,12 @@ la disposition livrée. `scripts/racine-code.mjs` **constate** la racine du code
 au lieu de la supposer : c'est ce qui évite le piège de NC-I-009, où un décalage
 entre l'outil et l'arborescence qu'il contrôle avait éteint toutes ses
 exemptions.
+
+## Les jouer dans l'atelier
+
+Ces épreuves ne se lancent pas au terminal dans l'atelier : c'est
+**`scripts/harnais-atelier.mjs`** qui les rejoue (un fichier à la fois, comme
+`node --test` les isole), en même temps que la syntaxe, le style et les
+générateurs. La recette, les **chiffres attendus** et la liste des écarts connus
+(qui sont un artefact du harnais, jamais une excuse) sont dans
+**`docs/ATELIER.md` § 3** — le document à lire avant de travailler dans l'atelier.

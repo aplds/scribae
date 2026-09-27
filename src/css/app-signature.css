@@ -22,7 +22,7 @@
 .sig-item {
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
-  cursor: pointer; font: inherit; font-size: .875rem; text-align: left; color: inherit;
+  cursor: pointer; font: inherit; font-size: var(--t-md); text-align: left; color: inherit;
   /* Les étiquettes d'état sont longues (« Recours introduit — contentieux en
      cours ») et ne se coupent pas : sur un écran étroit, elles passent à la
      ligne au lieu de pousser la liste hors de la page. */
@@ -31,7 +31,7 @@
 .sig-item:hover { background: var(--bg-alt); }
 .sig-item.is-on { border-color: var(--brand); background: var(--brand-soft); }
 .sig-item__num { flex: none; font-weight: 600; }
-.sig-item__obj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
+.sig-item__obj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-sm); }
 .sig-item .fr-badge { white-space: nowrap; flex: none; }
 .sig-kv { overflow-wrap: anywhere; }
 /* Le rappel du CIRCUIT de signature de l'acte (électronique ou externe) : une
@@ -45,28 +45,28 @@
 .sig-step__dot {
   width: 20px; height: 20px; flex: none; border-radius: 50%; z-index: 1;
   background: var(--bg-contrast); color: var(--ink-muted);
-  display: grid; place-items: center; font-size: .7rem; font-weight: 700;
+  display: grid; place-items: center; font-size: var(--t-xs); font-weight: 700;
 }
 .sig-step.is-done .sig-step__dot { background: var(--success); color: #fff; }
 /* Une marche PASSÉE SANS ÊTRE FRANCHIE (voir src/lib/parcours.js) : creuse, en
    pointillés — l'acte est allé plus loin sans elle, elle n'attend rien. */
 .sig-step.is-so .sig-step__dot { background: none; color: var(--ink-muted); border: 1px dashed var(--border-strong); }
 .sig-step.is-so .sig-step__title { color: var(--ink-muted); font-weight: 500; }
-.sig-step__title { margin: 0; font-size: .86rem; font-weight: 600; }
-.sig-step__line { margin: 2px 0 0; font-size: .76rem; color: var(--ink-muted); }
+.sig-step__title { margin: 0; font-size: var(--t-sm); font-weight: 600; }
+.sig-step__line { margin: 2px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
 
 .sig-tool { display: flex; flex-direction: column; gap: 10px; }
 .sig-tool__bar { display: flex; align-items: center; gap: 10px; background: #0f2b46; color: #fff; padding: 8px 12px; border-radius: var(--radius); }
-.sig-tool__mark { background: #fff; color: #0f2b46; font-weight: 800; padding: 1px 6px; border-radius: 3px; font-size: .8rem; }
+.sig-tool__mark { background: #fff; color: #0f2b46; font-weight: 800; padding: 1px 6px; border-radius: 3px; font-size: var(--t-xs); }
 .sig-tool__title { display: flex; flex-direction: column; line-height: 1.2; flex: 1 1 auto; }
-.sig-tool__title span { font-size: .72rem; opacity: .8; }
-.sig-tool__ext { font-family: var(--font-mono); font-size: .7rem; opacity: .8; }
+.sig-tool__title span { font-size: var(--t-xs); opacity: .8; }
+.sig-tool__ext { font-family: var(--font-mono); font-size: var(--t-xs); opacity: .8; }
 .sig-tool__body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; align-items: start; }
-.sig-tool__side h3 { margin: 0 0 6px; font-size: .9rem; }
+.sig-tool__side h3 { margin: 0 0 6px; font-size: var(--t-md); }
 .sig-tool__doc { max-height: 52vh; overflow: auto; }
 .sig-paper .paper { padding: var(--paper-pad, 1.2cm 1cm); }
 .sig-cert { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; background: var(--bg); }
-.sig-cert h3 { margin: 0 0 6px; font-size: .9rem; }
+.sig-cert h3 { margin: 0 0 6px; font-size: var(--t-md); }
 .sig-doc-view { height: 70vh; }
 /* Le document montré dans la fenêtre de signature est un `.paper-box` : il porte
    déjà son propre défilement, mais sans hauteur contrainte il grandissait à la
@@ -90,25 +90,25 @@
 }
 .sig-file__item--action { border-left: 3px solid var(--brand); }
 .sig-file__num { flex: none; font-weight: 600; }
-.sig-file__obj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
+.sig-file__obj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-sm); }
 .sig-tool__warn { border-left: 3px solid var(--warning, #b34000); padding-left: 8px; }
-.oppo-preview { border-left: 3px solid var(--success); background: #f2f8f4; padding: 8px 10px; border-radius: 3px; margin: 8px 0; display: flex; flex-direction: column; gap: 2px; font-size: .82rem; }
-.oppo-preview strong { font-size: .86rem; }
+.oppo-preview { border-left: 3px solid var(--success); background: #f2f8f4; padding: 8px 10px; border-radius: 3px; margin: 8px 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--t-sm); }
+.oppo-preview strong { font-size: var(--t-sm); }
 
 .api-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .api-base { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
 .api-base code { background: var(--bg-alt); padding: 2px 6px; border-radius: 3px; }
 .api-token { word-break: break-all; }
-.api-group { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 14px 0 6px; }
+.api-group { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-muted); margin: 14px 0 6px; }
 .api-op { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; background: var(--bg); }
 .api-op > summary { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; flex-wrap: wrap; }
 .api-op > summary::-webkit-details-marker { display: none; }
 .api-op > summary code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .api-op[open] > summary { border-bottom: 1px solid var(--border); background: var(--bg-alt); }
-.api-op__sum { font-size: .8rem; color: var(--ink-2); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-op__sum { font-size: var(--t-xs); color: var(--ink-2); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .api-op__body { padding: 10px 12px; }
 .api-op__body ul { margin: 4px 0 8px; padding-left: 18px; }
-.api-method { font-family: var(--font-mono); font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; flex: none; }
+.api-method { font-family: var(--font-mono); font-size: var(--t-xs); font-weight: 700; padding: 1px 6px; border-radius: 3px; flex: none; }
 .api-method--get { background: #e8edff; color: #0063cb; }
 .api-method--post { background: #b8fec9; color: #1b5e2c; }
 .api-journal { display: flex; flex-direction: column; gap: 5px; max-height: 60vh; overflow: auto; }
@@ -118,15 +118,15 @@
 .api-entry--numerotation { border-left-color: #b34000; }
 .api-entry > summary { display: flex; align-items: center; gap: 8px; padding: 6px 9px; cursor: pointer; list-style: none; }
 .api-entry > summary::-webkit-details-marker { display: none; }
-.api-svc { font-size: .64rem; text-transform: uppercase; letter-spacing: .04em; padding: 1px 5px; border-radius: 3px; background: var(--info-bg); color: var(--info); flex: none; }
+.api-svc { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; padding: 1px 5px; border-radius: 3px; background: var(--info-bg); color: var(--info); flex: none; }
 .api-entry--prestataire .api-svc { background: #f3e9f9; color: #7b3fa0; }
 .api-entry--legalite .api-svc { background: #eaf5ee; color: #0b5a2b; }
 .api-entry--numerotation .api-svc { background: #fdece2; color: #b34000; }
 .api-entry__url { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .api-ms { white-space: nowrap; flex: none; }
 .api-entry__body { padding: 8px 10px; border-top: 1px solid var(--border); }
-.api-entry__h { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); margin: 6px 0 3px; }
-.fr-codebox { background: #0f1720; color: #e6edf3; padding: 10px 12px; border-radius: var(--radius); overflow: auto; max-height: 260px; font-size: .74rem; line-height: 1.45; margin: 0; }
+.api-entry__h { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); margin: 6px 0 3px; }
+.fr-codebox { background: #0f1720; color: #e6edf3; padding: 10px 12px; border-radius: var(--radius); overflow: auto; max-height: 260px; font-size: var(--t-xs); line-height: 1.45; margin: 0; }
 
 .pub-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; background: var(--bg); border: 1px solid var(--border); border-left: 4px solid var(--brand); border-radius: var(--radius); padding: 10px 14px; flex-wrap: wrap; }
 .pub-head__left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -135,7 +135,7 @@
 .pub-head__eli code { background: var(--bg-alt); padding: 2px 6px; border-radius: 3px; }
 .pub-title { margin: 0; }
 .pub-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-.pub-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 4px 0 0; font-size: .82rem; }
+.pub-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 4px 0 0; font-size: var(--t-sm); }
 .pub-dl dt { color: var(--ink-muted); }
 .pub-dl dd { margin: 0; }
 .pub-frame { margin-top: 12px; }
@@ -143,7 +143,7 @@
 .pub-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
 .pub-version.is-on { background: var(--bg-alt); }
 .oppo { border-left: 4px solid var(--success); background: #f2f8f4; border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
-.oppo > strong { display: block; font-size: .9rem; margin-bottom: 4px; }
+.oppo > strong { display: block; font-size: var(--t-md); margin-bottom: 4px; }
 .pub-table td { vertical-align: middle; }
 
 /* Zone sensible : le retrait d'une publication du recueil. Un acte administratif
@@ -152,9 +152,9 @@
    porte l'avertissement lui-même. */
 .pub-danger { border: 2px solid var(--error); }
 .pub-danger__hero { border: 2px solid var(--error); border-radius: var(--radius); background: var(--error-bg); padding: 14px 16px; margin: 6px 0 12px; }
-.pub-danger__alert { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 1.2rem; font-weight: 800; line-height: 1.25; color: var(--error); }
+.pub-danger__alert { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: var(--t-xl); font-weight: 800; line-height: 1.25; color: var(--error); }
 .pub-danger__alert svg { flex: none; }
-.pub-danger__text { margin: 0 0 8px; font-size: .88rem; line-height: 1.5; }
+.pub-danger__text { margin: 0 0 8px; font-size: var(--t-md); line-height: 1.5; }
 .pub-danger__text:last-child { margin-bottom: 0; }
 .fr-modal .pub-danger__hero { margin-top: 0; }
 

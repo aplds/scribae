@@ -1,8 +1,9 @@
 import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, oublierBulletinsRecueil } from "../state.js";
 import { h, clear, button, toast, icon, modal } from "../dom.js";
 import { download, pickFile, uid, todayIso, copyText } from "../../lib/util.js";
+import { normaliser } from "../../lib/search.js";
 import * as cles from "../../lib/cles-service.js";
-import { textField, selectField, choiceField, fontField, confirmDialog, sectionHeader, helpLink } from "../components.js";
+import { textField, selectField, choiceField, fontField, confirmDialog, sectionHeader, helpLink, pageTitle } from "../components.js";
 import { clearAll, saveConfig } from "../../lib/store.js";
 import * as db from "../../lib/db/index.js";
 import { seedConfig, seedTrames } from "../../lib/seed.js";
@@ -29,8 +30,11 @@ import {
   signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, trameModeLabel,
   circuitPour, circuitsDisponibles, modeLabel,
   circuitElectroniqueSimule, motifCircuitSimule, prestataireDuService,
+  controleLegaliteDuService, controleLegaliteReelle, motifControleLegaliteSimule,
+  signatureInterneDuService, signatureInterneDisponible, motifSignatureInterne,
 } from "../../lib/externe.js";
 import { EVENEMENTS, courrielSettings, etatService as etatCourriel, envoyerTest, evenementDe } from "../../lib/courriel.js";
+import { MODES_CONTROLE_LEGALITE, modeControleLegalite } from "../../lib/legalite.js";
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
 import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
@@ -70,17 +74,231 @@ const TABS = [
   { id: "donnees", label: "Données" },
 ];
 
+// ==================================================== chercher dans les réglages
+//
+// L'administration compte vingt-trois onglets et des centaines de réglages :
+// retrouver « les chats des pages d'erreur » — onglet Publication, carte
+// « Apparence du site public », encart « Pages d'erreur » — demandait de les
+// ouvrir l'un après l'autre. La barre posée sous le titre rend le chemin : on
+// tape un mot, on voit OÙ il mène, et on y va d'un clic.
+//
+// POURQUOI L'INDEX NE SE PÉRIME PAS. Il n'est pas écrit à la main : il est
+// obtenu en DESSINANT chaque onglet dans un nœud DÉTACHÉ, puis en lisant ce que
+// ce dessin contient. Les libellés indexés sont donc, par construction, ceux
+// que l'écran affiche — aucune table de correspondance à tenir à jour. Le dessin
+// détaché ne coûte qu'une fois (l'index est gardé pour la session) et n'écrit
+// rien : on lui passe des `save`/`redraw` neutres. Il fait en revanche ce qu'une
+// ouverture d'onglet fait — lire un état de service, lire un journal —, ce qui
+// est sans conséquence : ce sont des lectures, et une seule fois.
+let indexReglages = null;
+let masquesRecherche = [];
+
+// Un champ de réglage : son nœud, son libellé, son explication, et le rangement
+// où il vit. `parcourirReglages` est le SEUL lecteur de cette structure :
+// l'index et le filtre de l'écran s'en servent tous les deux, donc ils voient
+// exactement les mêmes champs.
+function parcourirReglages(panneau, onChamp) {
+  let carte = "";
+  let encart = "";
+  for (const el of panneau.querySelectorAll("*")) {
+    const classes = el.classList;
+    if (classes.contains("fr-card__title")) { carte = el.textContent.trim(); encart = ""; continue; }
+    if (el.tagName === "H3") { encart = el.textContent.trim(); continue; }
+    if (el.tagName === "STRONG" && classes.contains("fr-small")) { encart = el.textContent.trim(); continue; }
+    if (!classes.contains("fr-field")) continue;
+    const lab = el.querySelector(".fr-label");
+    if (!lab) continue;
+    const label = lab.textContent.trim();
+    if (!label) continue;
+    const aide = el.querySelector(".fr-hint");
+    onChamp({ el, label, aide: aide ? aide.textContent.trim() : "", carte, encart });
+  }
+}
+
+// Ce sur quoi porte la comparaison : le libellé, son explication ET son
+// rangement — de sorte que « apparence » trouve les réglages d'une carte dont
+// le titre le dit, même si aucun de leurs champs ne le répète.
+const texteReglage = (r) => normaliser([r.label, r.aide, r.encart, r.carte, r.ongletLabel || ""].join(" "));
+
+const motsRecherche = (requete) => normaliser(requete).split(/[^a-z0-9]+/).filter((m) => m.length > 1);
+
+const cheminReglage = (r) => [r.ongletLabel, r.carte, r.encart].filter(Boolean).join(" › ");
+
+function construireIndexReglages() {
+  const entrees = [];
+  const hote = h("div");                        // DÉTACHÉ : rien de tout cela n'est affiché
+  const onglet = state.ui.refTab;
+  for (const t of TABS) {
+    state.ui.refTab = t.id;
+    clear(hote);
+    renderReferentiel(hote);                    // le VRAI dessin de l'onglet, hors du document
+    const panneau = hote.querySelector(".ref-panneau");
+    if (!panneau) continue;
+    parcourirReglages(panneau, (r) => entrees.push({
+      label: r.label, aide: r.aide, carte: r.carte, encart: r.encart,
+      onglet: t.id, ongletLabel: t.label,
+    }));
+  }
+  state.ui.refTab = onglet;
+  return entrees;
+}
+
+// Les réglages qui répondent : tous les mots tapés doivent s'y trouver. Le
+// libellé passe avant l'explication, et le début du libellé avant le reste.
+function chercherReglages(mots, max = 10) {
+  if (!indexReglages) indexReglages = construireIndexReglages();
+  const trouves = [];
+  for (const e of indexReglages) {
+    if (!mots.every((m) => texteReglage(e).includes(m))) continue;
+    const libelle = normaliser(e.label);
+    trouves.push({ ...e, score: libelle.startsWith(mots[0]) ? 3 : libelle.includes(mots[0]) ? 2 : 1 });
+  }
+  trouves.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, "fr", { numeric: true }));
+  return { liste: trouves.slice(0, max), total: trouves.length };
+}
+
+function rendreLesChampsMasques() {
+  for (const el of masquesRecherche) el.hidden = false;
+  masquesRecherche = [];
+}
+
+function masquerChamp(el) {
+  if (!el.hidden) { el.hidden = true; masquesRecherche.push(el); }
+}
+
+// Le filtre de l'onglet affiché : il ne cache QUE des champs, et les cartes qui
+// les portent quand plus aucun ne répond. Le reste de l'écran — listes, boutons,
+// explications — reste lisible : une recherche ne doit pas vider un onglet dont
+// le contenu n'est pas fait de réglages. Renvoie le nombre de champs qui restent.
+function filtrerOngletCourant(mots) {
+  const panneau = document.querySelector(".ref-panneau");
+  if (!panneau) return 0;
+  const onglet = TABS.find((t) => t.id === state.ui.refTab);
+  let restants = 0;
+  parcourirReglages(panneau, (r) => {
+    const texte = texteReglage({ ...r, ongletLabel: onglet ? onglet.label : "" });
+    if (mots.every((m) => texte.includes(m))) restants += 1;
+    else masquerChamp(r.el);
+  });
+  for (const carte of panneau.querySelectorAll(".fr-card")) {
+    if (!carte.querySelector(".fr-field")) continue;          // carte sans champ : on n'y touche pas
+    if ([...carte.querySelectorAll(".fr-field")].some((f) => !f.hidden)) continue;
+    const titres = [...carte.querySelectorAll(".fr-card__title, .fr-card__sub, h3, strong.fr-small")].map((x) => x.textContent).join(" ");
+    if (mots.every((m) => normaliser(titres).includes(m))) continue;   // la carte PARLE de la recherche
+    masquerChamp(carte);
+  }
+  return restants;
+}
+
+// Va au réglage : on change d'onglet s'il le faut, puis on pose la page sur le
+// champ et on le fait clignoter — sans quoi l'arrivée dans un onglet de trois
+// mille pixels de long ne dirait pas ce qu'on est venu voir.
+function allerAuReglage(entree) {
+  if (entree.onglet !== state.ui.refTab) {
+    state.ui.refTab = entree.onglet;
+    redrawView();                        // le dessin de l'atelier est différé : on attend le champ
+  }
+  const champ = document.querySelector(".ref-recherche__champ");
+  if (champ) champ.focus();
+  const tenter = (essais) => {
+    const panneau = document.querySelector(".ref-panneau");
+    let cible = null;
+    if (panneau) {
+      parcourirReglages(panneau, (r) => {
+        if (cible || r.label !== entree.label) return;
+        if (entree.carte && r.carte !== entree.carte) return;
+        cible = r.el;
+      });
+    }
+    if (cible) {
+      cible.hidden = false;
+      cible.scrollIntoView({ block: "center", behavior: "smooth" });
+      cible.classList.add("ref-field--cible");
+      setTimeout(() => cible.classList.remove("ref-field--cible"), 2600);
+      return;
+    }
+    if (essais > 0) setTimeout(() => tenter(essais - 1), 60);
+  };
+  tenter(24);
+}
+
+// Peint ce que la recherche a de quoi dire : le filtre de l'onglet, et la liste
+// des réglages trouvés — dans cet onglet comme dans les autres. Appelée à chaque
+// frappe, et après chaque dessin de l'écran (la recherche est gardée).
+function peindreRecherche() {
+  const champ = document.querySelector(".ref-recherche__champ");
+  const zone = document.querySelector(".ref-recherche__resultats");
+  const annonce = document.querySelector(".ref-recherche__annonce");
+  if (!champ || !zone || !annonce) return;
+  state.ui.refRech = champ.value;
+  rendreLesChampsMasques();
+  clear(zone);
+  const mots = motsRecherche(champ.value);
+  if (!mots.length) {
+    zone.hidden = true;
+    annonce.textContent = champ.value.trim() ? "Tapez au moins deux caractères." : "";
+    return;
+  }
+  const restants = filtrerOngletCourant(mots);
+  const { liste, total } = chercherReglages(mots);
+  zone.hidden = false;
+  if (!total) {
+    annonce.textContent = "Aucun réglage ne répond à « " + champ.value.trim() + " ».";
+    return;
+  }
+  annonce.textContent = restants
+    ? restants + " réglage(s) dans cet onglet, " + total + " au total."
+    : total + " réglage(s) trouvé(s) dans les autres onglets.";
+  for (const e of liste) {
+    const ici = e.onglet === state.ui.refTab;
+    zone.appendChild(h("button", {
+      type: "button", class: "ref-resultat" + (ici ? " is-ici" : ""),
+      onClick: () => allerAuReglage(e),
+    },
+      h("span", { class: "ref-resultat__label", text: e.label }),
+      h("span", { class: "ref-resultat__chemin", text: cheminReglage(e) + (ici ? " · cet onglet" : "") })));
+  }
+  if (total > liste.length) {
+    zone.appendChild(h("p", { class: "ref-recherche__suite", text: "… et " + (total - liste.length) + " autre(s) : précisez la recherche." }));
+  }
+}
+
+function barreDesReglages() {
+  const champ = h("input", {
+    class: "fr-input ref-recherche__champ", type: "search", spellcheck: "false",
+    placeholder: "Chercher un réglage — « chat », « SMTP », « opposabilité »…",
+    "aria-label": "Chercher un réglage dans l'administration",
+    on: {
+      input: () => peindreRecherche(),
+      keydown: (e) => {
+        if (e.key === "Escape") { e.target.value = ""; peindreRecherche(); }
+        else if (e.key === "Enter") {
+          const premier = document.querySelector(".ref-resultat");
+          if (premier) premier.click();
+        }
+      },
+    },
+  });
+  champ.value = state.ui.refRech || "";
+  return h("div", { class: "ref-recherche" },
+    h("span", { class: "ref-recherche__loupe" }, icon("search")),
+    champ,
+    h("p", { class: "ref-recherche__annonce", "aria-live": "polite" }),
+    h("div", { class: "ref-recherche__resultats", hidden: true }));
+}
+
 export function renderReferentiel(root) {
   const ui = (state.ui = state.ui || {});
   ui.refTab = ui.refTab || "identite";
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Administration" }),
-      h("p", { class: "page-head__sub", text: "Tout ce qui est configurable : marques, entités, services et bureaux, personnes, rôles, références juridiques, mentions, numérotation, vocabulaire. Rien de tout cela n'est codé dans l'application." }),
+      pageTitle("Administration" , "Tout ce qui est configurable : marques, entités, services et bureaux, personnes, rôles, références juridiques, mentions, numérotation, vocabulaire. Rien de tout cela n'est codé dans l'application." ),
     ),
     h("div", { class: "page-head__actions" }, helpLink("administrateurs", "Aide")),
   ));
+
+  root.appendChild(barreDesReglages());
 
   const tabs = h("div", { class: "fr-tabs" });
   for (const t of TABS) {
@@ -91,7 +309,7 @@ export function renderReferentiel(root) {
     }));
   }
   root.appendChild(tabs);
-  const body = h("div");
+  const body = h("div", { class: "ref-panneau" });
   root.appendChild(body);
 
   function redraw() { redrawView(); }
@@ -501,6 +719,12 @@ export function renderReferentiel(root) {
       ),
     ));
   }
+
+  // Le dessin est achevé : la recherche en cours reprend ses droits — un dessin
+  // de l'écran (un onglet changé, un réglage enregistré) ne doit pas l'effacer.
+  // Le dessin DÉTACHÉ qui construit l'index, lui, ne peint rien : il n'est pas
+  // dans la page, et `peindreRecherche` lirait les nœuds de l'écran réel.
+  if (root.isConnected) peindreRecherche();
 }
 
 // ------------------------------------------------------------- base de données
@@ -1788,13 +2012,33 @@ function signaturePanel(save, redraw) {
     label: "Circuit de signature de la collectivité",
     value: d.mode,
     options: SIGNATURE_MODES.map((m) => ({ value: m.id, label: m.label })),
-    help: "Électronique : l'acte est déposé auprès du service puis signé dans l'outil du prestataire, et la signature est vérifiée par empreinte. Simple : le signataire signe dans l'application, avec son compte — aucun prestataire n'est requis, et les mentions nominatives restent dans l'original interne. Externe : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée est déposée en PDF — et sa conformité certifiée par le réviseur avant publication.",
+    help: "Électronique : l'acte est déposé auprès du service puis signé dans l'outil du prestataire, et la signature est vérifiée par empreinte. Simple : le signataire signe dans l'application, avec son compte — aucun prestataire n'est requis, et les mentions nominatives restent dans l'original interne. Interne : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — la clé ne quitte jamais le serveur (auto-hébergement seulement). Externe : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée est déposée en PDF — et sa conformité certifiée par le réviseur avant publication.",
     onChange: (v) => { s.mode = v; save(); redraw(); },
   }));
   const mode = SIGNATURE_MODES.find((m) => m.id === d.mode) || SIGNATURE_MODES[0];
   wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
     h("p", { class: "fr-alert__title", text: modeLabel(d.mode) }),
     h("p", { class: "fr-small", text: mode.hint })));
+
+  // ------------------------------------------------ la signature interne
+  // Le circuit INTERNE n'appelle personne : c'est le SERVICE qui signe, avec une
+  // clé privée qu'il garde scellée au repos. Il n'y a donc RIEN à régler ici — ni
+  // adresse, ni clé —, mais l'administrateur doit savoir si ce service en tient
+  // un : sans clé de scellement (`SCRIBA_SIGNATURE_KV_KEY`), le circuit est
+  // éteint, et l'application cesse de l'offrir. Le bloc ne s'affiche que lorsque
+  // le sujet se pose (circuit choisi, ou coffre connu du service).
+  const coffre = signatureInterneDuService();
+  if (d.mode === "interne" || coffre) {
+    const ouvert = signatureInterneDisponible();
+    wrap.appendChild(h("hr", { class: "fr-sep" }));
+    wrap.appendChild(sectionHeader("Coffre de la signature interne"));
+    wrap.appendChild(h("div", { class: "fr-alert fr-alert--" + (ouvert ? "success" : "warning"), style: { marginBottom: "12px" } },
+      h("p", { class: "fr-alert__title", text: ouvert ? "Coffre ouvert — le service peut signer" : "Coffre fermé — circuit indisponible" }),
+      h("p", { class: "fr-small", text: ouvert
+        ? `Le service détient les clés privées des signataires, scellées au repos. ${coffre.signataires || 0} certificat(s) émis ; horodatage ${coffre.horodatage ? "en place" : "créé au premier acte signé"}. Niveau annoncé : ${coffre.niveau || "avancee"}.`
+        : motifSignatureInterne() }),
+      h("p", { class: "fr-small fr-muted", text: "Le coffre ne se règle que dans le .env du déploiement : la clé de scellement (SCRIBA_SIGNATURE_KV_KEY, 32 octets, en hexadécimal ou en base64) scelle chaque clé privée (AES-256-GCM), et le coffre lui-même vit dans l'état du service. Aucune clé ne se saisit ni ne se lit ici : le référentiel s'exporte et se partage." })));
+  }
 
   // ------------------------------------------------ l'API du prestataire
   // Le circuit électronique a besoin d'un prestataire joignable. Ses réglages
@@ -1916,7 +2160,7 @@ function signaturePanel(save, redraw) {
 
   wrap.appendChild(h("hr", { class: "fr-sep" }));
   wrap.appendChild(sectionHeader("Par trame"));
-  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" }, text: "Chaque trame peut suivre le réglage ci-dessus, imposer l'un des circuits (électronique, simple, externe), ou en autoriser un au choix du rédacteur. Ce réglage se fait sur la trame, onglet « Trame », rubrique « Signature »." }));
+  wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" }, text: "Chaque trame peut suivre le réglage ci-dessus, imposer l'un des circuits (électronique, signature simple, signature interne, circuit externe), ou en autoriser un au choix du rédacteur. Ce réglage se fait sur la trame, onglet « Trame », rubrique « Signature »." }));
   const trames = (state.trames || []).slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   if (!trames.length) {
     wrap.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucune trame." }));
@@ -1931,7 +2175,7 @@ function signaturePanel(save, redraw) {
       tb.appendChild(h("tr", {},
         h("td", { text: t.name || t.id }),
         h("td", { class: "fr-small", text: trameModeLabel(t.signature || "") }),
-        h("td", {}, h("span", { class: "fr-badge fr-badge--" + (c2.mode === "externe" ? "warning" : "info"), text: dispo.join(" ou ") + (c2.choix ? " (au choix)" : "") })),
+        h("td", {}, h("span", { class: "fr-badge fr-badge--" + (c2.mode === "externe" ? "warning" : c2.mode === "interne" ? "success" : "info"), text: dispo.join(" ou ") + (c2.choix ? " (au choix)" : "") })),
         h("td", {}, button("Éditer la trame", { variant: "tertiary", size: "sm", icon: "doc", onClick: () => navigate("trame/" + t.id) }))));
     }
     table.appendChild(tb);
@@ -2746,28 +2990,52 @@ function experimentalPanel(save, redraw) {
         onClick: () => { state.ui.refTab = "circuits"; redraw(); },
       }))));
 
-  // La transmission au contrôle de légalité : une étape de plus, entre le
-  // retour signé et la publication, qui passe par l'API d'envoi de la
-  // préfecture (voir src/lib/legalite.js). Éteinte, rien n'est envoyé et la
-  // formalité se constate à la main depuis l'échéancier, comme avant.
+  // LA TRANSMISSION AU CONTRÔLE DE LÉGALITÉ : TROIS RÉGIMES (voir
+  // src/lib/legalite.js). « Désactivée » ne gère rien ; « Déclarative » fait
+  // attester la transmission par un réviseur avant publication, sans aucun appel
+  // sortant ; « API » adresse l'acte à l'API d'envoi @ctes, chaque acte pouvant
+  // en outre être DÉCLARÉ transmis.
+  const mode = modeControleLegalite(c);
   wrap.appendChild(choiceField({
-    label: "Transmission au contrôle de légalité (télétransmission @ctes)",
-    value: !!x.controleLegalite,
-    options: [{ value: true, label: "Activée — API d'envoi" }, { value: false, label: "Désactivée (par défaut)" }],
-    help: "L'étape s'intercale automatiquement entre le retour signé et la publication : l'acte signé est télétransmis à l'API d'envoi du contrôle de légalité, l'accusé de réception de la préfecture est déposé sur le document (« Transmis au contrôle de légalité le … à … »), puis l'acte est publié. Tant que la transmission n'a pas abouti, l'acte n'est pas publié. La télétransmission suppose une convention et des identifiants d'accès auprès de la préfecture : laissez désactivé si vous n'en avez pas.",
+    label: "Transmission au contrôle de légalité",
+    value: mode,
+    options: MODES_CONTROLE_LEGALITE.map((m) => ({ value: m.id, label: m.label })),
+    help: "« Désactivée » : rien n'est géré, la transmission se constate à la main depuis l'échéancier. « Déclarative » : avant sa publication, l'acte signé attend qu'un RÉVISEUR compétent déclare à qui, et à quelle date, il a été transmis — aucun appel sortant, et la déclaration engage son auteur. « API » : le service adresse l'acte à l'API d'envoi @ctes, et chaque acte peut aussi être DÉCLARÉ transmis (API injoignable, envoi hors application). Dans les deux régimes actifs, l'acte ne peut pas être publié tant que sa transmission n'est pas enregistrée (le service refuse en 409 transmission_absente).",
     onChange: async (v) => {
-      x.controleLegalite = v;
-      // La transmission ne change que la chaîne automatique : aucun acte de
-      // démonstration n'a besoin d'être reconstruit (les transmissions déjà
-      // constatées, elles, restent au dossier).
+      c.controleLegalite = { ...(c.controleLegalite || {}), mode: v };
+      x.controleLegalite = v !== "desactive";
+      // Le changement de régime ne touche AUCUN acte déjà déposé : les
+      // transmissions constatées restent au dossier, et un acte déposé avant le
+      // changement garde ce que son dépôt a déclaré.
       touch("config");
+      redraw();
     },
   }));
-  if (x.controleLegalite) {
+  if (mode === "api") {
+    // C'EST LE SERVICE QUI APPELLERA (ou non) L'API @ctes, et lui seul détient la
+    // clé. On affiche donc SON état : sans lui, l'administrateur croirait à une
+    // transmission réelle là où le certificat ne serait qu'une simulation marquée
+    // (voir NC-IV-004).
+    const svc = controleLegaliteDuService();
+    const reelle = controleLegaliteReelle();
+    wrap.appendChild(h("div", { class: "fr-alert fr-alert--" + (reelle ? "success" : "warning"), style: { marginTop: "10px" } },
+      h("p", { class: "fr-alert__title", text: reelle ? "Transmission réelle — le service appelle l'API du contrôle de légalité" : "Transmission simulée par le service" }),
+      h("p", { class: "fr-small", text: reelle
+        ? `Le service adresse l'acte signé à « ${svc.destinataire || CONTROLE_LEGALITE.destinataire} » à l'adresse ${svc.url}${svc.chemin || ""} — la clé d'API reste au service, et ne transite jamais par cette page. Le certificat délivré est celui de l'accusé de réception de l'API.`
+        : (motifControleLegaliteSimule() || "Le service n'appelle pas l'API du contrôle de légalité.") }),
+      h("p", { class: "fr-small fr-muted", text: "Chaque acte signé sera télétransmis, puis publié. Le certificat de transmission est déposé sur l'original signé et sur la version publiée." }),
+      h("p", { class: "fr-small fr-muted", text: "Chaque acte peut en outre faire l'objet d'une DÉCLARATION de transmission (attestée par un réviseur) : c'est la voie de l'acte transmis hors application, ou d'un envoi que l'API n'a pas pu porter. Les deux voies lèvent la même porte de publication." }),
+      h("p", { class: "fr-small fr-muted", text: reelle
+        ? "Les réglages de l'API (adresse, chemin, destinataire, délai) se posent dans le .env du déploiement (SCRIBA_CONTROLE_LEGALITE_*), comme la clé. Le référentiel s'exporte et se partage : aucun secret n'y a sa place."
+        : "Pour brancher la télétransmission : posez l'adresse et la clé dans le .env du service auto-hébergé (SCRIBA_CONTROLE_LEGALITE_URL et SCRIBA_CONTROLE_LEGALITE_API_CLE), puis redémarrez-le. Tant qu'elle n'est pas branchée, le certificat porte la mention de démonstration — il n'est pas opposable." }),
+      h("div", { class: "fr-row" },
+        button("Régler les délais d'exécution", { variant: "secondary", size: "sm", icon: "gear", onClick: () => { state.ui.refTab = "delais"; redraw(); } }),
+        button("Ouvrir l'échéancier", { variant: "tertiary", size: "sm", icon: "list", onClick: () => navigate("execution") }))));
+  } else if (mode === "declaratif") {
     wrap.appendChild(h("div", { class: "fr-alert fr-alert--info", style: { marginTop: "10px" } },
-      h("p", { class: "fr-alert__title", text: "La transmission au contrôle de légalité est activée" }),
-      h("p", { class: "fr-small", text: `Chaque acte signé sera télétransmis à « ${CONTROLE_LEGALITE.destinataire} » par l'API d'envoi (${CONTROLE_LEGALITE.apiUrl}), puis publié. Le certificat de transmission est déposé sur l'original signé et sur la version publiée.` }),
-      h("p", { class: "fr-small fr-muted", text: "Les actes déposés AVANT l'activation ne portent pas cette exigence : le service les publiera sans transmission. Les actes signés à partir de maintenant la portent." }),
+      h("p", { class: "fr-alert__title", text: "Transmission déclarative — aucun appel sortant" }),
+      h("p", { class: "fr-small", text: "L'acte signé attend la déclaration d'un réviseur compétent : à qui il a été transmis, et à quelle date. Aucune adresse ni clé d'API n'est nécessaire — la déclaration vaut attestation, et son auteur y est nommé." }),
+      h("p", { class: "fr-small fr-muted", text: "La formalité se déclare depuis la fiche de l'acte, l'échéancier ou l'écran Signature & publication, par le réviseur compétent (ou l'administration). Tant qu'elle manque, l'acte signé n'est pas publié — et le service refuse la publication (409 transmission_absente)." }),
       h("div", { class: "fr-row" },
         button("Régler les délais d'exécution", { variant: "secondary", size: "sm", icon: "gear", onClick: () => { state.ui.refTab = "delais"; redraw(); } }),
         button("Ouvrir l'échéancier", { variant: "tertiary", size: "sm", icon: "list", onClick: () => navigate("execution") }))));
@@ -2795,7 +3063,7 @@ function assistantsPanel(save, redraw) {
   wrap.appendChild(card("Deux assistants, deux savoirs",
     "Plume, dans l'atelier, explique le mode d'emploi de l'outil ; Publia, sur le recueil public, répond sur les actes publiés. Chacun ne reçoit que ce qu'il a le droit de savoir : aucune question n'emporte le contenu d'un acte, et l'assistant de l'atelier ne peut pas en voir — rien ne lui est jamais transmis.",
     h("p", { class: "fr-small fr-muted", text: "Le moteur de langage qui les fait parler est interchangeable : celui de Perchance, quand il est disponible, ou celui de la collectivité — une adresse d'API, une clé, un nom de modèle. C'est ce qui permet de les faire fonctionner hors de Perchance, ou de garder les échanges sur son propre réseau." }),
-    h("p", { class: "fr-small fr-muted", text: "Le NOM et L'ICÔNE de chaque assistant se changent ci-dessous : l'interface suit partout — pastille, panneau, bulle d'invitation. Le nom et l'icône livrés sont rappelés en repère." }),
+    h("p", { class: "fr-small fr-muted", text: "Le NOM et L'ICÔNE de chaque assistant se changent ci-dessous : l'interface suit partout — pastille et panneau. Le nom et l'icône livrés sont rappelés en repère." }),
     h("p", { class: "fr-small fr-muted", text: "Les deux s'éteignent séparément : éteint, un assistant disparaît complètement de son interface — pas de pastille, pas de panneau. Cette décision vaut pour toute l'installation ; chaque agent peut en outre masquer un assistant allumé pour son seul compte, dans le menu de son nom." })));
   wrap.appendChild(carteAssistant("atelier", save, redraw));
   wrap.appendChild(carteAssistant("public", save, redraw));
@@ -2978,7 +3246,7 @@ function promptsAssistant(qui, s, ecrire, redraw) {
   box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0" },
     text: (!liste.length
       ? "Aucune question proposée : l'assistant n'affiche que sa zone de saisie."
-      : "Ces questions s'affichent sous forme de boutons à l'ouverture de l'assistant, et l'une d'elles est soufflée de temps en temps dans une petite bulle. Elles servent d'exemples — l'agent peut toujours écrire la sienne.") }));
+      : "Ces questions s'affichent sous forme de boutons dans le panneau de l'assistant. Elles servent d'exemples — l'agent peut toujours écrire la sienne.") }));
   liste.forEach((p, i) => {
     box.appendChild(h("div", { class: "assist-prompt" },
       h("div", { class: "assist-prompt__tete" },

@@ -206,6 +206,7 @@ ne pense à lancer.
 | `collections/<nom>.json` | une collection : `{ revision, records }` (référentiel, trames, actes, comptes) |
 | `journal.jsonl` | le journal technique — une ligne JSON par geste |
 | `courriel.jsonl` | la trace des courriels expédiés (ou non) |
+| `pieces/<id>.json` | une pièce jointe déposée (original signé d'une reprise, version signée d'un circuit externe) : son contenu en base64, son nom, son type, son empreinte |
 | `secrets/mots-de-passe.json` | les **empreintes** de mots de passe (jamais les mots de passe) |
 | `secrets/sessions.json` | les sessions ouvertes (rangées par l'empreinte de leur jeton) |
 | `STOCKAGE.json` | la version du rangement (pour les migrations futures) |
@@ -225,6 +226,15 @@ on lance la commande, on le redémarre. C'est la seule contrainte d'exploitation
 fichiers. Le dossier doit être accessible **en écriture** par le compte du service ; sinon le
 service refuse de démarrer et le dit (il donne la marche à suivre dans son journal et sur son
 écran de santé).
+
+**Les pièces jointes** — les fichiers déposés : l'original signé d'une reprise, la version
+signée d'un circuit externe — se rangent comme le reste : dans la table **`sb_piece`** en
+MariaDB, dans **`DATA_DIR/pieces/`** en rangement par fichiers. Elles entrent donc dans la
+sauvegarde (§ 8). Une pièce déposée est plafonnée à environ **5,5 Mo** — de quoi porter le PDF
+d'un acte signé. Pour relever ce plafond, agrandissez `MAX_BODY` du `.env` **et**
+`client_max_body_size` de nginx (§ 10) : les deux, sinon la façade refuse la requête avant même
+que le service ne la voie. Là où le poste parle au service **sans façade HTTP**, le plafond
+tombe à environ **600 Ko** (la taille d'un message du canal).
 
 **Passer d'un rangement à l'autre.** Il n'y a pas de migration automatique : on **exporte** et
 on **importe**. L'application sait exporter l'intégralité de son contenu (Administration ›
@@ -748,6 +758,16 @@ en signature.
 
 ## 5. Configuration
 
+Les réglages de cet écran vivent à un endroit nommé : un **onglet**, une **carte**, un **encart**.
+C'est ce chemin qui est cité partout ci-dessous — *Administration › Publication › Apparence du site
+public › Pages d'erreur*, par exemple. Une **barre de recherche** posée sous le titre de l'écran les
+traverse tous : on y tape un mot — « chat », « SMTP », « opposabilité » —, la liste des réglages qui
+y répondent s'affiche avec son chemin, et un clic ouvre l'onglet concerné, fait défiler jusqu'au
+champ et le fait clignoter. Tant qu'un mot est saisi, l'onglet affiché ne montre plus que les
+réglages qui y répondent ; `Échap` efface la recherche. L'index n'est pas tenu à la main : chaque
+onglet est dessiné une fois, hors de l'écran, et ses libellés sont lus tels quels — ce que la
+recherche trouve est donc exactement ce que l'écran affiche.
+
 ### 5.1 Réglage de persistance (par poste)
 
 **Administration › Base de données** (réservé à `referentiel.gerer`). Trois modes :
@@ -846,6 +866,19 @@ posées par le déploiement) :
 | `SCRIBA_SIGNATURE_API_CHEMIN_STATUT` | `/documents/{document}` | relecture du statut |
 | `SCRIBA_SIGNATURE_API_CLE` | — | **SECRET.** La clé que le service présente au prestataire. Elle **ne quitte jamais le serveur** : ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel ou une sauvegarde de données |
 
+**La signature interne** — le quatrième circuit, où c'est le SERVICE qui signe (§ 5.5 sexies bis) —
+se règle par les variables suivantes. Le **mode** et les deux réglages d'identité sont des variables
+de **référentiel** (le service les valide et les transmet au navigateur, comme celles du
+prestataire) ; la **clé de scellement** est un **secret de service**, qui ne quitte jamais le
+serveur :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SCRIBA_SIGNATURE_MODE` | `electronique` | le circuit général de la collectivité : `electronique`, `simple`, `interne` ou `externe`. Une trame peut trancher autrement — § 5.5 sexies bis |
+| `SCRIBA_SIGNATURE_INTERNE_NIVEAU` | `avancee` | le niveau que le service **annonce** quand il signe lui-même : `avancee` (la clé privée est sous le contrôle exclusif du signataire, un certificat est émis) ou `simple`. Ni l'un ni l'autre n'est *qualifié* au sens d'eIDAS |
+| `SCRIBA_SIGNATURE_INTERNE_AUTORITE` | *vide* | le nom porté par l'**émetteur** des certificats internes (champ `emetteur` de l'original signé). Vide : « Autorité de certification interne — <nom de la collectivité> ». Ce n'est **pas** une autorité de confiance qualifiée |
+| `SCRIBA_SIGNATURE_KV_KEY` | — | **SECRET.** 32 octets, en hexadécimal (64 caractères) ou en base64 : la **clé de scellement** du coffre (AES-256-GCM). **Sans elle, la signature interne est ÉTEINTE** — la route refuse (`409 signature_interne_indisponible`) et l'application n'offre pas ce circuit. La perdre ou la changer **n'invalide pas** les actes déjà signés (leur certificat voyage avec l'original) : elle oblige seulement à réémettre des clés |
+
 Deux autres réglages de **référentiel** concernent l'accès à l'atelier (§ 5.5). Comme les
 précédents, ils sont validés par le service, puis transmis au navigateur, et ils **l'emportent** sur
 la valeur réglée dans l'interface (l'écran d'administration les signale alors comme posés par le
@@ -879,14 +912,32 @@ Ce qui habille un acte est d'une autre nature : la **charte graphique** (écran 
 style », permission `trames.styles`) est, elle, une donnée du **référentiel** : elle se partage,
 s'exporte et s'importe.
 
-### 5.4 Fonctions expérimentales
+### 5.4 Fonctions expérimentales : la transmission au contrôle de légalité
 
 **Administration › Expérimentale** rassemble les fonctions livrées mais **éteintes par défaut**,
-activables d'un clic. Le réglage (`config.experimental`) suit le référentiel exporté et importé.
+activables d'un clic. Le réglage suit le référentiel exporté et importé.
 
-Il n'y a plus qu'une fonction expérimentale : la **télétransmission au contrôle de légalité**
-(l'étape qui s'intercale entre le retour signé et la publication, avec l'accusé de réception de la
-préfecture). Le **parapheur**, lui, est **sorti du régime expérimental** : le **circuit de
+Il n'y a plus qu'un réglage expérimental : le **régime de transmission au contrôle de légalité**
+(`config.controleLegalite.mode`), à **trois valeurs** :
+
+- **Désactivée** (défaut) — rien n'est géré par l'application : l'étape ne s'intercale pas entre le
+  retour signé et la publication, et la transmission se **constate à la main** depuis l'échéancier ;
+- **Déclarative** — avant sa **publication**, l'acte signé attend qu'un **réviseur compétent
+  déclare** à qui, et à quelle date, il a été transmis. **Aucun appel sortant** : la déclaration vaut
+  attestation, elle nomme son auteur, et c'est elle que le service exige pour publier ;
+- **API (@ctes)** — le **service** adresse l'acte signé à l'**API d'envoi** du contrôle de légalité
+  (adresse et clé du `.env` du déploiement, voir `server/env.example`) ; l'accusé de réception vaut
+  certificat, et **chaque acte peut en outre être déclaré transmis** (envoi hors application).
+
+Dans les deux régimes actifs, l'acte ne peut pas être **publié** tant que sa transmission n'est pas
+enregistrée (le service refuse en `409 transmission_absente`), et la **déclaration** est réservée à
+un **réviseur compétent** ou à l'administration — quand le service identifie les personnes, il
+oppose la déclaration à son auteur (on ne déclare pas au nom d'un autre). L'écran d'Administration
+affiche, pour chaque régime, ce qui se passe — et, en régime API, l'état **réel** du service
+(transmission réelle ou simulée), pour ne pas laisser croire à un appel qui n'aura pas lieu. Voir
+`SPEC.md` § 2.8.2 bis.
+
+Le **parapheur**, lui, est **sorti du régime expérimental** : le **circuit de
 validation** d'un acte avant sa signature est une fonction ordinaire — l'écran Parapheur et son
 entrée de menu, l'onglet « Circuits de validation » de l'Administration, le réglage de circuit
 d'une trame et la carte Parapheur d'un acte sont toujours là. Un référentiel qui n'en veut pas
@@ -1008,6 +1059,9 @@ référentiel, comme le reste) :
   IP** et la page d'où il vient. C'est ce qui justifie qu'elle soit **éteinte par défaut** — ne
   l'allumez qu'en connaissance de cause. Le réglage suit les publications : le recueil servi par le
   service l'applique à partir de la **prochaine publication** (comme les renvois et les mentions).
+  Pour l'atteindre sans parcourir les onglets : la **barre de recherche** de l'écran Administration
+  (§ 5) le trouve en tapant « chat », « http.cat » ou « erreur », et le chemin affiché est
+  *Publication › Apparence du site public › Pages d'erreur*.
   La règle du choix de l'image vit dans `server/mysql/chats-erreur.mjs`, partagée par l'application
   et le service (`src/lib/chats-erreur.js`, `src/ui/chats-erreur.js`).
 - **Accès à l'atelier** — la **liste d'adresses** autorisées à ouvrir l'atelier, et le message
@@ -1143,7 +1197,7 @@ Assistants** (le réglage suit l'export du référentiel, comme le reste) :
 
 **Le nom et l'icône.** Chaque assistant porte un **nom** et une **icône** que vous changez ici
 même : un champ pour le nom, une adresse d'image pour l'icône, et un aperçu qui suit la frappe.
-L'interface les reprend **partout** — la pastille, le panneau, la bulle d'invitation, le menu du
+L'interface les reprend **partout** — la pastille, le panneau, le menu du
 compte. Laissez un champ **vide** pour revenir à ce que l'application livre (« Plume », « Publia »
 et leurs portraits) : un assistant ne s'affiche jamais sans nom ni sans visage. Le réglage suit
 l'export du référentiel, comme le reste.
@@ -1185,8 +1239,9 @@ Perchance, et il laisse les échanges sur votre réseau.
 **Instruction et questions proposées.** Pour chaque assistant, l'administrateur modifie
 l'**instruction** envoyée au moteur (le rôle, ce qu'il ne fait jamais, sa manière de répondre —
 « laissez vide » rétablit le texte livré) et la liste des **questions proposées** : une étiquette
-de bouton et la question envoyée, ajoutables et supprimables. Une question tirée au sort est
-soufflée dans une petite bulle, une fois par chargement. Le bouton **Tester le moteur** dit
+de bouton et la question envoyée, ajoutables et supprimables. Les questions proposées s'affichent
+dans le panneau ; l'assistant ne souffle plus de question de lui-même (revue d'interface, P7). Le
+bouton **Tester le moteur** dit
 immédiatement si le moteur répond, et **Rétablir les réglages livrés** efface les écarts.
 
 **Les réponses renvoient par des liens.** Plume termine par le lien du **chapitre du guide** qui
@@ -1404,6 +1459,48 @@ compose l'adresse de son propre domaine, suivie de `/v1/webhooks/signature` ; el
 joignable **depuis l'extérieur**, en HTTPS, et la convention avec le prestataire doit prévoir le
 format de cette notification (l'application accepte le retour signé et **revérifie l'empreinte**
 du document avant de le tenir pour signé).
+
+### 5.5 sexies bis La signature interne : c'est le SERVICE qui signe
+
+C'est le quatrième circuit de signature, et le seul dont la clé privée **ne vit pas dans le
+navigateur**. Jusque-là, la clé du signataire était engendrée par le poste (signature simple) ou
+détenue par un prestataire ; ici, c'est le **service de la collectivité** qui engendre la clé du
+signataire, la **garde scellée** dans son coffre, et **signe lui-même**. Le poste ne reçoit jamais
+la clé — seulement l'original signé (clé publique, certificat, horodatage). C'est la condition
+eIDAS de la signature **avancée** (clé sous le contrôle exclusif du signataire, certificat émis,
+signature liée au document) ; elle n'est **pas qualifiée** pour autant, l'autorité d'émission étant
+interne à la collectivité — et l'acte publié le dit.
+
+**Ce circuit n'existe qu'en auto-hébergement.** Il suppose un coffre **durable**, donc un service
+qui en tient un. Le service de démonstration de la plateforme n'en a pas (son état vit dans le
+navigateur, et une clé privée qui vivrait là ne serait à l'abri de personne) : il **refuse
+franchement** (`409 signature_interne_indisponible`, avec son motif) plutôt que de simuler une
+signature « au nom du service ». L'application, de son côté, ne propose le circuit que si le
+service déclare tenir son coffre (`GET /v1/config`, champ `signatureInterne`).
+
+**Où cela se règle.** Le **mode** se choisit dans *Administration › Signature* (« Circuit de
+signature de la collectivité »), ou se pose par `SCRIBA_SIGNATURE_MODE=interne` ; une trame peut
+aussi l'imposer ou l'autoriser (`trame.signature` : `interne_impose`, `interne_autorise`). Le
+**coffre**, lui, ne se règle que dans le `.env` : `SCRIBA_SIGNATURE_KV_KEY` (32 octets en
+hexadécimal ou en base64, marquée *secret*) scelle chaque clé privée (AES-256-GCM) ; sans elle, le
+circuit est **éteint**. `SCRIBA_SIGNATURE_INTERNE_NIVEAU` et `SCRIBA_SIGNATURE_INTERNE_AUTORITE`
+règlent ce que le service annonce et le nom de l'émetteur des certificats (voir § 5.2).
+
+**Le coffre.** Une fiche **par signataire** — la clé suit la **personne** (son identifiant de
+personne, à défaut son compte, son adresse, son nom), comme un certificat de signature suit son
+titulaire ; une fiche d'**horodatage** unique date les actes au nom du service. Le coffre ne
+contient que des clés **scellées** et des certificats **publics** : une sauvegarde de la base ne
+livre aucune clé privée. Le perdre n'est pas une catastrophe : chaque acte déjà signé porte son
+certificat, donc reste vérifiable ; une clé de scellement changée oblige en revanche à engendrer de
+nouvelles clés, et le journal le consigne (`coffre_cle_illisible`, `coffre_cle_engendree`).
+
+**Comment l'éprouver.** Renseignez `SCRIBA_SIGNATURE_KV_KEY`, redémarrez le service, puis :
+(1) `GET /v1/config` doit rendre `signatureInterne.disponible: true` ; (2) *Administration ›
+Signature* doit afficher « **Coffre ouvert** — le service peut signer » (et « Coffre fermé » avec
+le motif quand la clé manque) ; (3) sur un **acte d'essai**, envoyez en signature en choisissant le
+circuit interne : l'acte est signé par le service, l'original porte un certificat d'émetteur
+interne, et la fenêtre « Signature » du titulaire le déclare **avancée, non qualifiée**. Le coffre
+se suit dans *Administration › Signature* (nombre de certificats émis, présence de l'horodatage).
 
 ### 5.5 septies Le bulletin (ou Journal) des actes
 
@@ -1704,12 +1801,15 @@ déposé, donc on ne peut pas publier autre chose que ce qui a été signé. Pou
 **qualifiée**, il faut brancher le prestataire de la collectivité (point d'extension :
 `src/lib/signature.js` côté application, et le domaine `actes.mjs` côté service).
 
-**Trois circuits**, réglés globalement (Administration › **Signature**) ou par trame
+**Quatre circuits**, réglés globalement (Administration › **Signature**) ou par trame
 (`trame.signature`) : `electronique` (défaut — l'acte part au prestataire et revient signé),
-`simple` (le signataire signe **dans l'application**, avec son compte), `externe` (le document est
-téléchargé, signé hors de l'application, et le PDF signé est déposé après certification du
-réviseur). Un acte **engagé** dans un circuit y reste : changer un réglage ne déplace pas un acte
-en cours.
+`simple` (le signataire signe **dans l'application**, avec son compte), `interne` (c'est le
+**SERVICE** qui signe, avec la clé du signataire gardée scellée dans son coffre — § 5.5 sexies
+bis, auto-hébergement seulement), `externe` (le document est téléchargé, signé hors de
+l'application, et le PDF signé est déposé après certification du réviseur). Les quatre circuits
+sont menés par les **deux** services (démonstration et auto-hébergé), à cette réserve près que
+la signature interne exige le coffre du service Node. Un acte **engagé** dans un circuit y reste :
+changer un réglage ne déplace pas un acte en cours.
 
 **La signature simple est la plus nominative** — c'est dans la nature du procédé —, et c'est
 pourquoi elle est celle dont l'original est le plus strictement partitionné. `partiePublique(pack)`
@@ -1841,7 +1941,8 @@ Un acte pèse quelques dizaines de Kio ; quelques milliers d'actes tiennent dans
 centaines de Mio. Les index de `sb_record` suffisent largement à ce volume. Les limites à
 connaître : 40 publications conservées et 80 circuits de signature (les plus anciens sont
 évincés) — ajustables par `MAX_PUBLIES` / `MAX_SIGNATURES` / `MAX_ACTES` ; 8 Mio par requête
-(`MAX_BODY`) ; 400 000 caractères par acte déposé (`MAX_DOC`).
+(`MAX_BODY`) ; 400 000 caractères par acte déposé (`MAX_DOC`) ; environ 5,5 Mo par **pièce
+jointe** (le plafond utile de `MAX_BODY` une fois le contenu encodé — voir § 2.4).
 
 > **Ce service n'est pas, non plus, un service d'archivage** : les bornes ci-dessus sont des
 > **bornes d'exploitation courante**, pas des durées de conservation. Ce que la collectivité
@@ -1941,7 +2042,8 @@ le dossier rappelle cette marche à suivre à qui l'ouvre.
 
 **En rangement MariaDB**, trois choses à sauvegarder :
 
-1. **La base** (référentiel, trames, actes, comptes, journal, état du service) — c'est
+1. **La base** (référentiel, trames, actes, comptes, journal, état du service, **pièces
+   jointes** — les fichiers déposés) — c'est
    l'essentiel. En mode **comptes locaux**, les tables `sb_motdepasse` (les dérivés) et
    `sb_session` (les sessions ouvertes) en font partie : un dump sans elles rendrait
    l'installation inaccessible. Dump logique :

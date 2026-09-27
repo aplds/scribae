@@ -39,7 +39,7 @@
 //
 // Le NOM et L'ICÔNE se règlent aussi (Administration › Assistants) : une
 // collectivité qui préfère « Ariane » ou une autre vignette les change ici, et
-// l'interface suit partout — pastille, panneau, bulle d'invitation.
+// l'interface suit partout — pastille et panneau.
 //
 // Deux choses se règlent ENFIN au poste de travail, et non dans le référentiel :
 //   • l'agent peut ÉTEINDRE un assistant pour lui-même (menu de son compte) —
@@ -319,19 +319,19 @@ function budget() {
 // Le nom des chapitres utiles à chaque écran. C'est ce qui donne à l'assistant
 // une réponse utile dès la première question, sans lui envoyer tout le guide.
 const CHAPITRES_ECRAN = {
-  trames: ["administrateurs", "chartes", "annexes"],
-  trame: ["administrateurs", "chartes", "annexes"],
-  rediger: ["rediger", "messages", "export", "annexes"],
+  trames: ["administrateurs", "chartes", "annexes", "a-deux"],
+  trame: ["administrateurs", "chartes", "annexes", "a-deux"],
+  rediger: ["rediger", "a-deux", "messages", "export", "annexes"],
   actes: ["retrouver", "export"],
-  acte: ["retrouver", "signature", "execution", "annexes"],
+  acte: ["retrouver", "signature", "signature-simple", "signature-interne", "signature-externe", "execution", "annexes"],
   modifier: ["modifier", "annexes"],
   delegations: ["delegations", "ouvrir", "signature"],
-  signature: ["signature", "signature-externe", "parapheur"],
+  signature: ["signature", "signature-simple", "signature-interne", "signature-externe", "parapheur"],
   publications: ["publication"],
   publication: ["publication"],
   reprises: ["reprises", "publication"],
   execution: ["execution"],
-  revision: ["revision", "signature-externe"],
+  revision: ["revision", "signature-interne", "signature-externe"],
   parapheur: ["parapheur"],
   referentiel: ["administrateurs", "comptes", "annuaire"],
   styles: ["chartes"],

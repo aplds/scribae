@@ -15,6 +15,33 @@ export function helpLink(chapterId, label = "Aide sur cette page") {
   }, icon("info", 14), h("span", { text: label }));
 }
 
+// L'AIDE À LA DEMANDE (revue d'interface, P4). Le paragraphe de présentation
+// d'un écran ne s'affiche plus d'emblée : il se replie derrière un lien, à
+// droite du titre. Le texte n'est pas supprimé — il est déplacé là où on le
+// cherche, et le « Comment faire ? » du guide reste à un clic.
+//
+// Un encadré pédagogique long se replie de la même façon, avec son intitulé :
+// c'est le même composant, pour que le geste (« cliquer pour lire ») soit le
+// même partout.
+export function notePlier(titre, contenu, { classe = "note-pliable", open = false } = {}) {
+  const det = h("details", { class: classe, ...(open ? { open: "" } : {}) },
+    h("summary", { class: classe + "__titre", text: titre }));
+  if (Array.isArray(contenu)) det.append(...contenu);
+  else det.appendChild(h("p", { class: classe + "__texte", text: contenu }));
+  return det;
+}
+
+export const aideEcran = (texte) =>
+  (texte ? notePlier("À quoi sert cet écran ?", texte, { classe: "aide-ecran" }) : null);
+
+// Le TITRE d'un écran, avec son aide à la demande : une seule façon d'écrire
+// un en-tête de page, pour que le lien d'aide soit toujours au même endroit.
+export function pageTitle(titre, aide = "") {
+  return h("div", { class: "page-head__ligne" },
+    h("h1", { class: "page-head__title", text: titre }),
+    aide ? aideEcran(aide) : null);
+}
+
 // Un champ de saisie dont la FRAPPE peut redessiner ce qui le porte : une fiche
 // dont l'en-tête reprend le nom qu'on écrit, un bloc qui se recalcule, un
 // formulaire qui se reconstruit. Le nœud est alors remplacé, et la saisie
@@ -233,6 +260,89 @@ export function statusBadge(status) {
   const map = { draft: ["Brouillon", "warning"], published: ["Mise à disposition", "success"], archived: ["Archivée", "info"] };
   const [label, color] = map[status] || map.draft;
   return h("span", { class: "fr-badge fr-badge--" + color, text: label });
+}
+
+// ---------------------------------------------------------------- mentions
+// UNE PASTILLE PAR OBJET, ET TROIS SEULEMENT (revue d'interface, P3).
+// Le statut reste une pastille : c'est lui qu'on cherche des yeux dans une liste.
+// Le reste — la nature, la famille, le service, le nombre de champs, de règles,
+// de commentaires — n'est pas un signal, c'est une description : il tient sur une
+// ligne en gris, séparé par des points, et il reste lisible sans qu'aucune
+// couleur ne crie. Un `alerte: true` garde la couleur d'avertissement à ce qui en
+// vaut vraiment une (« non publiable »).
+export function mentions(items) {
+  const parts = (items || []).filter(Boolean).map((it) => (typeof it === "string" ? { text: it } : it));
+  if (!parts.length) return null;
+  return h("p", { class: "app-mentions" },
+    ...parts.flatMap((it, i) => [
+      i ? h("span", { class: "app-mentions__sep", "aria-hidden": "true", text: " · " }) : null,
+      h("span", {
+        class: "app-mentions__item" + (it.alerte ? " app-mentions__item--alerte" : ""),
+        title: it.title, text: it.text,
+      }),
+    ]));
+}
+
+// -------------------------------------------------------------- menu « ⋯ »
+// UNE ACTION PRINCIPALE PAR CARTE (revue d'interface, P2). Les autres gestes ne
+// disparaissent pas : ils se rangent derrière ce bouton. Le panneau est posé en
+// `fixed` (et non en absolu) pour deux raisons : il échappe au défilement de la
+// zone de contenu, et on peut le faire tenir dans la fenêtre — vers le bas s'il
+// y a la place, vers le haut sinon. Il se ferme au clic ailleurs, à `Échap`, et
+// au premier défilement (un menu détaché de son bouton ne veut plus rien dire).
+export function menuButton(items, { label = "", title = "Autres actions", icon: ic = "dots", variant = "tertiary", size = "" } = {}) {
+  const gestes = (items || []).filter(Boolean);
+  if (!gestes.length) return null;
+  const wrap = h("span", { class: "app-menubtn" });
+  const panneau = h("div", { class: "app-menu", role: "menu", hidden: true });
+  const btn = h("button", {
+    class: `fr-btn fr-btn--${variant}${size ? " fr-btn--" + size : ""}`,
+    type: "button", title, "aria-haspopup": "menu", "aria-expanded": "false",
+  }, icon(ic, 16), label ? h("span", { text: label }) : null);
+
+  const detacher = () => {
+    document.removeEventListener("click", ailleurs, true);
+    document.removeEventListener("keydown", touche, true);
+    window.removeEventListener("scroll", fermer, true);
+    window.removeEventListener("resize", fermer, true);
+  };
+  function fermer() {
+    panneau.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    detacher();
+  }
+  const ailleurs = (e) => { if (!wrap.contains(e.target)) fermer(); };
+  const touche = (e) => { if (e.key === "Escape") { fermer(); btn.focus(); } };
+  const placer = () => {
+    const r = btn.getBoundingClientRect();
+    const haut = panneau.offsetHeight;
+    const large = panneau.offsetWidth;
+    const dessous = window.innerHeight - r.bottom - 8;
+    const dessus = r.top - 8;
+    panneau.style.top = (dessous >= haut || dessous >= dessus ? r.bottom + 4 : Math.max(8, r.top - 4 - haut)) + "px";
+    panneau.style.right = Math.max(8, Math.min(window.innerWidth - r.right, window.innerWidth - large - 8)) + "px";
+  };
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!panneau.hidden) return void fermer();
+    panneau.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    placer();
+    document.addEventListener("click", ailleurs, true);
+    document.addEventListener("keydown", touche, true);
+    window.addEventListener("scroll", fermer, true);
+    window.addEventListener("resize", fermer, true);
+  });
+  for (const g of gestes) {
+    if (g.separator) { panneau.appendChild(h("hr", { class: "app-menu__sep" })); continue; }
+    panneau.appendChild(h("button", {
+      class: "app-menu__item" + (g.danger ? " app-menu__item--danger" : ""),
+      type: "button", role: "menuitem", title: g.title,
+      on: { click: () => { fermer(); if (g.onClick) g.onClick(); } },
+    }, h("span", { class: "fr-icon" }, icon(g.icon || "right", 15)), h("span", { text: g.label })));
+  }
+  wrap.append(btn, panneau);
+  return wrap;
 }
 
 // Statuts d'un acte : libellés et couleurs définis une seule fois (registre des

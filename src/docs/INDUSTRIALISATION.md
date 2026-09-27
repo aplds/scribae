@@ -16,8 +16,9 @@ ligne) — voir aussi `src/server/README.md` pour l'exploitation.
 > c'est le seul arbre que la plateforme conserve d'une séance à l'autre. Il est
 > pourtant écrit pour la **disposition livrée** — le code y est `../src/…`,
 > l'outillage `../scripts/…` —, et `scripts/racine-code.mjs` constate la racine du
-> code au lieu de la supposer. Le harnais de l'atelier (§2) simule cette
-> disposition avant de conclure quoi que ce soit.
+> code au lieu de la supposer. Le harnais de l'atelier (`scripts/harnais-atelier.mjs`,
+> § 2 « Vérifier depuis l'atelier ») simule cette disposition avant de conclure
+> quoi que ce soit.
 
 ---
 
@@ -110,6 +111,42 @@ peut être lancé, l'épreuve se **saute** au lieu d'échouer.
 > pas tomber la suite : l'import échoue et les tests correspondants sont
 > **sautés**. Un test qu'on ne peut pas exécuter ici ne doit pas cacher ceux
 > qu'on peut exécuter.
+
+### Vérifier depuis l'atelier : le harnais
+
+Dans l'atelier (Perchance), il n'y a **ni système de fichiers ni processus** : rien
+de ce qui précède n'y est lançable tel quel. C'est le rôle de
+**`scripts/harnais-atelier.mjs`** — l'outillage est ainsi rangé **dans le dépôt**,
+à sa place attendue (il n'est pas une épreuve : `npm test` ne le voit pas, et
+`npm run syntaxe` le parse comme un module).
+
+Il monte la disposition livrée dans un système de fichiers **virtuel** (la racine
+virtuelle étant `src/`), remplace les modules Node (`node:fs`, `node:path`,
+`node:url`, `node:crypto`) par des doublures, fait passer le tout par **esbuild**,
+et laisse les écritures retomber dans `src/`. Surtout, il charge les scripts du
+dépôt **eux-mêmes** : `verifier-style.mjs` et les trois générateurs s'exécutent
+tels quels, sans qu'aucune règle ne soit recopiée.
+
+| Service | Ce qu'il fait |
+|---|---|
+| `h.verifier({ fs })` | la syntaxe, le style puis les épreuves — l'ordre de `npm run verifier` |
+| `h.verifierSyntaxe({ fs })` | parse chaque `.js`/`.mjs` de `src/` (par le parseur d'esbuild : il n'y a pas de processus) |
+| `h.verifierStyle({ fs })` | exécute `scripts/verifier-style.mjs` tel qu'il est livré, en strict |
+| `h.epreuves({ fs, cibles })` | les épreuves, **un fichier à la fois** (comme `node --test` les isole) |
+| `h.regenerer({ fs })` | les trois générateurs — les documents engendrés |
+| `h.texte(rapport)` | le verdict en quelques lignes, à rendre tel quel |
+
+**Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
+`import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
+écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3b), tous dus à
+l'absence de Node et de réseau : la liste, la lecture de chaque écart et les
+chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
+
+> **L'atelier n'est pas la CI, et le harnais n'est pas Node.** La CI exécute
+> `npm run syntaxe` (`node --check`) et `npm test` avec un vrai Node : c'est elle
+> qui fait foi. Le harnais est l'ombre portée de la CI dans l'atelier — il dit
+> quand quelque chose a **régressé**, et il ne remplace jamais le regard sur
+> l'écran (voir `docs/ATELIER.md` § 5 et § 6).
 
 ### Les épreuves de parcours, et le contrat commun aux deux services
 

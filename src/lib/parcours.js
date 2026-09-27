@@ -43,7 +43,7 @@ import { circuitFor, validationAJour, etiquetteEtape, etapeCible, ETAPE_STATUTS 
 import { revisionRequise, reviseursPour, revisionAJour } from "./revision.js";
 import { signataireEffectif, placeDansChaine } from "./signataires.js";
 import { modeSignature, certificationDe, certificationRequise, versionSignee } from "./externe.js";
-import { controleLegaliteActif } from "./legalite.js";
+import { controleLegaliteActif, controleLegaliteParApi } from "./legalite.js";
 import { tramePublishable } from "./schema.js";
 
 // Les LIBELLÉS courts d'une phase (ce que porte une puce de timeline) et son
@@ -136,6 +136,10 @@ export function parcoursDeActe(acte, { config, trames = [], users = [], trame } 
 
   const mode = modeSignature(config, t, acte);
   const externe = mode === "externe";
+  // La signature INTERNE suit le même parcours que la signature simple (parapheur,
+  // révision, puis signature) : ce qui change est QUI signe — le service, avec la
+  // clé du signataire gardée scellée dans son coffre (voir src/lib/externe.js).
+  const interne = mode === "interne";
   const circuit = circuitFor(config, { trame: t, acte });
   const validation = acte?.validation || null;
   const paraFait = !!(validation && validationAJour(acte) && validation.statut === "valide");
@@ -197,12 +201,16 @@ export function parcoursDeActe(acte, { config, trames = [], users = [], trame } 
     cle: "signature",
     nature: "signature",
     label: PHASE_LABELS.signature.court,
-    titre: externe ? "Signature hors de l'application (circuit externe)" : PHASE_LABELS.signature.long,
+    titre: externe ? "Signature hors de l'application (circuit externe)"
+      : interne ? "Signature par le service (signature interne)"
+        : PHASE_LABELS.signature.long,
     acteur: acteurDeSignature(config, acte, t),
     fait: signe,
     hint: externe
       ? "Le document est remis au signataire, signé hors de l'application, puis sa version signée est déposée et certifiée."
-      : "La signature engage son auteur : le signataire désigné signe le texte tel qu'il a été contrôlé.",
+      : interne
+        ? "C'est le SERVICE qui signe, avec la clé privée du signataire gardée scellée dans son coffre : la clé ne quitte jamais le serveur. Le titulaire engage toutefois sa signature lui-même, en déclarant le document sous ses yeux."
+        : "La signature engage son auteur : le signataire désigné signe le texte tel qu'il a été contrôlé.",
   });
 
   if (externe) {
@@ -222,15 +230,20 @@ export function parcoursDeActe(acte, { config, trames = [], users = [], trame } 
   }
 
   if (controleLegaliteActif(config)) {
+    // L'acteur de la porte dépend du RÉGIME : l'API d'envoi, ou le réviseur qui
+    // déclare la transmission (voir src/lib/legalite.js).
+    const parApi = controleLegaliteParApi(config);
     phases.push({
       cle: "legalite",
       nature: "legalite",
       label: PHASE_LABELS.legalite.court,
       titre: PHASE_LABELS.legalite.long,
-      acteur: "Le contrôle de légalité (préfecture)",
+      acteur: parApi ? "Le contrôle de légalité (préfecture)" : "Le réviseur — déclaration de transmission",
       fait: !!(acte && acte.execution && acte.execution.transmission),
       position: "après la signature · avant la publication",
-      hint: "L'acte signé est télétransmis à la préfecture avant sa publication.",
+      hint: parApi
+        ? "L'acte signé est télétransmis à la préfecture avant sa publication."
+        : "L'acte signé attend la déclaration de son réviseur : à qui, et à quelle date, il a été transmis.",
     });
   }
 

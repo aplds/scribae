@@ -240,6 +240,13 @@ dossier (on ne lance pas deux `api` sur le même `./data`, et on n'exécute pas 
 `--reconcilier` pendant que le service tourne) ; et le dossier doit être **accessible en écriture**
 par le compte du conteneur — sinon le service refuse de démarrer et le dit dans ses journaux.
 
+**Les pièces jointes** (l'original signé d'une reprise, la version signée d'un circuit externe)
+suivent ce même rangement : table `sb_piece` en MariaDB, sous-dossier `pieces/` du volume de
+données en mode fichiers. Elles entrent donc dans la sauvegarde, et une pièce est plafonnée à
+environ **5,5 Mo** (~600 Ko là où le poste parle au service sans façade HTTP). Pour relever ce
+plafond, agrandissez `MAX_BODY` **et** `client_max_body_size` (16 Mo par défaut dans les nginx
+livrés) : les deux, sinon la façade refuse l'envoi avant que le service ne le voie.
+
 ## 6. Configurer
 
 Toute la configuration passe par l'**environnement** du conteneur. La référence complète
@@ -313,7 +320,8 @@ réparée pendant qu'il tourne n'exige pas de le recréer.
   conteneur avec la nouvelle étiquette (ou `docker compose up -d` si vous utilisez le
   Compose du § 5.3). Appliquez la migration si le schéma a changé.
 - **Sauvegardes** : la base se sauvegarde comme toute base MariaDB
-  (`mariadb-dump`). Voir « Sauvegardes » dans `src/docs/ADMINISTRATION.md`. Pensez à
+  (`mariadb-dump`) — elle porte aussi les **pièces jointes** (les fichiers déposés). Voir
+  « Sauvegardes » dans `src/docs/ADMINISTRATION.md`. Pensez à
   sauvegarder la configuration (les variables d'environnement) à part : elle ne vit
   nulle part dans l'image.
 - **Registre privé** : l'image ne contient **aucun secret** (les mots de passe viennent de

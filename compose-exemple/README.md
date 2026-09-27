@@ -50,7 +50,7 @@ tel quel — le fichier entier est transmis au service.
 - **Mise à jour** : `docker compose pull && docker compose up -d`. Le schéma est
   appliqué au démarrage, sans perte de données.
 - **Ce qui reste à faire à la main** : les comptes des agents, le référentiel, les
-  trames. Le **Guide** intégré à l'application (29 chapitres) est écrit pour les
+  trames. Le **Guide** intégré à l'application (32 chapitres) est écrit pour les
   administrateurs ; commencez par lui.
 
 ## Fichiers

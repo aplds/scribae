@@ -373,10 +373,29 @@ export const VARIABLES = [
   // --- Signature ------------------------------------------------------------
   {
     env: "SCRIBA_SIGNATURE_MODE", cle: "signature.mode", portee: "referentiel",
-    type: "choix", choix: ["electronique", "simple", "externe"], groupe: "Signature",
+    type: "choix", choix: ["electronique", "simple", "interne", "externe"], groupe: "Signature",
     libelle: "Circuit de signature",
-    description: "« electronique » : prestataire par API. « simple » : signature dans l'application. « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement.",
+    description: "« electronique » : prestataire par API. « simple » : signature dans l'application, avec la clé du poste. « interne » : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — auto-hébergement seulement (SCRIBA_SIGNATURE_KV_KEY). « externe » : document signé hors ligne puis déposé. Une trame peut trancher autrement.",
     exemple: "electronique",
+  },
+  // --- Signature : la signature interne (le coffre du service) --------------
+  // Le circuit « interne » n'appelle personne : c'est le service qui signe, avec
+  // une clé qu'il détient seul, scellée au repos. Ces deux réglages disent
+  // COMMENT il se présente (quel niveau, sous quelle autorité d'émission) ; la
+  // clé de scellement, elle, est un SECRET, et se pose plus bas.
+  {
+    env: "SCRIBA_SIGNATURE_INTERNE_NIVEAU", cle: "signature.interne.niveau", portee: "referentiel",
+    type: "choix", choix: ["simple", "avancee"], groupe: "Signature — interne",
+    libelle: "Niveau de la signature interne",
+    description: "Ce que le service annonce quand il signe lui-même. « avancee » : la clé privée est sous le contrôle exclusif du signataire (elle ne quitte pas le coffre) et le certificat est émis par une autorité — c'est la définition eIDAS de la signature avancée. « simple » : le service déclare ne produire qu'une signature simple. Ni l'un ni l'autre n'est QUALIFIÉ au sens du règlement (UE) n° 910/2014.",
+    exemple: "avancee",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_INTERNE_AUTORITE", cle: "signature.interne.autorite", portee: "referentiel",
+    type: "texte", groupe: "Signature — interne",
+    libelle: "Autorité d'émission des certificats internes",
+    description: "Le nom porté par l'émetteur des certificats que le service délivre lui-même (champ `emetteur` du certificat de l'original signé). Vide : « Autorité de certification interne — <nom de la collectivité> ». Ce n'est PAS une autorité de confiance qualifiée : la mention le dit dans l'acte publié.",
+    exemple: "AC interne — Ville de Valmont-sur-Loire",
   },
   // --- Signature : l'API du prestataire -------------------------------------
   // Le circuit électronique suppose un prestataire joignable. Son adresse, son
@@ -452,6 +471,48 @@ export const VARIABLES = [
     libelle: "Chemin — suivi du circuit",
     description: "Point de terminaison interrogé pour relire le statut d'un circuit. Jeton {document}.",
     exemple: "/documents/{document}",
+  },
+
+  // --- Contrôle de légalité (télétransmission @ctes) ------------------------
+  // L'étape de transmission au contrôle de légalité : l'acte signé part vers
+  // l'API d'envoi, qui en accuse réception. Tant que ces variables ne sont pas
+  // posées, la transmission reste SIMULÉE et le dit ; posées, elle est RÉELLE
+  // (voir src/server/mysql/controle-legalite.mjs). La CLÉ, elle, reste au
+  // service (`SCRIBA_CONTROLE_LEGALITE_API_CLE`, plus bas) : c'est un secret.
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_TRANSPORT", cle: "controleLegalite.transport", portee: "referentiel",
+    type: "choix", choix: ["service", "demonstration"], groupe: "Contrôle de légalité",
+    libelle: "Transport de la télétransmission",
+    description: "« service » : c'est le service de la collectivité qui adresse l'acte à l'API d'envoi — seul moyen de garder la clé côté serveur. « demonstration » : la transmission est simulée localement (aucun appel sortant), et le certificat porte la mention de démonstration.",
+    exemple: "service",
+  },
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_URL", cle: "controleLegalite.url", portee: "referentiel",
+    type: "url", groupe: "Contrôle de légalité",
+    libelle: "Adresse de base de l'API de contrôle de légalité",
+    description: "Racine de l'API d'envoi (@ctes, ou le concentrateur de la collectivité). Vide, la télétransmission reste simulée : aucun acte ne sort, et le certificat le dit.",
+    exemple: "https://api.ctes.exemple.fr/v1",
+  },
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_CHEMIN", cle: "controleLegalite.chemin", portee: "referentiel",
+    type: "texte", groupe: "Contrôle de légalité",
+    libelle: "Chemin — envoi d'une transmission",
+    description: "Point de terminaison qui reçoit l'acte signé, relatif à l'adresse de base.",
+    exemple: "/transmissions",
+  },
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_DESTINATAIRE", cle: "controleLegalite.destinataire", portee: "referentiel",
+    type: "texte", groupe: "Contrôle de légalité",
+    libelle: "Destinataire porté au certificat",
+    description: "Le libellé de l'autorité destinataire, tel qu'il figurera sur le certificat de transmission (« Préfecture — contrôle de légalité »).",
+    exemple: "Préfecture — contrôle de légalité",
+  },
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_TIMEOUT", cle: "controleLegalite.timeoutMs", portee: "referentiel",
+    type: "entier", min: 1000, max: 120000, groupe: "Contrôle de légalité",
+    libelle: "Délai d'attente de l'API (ms)",
+    description: "Temps maximal accordé à l'appel de télétransmission avant abandon.",
+    exemple: "20000",
   },
 
   // --- Annuaire de la collectivité (OIDC) -----------------------------------
@@ -629,11 +690,11 @@ export const VARIABLES = [
   // « Circuits de validation », et ce sont les circuits enregistrés qui
   // décident. Il n'a donc plus de variable de déploiement.
   {
-    env: "SCRIBA_CONTROLE_LEGALITE", cle: "experimental.controleLegalite", portee: "referentiel",
-    type: "booleen", groupe: "Fonctions",
-    libelle: "Contrôle de légalité",
-    description: "Active la transmission de l'acte signé au représentant de l'État par API. Éteint par défaut.",
-    exemple: "false",
+    env: "SCRIBA_CONTROLE_LEGALITE_MODE", cle: "controleLegalite.mode", portee: "referentiel",
+    type: "choix", choix: ["desactive", "declaratif", "api"], groupe: "Fonctions",
+    libelle: "Régime de transmission au contrôle de légalité",
+    description: "TROIS RÉGIMES. « desactive » : rien n'est géré par l'application, la transmission se constate à la main. « declaratif » : avant sa publication, l'acte signé attend qu'un RÉVISEUR compétent déclare à qui, et à quelle date, il a été transmis — aucun appel sortant. « api » : le service adresse l'acte à l'API d'envoi @ctes (voir SCRIBA_CONTROLE_LEGALITE_TRANSPORT), et chaque acte peut en outre être déclaré transmis. Dans les deux régimes actifs, la publication est refusée tant que la transmission n'est pas enregistrée. L'ancien booléen SCRIBA_CONTROLE_LEGALITE (vrai = « api ») est replié dans le référentiel à la première lecture.",
+    exemple: "desactive",
   },
   {
     env: "SCRIBA_ASSISTANT_ATELIER", cle: "assistant.atelier.actif", portee: "referentiel",
@@ -796,6 +857,17 @@ export const VARIABLES = [
     env: "SCRIBA_SIGNATURE_API_CLE", portee: "service", type: "texte", secret: true, groupe: "Signature — API",
     libelle: "Clé d'API du prestataire de signature",
     description: "La clé que le service présente au prestataire (en-tête Authorization). Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, le service n'appelle pas le prestataire en production. SECRET.",
+  },
+  {
+    env: "SCRIBA_CONTROLE_LEGALITE_API_CLE", portee: "service", type: "texte", secret: true, groupe: "Contrôle de légalité",
+    libelle: "Clé d'API du contrôle de légalité",
+    description: "La clé que le service présente à l'API d'envoi du contrôle de légalité (@ctes), en-tête Authorization. Elle ne quitte JAMAIS le serveur : elle n'est ni transmise au navigateur, ni journalisée, ni recopiée dans le référentiel. Sans elle, la télétransmission reste simulée. SECRET.",
+  },
+  {
+    env: "SCRIBA_SIGNATURE_KV_KEY", portee: "service", type: "texte", secret: true, groupe: "Signature — interne",
+    libelle: "Clé de scellement du coffre de signature interne",
+    description: "32 octets, en hexadécimal (64 caractères) ou en base64, qui scellent au repos (AES-256-GCM) les clés privées que le service détient pour la signature interne. Sans elle, la signature interne est ÉTEINTE — la route refuse, et l'application n'offre pas ce circuit. La perdre ou la changer n'invalide pas les actes déjà signés (leur certificat voyage avec l'original) : elle oblige seulement à réémettre des clés. SECRET.",
+    exemple: "64 caractères hexadécimaux, ou 32 octets en base64 (openssl rand -hex 32)",
   },
   {
     env: "CORS_ORIGINS", portee: "service", type: "liste", groupe: "Façade HTTP",

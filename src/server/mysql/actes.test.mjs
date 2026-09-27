@@ -16,9 +16,9 @@ const sha256 = (s) => createHash("sha256").update(String(s), "utf8").digest("hex
 const AKN = "<akomaNtoso><body>Arrêté n°2026-401</body></akomaNtoso>";
 const JETON = "Bearer bon";
 
-function banc({ save = () => true } = {}) {
+function banc({ save = () => true, controleLegalite = null } = {}) {
   const state = emptyState();
-  const api = createActesApi({ state, sha256, save, now: () => "2026-03-10T12:00:00.000Z" });
+  const api = createActesApi({ state, sha256, save, controleLegalite, now: () => "2026-03-10T12:00:00.000Z" });
   const authorize = (headers) => (String(headers.authorization || "").includes(JETON)
     ? null
     : { status: 401, headers: {}, body: { erreur: "absent", code: "jeton_absent" } });
@@ -168,6 +168,82 @@ test("contrôle de légalité : transmettre avant de publier, et le certificat e
   assert.equal(publie.status, 201);
   const rec = (await call("GET", `/v1/publications/${encodeURIComponent(publie.body.cle)}`)).body;
   assert.equal(rec.transmission.mention, t.body.certificat.mention);
+});
+
+test("contrôle de légalité : une DÉCLARATION vaut transmission, sans appel à l'API", async () => {
+  const { call } = banc();
+  const a = (await call("POST", "/v1/actes", { akn: AKN, numero: "2026-403", dateSignature: "2026-03-10", controleLegalite: true }, { authorization: JETON })).body;
+  const s = (await call("POST", `/v1/actes/${a.id}/signature`, {}, { authorization: JETON })).body;
+  (await call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  }, { authorization: JETON }));
+
+  // Une déclaration incomplète ne vaut rien : il faut dire À QUI et À QUELLE DATE.
+  const sansDate = await call("POST", `/v1/actes/${a.id}/transmission`, { declaration: { destinataire: "Préfecture" } }, { authorization: JETON });
+  assert.equal(sansDate.status, 422);
+  assert.equal(sansDate.body.code, "declaration_incomplete");
+  const sansDest = await call("POST", `/v1/actes/${a.id}/transmission`, { declaration: { at: "2026-03-11" } }, { authorization: JETON });
+  assert.equal(sansDest.status, 422);
+  assert.equal(sansDest.body.champ, "destinataire");
+
+  // La déclaration enregistre une transmission, SANS appel sortant : le certificat
+  // est une DÉCLARATION, et sa mention nomme son auteur.
+  const d = await call("POST", `/v1/actes/${a.id}/transmission`, {
+    declaration: { at: "2026-03-11", destinataire: "Préfecture — contrôle de légalité", reference: "2026-03-DELEG-0184", motif: "API injoignable", personId: "per-004", auteur: "Jeanne MARTIN" },
+  }, { authorization: JETON });
+  assert.equal(d.status, 201);
+  assert.equal(d.body.declaration, true);
+  assert.equal(d.body.demonstration, false);
+  assert.equal(d.body.certificat.nature, "Déclaration de transmission au contrôle de légalité");
+  assert.match(d.body.certificat.mention, /\(déclaration de Jeanne MARTIN\)/);
+  assert.equal(d.body.reference, "2026-03-DELEG-0184");
+  // Le service DIT ce qu'il a pu attester : ici il n'identifie pas les personnes
+  // (banc sans session), donc la déclaration est « déclarée », et le client le
+  // reprend tel quel (voir NC-II-017) — il ne la présente pas comme vérifiée.
+  assert.equal(d.body.attribution, "declaree");
+  assert.equal(d.body.auteur, "Jeanne MARTIN");
+  const lu = await call("GET", `/v1/actes/${a.id}/transmission`, null, { authorization: JETON });
+  assert.equal(lu.body.declaration.attribution, "declaree");
+
+  // La publication passe : la déclaration a levé la porte.
+  const corps = { html: "<html>x</html>", akn: AKN, eliUri: "eli:/fr/arr/2026/0403/iam", datePublication: "2026-03-12", original: { document: { sha256: sha256(AKN) }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] } };
+  assert.equal((await call("POST", `/v1/actes/${a.id}/publication`, corps, { authorization: JETON })).status, 201);
+});
+
+test("déclaration de transmission opposée à l'opérateur, et à sa compétence", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-702", revision: { statut: "valide", reviseurs: ["per-004"] } })).body;
+  const circ = (await b.call("POST", `/v1/actes/${a.id}/signature`, {})).body;
+  await b.call("POST", "/v1/webhooks/signature", {
+    signatureId: circ.signatureId,
+    documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  });
+
+  // 1. On ne déclare pas à la place d'un autre.
+  const autrui = await b.call("POST", `/v1/actes/${a.id}/transmission`, {
+    declaration: { at: "2026-03-11", destinataire: "Préfecture", personId: "per-004" },
+  }, { identite: b.session(AUTRE) });
+  assert.equal(autrui.status, 403);
+  assert.equal(autrui.body.code, "declaration_non_habilitée");
+
+  // 2. Hors compétence : l'acte n'a été révisé que par per-004, et l'opérateur est
+  //    per-009 — il déclare en son propre nom, mais cet acte n'est pas le sien.
+  const hors = await b.call("POST", `/v1/actes/${a.id}/transmission`, {
+    declaration: { at: "2026-03-11", destinataire: "Préfecture", personId: "per-009" },
+  }, { identite: b.session(AUTRE) });
+  assert.equal(hors.status, 403);
+  assert.equal(hors.body.code, "declaration_non_habilitée");
+
+  // 3. Le réviseur compétent déclare : accepté, « vérifiée », et le NOM inscrit
+  //    vient du référentiel — non du corps.
+  const ok = await b.call("POST", `/v1/actes/${a.id}/transmission`, {
+    declaration: { at: "2026-03-11", destinataire: "Préfecture", auteur: "Faux Nom", personId: "per-004" },
+  }, { identite: b.session(MAIRE) });
+  assert.equal(ok.status, 201);
+  assert.match(ok.body.certificat.mention, /Jeanne MARTIN/);
+  assert.equal(ok.body.attribution, "verifiee", "le service dit qu'il a pu opposer la déclaration à l'opérateur");
+  assert.equal(b.state.actes[a.id].transmission.declaration.attribution, "verifiee");
 });
 
 test("le routage : hors domaine, méthode et débit", async () => {
@@ -426,4 +502,524 @@ test("un acte qui n'a pas été déposé comme reprise ne se publie pas sans sig
   }, { authorization: JETON }));
   assert.equal(res.status, 409);
   assert.equal(res.body.code, "acte_non_reprise");
+});
+
+// ------------------------------------------------------ le circuit de signature EXTERNE
+// L'acte a été signé HORS de l'application (papier, ou outil tiers que le client
+// ne pilote pas). Le client dépose la version signée et son empreinte, puis — si
+// le dépôt a déclaré la certification requise — la conformité attestée par un
+// réviseur. C'est le SERVICE qui tient l'ordre « version signée -> conformité
+// certifiée -> publié » : ces épreuves le tiennent d'un bout à l'autre, et le
+// jeu d'appels commun (`tests/conformite-service.mjs`) tient la présence des deux
+// routes des DEUX côtés du contrat.
+test("le circuit externe : la publication attend la version signée, puis la conformité", async () => {
+  const { state, call } = banc();
+  const akn = "<akomaNtoso><body>Arrêté n°2026-701</body></akomaNtoso>";
+  const a = (await call("POST", "/v1/actes", {
+    akn, numero: "2026-701", dateSignature: "2026-03-10",
+    signatureMode: "externe", certificationRequise: true,
+  }, { authorization: JETON })).body;
+  assert.equal(state.actes[a.id].signatureMode, "externe");
+  assert.equal(state.actes[a.id].certificationRequise, true);
+
+  const publier = () => call("POST", `/v1/actes/${a.id}/publication`,
+    { html: "<html>acte</html>", akn, eliUri: "eli:/fr/arr/2026/0701/iam", original: {} },
+    { authorization: JETON });
+
+  // 1. Rien n'est signé : le motif est celui DU CIRCUIT, pas l'« acte_non_signe » général.
+  const avant = await publier();
+  assert.equal(avant.status, 409, "étape 1 : publier avant toute signature");
+  assert.equal(avant.body.code, "version_signee_absente", "étape 1 : code");
+
+  // 2. Un acte qui ne suit PAS ce circuit refuse une version signée externe.
+  // Un document DIFFÉRENT : le dépôt d'un document identique encore en circuit
+  // est idempotent, et rendrait le même acte (donc le même circuit).
+  const autre = (await call("POST", "/v1/actes", {
+    akn: "<akomaNtoso><body>Arrêté n°2026-702</body></akomaNtoso>", numero: "2026-702",
+  }, { authorization: JETON })).body;
+  const horsCircuit = await call("POST", `/v1/actes/${autre.id}/signature-externe`,
+    { signe: { url: "https://exemple.fr/0702-signe.pdf", sha256: "a".repeat(64), nom: "0702-signe.pdf" } },
+    { authorization: JETON });
+  assert.equal(horsCircuit.status, 409, "étape 2 : statut");
+  assert.equal(horsCircuit.body.code, "circuit_non_externe", "étape 2 : code");
+
+  // 3. La version signée est déposée : l'acte passe « signée », mais reste non publiable.
+  const signe = await call("POST", `/v1/actes/${a.id}/signature-externe`, {
+    signe: { url: "https://exemple.fr/0701-signe.pdf", sha256: "b".repeat(64), nom: "0701-signe.pdf", taille: 4321, deposeLe: "2026-03-10T13:00:00.000Z" },
+  }, { authorization: JETON });
+  assert.equal(signe.status, 201);
+  assert.equal(signe.body.statut, "signee");
+  assert.equal(state.actes[a.id].originalExterne.url, "https://exemple.fr/0701-signe.pdf");
+  const encore = await publier();
+  assert.equal(encore.status, 409, "étape 3 : publier avant la conformité");
+  assert.equal(encore.body.code, "conformite_non_certifiee", "étape 3 : code");
+
+  // 4. Une certification qui ne porte pas sur la pièce déposée n'atteste rien.
+  const incoherente = await call("POST", `/v1/actes/${a.id}/conformite`, {
+    certification: { statut: "conforme", sha256Signe: "c".repeat(64), parNom: "Réviseur" },
+  }, { authorization: JETON });
+  assert.equal(incoherente.status, 409, "étape 4 : statut");
+  assert.equal(incoherente.body.code, "certification_incoherente", "étape 4 : code");
+
+  // 5. Une conformité REFUSÉE remet l'acte en attente : c'est le SERVICE qui l'applique.
+  const nonConforme = await call("POST", `/v1/actes/${a.id}/conformite`, {
+    certification: { statut: "non_conforme", sha256Signe: "b".repeat(64), motif: "page manquante" },
+  }, { authorization: JETON });
+  assert.equal(nonConforme.status, 201);
+  assert.equal(state.actes[a.id].statut, "depose");
+  assert.equal((await publier()).body.code, "conformite_non_certifiee");
+
+  // 6. Une NOUVELLE version signée annule la certification, puis la conformité
+  //    certifiée ouvre enfin la publication.
+  await call("POST", `/v1/actes/${a.id}/signature-externe`, {
+    signe: { url: "https://exemple.fr/0701-signe-v2.pdf", sha256: "d".repeat(64), nom: "0701-signe-v2.pdf" },
+  }, { authorization: JETON });
+  assert.equal(state.actes[a.id].certification, null, "une nouvelle pièce annule l'ancienne certification");
+  assert.equal((await publier()).body.code, "conformite_non_certifiee");
+  const certifie = await call("POST", `/v1/actes/${a.id}/conformite`, {
+    certification: { statut: "conforme", sha256Signe: "d".repeat(64), parNom: "Réviseur", le: "2026-03-10T14:00:00.000Z" },
+  }, { authorization: JETON });
+  assert.equal(certifie.status, 201);
+  const publie = await publier();
+  assert.equal(publie.status, 201);
+
+  // La publication PORTE la version signée et sa certification : c'est elle
+  // « l'original » que le recueil public montre pour cet acte.
+  const rec = (await call("GET", `/v1/publications/${encodeURIComponent(publie.body.cle)}`)).body;
+  assert.equal(rec.originalExterne.url, "https://exemple.fr/0701-signe-v2.pdf");
+  assert.equal(rec.originalExterne.certification.statut, "conforme");
+
+  // 7. Un acte déjà publié ne remplace pas sa version signée.
+  const deja = await call("POST", `/v1/actes/${a.id}/signature-externe`,
+    { signe: { url: "https://exemple.fr/autre.pdf", sha256: "e".repeat(64), nom: "autre.pdf" } },
+    { authorization: JETON });
+  assert.equal(deja.status, 409, "étape 7 : re-signer un acte publié");
+  assert.equal(deja.body.code, "deja_publie");
+});
+
+test("un acte déclaré non publiable ne se publie pas, même signé", async () => {
+  const { call } = banc();
+  const akn = "<akomaNtoso><body>Décision individuelle n°2026-721</body></akomaNtoso>";
+  const a = (await call("POST", "/v1/actes", {
+    akn, numero: "2026-721", publishable: false, signatureMode: "externe",
+  }, { authorization: JETON })).body;
+  await call("POST", `/v1/actes/${a.id}/signature-externe`,
+    { signe: { url: "https://exemple.fr/0721.pdf", sha256: "f".repeat(64), nom: "0721.pdf" } },
+    { authorization: JETON });
+  const res = await call("POST", `/v1/actes/${a.id}/publication`,
+    { html: "x", akn, original: {}, eliUri: "eli:/fr/dec/2026/0721/iam" }, { authorization: JETON });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "acte_non_publiable");
+});
+
+// --------------------------------- les portes du parapheur et de la révision
+// Le dépôt PORTE l'état du parapheur et de la révision du client ; le service ne
+// les exécute pas, mais refuse d'ouvrir une signature tant qu'ils ne sont pas
+// achevés. C'est ce qui garantit que l'acte signé est celui qui a été approuvé.
+test("le parapheur et la révision gardent l'ouverture de la signature", async () => {
+  const akn = "<akomaNtoso><body>Arrêté n°2026-711</body></akomaNtoso>";
+  const deposer = (call, champs) => call("POST", "/v1/actes", { akn, ...champs }, { authorization: JETON });
+
+  const enAttente = banc();
+  const a1 = (await deposer(enAttente.call, {
+    numero: "2026-711",
+    validation: { statut: "en_cours", circuitLabel: "Vérification puis visa", etapes: ["verification"] },
+    revision: { statut: "valide" },
+  })).body;
+  const refusValidation = await enAttente.call("POST", `/v1/actes/${a1.id}/signature`, {}, { authorization: JETON });
+  assert.equal(refusValidation.status, 409);
+  assert.equal(refusValidation.body.code, "validation_incomplete");
+
+  const revision = banc();
+  const a2 = (await deposer(revision.call, {
+    numero: "2026-712",
+    validation: { statut: "valide", circuitLabel: "Vérification puis visa" },
+    revision: { statut: "en_attente", parNom: "Réviseur" },
+  })).body;
+  const refusRevision = await revision.call("POST", `/v1/actes/${a2.id}/signature`, {}, { authorization: JETON });
+  assert.equal(refusRevision.status, 409);
+  assert.equal(refusRevision.body.code, "revision_incomplete");
+
+  // Les deux portes franchies : la signature s'ouvre.
+  const pret = banc();
+  const a3 = (await deposer(pret.call, {
+    numero: "2026-713",
+    validation: { statut: "valide", circuitLabel: "Vérification puis visa" },
+    revision: { statut: "valide", parNom: "Réviseur" },
+  })).body;
+  const ouvre = await pret.call("POST", `/v1/actes/${a3.id}/signature`, {}, { authorization: JETON });
+  assert.equal(ouvre.status, 202);
+  assert.equal(ouvre.body.statut, "en_attente");
+  assert.equal(pret.state.actes[a3.id].statut, "en_signature");
+});
+
+// ------------------------------------------------------ la signature interne
+// Le circuit où c'est le SERVICE qui signe : la clé privée du signataire est
+// détenue par le service (scellée au repos) et ne quitte jamais le serveur. Deux
+// choses s'éprouvent ICI, et rien d'autre : la route refuse QUAND ELLE NE PEUT
+// PAS (sans coffre), et quand elle peut, elle signe, conserve la part interne,
+// et rend un original que la vérification accepte.
+test("la signature interne : le service signe, ou refuse en le disant", async () => {
+  const { portWebcrypto, createSignatureInterne, verifierOriginal } = await import("./signature-interne.mjs");
+  const cryptoPort = portWebcrypto(globalThis.crypto.subtle);
+  const aknInterne = "<akomaNtoso><body>Arrêté n°2026-601</body></akomaNtoso>";
+
+  // 1. SANS COFFRE : refus franc, avec son motif — jamais une simulation au nom
+  //    du service (c'est le constat NC-IV-001, pris par l'autre bout).
+  const sans = banc();
+  const a1 = (await sans.call("POST", "/v1/actes", { akn: aknInterne }, { authorization: JETON })).body;
+  const refus = await sans.call("POST", `/v1/actes/${a1.id}/signature`, { mode: "interne", signataires: [{ nom: "Jeanne MARTIN" }] }, { authorization: JETON });
+  assert.equal(refus.status, 409);
+  assert.equal(refus.body.code, "signature_interne_indisponible");
+  assert.ok(String(refus.body.motif || "").length > 20, "le refus dit son motif");
+  assert.equal(sans.state.actes[a1.id].statut, "depose", "un refus ne touche pas à l'acte");
+
+  // 2. AVEC COFFRE : le service signe. Une clé de scellement de 32 octets suffit
+  //    (ici en hexadécimal), et le coffre vit dans l'état du service.
+  const etat = emptyState();
+  const coffre = {};
+  const signatureInterne = createSignatureInterne({
+    crypto: cryptoPort, cle: "a".repeat(64), coffre, brand: "Ville de Valmont-sur-Loire",
+  });
+  const api = createActesApi({
+    state: etat, sha256, save: () => true, now: () => "2026-03-10T12:00:00.000Z", signatureInterne,
+  });
+  const authorize = (headers) => (String(headers.authorization || "").includes(JETON)
+    ? null
+    : { status: 401, headers: {}, body: { erreur: "absent", code: "jeton_absent" } });
+  const call = async (method, path, body, headers = {}) =>
+    api.route({ method, path, headers, body }, { authorize, rate: () => false });
+
+  const a2 = (await call("POST", "/v1/actes", { akn: aknInterne, numero: "2026-601" }, { authorization: JETON })).body;
+  const c = await call("POST", `/v1/actes/${a2.id}/signature`, {
+    mode: "interne",
+    signataires: [{ nom: "Jeanne MARTIN", courriel: "j.martin@vsl.fr", personId: "per-004", fonction: "Maire" }],
+    operateur: { id: "u-12", nom: "Jeanne MARTIN" },
+  }, { authorization: JETON });
+
+  assert.equal(c.status, 201);
+  assert.equal(c.body.niveau, "interne");
+  assert.equal(c.body.statut, "signee");
+  assert.equal(c.body.documentSigne.prestataire.id, "scribae-interne");
+  assert.equal(c.body.documentSigne.format, "application/vnd.actes.original-signe+json");
+
+  // L'acte déposé : signé, avec sa date, son circuit et sa part INTERNE (celle
+  // que la route protégée rend, et que le recueil ne voit jamais).
+  assert.equal(etat.actes[a2.id].statut, "signee");
+  assert.match(String(etat.actes[a2.id].signeLe || ""), /^\d{4}-\d{2}-\d{2}T/, "l'acte porte sa date de signature");
+  assert.equal(etat.actes[a2.id].signatureId, c.body.signatureId);
+  assert.equal(etat.actes[a2.id].originalInterne.signataire.courriel, "j.martin@vsl.fr");
+  assert.equal(etat.signatures[c.body.signatureId].niveau, "interne");
+  assert.equal(etat.signatures[c.body.signatureId].simulation, false, "le service a réellement signé");
+
+  // L'original est VÉRIFIABLE : c'est ce qui rend le circuit utilisable sans rien
+  // de plus (le recueil le contrôle par la même règle).
+  const verif = await verifierOriginal(cryptoPort, c.body.documentSigne);
+  assert.equal(verif.ok, true, verif.checks.map((x) => x.label + "=" + x.ok).join(" | "));
+
+  // La part NOMINATIVE ne sort pas par la route du recueil.
+  const pub = (await call("GET", `/v1/signatures/${c.body.signatureId}/document-signe`, null, { authorization: JETON })).body;
+  assert.equal(pub.documentSigne.interne, undefined);
+  assert.equal(pub.documentSigne.signatures[0].signataire.courriel, undefined);
+  assert.equal(pub.documentSigne.signatures[0].signataire.nom, "Jeanne MARTIN", "le nom, lui, est public");
+
+  // Le coffre : une fiche pour le signataire, une pour l'horodatage, et jamais
+  // une clé privée en clair.
+  assert.equal(Object.keys(coffre).length, 2);
+  assert.equal(JSON.stringify(coffre).includes('"d"'), false);
+
+  // Une SECONDE demande est refusée : l'acte est déjà signé.
+  const deja = await call("POST", `/v1/actes/${a2.id}/signature`, { mode: "interne", signataires: [{ nom: "Jeanne MARTIN" }] }, { authorization: JETON });
+  assert.equal(deja.status, 409);
+  assert.equal(deja.body.code, "deja_signe");
+});
+
+// ============================================================================
+// LA PORTE DE SIGNATURE — personne ne signe à la place d'un autre.
+//
+// C'est le constat NC-II-006 du registre. Quand le SERVICE identifie les
+// personnes (déploiement à session : AUTH_MODE=password ou oidc), il oppose le
+// signataire déclaré à l'opérateur, et il prend le NOM au référentiel — jamais au
+// corps de la requête. Sans identité (mode « demo »), il ne simule pas la
+// vérification : il la DÉCLARE absente (`attribution: « declaree »`).
+// ============================================================================
+const REFERENTIEL = {
+  people: [
+    { id: "per-004", civility: "Mme", firstName: "Jeanne", lastName: "MARTIN" },
+    { id: "per-009", civility: "M.", firstName: "Paul", lastName: "DURAND" },
+  ],
+};
+
+async function bancSession() {
+  const { portWebcrypto, createSignatureInterne } = await import("./signature-interne.mjs");
+  const state = emptyState();
+  const coffre = {};
+  const signatureInterne = createSignatureInterne({
+    crypto: portWebcrypto(globalThis.crypto.subtle), cle: "b".repeat(64), coffre, brand: "Ville de Valmont-sur-Loire",
+  });
+  const api = createActesApi({
+    state, sha256, save: () => true, now: () => "2026-03-10T12:00:00.000Z",
+    signatureInterne, referentiel: async () => REFERENTIEL,
+  });
+  const call = async (method, path, body, { identite = null, sessionRequise = true } = {}) =>
+    api.route({ method, path, headers: { authorization: JETON }, body }, { authorize: () => null, rate: () => false, identite, sessionRequise });
+  const session = (compte) => ({ type: "session", ...compte });
+  return { state, api, call, session, coffre };
+}
+
+const MAIRE = { id: "u-12", login: "j.martin", email: "j.martin@vsl.fr", personId: "per-004" };
+const AUTRE = { id: "u-13", login: "p.durand", email: "p.durand@vsl.fr", personId: "per-009" };
+
+test("signature opposée à l'opérateur : on ne signe pas à la place d'un autre", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-701" })).body;
+
+  // 1. Un AUTRE compte pour un signataire déclaré : refus, et l'acte n'est pas
+  //    touché. C'est le scénario d'usurpation, pris par la porte du service.
+  const refus = await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    mode: "interne",
+    signataires: [{ nom: "Jeanne MARTIN", courriel: "j.martin@vsl.fr", personId: "per-004" }],
+  }, { identite: b.session(AUTRE) });
+  assert.equal(refus.status, 403);
+  assert.equal(refus.body.code, "signature_non_habilitée");
+  assert.equal(b.state.actes[a.id].statut, "depose", "un refus ne touche pas à l'acte");
+
+  // 2. Une CLÉ de service n'est pas une personne : elle ne signe pas au nom d'un
+  //    signataire, quel que soit son rôle.
+  const parCle = await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    mode: "interne", signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }],
+  }, { identite: { type: "cle", role: "administrateur", label: "script" } });
+  assert.equal(parCle.status, 403);
+  assert.equal(parCle.body.code, "signature_sans_identite");
+
+  // 3. Un compte sans personne rattachée ne peut pas signer : la signature serait
+  //    anonyme.
+  const sansPersonne = await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    mode: "interne", signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }],
+  }, { identite: b.session({ id: "u-99", login: "sans.personne", personId: "" }) });
+  assert.equal(sansPersonne.status, 403);
+  assert.equal(sansPersonne.body.code, "operateur_non_identifie");
+
+  // 4. LE TITULAIRE signe — et le NOM inscrit vient du RÉFÉRENTIEL, même si le
+  //    corps déclarait « Le Maire ».
+  const ok = await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    mode: "interne",
+    signataires: [{ nom: "Le Maire", courriel: "j.martin@vsl.fr", personId: "per-004", fonction: "Maire" }],
+  }, { identite: b.session(MAIRE) });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.documentSigne.signatures[0].signataire.nom, "Mme Jeanne MARTIN", "le nom vient du référentiel");
+  assert.equal(ok.body.documentSigne.signatures[0].signataire.personId, "per-004");
+  assert.equal(b.state.signatures[ok.body.signatureId].attribution, "verifiee");
+  assert.equal(b.state.signatures[ok.body.signatureId].verifie, true);
+  // L'opérateur consigné est celui du SERVICE, non celui que le corps déclare.
+  assert.equal(b.state.actes[a.id].originalInterne.operateur.personId, "per-004");
+});
+
+test("sans session, le service ne prétend pas avoir vérifié (mode demo)", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN })).body;
+  const c = await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    mode: "interne", signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }],
+  }, { sessionRequise: false });
+  assert.equal(c.status, 201);
+  assert.equal(b.state.signatures[c.body.signatureId].attribution, "declaree");
+  assert.equal(b.state.signatures[c.body.signatureId].verifie, false);
+});
+
+test("le webhook refuse la signature apportée par un autre (circuit simple)", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN })).body;
+  const circ = (await b.call("POST", `/v1/actes/${a.id}/signature`, {
+    signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }], niveau: "simple",
+  })).body;
+  const pack = (personId) => ({
+    document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:10:00.000Z" }],
+    interne: { signataire: { nom: "Jeanne MARTIN", personId } },
+  });
+
+  // Le compte d'un autre apporte le paquet signé au nom du maire : refus.
+  const faux = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ.signatureId, documentSigne: pack("per-004") }, { identite: b.session(AUTRE) });
+  assert.equal(faux.status, 403);
+  assert.equal(faux.body.code, "signature_non_habilitée");
+  assert.equal(b.state.actes[a.id].statut, "en_signature", "un refus ne fait pas passer l'acte à signée");
+
+  // Le titulaire, lui, apporte la sienne : acceptée et marquée vérifiée.
+  const bon = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ.signatureId, documentSigne: pack("per-004") }, { identite: b.session(MAIRE) });
+  assert.equal(bon.status, 200);
+  assert.equal(b.state.actes[a.id].statut, "signee");
+  assert.equal(b.state.signatures[circ.signatureId].attribution, "verifiee");
+});
+
+test("la certification de conformité est opposée à l'opérateur", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, signatureMode: "externe" })).body;
+  const signe = (await b.call("POST", `/v1/actes/${a.id}/signature-externe`, {
+    signe: { url: "https://vsl.fr/signe.pdf", sha256: sha256("pdf"), nom: "signe.pdf" },
+    certificationRequise: true,
+  })).body;
+  assert.equal(signe.statut, "signee");
+
+  // Un autre compte certifie au nom du réviseur : refus.
+  const faux = await b.call("POST", `/v1/actes/${a.id}/conformite`, {
+    certification: { statut: "conforme", parNom: "Mme Jeanne MARTIN", personId: "per-004", sha256Signe: sha256("pdf") },
+  }, { identite: b.session(AUTRE) });
+  assert.equal(faux.status, 403);
+  assert.equal(faux.body.code, "conformite_non_habilitée");
+  assert.equal(b.state.actes[a.id].certification, null, "un refus n'inscrit rien");
+
+  // Le réviseur lui-même : accepté, avec son nom pris au référentiel.
+  const ok = await b.call("POST", `/v1/actes/${a.id}/conformite`, {
+    certification: { statut: "conforme", parNom: "Jeanne", personId: "per-004", sha256Signe: sha256("pdf") },
+  }, { identite: b.session(MAIRE) });
+  assert.equal(ok.status, 201);
+  assert.equal(b.state.actes[a.id].certification.parNom, "Mme Jeanne MARTIN");
+  assert.equal(b.state.actes[a.id].certification.parCompte.personId, "per-004");
+});
+
+// ============================================================================
+// LA TÉLÉTRANSMISSION RÉELLE, ET LA REPOSE AU REGISTRE.
+// ============================================================================
+
+// Un faux client de contrôle de légalité : on lui dit ce que l'API rend, et il
+// note ce qu'on lui a transmis. C'est le SEUL point de contact avec @ctes, et
+// c'est ce qui rend la télétransmission éprouvable sans réseau.
+function fauxControle({ reference = "AR-2026-9001", recuLe = "2026-03-10T13:00:00.000Z", echec = null } = {}) {
+  const transmis = [];
+  return {
+    transmis,
+    actif: () => true,
+    etat: () => ({ actif: true, transport: echec ? "demonstration" : "service", url: "https://ctes.exemple.fr/v1", motif: echec || "" }),
+    reglages: () => ({ url: "https://ctes.exemple.fr/v1" }),
+    transmettre: async (t) => {
+      transmis.push(t);
+      if (echec) throw new Error(echec);
+      return { reference, recuLe, destinataire: t.destinataire, statut: 201 };
+    },
+  };
+}
+
+// Dépose un acte et le fait signer par le webhook — le trajet minimal.
+async function deposerEtSigner(call, corps) {
+  const a = (await call("POST", "/v1/actes", { akn: AKN, ...corps }, { authorization: JETON })).body;
+  const s = (await call("POST", "/v1/actes/" + a.id + "/signature", {}, { authorization: JETON })).body;
+  await call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:20:00.000Z" }] },
+  }, { authorization: JETON });
+  return a;
+}
+
+test("contrôle de légalité : l'API branchée transmet réellement, et le certificat le dit", async () => {
+  const faux = fauxControle();
+  const { call, state } = banc({ controleLegalite: faux });
+  const a = await deposerEtSigner(call, { numero: "2026-501", controleLegalite: true });
+
+  const t = (await call("POST", "/v1/actes/" + a.id + "/transmission", { auteur: "Yann DUBOIS", entite: "Ville de Valmont-sur-Loire" }, { authorization: JETON }));
+  assert.equal(t.status, 201);
+  // L'appel a bien eu lieu, avec l'acte et son empreinte.
+  assert.equal(faux.transmis.length, 1);
+  assert.equal(faux.transmis[0].akn, AKN);
+  assert.equal(faux.transmis[0].empreinte, sha256(AKN));
+  // Le certificat est celui de l'API, et il ne se présente PAS comme une simulation.
+  assert.equal(t.body.reference, "AR-2026-9001");
+  assert.equal(t.body.recuLe, "2026-03-10T13:00:00.000Z");
+  assert.equal(t.body.demonstration, false);
+  assert.equal(t.body.certificat.demonstration, false);
+  assert.equal(t.body.certificat.nature, "Accusé de réception de télétransmission");
+  assert.equal(t.body.certificat.mention.includes("démonstration"), false, "une transmission réelle ne porte pas la réserve");
+  assert.equal(state.actes[a.id].transmission.api.simule, false);
+});
+
+test("contrôle de légalité : un refus de l'API laisse l'acte NON transmis, et le service ne fabrique rien", async () => {
+  const faux = fauxControle({ echec: "Le contrôle de légalité a refusé la transmission (422) — acte hors délai." });
+  const { call, state } = banc({ controleLegalite: faux });
+  const a = await deposerEtSigner(call, { numero: "2026-502", controleLegalite: true });
+
+  const echec = await call("POST", "/v1/actes/" + a.id + "/transmission", {}, { authorization: JETON });
+  assert.equal(echec.status, 502);
+  assert.equal(echec.body.code, "transmission_echec");
+  assert.equal(state.actes[a.id].transmission, undefined, "aucun certificat n'est enregistré sur un échec");
+  assert.equal(state.actes[a.id].statut, "signee", "l'acte reste signé : la transmission pourra être rejouée");
+  const suite = await call("POST", "/v1/actes/" + a.id + "/transmission", {}, { authorization: JETON });
+  assert.equal(suite.status, 502, "l'API refuse toujours : le service ne fabrique pas de certificat");
+});
+
+test("le rétablissement au registre : le titulaire, ou l'administration — et c'est marqué", async () => {
+  const b = await bancSession();
+  const ADMIN = { id: "u-01", login: "admin", email: "admin@vsl.fr", personId: "per-001", role: "administrateur", roles: ["administrateur"] };
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-801" })).body;
+  const circ = (await b.call("POST", "/v1/actes/" + a.id + "/signature", {
+    signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }], niveau: "simple",
+  })).body;
+  const pack = {
+    document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:10:00.000Z" }],
+    interne: { signataire: { nom: "Jeanne MARTIN", personId: "per-004" } },
+  };
+
+  // Un RÉDACTEUR (ni titulaire, ni administrateur) ne repose pas la signature
+  // d'un autre : le drapeau « reprise » ne lui donne aucun droit.
+  const redacteur = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ.signatureId, documentSigne: pack, reprise: true },
+    { identite: b.session({ ...AUTRE, role: "redacteur", roles: ["redacteur"] }) });
+  assert.equal(redacteur.status, 403);
+  assert.equal(redacteur.body.code, "signature_non_habilitée");
+
+  // L'ADMINISTRATEUR, lui, repose l'original — et le geste est NOMMÉ : la
+  // signature n'est pas présentée comme vérifiée, elle est une reprise.
+  const admin = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ.signatureId, documentSigne: pack, reprise: true },
+    { identite: b.session(ADMIN) });
+  assert.equal(admin.status, 200);
+  assert.equal(b.state.actes[a.id].statut, "signee");
+  assert.equal(b.state.signatures[circ.signatureId].attribution, "reprise");
+  assert.equal(b.state.signatures[circ.signatureId].operateur.personId, "per-001", "l'opérateur qui a posé est consigné");
+  assert.equal(b.state.signatures[circ.signatureId].verifie, false);
+});
+
+test("la compilation d'une version consolidée : posée par l'administration, et nommée", async () => {
+  const b = await bancSession();
+  const ADMIN = { id: "u-01", login: "admin", email: "admin@vsl.fr", personId: "per-001", role: "administrateur", roles: ["administrateur"] };
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-802" })).body;
+  const circ = (await b.call("POST", "/v1/actes/" + a.id + "/signature", {
+    signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }], niveau: "avancee",
+  })).body;
+  const pack = {
+    document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:10:00.000Z" }],
+    interne: { signataire: { nom: "Jeanne MARTIN", personId: "per-004" } },
+  };
+  const pose = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ.signatureId, documentSigne: pack, compilation: true },
+    { identite: b.session(ADMIN) });
+  assert.equal(pose.status, 200);
+  assert.equal(b.state.signatures[circ.signatureId].attribution, "compilation");
+  assert.equal(b.state.signatures[circ.signatureId].operateur.personId, "per-001");
+
+  // Sans le drapeau, l'administrateur qui n'est pas le signataire est refusé :
+  // l'exception ne s'ouvre que sur un geste NOMMÉ.
+  const a2 = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-803" })).body;
+  const circ2 = (await b.call("POST", "/v1/actes/" + a2.id + "/signature", {
+    signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }], niveau: "avancee",
+  })).body;
+  const sansDrapeau = await b.call("POST", "/v1/webhooks/signature",
+    { signatureId: circ2.signatureId, documentSigne: pack },
+    { identite: b.session(ADMIN) });
+  assert.equal(sansDrapeau.status, 403);
+  assert.equal(sansDrapeau.body.code, "signature_non_habilitée");
+});
+
+test("le titulaire apporte sa propre signature : attribuée vérifiée, avec son opérateur", async () => {
+  const b = await bancSession();
+  const a = (await b.call("POST", "/v1/actes", { akn: AKN, numero: "2026-804" })).body;
+  const circ = (await b.call("POST", "/v1/actes/" + a.id + "/signature", {
+    signataires: [{ nom: "Jeanne MARTIN", personId: "per-004" }], niveau: "simple",
+  })).body;
+  const bon = await b.call("POST", "/v1/webhooks/signature", {
+    signatureId: circ.signatureId,
+    documentSigne: { document: { akn: AKN }, signatures: [{ signeLe: "2026-03-10T12:10:00.000Z" }], interne: { signataire: { nom: "Le Maire", personId: "per-004" } } },
+  }, { identite: b.session(MAIRE) });
+  assert.equal(bon.status, 200);
+  assert.equal(b.state.signatures[circ.signatureId].attribution, "verifiee");
+  assert.equal(b.state.signatures[circ.signatureId].operateur.personId, "per-004");
 });

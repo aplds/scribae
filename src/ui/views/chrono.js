@@ -13,8 +13,8 @@
 // et journalisés.
 // ============================================================================
 import { state, redrawView, navigate, can, touch, journaliser } from "../state.js";
-import { h, button, toast, modal } from "../dom.js";
-import { selectField, textField, confirmDialog, emptyState, helpLink } from "../components.js";
+import { h, button, toast, modal, select, textInput } from "../dom.js";
+import { selectField, textField, confirmDialog, emptyState, helpLink, pageTitle } from "../components.js";
 import { download, formatDate } from "../../lib/util.js";
 import { blobCsv, blobXlsx } from "../../lib/xlsx.js";
 import { numberingSettings } from "../../lib/sequence.js";
@@ -25,10 +25,15 @@ import {
 
 const FILTRE_VIDE_RESUME = (f) => Object.values(f).filter((v) => v && v !== true).length === 0;
 
+// Combien de lignes du chrono s'affichent d'abord. Le chrono réel en compte des
+// milliers : les rendre toutes faisait trente-neuf mille pixels de page.
+const CHRONO_PAGE = 25;
+
 function filtres() {
   const ui = (state.ui = state.ui || {});
   ui.chronoFiltres = { ...FILTRES_VIDES, ...(ui.chronoFiltres || {}) };
   ui.chronoTri = ui.chronoTri || { cle: "seq", sens: "desc" };
+  ui.chronoAffiches = ui.chronoAffiches || CHRONO_PAGE;
   return { f: ui.chronoFiltres, tri: ui.chronoTri, ui };
 }
 
@@ -55,8 +60,7 @@ export function renderChrono(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Chrono de numérotation" }),
-      h("p", { class: "page-head__sub", text: "Tous les numéros attribués : leur rang, l'entité et le type d'acte concernés, l'état de l'acte, ses dates et son rédacteur. Les rangs jamais attribués et les numéros annulés y figurent aussi — un trou du chrono s'explique. Cliquez un en-tête pour trier, une ligne pour ouvrir l'acte." }),
+      pageTitle("Chrono de numérotation" , "Tous les numéros attribués : leur rang, l'entité et le type d'acte concernés, l'état de l'acte, ses dates et son rédacteur. Les rangs jamais attribués et les numéros annulés y figurent aussi — un trou du chrono s'explique. Cliquez un en-tête pour trier, une ligne pour ouvrir l'acte." ),
     ),
     h("div", { class: "page-head__actions" },
       button("Export CSV", { variant: "secondary", icon: "download", onClick: () => importerExport("csv") }),
@@ -104,38 +108,60 @@ export function renderChrono(root) {
   }
 
   // ------------------------------------------------------------ les filtres
+  // LA BARRE DU CHRONO (revue d'interface, P5). Le chrono est le plus long des
+  // écrans (trente-neuf mille pixels) : ses filtres restent donc EN HAUT du
+  // défilement, réduits à ce qu'on pose neuf fois sur dix — la recherche, l'état,
+  // l'entité, l'année. Le reste (type d'acte, source, dates, rangs libres et
+  // numéros annulés) vit derrière « Plus de filtres », et le compte suit.
   const optionsEntites = [...new Set(lignes.map((l) => l.entityCode).filter(Boolean))]
     .sort().map((code) => ({ value: code, label: (c.entities || []).find((e) => e.code === code)?.name || code }));
   const optionsAnnees = [...new Set(lignes.map((l) => l.annee).filter(Boolean))].sort().map((a) => ({ value: String(a), label: String(a) }));
   const optionsTypes = (c.actTypes || []).map((t) => ({ value: t.id, label: t.label }));
   const optionsEtats = Object.entries(ETATS_CHRONO).map(([id, v]) => ({ value: id, label: v.label }));
 
-  const poser = (patch) => { Object.assign(state.ui.chronoFiltres, patch); redrawView(); };
-  const reinit = () => { state.ui.chronoFiltres = { ...FILTRES_VIDES }; redrawView(); };
+  const poser = (patch) => { Object.assign(state.ui.chronoFiltres, patch); state.ui.chronoAffiches = CHRONO_PAGE; redrawView(); };
+  const reinit = () => { state.ui.chronoFiltres = { ...FILTRES_VIDES }; state.ui.chronoAffiches = CHRONO_PAGE; redrawView(); };
+  const plusDeFiltres = ui.chronoPlus === true;
 
-  const box = h("div", { class: "fr-card fr-card--soft chrono-filtres" },
-    h("div", { class: "fr-row" },
-      h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Filtrer" }),
-      !FILTRE_VIDE_RESUME(f) ? button("Réinitialiser", { variant: "tertiary", size: "sm", icon: "refresh", onClick: reinit }) : null,
-      h("span", { class: "fr-small fr-muted", text: `${visibles.length} / ${lignes.length} ligne(s)` }),
+  const champ = (label, control) => h("div", { class: "liste-barre__champ" },
+    h("label", { class: "fr-label", text: label }), control);
+  const barre = h("div", { class: "liste-barre chrono-barre no-print" },
+    champ("Recherche", textInput(f.q, (v) => poser({ q: v }), { placeholder: "Numéro, objet, trame, rédacteur…" })),
+    champ("État", select([{ value: "", label: "Tous les états" }, ...optionsEtats], f.statut, (v) => poser({ statut: v }))),
+    champ("Entité", select([{ value: "", label: "Toutes les entités" }, ...optionsEntites], f.entityCode, (v) => poser({ entityCode: v }))),
+    champ("Année", select([{ value: "", label: "Toutes les années" }, ...optionsAnnees], f.annee, (v) => poser({ annee: v }))),
+    h("div", { class: "liste-barre__champ liste-barre__champ--gestes" },
+      button(plusDeFiltres ? "Moins de filtres" : "Plus de filtres", {
+        variant: "tertiary", size: "sm", icon: plusDeFiltres ? "up" : "down",
+        onClick: () => { state.ui.chronoPlus = !plusDeFiltres; redrawView(); },
+      }),
+      button(ui.chronoToutesColonnes ? "Colonnes essentielles" : "Toutes les colonnes", {
+        variant: "tertiary", size: "sm", icon: ui.chronoToutesColonnes ? "left" : "right",
+        title: ui.chronoToutesColonnes
+          ? "Revenir aux six colonnes de lecture"
+          : "Afficher les " + (COLONNES_CHRONO.length - 6) + " autres colonnes (type, trame, dates, rédacteur, source, référence)",
+        onClick: () => { state.ui.chronoToutesColonnes = !ui.chronoToutesColonnes; redrawView(); },
+      }),
+      !FILTRE_VIDE_RESUME(f) ? button("Réinitialiser", { variant: "tertiary", size: "sm", icon: "refresh", onClick: reinit }) : null),
+  );
+  root.appendChild(barre);
+
+  if (plusDeFiltres) {
+    const box = h("div", { class: "fr-card fr-card--soft chrono-filtres" });
+    const grille = h("div", { class: "chrono-filtres__grid" });
+    grille.appendChild(selectField({ label: "Type d'acte", value: f.type, placeholder: "— tous —", options: optionsTypes, onChange: (v) => poser({ type: v }) }));
+    grille.appendChild(selectField({ label: "Source du numéro", value: f.source, placeholder: "— toutes —", options: [{ value: "interne", label: "Séquence interne" }, { value: "externe", label: "Service externe" }], onChange: (v) => poser({ source: v }) }));
+    grille.appendChild(textField({ label: "Signé à partir du", value: f.du, type: "date", onChange: (v) => poser({ du: v }) }));
+    grille.appendChild(textField({ label: "Signé jusqu'au", value: f.au, type: "date", onChange: (v) => poser({ au: v }) }));
+    box.appendChild(grille);
+    const caseACocher = (label, cle, aide) => h("label", { class: "fr-check", title: aide || "" },
+      h("input", { type: "checkbox", checked: !!f[cle], onChange: (e) => poser({ [cle]: e.target.checked }) }), label);
+    box.appendChild(h("div", { class: "fr-row chrono-filtres__cases" },
+      caseACocher("Afficher les rangs libres (trous du chrono)", "libres"),
+      caseACocher("Afficher les numéros annulés", "annules"),
     ));
-  const grille = h("div", { class: "chrono-filtres__grid" });
-  grille.appendChild(textField({ label: "Recherche", value: f.q, placeholder: "Numéro, objet, trame, rédacteur…", onChange: (v) => poser({ q: v }) }));
-  grille.appendChild(selectField({ label: "Entité", value: f.entityCode, placeholder: "— toutes —", options: optionsEntites, onChange: (v) => poser({ entityCode: v }) }));
-  grille.appendChild(selectField({ label: "Année", value: f.annee, placeholder: "— toutes —", options: optionsAnnees, onChange: (v) => poser({ annee: v }) }));
-  grille.appendChild(selectField({ label: "Type d'acte", value: f.type, placeholder: "— tous —", options: optionsTypes, onChange: (v) => poser({ type: v }) }));
-  grille.appendChild(selectField({ label: "État", value: f.statut, placeholder: "— tous —", options: optionsEtats, onChange: (v) => poser({ statut: v }) }));
-  grille.appendChild(selectField({ label: "Source du numéro", value: f.source, placeholder: "— toutes —", options: [{ value: "interne", label: "Séquence interne" }, { value: "externe", label: "Service externe" }], onChange: (v) => poser({ source: v }) }));
-  grille.appendChild(textField({ label: "Signé à partir du", value: f.du, type: "date", onChange: (v) => poser({ du: v }) }));
-  grille.appendChild(textField({ label: "Signé jusqu'au", value: f.au, type: "date", onChange: (v) => poser({ au: v }) }));
-  box.appendChild(grille);
-  const caseACocher = (label, cle, aide) => h("label", { class: "fr-check", title: aide || "" },
-    h("input", { type: "checkbox", checked: !!f[cle], onChange: (e) => poser({ [cle]: e.target.checked }) }), label);
-  box.appendChild(h("div", { class: "fr-row chrono-filtres__cases" },
-    caseACocher("Afficher les rangs libres (trous du chrono)", "libres"),
-    caseACocher("Afficher les numéros annulés", "annules"),
-  ));
-  root.appendChild(box);
+    root.appendChild(box);
+  }
 
   // -------------------------------------------------------------- le tableau
   if (!visibles.length) {
@@ -151,16 +177,44 @@ export function renderChrono(root) {
     redrawView();
   };
 
-  const head = h("tr", {}, ...COLONNES_CHRONO.map((col) => h("th", {
+  // LES COLONNES AUSSI SE CHOISISSENT (revue d'interface, P5). Un chrono porte
+  // quatorze colonnes : à l'écran, six suffisent à retrouver une ligne — le
+  // numéro, le rang, l'entité, l'objet, l'état et la date de signature. Les huit
+  // autres (type, trame, dates de création et de modification, rédacteur,
+  // source, référence) restent à un clic, et partent toujours entières dans les
+  // exports CSV et XLSX.
+  const CELLULES = {
+    numero: (l) => h("td", {}, h("span", { class: "fr-mono", text: l.numero || (l.etat === "libre" ? "rang " + l.seq + " libre" : "—") })),
+    seq: (l) => h("td", {}, l.seq == null ? h("span", { class: "fr-muted", text: "—" }) : String(l.seq)),
+    annee: (l) => h("td", {}, l.annee ? String(l.annee) : "—"),
+    entite: (l) => h("td", {}, l.entite || "—"),
+    type: (l) => h("td", {}, l.typeLabel || "—"),
+    objet: (l) => h("td", { class: "chrono-objet", title: l.objet || "" }, l.objet || (l.etat === "libre" ? l.observation || "—" : "—")),
+    trame: (l) => h("td", {}, l.trame || "—"),
+    etat: (l) => { const e = etatChrono(l.etat); return h("td", {}, h("span", { class: "fr-badge fr-badge--" + e.color, text: e.label })); },
+    dateSignature: (l) => h("td", {}, l.dateSignature ? formatDate(l.dateSignature) : "—"),
+    creeLe: (l) => h("td", {}, l.creeLe ? formatDate(l.creeLe) : "—"),
+    majLe: (l) => h("td", {}, l.majLe ? formatDate(l.majLe) : "—"),
+    redacteur: (l) => h("td", {}, l.redacteur || "—"),
+    source: (l) => h("td", {}, l.source === "externe" ? "Service externe" : "Interne"),
+    reference: (l) => h("td", {}, l.reference || "—"),
+  };
+  const COLONNES_ESSENTIELLES = ["numero", "seq", "entite", "objet", "etat", "dateSignature"];
+  const toutesColonnes = ui.chronoToutesColonnes === true;
+  const colonnes = toutesColonnes
+    ? COLONNES_CHRONO
+    : COLONNES_CHRONO.filter((col) => COLONNES_ESSENTIELLES.includes(col.cle));
+
+  const head = h("tr", {}, ...colonnes.map((col) => h("th", {
     class: "chrono-th" + (tri.cle === col.cle ? " is-sorted" : ""),
     title: "Trier par « " + col.label + " »",
     onClick: () => basculerTri(col.cle),
   }, col.label, tri.cle === col.cle ? h("span", { class: "chrono-th__sens", text: tri.sens === "asc" ? " ▲" : " ▼" }) : null)),
     peutGerer ? h("th", { class: "chrono-th chrono-th--act" }, "") : null);
 
+  const affiches = visibles.slice(0, ui.chronoAffiches);
   const tbody = h("tbody");
-  for (const l of visibles) {
-    const e = etatChrono(l.etat);
+  for (const l of affiches) {
     const estLibre = l.etat === "libre";
     const estAnnule = l.etat === "annule";
     const ouvrable = !!l.acteId && !estLibre && !estAnnule;
@@ -169,20 +223,7 @@ export function renderChrono(root) {
       title: ouvrable ? "Ouvrir l'acte" : (l.observation || ""),
       onClick: ouvrable ? (() => { state.ui.openActeId = l.acteId; navigate("acte/" + l.acteId); }) : null,
     },
-      h("td", {}, h("span", { class: "fr-mono", text: l.numero || (estLibre ? "rang " + l.seq + " libre" : "—") })),
-      h("td", {}, l.seq == null ? h("span", { class: "fr-muted", text: "—" }) : String(l.seq)),
-      h("td", {}, l.annee ? String(l.annee) : "—"),
-      h("td", {}, l.entite || "—"),
-      h("td", {}, l.typeLabel || "—"),
-      h("td", { class: "chrono-objet", title: l.objet || "" }, l.objet || (estLibre ? l.observation || "—" : "—")),
-      h("td", {}, l.trame || "—"),
-      h("td", {}, h("span", { class: "fr-badge fr-badge--" + e.color, text: e.label })),
-      h("td", {}, l.dateSignature ? formatDate(l.dateSignature) : "—"),
-      h("td", {}, l.creeLe ? formatDate(l.creeLe) : "—"),
-      h("td", {}, l.majLe ? formatDate(l.majLe) : "—"),
-      h("td", {}, l.redacteur || "—"),
-      h("td", {}, l.source === "externe" ? "Service externe" : "Interne"),
-      h("td", {}, l.reference || "—"),
+      ...colonnes.map((col) => (CELLULES[col.cle] || (() => h("td", {}, "—")))(l)),
       peutGerer ? h("td", { class: "chrono-td--act" },
         estLibre ? button("Annuler le numéro", {
           variant: "tertiary", size: "sm", icon: "trash",
@@ -192,8 +233,29 @@ export function renderChrono(root) {
   }
   const table = h("div", { class: "chrono-table-wrap" },
     h("table", { class: "fr-table chrono-table" }, h("thead", {}, head), tbody));
+  root.appendChild(h("p", { class: "liste-compte", text: visibles.length + " ligne" + (visibles.length > 1 ? "s" : "") + " — " + affiches.length + " affichée" + (affiches.length > 1 ? "s" : "") + (lignes.length !== visibles.length ? " (sur " + lignes.length + " au total)" : "") + (toutesColonnes ? "" : " · " + (COLONNES_CHRONO.length - colonnes.length) + " colonnes masquées") }));
   root.appendChild(table);
 
+  // Le chrono se déroule sur des milliers de lignes : on n'en affiche que ce
+  // qu'un écran porte, et on allonge à la demande (revue d'interface, P5).
+  const plusEl = h("div", { class: "liste-plus no-print" });
+  const restantes = visibles.length - affiches.length;
+  if (restantes > 0) {
+    plusEl.appendChild(button("Afficher les " + Math.min(CHRONO_PAGE, restantes) + " suivantes", {
+      variant: "secondary", size: "sm", icon: "down",
+      onClick: () => { state.ui.chronoAffiches += CHRONO_PAGE; redrawView(); },
+    }));
+    plusEl.appendChild(button("Afficher les 200 suivantes", {
+      variant: "tertiary", size: "sm",
+      onClick: () => { state.ui.chronoAffiches += 200; redrawView(); },
+    }));
+    plusEl.appendChild(button("Tout afficher (" + visibles.length + ")", {
+      variant: "tertiary", size: "sm",
+      onClick: () => { state.ui.chronoAffiches = visibles.length; redrawView(); },
+    }));
+  }
+  root.appendChild(plusEl);
+  // --------------------------------------------------------- gestes d'écriture
   // --------------------------------------------------------- gestes d'écriture
   if (peutGerer && resume.libres) {
     const libres = visibles.filter((l) => l.etat === "libre");

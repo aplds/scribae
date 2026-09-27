@@ -178,7 +178,7 @@ export async function buildSignedPackage({ akn, pageHtml, pageCss, numero, objet
   // de notification). Il n'apparaît JAMAIS dans la page publique — voir
   // `partiePublique`.
   if (interne) pack.interne = { format: "application/vnd.actes.dossier-signature+json", version: 1, ...interne };
-  pack.pageHtml = originalPageHtml(pack, pageHtml, brand, pageCss);
+  pack.pageHtml = pageOriginalSigne(pack, pageHtml, brand, pageCss);
   return pack;
 }
 
@@ -236,7 +236,14 @@ export async function verifySignedPackage(pack) {
 // feuille de style du document (`documentCss`), la même que celle du HTML
 // autonome et du PDF — l'original signé ne se présente donc pas autrement que
 // l'acte imprimé.
-function originalPageHtml(pack, bodyHtml, brand, pageCss) {
+//
+// ELLE EST EXPORTÉE parce que deux circuits en ont besoin : celui du poste, qui
+// l'ajoute à l'instant de la signature (`buildSignedPackage`), et la SIGNATURE
+// INTERNE, où c'est le SERVICE qui signe (voir
+// `src/server/mysql/signature-interne.mjs`) : le service ne sait pas rendre le
+// document, dont il n'a que l'Akoma Ntoso — c'est donc l'application, qui l'a
+// sous les yeux, qui habille l'original reçu avant de le conserver.
+export function pageOriginalSigne(pack, bodyHtml, brand, pageCss) {
   const s = (pack.signatures || [])[0] || {};
   const c = s.certificat || {};
   const h = pack.horodatage || {};

@@ -31,6 +31,7 @@ export const GROUPES_API = [
   { id: "comptes", label: "Comptes et sessions", resume: "Le mode d'authentification, l'ouverture de session, les mots de passe locaux." },
   { id: "persistance", label: "Persistance partagée", resume: "Les collections du référentiel, enregistrement par enregistrement." },
   { id: "actes", label: "Actes", resume: "Dépôt des actes finalisés, suivi, dossier interne." },
+  { id: "pieces", label: "Pièces jointes", resume: "Les fichiers conservés avec un acte : l'original signé d'une reprise, la version signée d'un circuit externe." },
   { id: "signature", label: "Signature", resume: "Circuits de signature, notification du prestataire, circuits externes." },
   { id: "publication", label: "Publication et ELI", resume: "Recueil public, identifiants persistants, retrait et épinglage." },
   { id: "bulletins", label: "Bulletins", resume: "Le Journal des actes : numéros par période, abonnés et flux." },
@@ -72,7 +73,7 @@ export const API_REFERENCE = [
   {
     id: "config", groupe: "service", methode: "GET", chemin: "/v1/config", auth: "public",
     resume: "Réglages de référentiel et état du prestataire",
-    description: "Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé). Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.",
+    description: "Les variables de RÉFÉRENTIEL posées dans le `.env` du déploiement, sous forme de chemins pointés, et les valeurs REFUSÉES avec leur motif — les variables de l'annuaire (`SCRIBA_ANNUAIRE_*`) comprises. Y figure aussi l'état du prestataire de signature (transport, adresse, niveau, chemins, et un booléen disant si la clé est là — jamais la clé), et celui du COFFRE DE SIGNATURE INTERNE (`signatureInterne` : disponible ou non, motif, niveau, algorithme, nombre de certificats émis, horodatage) — c'est ce qui permet à l'application de n'offrir que les circuits que ce service peut réellement mener. Aucun secret ne sort par cette route : elle sert à l'écran de connexion avant toute session.",
     service: "auto-heberge",
     reponses: [{ code: 200, description: "Réglages, erreurs, état du prestataire" }],
     champs: [
@@ -262,6 +263,14 @@ export const API_REFERENCE = [
     reponses: [{ code: 200, description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, { code: 403, description: "Rôle insuffisant (ou force sans le rôle administrateur)" }, { code: 413, description: "Trop d'enregistrements" }, { code: 507, description: "Base pleine" }],
   },
 
+  {
+    id: "db-flux", groupe: "persistance", methode: "GET", chemin: "/v1/db/flux", auth: "lecteur",
+    resume: "Suivre les changements en temps réel",
+    service: "auto-heberge",
+    description: "Ouvre un flux SSE sur lequel le service pousse chaque changement : `{ type: \"collection\", collection, revision, n, ids }` — le nom de la collection, sa révision, le nombre d'enregistrements touchés et leurs identifiants, JAMAIS leur contenu. Le poste relit ensuite la collection par la route de lecture, avec ses droits. Un poste lent (tampon plein) n'est pas attendu : il reçoit `{ type: \"resync\" }` et relit tout. Un commentaire de battement est émis toutes les 20 secondes pour tenir la connexion ouverte — un reverse-proxy qui tamponne la réponse (`proxy_buffering off` dans nginx) rendrait le flux muet.",
+    reponses: [{ code: 200, description: "Flux ouvert (text/event-stream)" }, { code: 401, description: "Session absente (mode mot de passe)" }, { code: 429, description: "Trop de flux ouverts depuis cette adresse" }, { code: 503, description: "Limite de flux ouverts atteinte (flux_sature)" }],
+  },
+
   // ============================================================== Actes
   {
     id: "actes-lister", groupe: "actes", methode: "GET", chemin: "/v1/actes", auth: "lecteur",
@@ -303,6 +312,48 @@ export const API_REFERENCE = [
     reponses: [{ code: 200, description: "Le dossier interne" }, { code: 404, description: "Aucun dossier interne (dossier_absent)" }],
   },
 
+  // ========================================================== Pièces jointes
+  // Les FICHIERS conservés avec un acte : l'original signé d'une reprise d'acte
+  // ancien, la version signée d'un acte mené par le circuit externe. Ils se
+  // déposaient chez l'hôte de la plateforme ; une installation auto-hébergée n'a
+  // pas cet hôte, et les range donc dans le service (voir src/lib/fichiers.js).
+  {
+    id: "pieces-deposer", groupe: "pieces", methode: "POST", chemin: "/v1/pieces", auth: "redacteur",
+    resume: "Déposer une pièce (fichier joint)",
+    description: "Range un fichier joint à un acte — l'original signé d'une reprise d'acte ancien, ou la version signée d'un acte du circuit externe — et rend son ADRESSE de lecture. Le contenu voyage en base64 dans un corps JSON : le canal temps réel de l'édition en ligne ne transporte pas de binaire, et l'API lit ses corps en UTF-8. Les métadonnées — nom, type, taille, empreinte SHA-256 — sont DÉCLARÉES par le client : c'est lui qui lit le fichier, et c'est son empreinte que le recueil affichera ; le service les range, il ne les juge pas. L'APPLICATION y recourt quand l'hébergement n'offre pas de dépôt de fichiers de son côté (`root.uploadPlugin`) — c'est-à-dire en auto-hébergement. La taille est bornée par `MAX_BODY` du service (8 Mio par défaut, soit environ 5,5 Mo de fichier une fois le base64 passé) ; le plafond se relève dans le `.env`, et la façade doit suivre (`client_max_body_size`).",
+    corps: { nom: "1998-042.pdf", type: "application/pdf", taille: 182345, sha256: "…", base64: "JVBERi0xLjQK…" },
+    reponses: [
+      { code: 201, description: "Pièce déposée : son identifiant et son adresse de lecture" },
+      { code: 400, description: "Contenu illisible (piece_illisible)" },
+      { code: 413, description: "Pièce trop volumineuse (piece_trop_volumineuse)" },
+      { code: 422, description: "Nom ou contenu absent (piece_sans_nom, piece_absente)" },
+      { code: 507, description: "Le rangement n'a pas pu conserver la pièce" },
+    ],
+    champs: [
+      { cle: "id", type: "string", description: "L'identifiant de la pièce (il EST son adresse de lecture)" },
+      { cle: "url", type: "string", description: "L'adresse à citer sur l'acte (le service auto-hébergé rend `/v1/pieces/{id}`)" },
+      { cle: "sha256", type: "string", description: "L'empreinte déclarée, conservée telle quelle" },
+    ],
+  },
+  {
+    id: "pieces-lire", groupe: "pieces", methode: "GET", chemin: "/v1/pieces/{id}", auth: "public",
+    resume: "Lire une pièce (fichier joint)",
+    description: "Rend la pièce déposée. Route PUBLIQUE, et ce n'est pas un oubli : le recueil public cite cette adresse — c'est elle qui montre l'original signé d'un acte ancien, ou la version signée d'un acte du circuit externe. L'identifiant, tiré au hasard à la taille d'une clé, est le seul droit d'entrée. Le service auto-hébergé rend les OCTETS de la pièce avec son type MIME (elle s'ouvre dans un lien, un cadre de lecture, ou se télécharge) ; le service embarqué, qui n'a pas de façade HTTP, rend le même contenu en JSON + base64. Une pièce inconnue est un 404.",
+    params: [{ nom: "id", type: "string", description: "Identifiant de la pièce" }],
+    reponses: [{ code: 200, description: "La pièce (octets, ou JSON + base64 selon le service)" }, { code: 404, description: "Pièce inconnue (piece_inconnue)" }],
+  },
+  {
+    id: "pieces-supprimer", groupe: "pieces", methode: "DELETE", chemin: "/v1/pieces/{id}", auth: "redacteur",
+    resume: "Retirer une pièce",
+    description: "Retire une pièce déposée. Geste de PROPRETÉ — le rédacteur qui venait de joindre un original et se ravise —, jamais une dépublication. Refusé tant qu'un acte déposé ou une publication cite la pièce : la retirer laisserait une page du recueil avec un lien mort. C'est le pendant du bouton « Retirer » qui accompagne l'original joint à une reprise.",
+    params: [{ nom: "id", type: "string", description: "Identifiant de la pièce" }],
+    reponses: [
+      { code: 200, description: "Pièce retirée" },
+      { code: 404, description: "Pièce inconnue (piece_inconnue)" },
+      { code: 409, description: "Pièce citée par un acte ou une publication (piece_referencee)" },
+    ],
+  },
+
   // ========================================================== Signature
   {
     id: "signature-envoyer", groupe: "signature", methode: "POST", chemin: "/v1/actes/{id}/signature", auth: "redacteur",
@@ -324,6 +375,30 @@ export const API_REFERENCE = [
       { cle: "signatureId", type: "string", description: "Identifiant du circuit (SIG-…)" },
       { cle: "lienSignature", type: "string", description: "Le lien de signature chez le prestataire, quand il est branché" },
       { cle: "simulation", type: "booléen", description: "true : aucun appel n'est sorti" },
+    ],
+  },
+  {
+    id: "signature-interne", groupe: "signature", methode: "POST", chemin: "/v1/actes/{id}/signature", auth: "redacteur",
+    resume: "Signer un acte avec le service (signature interne)",
+    description: "Avec `mode: \"interne\"`, la route change de nature : ce n'est plus un prestataire qui signera, c'est LE SERVICE. Il détient la clé privée du signataire, scellée au repos (AES-256-GCM) sous la clé de scellement du déploiement (`SCRIBA_SIGNATURE_KV_KEY`), et signe avec elle : la clé ne quitte jamais le serveur, et le poste ne reçoit que l'original signé — document figé, signature, certificat, horodatage. La réponse porte donc l'original signé (`documentSigne`), et l'acte est « signé » dans la foulée : il n'y a ni lien de signature, ni webhook, ni relève de statut. C'est la définition eIDAS de la signature avancée (clé sous le contrôle exclusif du signataire, certificat émis par une autorité, signature liée au document) — sans être qualifiée, faute d'autorité de confiance qualifiée. Ce circuit n'existe qu'en AUTO-HÉBERGEMENT : sans clé de scellement — et sur le service de démonstration, qui ne tient aucun coffre —, la route refuse (409 `signature_interne_indisponible`) plutôt que de simuler une signature que le service ne peut pas produire.",
+    params: [{ nom: "id", type: "string", description: "Identifiant de l'acte déposé" }],
+    corps: {
+      mode: "interne",
+      signataires: [{ nom: "Jeanne Mercier", courriel: "j.mercier@exemple.fr", fonction: "Le maire", ordre: 1, personId: "per-004", compteId: "u-12", entite: "Ville de Valmont-sur-Loire" }],
+      operateur: { id: "u-12", nom: "Jeanne Mercier", courriel: "j.mercier@exemple.fr", compte: "j.mercier" },
+      poste: "Mozilla/5.0 (poste de l'agent)",
+    },
+    reponses: [
+      { code: 201, description: "Acte signé : la réponse porte l'original signé" },
+      { code: 409, description: "Circuit interne indisponible (signature_interne_indisponible), ou acte déjà signé" },
+      { code: 502, description: "La signature interne a échoué (signature_interne_echec)" },
+    ],
+    champs: [
+      { cle: "documentSigne", type: "object", description: "L'original signé complet : `document` (Akoma Ntoso et son empreinte SHA-256), `signatures` (valeur, certificat, signeLe), `horodatage`, `prestataire` et `interne` (part non diffusée)" },
+      { cle: "certificat", type: "object", description: "Le certificat du signataire : sujet, émetteur, numéro de série, validité, clé publique (JWK), empreinte" },
+      { cle: "horodatage", type: "object", description: "L'horodatage du service, signé par sa propre clé d'horodatage" },
+      { cle: "prestataire", type: "object", description: "{ id: « scribae-interne », nom, niveau } — l'émetteur est le service lui-même" },
+      { cle: "empreinte", type: "string", description: "L'empreinte SHA-256 du document signé" },
     ],
   },
   {
@@ -370,10 +445,11 @@ export const API_REFERENCE = [
   },
   {
     id: "transmission", groupe: "signature", methode: "POST", chemin: "/v1/actes/{id}/transmission", auth: "redacteur",
-    resume: "Transmettre au contrôle de légalité",
-    description: "L'acte signé part vers l'API d'envoi de la préfecture, qui en accuse réception. L'accusé vaut certificat informatique de transmission, déposé sur le document. Un acte déclaré soumis au contrôle de légalité ne peut PAS être publié avant sa transmission (409 `transmission_absente`).",
+    resume: "Transmettre au contrôle de légalité (API, ou déclaration)",
+    description: "Trois voies. DÉCLARATION : le corps porte `declaration` (`at` et `destinataire` requis) — la transmission a été faite hors application, et une personne l'atteste ; aucune requête n'est adressée à l'API, le certificat conservé est une déclaration, et sa mention nomme son auteur. C'est la voie du régime déclaratif, et celle de l'acte transmis autrement en régime API. Quand le service identifie les personnes (session), la déclaration est opposée à l'opérateur : `declaration.personId` doit être celui du compte connecté, et l'acte peut exiger un réviseur compétent (`403 declaration_non_habilitée`). APPEL RÉEL : sans `declaration`, quand l'API est branchée (SCRIBA_CONTROLE_LEGALITE_URL et _CLE dans le .env du service), l'appel a lieu et le certificat est celui que l'API rend ; un refus échoue en 502 (`transmission_echec`) sans rien enregistrer. SIMULATION : sans `declaration` et sans API branchée, le certificat est fabriqué localement et porte `demonstration: true`, avec une mention qui le dit. Un acte déclaré soumis au contrôle de légalité ne peut PAS être publié avant sa transmission (409 `transmission_absente`).",
     params: [{ nom: "id", type: "string", description: "Identifiant de l'acte" }],
-    reponses: [{ code: 200, description: "Transmission enregistrée" }, { code: 409, description: "Acte non signé (acte_non_signe)" }],
+    corps: { declaration: { at: "2026-09-22", destinataire: "Préfecture — contrôle de légalité", reference: "2026-09-DELEG-0184", motif: "API injoignable", personId: "p-roussel" } },
+    reponses: [{ code: 201, description: "Transmis : certificat de transmission (accusé réel, déclaration, ou simulation marquée demonstration: true) ; pour une déclaration, la réponse porte `attribution` (`verifiee` | `declaree`) et `auteur` — ce que le service a pu attester" }, { code: 200, description: "Acte déjà transmis (idempotent)" }, { code: 409, description: "Acte non signé (acte_non_signe)" }, { code: 403, description: "Déclaration engageant une autre personne, ou hors compétence (declaration_non_habilitée)" }, { code: 422, description: "Déclaration incomplète ou illisible (declaration_incomplete, declaration_invalide)" }, { code: 502, description: "L'API de contrôle de légalité a refusé ou n'a pas répondu (transmission_echec)" }],
   },
   {
     id: "transmission-lire", groupe: "signature", methode: "GET", chemin: "/v1/actes/{id}/transmission", auth: "lecteur",
@@ -625,6 +701,10 @@ export const CODES_ERREUR = [
   { code: "acte_non_signe", sens: "Publication ou transmission demandée avant la signature." },
   { code: "acte_non_publiable", sens: "L'acte a été déposé non publiable (acte individuel)." },
   { code: "transmission_absente", sens: "L'acte est soumis au contrôle de légalité, mais n'a pas été transmis." },
+  { code: "declaration_incomplete", sens: "La déclaration de transmission n'indique pas à quelle date, ou à qui, l'acte a été transmis." },
+  { code: "declaration_invalide", sens: "La déclaration de transmission est illisible." },
+  { code: "declaration_non_habilitée", sens: "La déclaration engage une autre personne que l'opérateur, ou un compte qui n'est pas un réviseur compétent de l'acte." },
+  { code: "transmission_echec", sens: "L'API de contrôle de légalité a refusé ou n'a pas répondu : rien n'est enregistré, la transmission se rejoue." },
   { code: "conformite_non_certifiee", sens: "Le circuit externe attend la certification de conformité du réviseur." },
   { code: "validation_incomplete", sens: "Le circuit de validation (parapheur) n'est pas achevé." },
   { code: "revision_incomplete", sens: "La révision n'est pas achevée : la signature ne peut pas s'ouvrir." },
@@ -632,6 +712,10 @@ export const CODES_ERREUR = [
   { code: "signature_rejetee", sens: "L'empreinte du document signé ne correspond pas à celle du document déposé." },
   { code: "prestataire_indisponible", sens: "Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse)." },
   { code: "circuit_non_externe", sens: "L'acte ne suit pas le circuit externe." },
+  { code: "piece_inconnue", sens: "Aucune pièce (fichier joint) ne porte cet identifiant." },
+  { code: "piece_referencee", sens: "La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort." },
+  { code: "piece_absente", sens: "Le corps de la requête ne porte pas le contenu de la pièce (`base64`)." },
+  { code: "piece_trop_volumineuse", sens: "La pièce dépasse le plafond du service (MAX_BODY)." },
   { code: "publication_inconnue", sens: "Aucune publication ne porte cette clé." },
   { code: "bulletin_inconnu", sens: "Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique)." },
   { code: "bulletin_provisoire", sens: "Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés." },
@@ -729,9 +813,10 @@ export function markdownApi({ base = "https://api.exemple.fr" } = {}) {
     + "révisions et détection de conflits. C'est ce que le navigateur synchronise "
     + "en continu ;");
   out.push("- le **domaine** — `/v1/actes/…`, `/v1/signatures/…`, "
-    + "`/v1/publications/…` : le dépôt d'un acte finalisé, l'ouverture d'un circuit "
-    + "de signature, la publication au recueil et les identifiants persistants "
-    + "(ELI). C'est ce qu'un script ou un prestataire appelle.");
+    + "`/v1/publications/…`, `/v1/pieces/…` : le dépôt d'un acte finalisé, "
+    + "l'ouverture d'un circuit de signature, la publication au recueil, les "
+    + "identifiants persistants (ELI) et les fichiers conservés avec les actes. "
+    + "C'est ce qu'un script ou un prestataire appelle.");
   out.push("");
   p("S'y ajoutent les routes de **service** (`/v1/config`, `/v1/auth/…`, "
     + "`/v1/courriel`) et les **adresses publiques du site** (`/recueil`, "

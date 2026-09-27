@@ -20,7 +20,7 @@
 // ============================================================================
 import { state, touch, applyBrand, redrawView } from "../state.js";
 import { h, clear, button, toast, field as frField, fitPaper } from "../dom.js";
-import { textField, selectField, choiceField, fontField, confirmDialog, helpLink, emptyState } from "../components.js";
+import { textField, selectField, choiceField, fontField, confirmDialog, helpLink, emptyState, pageTitle } from "../components.js";
 import { download, pickFile } from "../../lib/util.js";
 import {
   emptyStyle, stylesOf, styleSummary, styleTraits, sampleDocument, generalStyle, STYLE_PRESETS, applyPreset,
@@ -318,8 +318,7 @@ export function renderStyles(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Feuilles de style" }),
-      h("p", { class: "page-head__sub", text: "La charte graphique des décisions : marges, police, logo, en-tête, filets, encadrés, tableaux, signature. Une feuille générale habille tous les actes ; des sous-feuilles se rattachent facultativement à certaines entités ou familles d'actes. La présentation est la même à l'écran, à l'impression (PDF), en Word et sur la version publiée." }),
+      pageTitle("Feuilles de style" , "La charte graphique des décisions : marges, police, logo, en-tête, filets, encadrés, tableaux, signature. Une feuille générale habille tous les actes ; des sous-feuilles se rattachent facultativement à certaines entités ou familles d'actes. La présentation est la même à l'écran, à l'impression (PDF), en Word et sur la version publiée." ),
     ),
     h("div", { class: "page-head__actions" },
       h("div", { class: "styles-tabs", role: "tablist" },

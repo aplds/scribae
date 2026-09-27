@@ -15,7 +15,7 @@
 import { h, clear, icon, button, toast } from "./dom.js";
 import {
   state, navigate, surChangementCollab, presencesActives,
-  notifications, marquerVu,
+  notifications, marquerVu, etatFlux, surEtatFlux, resynchroniserFlux,
 } from "./state.js";
 import { formatDate } from "../lib/util.js";
 
@@ -28,13 +28,38 @@ export function monterBarreCollab(container) {
   unsubs = [];
   clear(container);
   const presence = h("div", { class: "collab-presence" });
+  const synchro = h("div", { class: "collab-synchro" });
   const cloche = h("div", { class: "collab-cloche" });
+  container.appendChild(synchro);
   container.appendChild(presence);
   container.appendChild(cloche);
   const maj = () => { peindrePresence(presence); peindreCloche(cloche); };
   unsubs.push(surChangementCollab(maj));
+  unsubs.push(surEtatFlux(() => peindreSynchro(synchro)));
   unsubs.push(() => fermerPanneau());
   maj();
+}
+
+// LE TÉMOIN DU TEMPS RÉEL (1.6.2). Il ne paraît que là où il y a quelque chose
+// à dire : sur un déploiement sans flux (stockage local, démonstration), il
+// reste muet — annoncer « sondage » là où il n'y a jamais eu de flux serait du
+// bruit. Cliquer dessus relance la liaison.
+function peindreSynchro(box) {
+  clear(box);
+  const e = etatFlux();
+  if (!e || e.etat === "absent" || e.etat === "inactif") return;
+  const LIBELLES = {
+    connexion: { texte: "connexion…", classe: "is-attente", titre: "Le flux temps réel s'ouvre." },
+    ouvert: { texte: "temps réel", classe: "is-ouvert", titre: "Les modifications des autres postes arrivent en direct." },
+    erreur: { texte: "hors temps réel", classe: "is-panne", titre: (e.detail || "Le flux est interrompu.") + " La lecture périodique prend le relais ; cliquez pour réessayer." },
+    arrete: { texte: "temps réel arrêté", classe: "is-panne", titre: "Le flux est arrêté ; cliquez pour le reprendre." },
+  };
+  const l = LIBELLES[e.etat];
+  if (!l) return;
+  box.appendChild(h("button", {
+    class: "collab-synchro__btn " + l.classe, type: "button", title: l.titre,
+    on: { click: () => { resynchroniserFlux(); peindreSynchro(box); } },
+  }, h("span", { class: "collab-synchro__dot" }), h("span", { class: "collab-synchro__texte", text: l.texte })));
 }
 
 function fermerPanneau() {
@@ -74,13 +99,20 @@ function basculerPanneauPrecence(ancre) {
   if (!actifs.length) corps.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucune présence détectée." }));
   for (const p of actifs) {
     const moi = p.userId === state.user?.id;
+    const cible = p.acteId ? { route: "acte/" + p.acteId, quoi: "Ouvrir l'acte" } : (p.trameId ? { route: "trame/" + p.trameId, quoi: "Ouvrir la trame" } : null);
+    const enEcriture = !!(p.brouillon && Date.now() - Date.parse(p.brouillon.at || p.at || 0) < 20000);
     corps.appendChild(h("div", { class: "collab-panel__row" + (moi ? " is-me" : "") },
       h("span", { class: "collab-presence__dot", text: initiales(p.byName) }),
       h("span", { class: "collab-panel__text" },
         h("strong", { text: p.byName + (moi ? " (vous)" : "") }),
-        h("span", { class: "fr-small fr-muted", text: [libelleEcran(p.ecran), p.acteLabel ? "→ " + p.acteLabel : ""].filter(Boolean).join(" · ") || "—" })),
-      !moi && p.acteId
-        ? h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", text: "Ouvrir", on: { click: () => { fermerPanneau(); navigate("acte/" + p.acteId); } } })
+        h("span", { class: "fr-small fr-muted", text: [
+          libelleEcran(p.ecran),
+          p.acteLabel ? "→ " + p.acteLabel : "",
+          p.trameLabel ? "→ trame : " + p.trameLabel : "",
+          enEcriture ? "écrit en ce moment" : "",
+        ].filter(Boolean).join(" · ") || "—" })),
+      !moi && cible
+        ? h("button", { class: "fr-btn fr-btn--tertiary fr-btn--sm", text: "Ouvrir", title: cible.quoi, on: { click: () => { fermerPanneau(); navigate(cible.route); } } })
         : null,
     ));
   }
@@ -97,7 +129,7 @@ async function peindreCloche(box) {
     class: "collab-cloche__btn" + (nonLus ? " is-on" : ""), type: "button",
     title: nonLus ? nonLus + " nouvelle(s) notification(s)" : "Notifications",
     on: { click: (e) => { e.stopPropagation(); basculerPanneauCloche(box); } },
-  }, icon("info", 16), nonLus ? h("span", { class: "collab-cloche__n", text: String(nonLus > 9 ? "9+" : nonLus) }) : null);
+  }, icon("cloche", 16), nonLus ? h("span", { class: "collab-cloche__n", text: String(nonLus > 9 ? "9+" : nonLus) }) : null);
   box.appendChild(b);
 }
 

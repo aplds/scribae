@@ -52,6 +52,12 @@ export const APPELS = [
     pourquoi: "l'état de provisionnement et les rôles connus",
     attend: { statut: 200, corps: aCle("roles") },
   },
+  {
+    id: "config",
+    methode: "GET", chemin: "/v1/config",
+    pourquoi: "les réglages posés par le déploiement, ET l'état de ce que le service peut mener — le prestataire de signature (`prestataire`) et le coffre de signature interne (`signatureInterne`) : c'est ce que l'application lit au démarrage pour n'offrir que les circuits réellement menables par ce service (une démonstration n'a pas de coffre et doit le dire)",
+    attend: { statut: 200, corps: aCle("variables") },
+  },
 
   // ------------------------------------------------- le recueil public lit
   {
@@ -103,6 +109,45 @@ export const APPELS = [
       kind: "reprise", informative: true, reprise: true,
     },
     pourquoi: "une reprise d'acte ancien se publie SANS signature, à titre informatif : les DEUX services doivent connaître cette route et le drapeau « reprise » (le refus d'un acte inconnu est légitime, l'ignorance de la route ne l'est pas)",
+    attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
+  },
+
+  // ---------------------------- la signature INTERNE (le service signe lui-même)
+  {
+    id: "signature-interne",
+    methode: "POST", chemin: "/v1/actes/inconnu/signature",
+    corps: { mode: "interne", signataires: [{ nom: "Épreuve de conformité", courriel: "epreuve@exemple.fr" }] },
+    pourquoi: "le circuit INTERNE (le SERVICE signe, avec la clé du signataire gardée scellée dans son coffre) est un circuit que les DEUX services doivent connaître : l'auto-hébergé le mène, la démonstration le refuse franchement (409 `signature_interne_indisponible`) — mais tous deux doivent d'abord savoir qu'un acte inconnu est un 404, et l'ignorance de la route n'est jamais légitime",
+    attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
+  },
+
+  // --------------------- la signature EXTERNE (l'acte est signé hors de l'application)
+  {
+    id: "signature-externe",
+    methode: "POST", chemin: "/v1/actes/inconnu/signature-externe",
+    corps: { signe: { url: "https://exemple.fr/epreuve-signe.pdf", sha256: "0".repeat(64), nom: "epreuve-signe.pdf" } },
+    pourquoi: "le circuit EXTERNE (papier ou outil tiers) est un circuit que les DEUX services doivent connaître : le client y dépose la version signée, et c'est le service qui tient l'ordre « version signée → conformité → publié ». Une route manquante d'un côté faisait échouer le client sur ce côté seulement (défaut corrigé en 1.6.2) — l'ignorance de la route n'est jamais légitime",
+    attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
+  },
+  {
+    id: "conformite",
+    methode: "POST", chemin: "/v1/actes/inconnu/conformite",
+    corps: { certification: { statut: "conforme", parNom: "Épreuve de conformité" } },
+    pourquoi: "la certification de conformité de la version signée (circuit externe) est un geste que les DEUX services doivent connaître : sans elle, la publication d'un acte à certification requise est refusée (409 `conformite_non_certifiee`) des deux côtés",
+    attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
+  },
+
+  // ------------------------------ les PIÈCES (les fichiers joints à un acte)
+  {
+    id: "piece-inconnue",
+    methode: "GET", chemin: "/v1/pieces/inconnue-xyz",
+    pourquoi: "l'adresse d'une pièce est citée par le recueil public — c'est elle qui montre l'original signé d'un acte ancien, ou la version signée d'un acte du circuit externe —, et une pièce inconnue est un 404 avec son code : les DEUX services doivent connaître cette route (l'application y dépose désormais les fichiers quand l'hôte n'offre pas de dépôt — voir src/lib/fichiers.js)",
+    attend: { statut: 404, corps: aCle("code") },
+  },
+  {
+    id: "piece-sans-contenu",
+    methode: "POST", chemin: "/v1/pieces", corps: { nom: "épreuve de conformité.pdf" },
+    pourquoi: "un dépôt de pièce sans son contenu est refusé par la validation (et non ignoré comme une route inconnue) : le corps est délibérément incomplet pour que le refus soit le même que l'appelant soit autorisé ou non",
     attend: { classe: ["4xx"], sansCode: "ressource_inconnue" },
   },
 

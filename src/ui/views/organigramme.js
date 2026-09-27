@@ -29,7 +29,7 @@
 // ============================================================================
 import { state, touch, redrawView, can, journaliser } from "../state.js";
 import { h, clear, button, toast, modal } from "../dom.js";
-import { textField, selectField, choiceField, confirmDialog, sectionHeader, helpLink, emptyState } from "../components.js";
+import { textField, selectField, choiceField, confirmDialog, sectionHeader, helpLink, emptyState, pageTitle } from "../components.js";
 import {
   ENTITY_KINDS, kindLabel, newEntite,
   entitesOf, entiteById, estAutonome, enfantsDe,
@@ -80,8 +80,7 @@ export function renderOrganigramme(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Organigramme" }),
-      h("p", { class: "page-head__sub", text: "La structure au nom de laquelle les actes sont pris : les entités (commune, établissements, régies…), les services qui les composent, et les bureaux auxquels les comptes sont rattachés. Cliquez un nœud pour ouvrir sa fiche — y désigner le signataire principal d'une entité, la rattacher à une autre, ou renseigner ses services et leurs bureaux. Un service peut dépendre d'un autre service, ou du bureau d'un autre service : les agents affectés à un service de tête voient alors les actes de toute la chaîne en contrebas. Une entité rattachée agit au nom d'une autre (une régie municipale, par exemple) sans perdre sa vie propre : son directeur, ses services, ses actes." }),
+      pageTitle("Organigramme" , "La structure au nom de laquelle les actes sont pris : les entités (commune, établissements, régies…), les services qui les composent, et les bureaux auxquels les comptes sont rattachés. Cliquez un nœud pour ouvrir sa fiche — y désigner le signataire principal d'une entité, la rattacher à une autre, ou renseigner ses services et leurs bureaux. Un service peut dépendre d'un autre service, ou du bureau d'un autre service : les agents affectés à un service de tête voient alors les actes de toute la chaîne en contrebas. Une entité rattachée agit au nom d'une autre (une régie municipale, par exemple) sans perdre sa vie propre : son directeur, ses services, ses actes." ),
     ),
     h("div", { class: "page-head__actions" },
       peutGerer ? button("Nouvelle entité", { variant: "primary", icon: "plus", onClick: () => ouvrirFicheEntite(c, { ...droits, creer: true }) }) : null,

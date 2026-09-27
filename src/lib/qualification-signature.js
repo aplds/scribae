@@ -11,6 +11,12 @@
 //                     (ouverture de session et déclaration cochée) ; la clé est
 //                     engendrée par le navigateur ;
 //   • « avancee »   — un prestataire signe, et son certificat est vérifié ;
+//   • « avancee »   (variante INTERNE) — c'est le SERVICE de la collectivité qui
+//                     signe, avec la clé du signataire gardée scellée dans son
+//                     coffre : la clé ne quitte jamais le serveur, ce qui est
+//                     exactement la condition eIDAS de la signature avancée
+//                     (contrôle exclusif de la clé par le signataire) — mais
+//                     l'autorité d'émission n'est pas qualifiée ;
 //   • « externe »   — l'acte est signé hors de l'application (papier ou outil
 //                     tiers) et la version signée est déposée et certifiée.
 //
@@ -45,6 +51,17 @@ export const MENTION_AVANCEE_SIMULEE =
   + "le certificat est un certificat de démonstration et n'a pas la valeur d'une signature qualifiée "
   + "(règlement (UE) n° 910/2014, eIDAS).";
 
+// LA VARIANTE INTERNE : ce n'est pas un prestataire qui a signé, c'est le service
+// de la collectivité lui-même, avec une clé qu'il détient seul. La distinction
+// compte pour qui lit l'acte : le signataire et l'émetteur du certificat
+// appartiennent à la même organisation, et l'autorité d'émission n'est pas une
+// autorité de confiance qualifiée. Le dire est ce qui tient la qualification.
+export const MENTION_AVANCEE_INTERNE =
+  "Signature électronique avancée, produite par le SERVICE de la collectivité : la clé privée du signataire est "
+  + "détenue et scellée par le service, et ne quitte jamais le serveur — le poste de signature n'y a pas accès. "
+  + "L'autorité qui a émis le certificat est interne à la collectivité : cette signature n'est donc pas qualifiée "
+  + "au sens du règlement (UE) n° 910/2014 (eIDAS), qui suppose un prestataire de confiance qualifié.";
+
 export const MENTION_AVANCEE =
   "Signature électronique avancée, produite par un prestataire de signature et vérifiée par le service. "
   + "Elle n'est pas qualifiée au sens du règlement (UE) n° 910/2014 (eIDAS) : cette qualification suppose un "
@@ -71,23 +88,31 @@ const LABELS = {
 //   niveau      un des NIVEAUX, ou "" si l'information manque (ancien
 //               enregistrement : on ne devine pas, on se tait) ;
 //   simule      le prestataire est-il simulé sur cette installation ?
-//   prestataire le nom du prestataire, s'il est connu.
+//   prestataire le nom du prestataire, s'il est connu — ou l'objet
+//               `{ id, nom }`. L'identifiant `scribae-interne` dit que c'est le
+//               SERVICE qui a signé : la mention le nomme alors pour ce qu'il est.
 export function qualificationSignature({ niveau = "", simule = false, prestataire = "" } = {}) {
   const n = niveauConnu(niveau);
+  const id = String((prestataire && prestataire.id) || "").trim();
   const nom = String((prestataire && prestataire.nom) || prestataire || "").trim();
-  if (!n) return { niveau: "", label: "", mention: "", qualifiee: false, simulee: false, avertissement: false };
+  const interne = id === "scribae-interne";
+  if (!n) return { niveau: "", label: "", mention: "", qualifiee: false, simulee: false, interne: false, avertissement: false };
   const mention = n === "simple" ? MENTION_SIMPLE
     : n === "qualifiee" ? MENTION_QUALIFIEE
     : n === "externe" ? MENTION_EXTERNE
+    : interne ? MENTION_AVANCEE_INTERNE
     : (simule ? MENTION_AVANCEE_SIMULEE : MENTION_AVANCEE);
   return {
     niveau: n,
-    label: LABELS[n] + (nom && n === "avancee" && !simule ? ` (${nom})` : ""),
+    label: LABELS[n] + (nom && n === "avancee" ? ` (${interne ? "par le service" : nom})` : ""),
     mention,
     qualifiee: n === "qualifiee",
-    simulee: n === "avancee" ? !!simule : false,
+    simulee: n === "avancee" ? !!simule && !interne : false,
+    // L'émetteur est le service lui-même : ni un tiers, ni — surtout — une
+    // autorité qualifiée. La notice de l'acte publié peut le dire.
+    interne,
     // Ce qui doit se voir : tout ce qui n'est pas qualifié, et tout ce qui est simulé.
-    avertissement: n !== "qualifiee" || !!simule,
+    avertissement: n !== "qualifiee" || (!!simule && !interne),
   };
 }
 
@@ -95,13 +120,17 @@ export function qualificationSignature({ niveau = "", simule = false, prestatair
 // la publication transmet au service (`niveau`), et ce qui permet au recueil de
 // qualifier la signature des années plus tard, sans relire l'acte.
 //
-//   circuit                 « simple » | « electronique » | « externe »
+//   circuit                 « simple » | « electronique » | « interne » | « externe »
 //   niveauPrestataire       le niveau réglé pour le prestataire (Administration
 //                           › Signature) : « simple », « avancee », « qualifiee »
 export function niveauDepuisCircuit(circuit, niveauPrestataire = "") {
   const c = String(circuit || "");
   if (c === "externe") return "externe";
   if (c === "simple") return "simple";
+  // La signature interne est « avancée » par construction (la clé est sous le
+  // contrôle exclusif du signataire, et un certificat est émis) : elle ne peut
+  // pas être déclarée qualifiée, faute d'autorité de confiance qualifiée.
+  if (c === "interne") return "avancee";
   if (c === "electronique") return niveauConnu(niveauPrestataire) || "avancee";
   return "";
 }

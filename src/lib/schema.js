@@ -484,7 +484,13 @@ export function newTrame(patch = {}) {
     //   ""                  suit le réglage général (Administration › Signature) ;
     //   "externe_impose"    le circuit externe est OBLIGATOIRE pour cette trame ;
     //   "externe_autorise"  le circuit externe est possible, au choix du rédacteur ;
+    //   "simple_impose"     la signature simple est OBLIGATOIRE pour cette trame ;
+    //   "simple_autorise"   la signature simple est possible, au choix du rédacteur ;
+    //   "interne_impose"    la signature interne est OBLIGATOIRE pour cette trame ;
+    //   "interne_autorise"  la signature interne est possible, au choix du rédacteur ;
     //   "electronique"      le circuit électronique est imposé.
+    // La liste qui fait foi est MODES_TRAME (src/lib/externe.js) : celle-ci n'est
+    // qu'un aide-mémoire.
     // Voir src/lib/externe.js.
     signature: "",
     fields: [],
@@ -696,10 +702,13 @@ export const emptyConfig = () => ({
     },
   },
   // Circuit de signature de la collectivité. `mode` : « electronique » (défaut —
-  // le prestataire, par API), ou « externe » (le document est téléchargé, signé
-  // hors de l'application, puis déposé en PDF ; le réviseur certifie la
-  // conformité avant publication). Une trame peut trancher autrement — imposer
-  // ou autoriser le circuit externe — par son réglage `signature`. Voir
+  // le prestataire, par API), « simple » (le signataire signe dans
+  // l'application, avec son compte), « interne » (le SERVICE signe, avec la clé
+  // du signataire gardée scellée dans son coffre — auto-hébergement seulement),
+  // ou « externe » (le document est téléchargé, signé hors de l'application, puis
+  // déposé en PDF ; le réviseur certifie la conformité avant publication). Une
+  // trame peut trancher autrement — imposer ou autoriser l'un des circuits — par
+  // son réglage `signature`. Voir
   // src/lib/externe.js et Administration › Signature. Le bloc `api` porte les
   // réglages du PRESTATAIRE (adresse, niveau, points de terminaison) : la clé,
   // elle, reste au service et n'est jamais écrite ici.
@@ -715,14 +724,23 @@ export const emptyConfig = () => ({
   //     référentiel qui décident (`config.circuits`, voir src/lib/validation.js).
   //     Le drapeau est conservé, toujours vrai, pour ne pas relire comme faux un
   //     référentiel enregistré avant ce changement.
-  //   • `controleLegalite` transmet l'acte signé au représentant de l'État par
-  //     une API d'envoi, entre le retour signé et la publication : l'accusé de
-  //     réception du contrôle de légalité est déposé sur le document, puis
-  //     l'acte est publié (voir src/lib/legalite.js). Éteint par défaut — la
-  //     télétransmission suppose une convention et des identifiants auprès de
-  //     la préfecture ; l'administration de la formalité reste possible à la
-  //     main depuis l'échéancier.
+  //   • `controleLegalite` — ancien booléen de la transmission au contrôle de
+  //     légalité, remplacé par `config.controleLegalite.mode` (trois régimes :
+  //     « desactive », « declaratif », « api » — voir juste après, et
+  //     src/lib/legalite.js). Conservé comme REPLI : `modeControleLegalite` le
+  //     lit (vrai = « api ») pour un référentiel enregistré avant les régimes.
   experimental: { parapheur: true, controleLegalite: false },
+  // LE RÉGIME DE TRANSMISSION au contrôle de légalité (Administration ›
+  // Expérimentale) : trois valeurs, et non plus un interrupteur.
+  //   • « desactive » — rien n'est géré par l'application : aucune porte ne
+  //     s'intercale entre la signature et la publication, et la transmission se
+  //     constate à la main ;
+  //   • « declaratif » — la publication attend qu'un RÉVISEUR compétent DÉCLARE
+  //     la transmission (à qui, à quelle date), sans aucun appel sortant ;
+  //   • « api » — le service adresse l'acte à l'API d'envoi @ctes, et chaque
+  //     acte peut en outre faire l'objet d'une déclaration.
+  // Voir src/lib/legalite.js, `modeControleLegalite`.
+  controleLegalite: { mode: "desactive" },
   // Assistants — deux aides en langage naturel, livrées avec l'application :
   //   • « Plume », dans l'atelier, qui explique le MODE D'EMPLOI de l'outil —
   //     et ne reçoit jamais le contenu d'un acte (voir src/lib/assistant.js) ;

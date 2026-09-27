@@ -19,6 +19,7 @@ import {
   recordsOf, indexOf, diffRecords, reconcile, stableStringify, isLocalOnly, isSingleton,
 } from "./contract.js";
 import { definirCleService } from "../cle-service.js";
+import { fusionnerJson, estObjet } from "../fusion.js";
 import { hostKv } from "../hosts.js";
 import { sessionDeService, deploiementAuth, setDeploiementAuth } from "../auth.js";
 import { enteteCsrf, jetonCsrfLisible, modeService, sessionCourante } from "../motdepasse.js";
@@ -676,6 +677,31 @@ export async function read(name, { fresh = false } = {}) {
   return (await driver.read(name)).value;
 }
 
+// ------------------------------------------------------- lecture à la demande
+// CE QU'UN AUTRE POSTE VIENT D'ÉCRIRE (1.6.2). Le flux (lib/flux.js) annonce
+// quelle collection a bougé et à quelle révision : ces trois accès sont ce qui
+// permet de décider s'il faut relire — et de relire sans passer par le miroir.
+export const revisionConnue = (name) => (snapshot[name] ? snapshot[name].rev : null);
+
+// Cet enregistrement est-il connu de la BASE ? Un enregistrement créé sur ce
+// poste et pas encore écrit (ou dont l'écriture a échoué) n'y est pas : il ne
+// doit donc jamais être effacé par une relecture venue d'ailleurs — c'est du
+// travail en vol, pas un reste.
+export const indexConnu = (name, id) => !!(snapshot[name] && snapshot[name].index[String(id)]);
+
+// Relit une collection depuis le service, sans se contenter du miroir local.
+export async function rafraichirCollection(name) {
+  if (!COLLECTIONS[name]) return null;
+  if (isLocalOnly(name)) return { value: (await localDriver.read(name)).value, revision: 0 };
+  if (driver.shared) {
+    if (pending.length) await flushPending();
+    const value = await readCollection(name);
+    return { value, revision: snapshot[name]?.rev ?? 0 };
+  }
+  const res = await driver.read(name);
+  return { value: res.value, revision: 0 };
+}
+
 // ---------------------------------------------------------------- écriture
 // LES ÉCRITURES D'UNE COLLECTION SE SUIVENT, une à la fois.
 //
@@ -757,8 +783,26 @@ async function ecrire(name, value, force) {
     }
   }
 
+  // LA FUSION DES CONFLITS (1.6.2).
+  //
+  // Un conflit veut dire « un autre poste a écrit cet enregistrement entre le
+  // moment où je l'ai lu et celui où j'ai écrit à mon tour ». Jusqu'ici, la
+  // réponse était « le serveur gagne » : ce poste perdait en bloc ce qu'il venait
+  // d'écrire. Sur un acte, c'était une relecture qui disparaissait ; sur le
+  // référentiel, c'étaient les réglages que l'on venait de poser.
+  //
+  // On REPREND donc le conflit : l'état du serveur avant notre écriture (notre
+  // index : c'est exactement la voie de base d'une fusion à trois voies), ce que
+  // nous voulions écrire, et ce que le serveur détient maintenant. Les
+  // modifications de chacun sur des CHAMPS différents sont conservées toutes les
+  // deux ; celles qui divergent vraiment sont signalées, jamais perdues en
+  // silence (voir lib/fusion.js).
+  const fusion = (force || !upserts.length) ? null : await reprendreConflits(name, base, upserts, res);
+  if (fusion) res = fusion.res;
+
   const index = { ...base };
   const payloadById = new Map(upserts.map((u) => [u.id, u]));
+  for (const u of (fusion ? fusion.upserts : [])) payloadById.set(u.id, u);
   for (const a of res.applied || []) {
     const u = payloadById.get(a.id);
     index[a.id] = { rev: a.rev, json: stableStringify(u ? u.payload : null), ord: u ? u.ord : 0 };
@@ -772,13 +816,117 @@ async function ecrire(name, value, force) {
   snapshot[name] = { rev: res.revision ?? (snapshot[name]?.rev || 0), index };
 
   let reconciled = value;
-  if (res.conflicts && res.conflicts.length) {
-    reconciled = reconcile(name, value, res.conflicts);
-    if (!SILENT_COLLECTIONS.has(name)) notify(conflictListeners, { collection: name, conflicts: res.conflicts });
+  // La version locale est celle qui a été écrite : c'est elle que le miroir doit
+  // garder, fusionnée.
+  if (fusion && fusion.valeurs.size) reconciled = appliquerFusion(name, reconciled, fusion.valeurs);
+  const restants = res.conflicts || [];
+  const desaccords = [
+    ...(fusion ? fusion.desaccords : []),
+    ...desaccordsDesConflits(base, upserts, restants),
+  ];
+  if (restants.length) reconciled = reconcile(name, value, restants);
+  // Ce qui a été FUSIONNÉ n'est pas un conflit : c'est le travail des deux postes,
+  // réuni — on l'annonce (l'écran le dit), sans le confondre avec un désaccord
+  // qui, lui, demande un arbitrage humain. Une seule notification, pour que
+  // l'écran n'ait pas à recoller deux récits.
+  if (!SILENT_COLLECTIONS.has(name) && (restants.length || (fusion && fusion.fusionnes.length))) {
+    notify(conflictListeners, {
+      collection: name,
+      conflicts: restants,
+      fusionnes: fusion ? fusion.fusionnes : [],
+      desaccords,
+    });
   }
   await kvSet(MIRROR_FOLDER, name, reconciled);
   setStatus("ok", "Service de données disponible.");
-  return { ok: true, conflicts: res.conflicts || [], value: reconciled };
+  return {
+    ok: true, conflicts: restants,
+    fusionnes: fusion ? fusion.fusionnes : [],
+    desaccords,
+    value: reconciled,
+  };
+}
+
+// Reprend les enregistrements renvoyés en conflit : fusion à trois voies, puis
+// second envoi, une seule fois. Rend `{ res, upserts, fusionnes, desaccords,
+// valeurs }` — `upserts` porte les charges fusionnées (pour l'index local),
+// `valeurs` la charge retenue par identifiant (pour le miroir), ou `null` s'il
+// n'y avait rien à reprendre.
+async function reprendreConflits(name, base, upserts, res) {
+  const parId = new Map(upserts.map((u) => [String(u.id), u]));
+  const repris = [];
+  const valeurs = new Map();
+  const desaccords = [];
+  for (const c of res.conflicts || []) {
+    if (c.deleted) continue;                       // supprimé ailleurs : c'est une décision, on ne la défait pas
+    const up = parId.get(String(c.id));
+    const prev = base[c.id];
+    if (!up || !prev) continue;                    // nous ne le connaissions pas : ce n'est pas une fusion, c'est une création en double
+    let charge = null;
+    try { charge = JSON.parse(prev.json); } catch (e) { charge = null; }
+    if (!estObjet(charge) || !estObjet(up.payload) || !estObjet(c.payload)) continue;
+    const r = fusionnerJson(charge, up.payload, c.payload);
+    repris.push({ id: String(c.id), ord: up.ord, rev: c.rev, payload: r.valeur });
+    valeurs.set(String(c.id), r.valeur);
+    for (const d of r.desaccords) desaccords.push(d);
+  }
+  if (!repris.length) return null;
+  let second = null;
+  try {
+    second = await driver.write(name, { upserts: repris, deletes: [], force: false });
+  } catch (e) {
+    return null;                                   // la reprise a échoué : on retombe sur le comportement d'avant (le serveur gagne)
+  }
+  const reprisIds = new Set(repris.map((u) => u.id));
+  return {
+    res: {
+      revision: second.revision ?? res.revision,
+      applied: [...(res.applied || []), ...(second.applied || [])],
+      conflicts: [
+        ...(res.conflicts || []).filter((c) => !reprisIds.has(String(c.id))),
+        ...(second.conflicts || []),
+      ],
+    },
+    upserts: repris,
+    fusionnes: repris.map((u) => u.id),
+    desaccords,
+    valeurs,
+  };
+}
+
+// Les champs en désaccord d'un conflit NON repris (une suppression, ou une
+// création concurrente) : l'écran peut dire ce qui diverge, au lieu de dire
+// seulement « un autre poste a modifié ceci ».
+function desaccordsDesConflits(base, upserts, conflicts) {
+  const parId = new Map(upserts.map((u) => [String(u.id), u]));
+  const out = [];
+  for (const c of conflicts || []) {
+    if (c.deleted) continue;
+    const up = parId.get(String(c.id));
+    const prev = base[c.id];
+    if (!up || !prev) continue;
+    let charge = null;
+    try { charge = JSON.parse(prev.json); } catch (e) { charge = null; }
+    if (!estObjet(charge) || !estObjet(up.payload)) continue;
+    const r = fusionnerJson(charge, up.payload, c.payload, { maxDesaccords: 3 });
+    for (const d of r.desaccords) out.push({ ...d, id: String(c.id) });
+  }
+  return out;
+}
+
+// La version locale, corrigée de ce qui a été fusionné : c'est elle que le
+// miroir local doit garder (sinon un poste hors ligne relirait, après coup, une
+// version qui n'est plus celle de la base).
+function appliquerFusion(name, value, valeurParId) {
+  if (isSingleton(name)) {
+    const v = valeurParId.get(SELF) || valeurParId.get("self");
+    return v === undefined ? value : v;
+  }
+  const arr = Array.isArray(value) ? value : [];
+  return arr.map((item) => {
+    const v = valeurParId.get(String(item && item.id));
+    return v === undefined ? item : v;
+  });
 }
 
 export async function remove(name) {

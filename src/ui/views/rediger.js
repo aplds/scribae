@@ -15,7 +15,8 @@
 import {
   state, touch, navigate, redrawView, can, visibleTrames, visibleActes,
   journaliser, circuitDe, signalerRedaction, quiRedige, parapheurActif,
-  revisionPour,
+  revisionPour, publierBrouillon, brouillonsDistants, surChangementCollab,
+  modificationDistante, oublierDistante, fluxActif,
 } from "../state.js";
 import { fullName } from "../../lib/users.js";
 import { ajouterRevision } from "../../lib/historique-brouillons.js";
@@ -33,7 +34,8 @@ import { lignesQualites, decisionsDeSignature } from "../../lib/delegations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown, exportStandaloneHtml, exportWordDoc, printDocument } from "../../lib/export.js";
 import { boutonsPdfA } from "../pdfa.js";
 import { download, uid, debounce, formatDate, todayIso, normalizeSpace } from "../../lib/util.js";
-import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge } from "../components.js";
+import { dateHeureFr, heureFr } from "../../lib/legalite.js";
+import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge, mentions, menuButton, notePlier, pageTitle } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { tramePublishable, natureDe, NODE_MAP, newNode, ladderOf, paramsBloc, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { estExterne, reserverNumero, fixerSequence } from "../../lib/numbering.js";
@@ -55,6 +57,173 @@ import { glissable } from "../dnd.js";
 import { trameEstDisponible } from "../mise-a-disposition.js";
 import { natureOfActe, identification, annexesVocab, libelleAnnexe, appellationAnnexe, numeroAffiche } from "../../lib/annexes.js";
 import { annexesJointes } from "../../lib/annexe-docs.js";
+
+// ============================================================================
+// LE BROUILLON PARTAGÉ (1.6.2) — écrire à deux dans le même acte.
+//
+// CE QUI SE PARTAGE. Un acte se rédige dans `draft.values` (les champs) et
+// `draft.values.__overrides` (les passages réécrits). On publie UNIQUEMENT les
+// clés que l'agent a touchées — jamais le document entier — et l'on applique, en
+// retour, ce que les autres ont touché, pour les clés que NOUS n'avons pas
+// touchées. Deux personnes qui remplissent deux champs différents du même acte
+// voient donc chacun le travail de l'autre apparaître, en une seconde.
+//
+// CE QUI NE SE PARTAGE PAS. Une clé touchée des deux côtés n'est pas écrasée :
+// chacun garde son texte tant qu'il écrit. L'arbitrage se fait à
+// l'enregistrement, par la fusion à trois voies de la persistance (voir
+// lib/fusion.js) : les modifications de chacun sont conservées, et un désaccord
+// sur la même valeur est signalé — jamais effacé en silence.
+//
+// CE QUE CELA COÛTE. Le brouillon voyage dans l'enregistrement de présence du
+// poste (voir lib/collab.js) : il est donc visible des autres postes de
+// l'installation, le temps de la rédaction, et disparaît au départ ou à la
+// fermeture de l'acte. Rien n'en est conservé (ni journal, ni base). Et il ne
+// circule QUE si le temps réel est ouvert : sur un service qui ne pousse pas les
+// changements (démonstration, stockage local), rien n'est publié — un brouillon
+// arrivé trente secondes en retard ne serait pas « en même temps », il serait du
+// bruit.
+// ============================================================================
+
+// La vue en cours de rendu : c'est par elle que le travail venu d'ailleurs se
+// peint, sans repasser par un redessin complet (qui casserait la saisie).
+let vueVivante = null;
+let abonneCollab = null;
+let minuteurBrouillon = null;
+let minuteurPeinture = null;
+let essaisPeinture = 0;
+const vusDistants = new Map();      // userId → date du dernier brouillon appliqué
+
+const ECART = "o:";                 // préfixe des clés d'écarts (passages réécrits)
+const BROUILLON_MS = 900;           // regroupement des frappes avant publication
+
+const instantane = (draft) => JSON.stringify({
+  v: draft.values,
+  o: (draft.values && draft.values.__overrides) || {},
+});
+
+const memeValeur = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+
+// Le travail local a changé : on note ce qui a bougé depuis la dernière
+// publication, et l'on publie dans un instant (le temps de la frappe).
+function marquerSale() {
+  const draft = state.rediger;
+  if (!draft || !draft.acteId) return;
+  programmerPublication();
+}
+
+function programmerPublication() {
+  if (minuteurBrouillon) return;
+  minuteurBrouillon = setTimeout(() => {
+    minuteurBrouillon = null;
+    publierMonBrouillon();
+  }, BROUILLON_MS);
+}
+
+// Publie les clés touchées — calculées par DIFFÉRENCE avec l'instantané pris à la
+// dernière publication. Compter sur un appel explicite à chaque geste (saisie,
+// liste, options de bloc, insertion de variable, sélecteur de signataire) serait
+// fragile : un chemin oublié, et le travail ne partirait plus. La différence, elle,
+// voit tout.
+function publierMonBrouillon() {
+  const draft = state.rediger;
+  if (!draft || !draft.acteId || !fluxActif()) return false;
+  const avant = draft.apercu ? safeParse(draft.apercu) : { v: {}, o: {} };
+  const maintenant = { v: draft.values || {}, o: draft.values?.__overrides || {} };
+  const touches = draft.touches instanceof Set ? draft.touches : (draft.touches = new Set());
+  for (const [cle, valeur] of Object.entries(maintenant.v)) {
+    if (!memeValeur(avant.v ? avant.v[cle] : undefined, valeur)) touches.add(cle);
+  }
+  for (const [addr, valeur] of Object.entries(maintenant.o)) {
+    if (!memeValeur(avant.o ? avant.o[addr] : undefined, valeur)) touches.add(ECART + addr);
+  }
+  draft.apercu = instantane(draft);
+  if (!touches.size) return false;
+  const valeurs = {};
+  const ecarts = {};
+  for (const cle of touches) {
+    if (cle.startsWith(ECART)) {
+      const addr = cle.slice(ECART.length);
+      const v = maintenant.o[addr];
+      if (v !== undefined) ecarts[addr] = v;
+    } else if (cle in maintenant.v) {
+      valeurs[cle] = maintenant.v[cle];
+    }
+  }
+  return publierBrouillon(draft.acteId, {
+    valeurs, ecarts,
+    label: draft.values.numero || draft.values.objet || "",
+  });
+}
+
+function safeParse(texte) {
+  try { return JSON.parse(texte) || {}; } catch (e) { return {}; }
+}
+
+// Applique ce que les autres postes écrivent, pour les clés que nous n'avons pas
+// touchées. Puis repeint — sans arracher le curseur : on attend que l'agent ait
+// quitté la saisie, et l'on n'insiste pas indéfiniment.
+function appliquerBrouillonsDistants() {
+  const draft = state.rediger;
+  if (!draft || !draft.acteId) return;
+  if (!fluxActif()) return;
+  const touches = draft.touches instanceof Set ? draft.touches : new Set();
+  let change = false;
+  for (const b of brouillonsDistants(draft.acteId)) {
+    if (vusDistants.get(b.userId) === b.at) continue;
+    vusDistants.set(b.userId, b.at);
+    for (const [cle, valeur] of Object.entries(b.valeurs || {})) {
+      if (touches.has(cle)) continue;
+      if (!memeValeur(draft.values[cle], valeur)) { draft.values[cle] = valeur; change = true; }
+    }
+    for (const [addr, valeur] of Object.entries(b.ecarts || {})) {
+      if (touches.has(ECART + addr)) continue;
+      draft.values.__overrides = draft.values.__overrides || {};
+      if (!memeValeur(draft.values.__overrides[addr], valeur)) { draft.values.__overrides[addr] = valeur; change = true; }
+    }
+  }
+  if (change) peindreDoucement();
+  peintreCollab();
+}
+
+// Repeint la ligne de collaboration de l'écran en cours (elle vit dans la vue).
+function peintreCollab() {
+  if (vueVivante && vueVivante.peindreCollab) vueVivante.peindreCollab();
+}
+
+function peindreDoucement() {
+  if (minuteurPeinture) return;
+  essaisPeinture = 0;
+  const essai = () => {
+    minuteurPeinture = null;
+    const actif = document.activeElement;
+    const dansLePapier = !!(vueVivante && vueVivante.papier && actif && vueVivante.papier.contains(actif));
+    essaisPeinture += 1;
+    // L'agent écrit : on attend son prochain répit. Passé quelques essais, on
+    // peint quand même — laisser une divergence à l'écran serait pire.
+    if ((dansLePapier || (actif && actif.isContentEditable)) && essaisPeinture < 8) {
+      minuteurPeinture = setTimeout(essai, 700);
+      return;
+    }
+    if (vueVivante) {
+      if (vueVivante.peindrePapier) vueVivante.peindrePapier();
+      if (vueVivante.peindreEtat) vueVivante.peindreEtat();
+    }
+  };
+  minuteurPeinture = setTimeout(essai, 200);
+}
+
+// L'abonnement est posé UNE fois pour tout le module : il lit `state.rediger` à
+// chaque fois, et ne retient donc rien du rendu qui l'a posé (la leçon de la
+// 1.6.1y : rien ne se pose par redessin sans un moyen de le reprendre).
+function veillerBrouillons() {
+  if (abonneCollab) return;
+  abonneCollab = surChangementCollab(() => {
+    if (state.route && state.route.view === "rediger") appliquerBrouillonsDistants();
+    // L'écran a changé : on lâche la vue (et, avec elle, le papier détaché du
+    // rendu précédent) plutôt que de la garder en vie pour rien.
+    else vueVivante = null;
+  });
+}
 
 export function openActe(acte) {
   state.ui = state.ui || {};
@@ -107,8 +276,7 @@ function renderChooser(root) {
 
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Rédiger un acte" }),
-      h("p", { class: "page-head__sub", text: "Choisissez l'acte à rédiger : une trame du référentiel, ou un acte déjà commencé. Le document s'ouvre ensuite dans l'éditeur de rédaction." }),
+      pageTitle("Rédiger un acte" , "Choisissez l'acte à rédiger : une trame du référentiel, ou un acte déjà commencé. Le document s'ouvre ensuite dans l'éditeur de rédaction." ),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("rediger", "Comment faire ?"),
@@ -233,6 +401,7 @@ function chooserTrameCard(t, nbActes) {
   const family = (config.families || []).find((f) => f.id === t.familyId);
   const commentaires = countNotes(t.body);
   const regles = (t.rules || []).length;
+  const nbChamps = (t.fields || []).length;
   return h("div", { class: "fr-card fr-card--pied" },
     h("div", { class: "fr-row" },
       // Pas de pastille de statut ici : cette liste ne contient QUE des trames
@@ -241,19 +410,21 @@ function chooserTrameCard(t, nbActes) {
     ),
     h("p", { class: "fr-card__sub", text: [family?.label, "v" + t.version].filter(Boolean).join(" · ") }),
     t.description ? h("p", { class: "fr-small fr-muted", text: t.description }) : null,
-    h("div", { class: "fr-row", style: { gap: "6px", margin: "8px 0" } },
-      t.serviceId
-        ? h("span", { class: "fr-badge fr-badge--info", text: targetLabel(config, t.serviceId, t.bureauId) })
-        : h("span", { class: "fr-badge", text: "Trame générale" }),
-      h("span", { class: "fr-badge", text: (t.fields || []).length + " champs" }),
-      regles ? h("span", { class: "fr-badge", text: regles + " règle" + (regles > 1 ? "s" : "") }) : null,
-      !tramePublishable(t) ? h("span", { class: "fr-badge fr-badge--warning", title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels).", text: "Non publiable" }) : null,
-      nbActes ? h("span", { class: "fr-badge", text: nbActes + " acte" + (nbActes > 1 ? "s" : "") }) : null,
-      commentaires ? h("span", { class: "fr-badge fr-badge--info", text: commentaires + " commentaire" + (commentaires > 1 ? "s" : "") }) : null,
-    ),
-    h("div", { class: "fr-row" },
+    // Ce qui décrit la trame tient sur une ligne en gris ; seul ce qui avertit
+    // garde une couleur (voir components.js, `mentions`).
+    mentions([
+      t.serviceId ? targetLabel(config, t.serviceId, t.bureauId) : "Trame générale",
+      `${nbChamps} champ${nbChamps > 1 ? "s" : ""}`,
+      regles ? `${regles} règle${regles > 1 ? "s" : ""}` : null,
+      nbActes ? `${nbActes} acte${nbActes > 1 ? "s" : ""}` : null,
+      commentaires ? `${commentaires} commentaire${commentaires > 1 ? "s" : ""}` : null,
+      !tramePublishable(t) ? { text: "non publiable", alerte: true, title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels)." } : null,
+    ]),
+    h("div", { class: "fr-row", style: { justifyContent: "space-between", marginTop: "10px" } },
       button("Rédiger", { variant: "primary", icon: "note", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
-      can("trames.gerer") ? button("Éditer la trame", { variant: "secondary", icon: "doc", onClick: () => navigate("trame/" + t.id) }) : null,
+      can("trames.gerer")
+        ? menuButton([{ label: "Éditer la trame", icon: "doc", onClick: () => navigate("trame/" + t.id) }], { title: "Autres gestes sur cette trame" })
+        : null,
     ),
   );
 }
@@ -319,6 +490,19 @@ export function renderRediger(root, params) {
   draft.values.__overrides = draft.values.__overrides || {};
   draft.values.__abrogations = Array.isArray(draft.values.__abrogations) ? draft.values.__abrogations : [];
   const overrides = draft.values.__overrides;
+  // Le brouillon partagé (1.6.2) vit DANS le brouillon : l'écran se redessine
+  // sans cesse (chaque enregistrement, chaque changement d'état), et ces deux
+  // repères doivent survivre au redessin — sans quoi l'on republierait tout, ou
+  // l'on écraserait ce que l'autre poste vient d'écrire.
+  if (!(draft.touches instanceof Set)) draft.touches = new Set();
+  if (draft.apercu === undefined) draft.apercu = instantane(draft);
+  veillerBrouillons();
+  // L'état « enregistré » : une signature du brouillon, prise à l'ouverture puis
+  // à chaque enregistrement. Comparer au tableau `acte.values` ne suffisait pas
+  // — le brouillon normalise des clés que l'acte enregistré n'a pas
+  // (`__abrogations`), si bien qu'un acte qu'on venait d'ouvrir se croyait déjà
+  // modifié. La signature, elle, ne bouge que si le brouillon change vraiment.
+  const signatureBrouillon = () => JSON.stringify({ v: draft.values, o: overrides });
   const sources = new Map(listSlots(trame, config).map((s) => [s.addr, s.original]));
   // Les emplacements des blocs et éléments AJOUTÉS (voir lib/structure.js) : ils
   // sont éditables comme les autres, mais leur origine est l'ajout lui-même —
@@ -364,7 +548,7 @@ export function renderRediger(root, params) {
     get selPath() { return ui.selPath || null; },
     get arme() { return ui.arme || null; },
     setField(id, value) { draft.values[id] = value; },
-    markDirty() {},
+    markDirty() { programmerPublication(); },
     paintSoon: debounce(() => paintPaper(), 130),
     paintPanelSoon: debounce(() => paintStatus(), 200),
     paintFull: () => { closeTokenEditor(); redraw(); },
@@ -384,31 +568,36 @@ export function renderRediger(root, params) {
         delete overrides[addr];
         sources.set(addr, src);
       }
+      programmerPublication();
     },
   };
   const paintFull = rx.paintFull;
   const paintSoon = rx.paintSoon;
 
   // ------------------------------------------------------------------ entête
+  // UN SEUL GESTE MIS EN AVANT (revue d'interface, P6) : « Enregistrer ». Tout
+  // le reste — exporter, imprimer, changer d'acte — se range derrière le menu
+  // « ⋯ » : ce sont des gestes de sortie, pas le travail en cours.
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       h("h1", { class: "page-head__title", text: existing ? "Reprise d'un acte" : "Rédiger un acte" }),
       h("p", { class: "page-head__sub", text: `${trame.name} · v${trame.version}${draft.values.numero ? " · n° " + draft.values.numero : ""}` }),
+      // L'ÉTAT DE L'ACTE EN UNE LIGNE (P6) : enregistré ou non, où en est
+      // l'acte dans son parcours, ce qui reste à compléter, ce qui bloque — au
+      // lieu d'un chapelet de pastilles. La ligne se remplit dans `paintEtat`.
+      h("p", { id: "rediger-etat", class: "rediger-etat" }),
     ),
     h("div", { class: "page-head__actions" },
       helpLink("rediger", "Comment faire ?"),
       entityPicker(),
-      h("span", { id: "rediger-badge" }),
-      h("span", { id: "rediger-parapheur" }),
-      h("span", { id: "rediger-revision" }),
-      button("Changer d'acte", { variant: "tertiary", icon: "doc", title: "Choisir une autre trame, ou reprendre un acte commencé", onClick: () => navigate("rediger") }),
-      button("Enregistrer", { variant: "secondary", icon: "check", onClick: save }),
-      // L'action mise en avant est le PROCHAIN PAS du parcours (soumettre au
-      // circuit, aller à la signature…), pas l'export : exporter est un geste
-      // de sortie, à faire en fin de course, et le mettre en avant laissait
-      // croire au rédacteur novice que son acte était terminé une fois exporté.
-      h("span", { id: "rediger-suite" }),
-      button("Exporter…", { variant: "tertiary", icon: "download", title: "Imprimer, transmettre ou archiver l'acte — ce n'est pas la fin du parcours : un acte se valide, se signe et se publie.", onClick: () => exportMenu() }),
+      // Le tiroir porte son compte : il ne s'ouvre que si on l'ouvre, et l'on y
+      // complète une chose à la fois (voir `paintCompleter`).
+      h("span", { id: "rediger-tiroir-btn" }),
+      button("Enregistrer", { variant: "primary", icon: "check", onClick: save }),
+      menuButton([
+        { label: "Exporter, imprimer, transmettre…", icon: "download", onClick: () => exportMenu() },
+        { label: "Changer d'acte", icon: "doc", onClick: () => navigate("rediger") },
+      ], { title: "Autres gestes" }),
     ),
   ));
 
@@ -420,14 +609,12 @@ export function renderRediger(root, params) {
   root.appendChild(parcours);
 
   // Un autre poste rédige le même acte : on le dit, plutôt que de laisser deux
-  // personnes s'étonner d'un conflit à l'enregistrement.
-  const autre = draft.acteId ? quiRedige(draft.acteId) : null;
-  if (autre) {
-    root.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { margin: "0 0 12px" } },
-      h("p", { class: "fr-alert__title", text: "Cet acte est ouvert sur un autre poste" }),
-      h("p", { class: "fr-small", text: `${autre.byName} le rédige en ce moment. Vous pouvez continuer, mais le dernier enregistrement envoyé à la base l'emporte : mieux vaut convenir de qui travaille dessus.` }),
-    ));
-  }
+  // personnes s'étonner d'un conflit à l'enregistrement. La ligne est VIVE
+  // (1.6.2) : elle se remplit dans `paintCollab`, et dit aussi ce que l'autre
+  // poste est en train d'écrire, et ce qui nous est arrivé d'ailleurs — avant la
+  // 1.6.2, elle était figée à l'ouverture de l'écran, et muette sur le reste.
+  const collabBox = h("div", { id: "rediger-collab" });
+  root.appendChild(collabBox);
 
   // Acte individuel : la trame est déclarée non publiable. On le dit dès la
   // rédaction, pour que l'agent ne cherche pas ensuite la case « publier ».
@@ -438,7 +625,7 @@ export function renderRediger(root, params) {
     ));
   }
 
-  const cols = h("div", { class: "redaction-grid" });
+  const cols = h("div", { class: "redaction-grid" + (ui.tiroir ? "" : " redaction-grid--ferme") });
   root.appendChild(cols);
 
   // ------------------------------------------------------- colonne document
@@ -447,13 +634,17 @@ export function renderRediger(root, params) {
   docCol.appendChild(h("div", { class: "fr-card fr-card--soft redaction-hint" },
     h("p", { class: "fr-small", style: { margin: 0 } },
       h("strong", { text: "Écrivez directement dans le document. " }),
-      "Cliquez sur une pastille bleue pour renseigner un champ, et sur n'importe quel texte pour le corriger comme dans un traitement de texte.",
+      "Cliquez une pastille bleue pour renseigner un champ, ou n'importe quel texte pour le corriger.",
     ),
-    h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 0" } },
-      "Ce que vous réécrivez est conservé, mais signalé aux administrateurs comme ",
-      h("span", { class: "rw-tagmini", text: "hors trame" }),
-      " — ce n'est pas bloquant : adapter une rédaction est parfois nécessaire.",
-    ),
+    // Ce qui explique le fonctionnement est replié (revue d'interface, P4) : le
+    // geste essentiel reste sous les yeux, le mode d'emploi s'ouvre à la demande.
+    notePlier("Comment écrire dans le document", [
+      h("p", { class: "note-pliable__texte", text: "Le document EST le formulaire : on écrit dedans comme dans un traitement de texte, et l'on clique les pastilles bleues pour renseigner les champs prévus par la trame. Les deux sont liés — compléter un champ ici le remplit là." }),
+      h("p", { class: "note-pliable__texte" },
+        "Ce que vous réécrivez est conservé, mais signalé aux administrateurs comme ",
+        h("span", { class: "rw-tagmini", text: "hors trame" }),
+        " : ce n'est pas bloquant, adapter une rédaction est parfois nécessaire."),
+    ]),
   ));
   const paper = h("div", { class: "paper paper--edit" });
   paper.style.fontFamily = config.brand.documentFont || "";
@@ -468,31 +659,39 @@ export function renderRediger(root, params) {
   const annexesBox = h("div", { class: "rx-annexes-doc" });
   docCol.appendChild(annexesBox);
   docCol.appendChild(annexesCard());
+  // LE CONTRÔLE, EN UNE LIGNE, AU BAS DU DOCUMENT (P6) : ce qui bloque, ce qui
+  // a été réécrit, ce qui a été laissé en consigne — remplace le chapelet de
+  // pastilles et laisse l'onglet « Contrôle & écarts » pour le détail.
+  const controleBox = h("div", { id: "rediger-controle", class: "rediger-controle" });
+  docCol.appendChild(controleBox);
 
   // -------------------------------------------------------- colonne panneau
-  const sideCol = h("div", { class: "fr-stack redaction-col--side" });
+  // LE TIROIR (P6). Le panneau de droite ne s'ouvre que si on l'ouvre, et son
+  // bouton porte son compte (« Compléter l'acte · 2 »). Il ne recouvre jamais le
+  // document : c'est une colonne, et quand il est fermé le document prend toute
+  // la largeur. L'état ouvert/fermé vit dans le brouillon, qui survit aux
+  // redessins — sans quoi l'écran se refermerait à chaque frappe.
+  const sideCol = h("aside", { class: "fr-stack redaction-col--side", id: "redaction-tiroir", hidden: !ui.tiroir });
   cols.appendChild(sideCol);
-  // La bibliothèque de variables reste OUVERTE au-dessus des onglets : insérer
-  // un champ ne doit jamais demander d'abord d'aller le chercher ailleurs. On
-  // la glisse dans le document — ou on la clique, puis on clique dans le texte.
-  const varChips = h("div", { class: "var-lib__chips" });
-  const varSearch = h("input", {
-    class: "fr-input var-lib__search", type: "search", placeholder: "Chercher une variable…",
-    on: { input: (e) => { ui.rechercheVar = e.target.value; paintPalette(); } },
-  });
-  const paletteCard = h("details", { class: "fr-card var-lib", open: true },
-    h("summary", { class: "var-lib__head" }, icon("palette", 15),
-      h("span", { class: "var-lib__title", text: "Variables" }),
-      h("span", { class: "var-lib__aide", text: "à glisser dans le document" })),
-    varSearch,
-    varChips,
+  // LA BARRE SE NOMME ET SE FERME. Un panneau qui apparaît sans titre se
+  // confondait avec le document : l'agent qui cliquait « Compléter l'acte » ne
+  // voyait pas qu'une barre venait de s'ouvrir à droite, et cherchait le
+  // résultat du geste dans la page. L'en-tête dit ce qu'est cette colonne, et
+  // porte sa fermeture — pas besoin de retrouver le bouton d'origine.
+  const sideHead = h("div", { class: "rx-tiroir__entete" },
+    h("span", { class: "rx-tiroir__icone" }, icon("panneau", 15)),
+    h("strong", { class: "rx-tiroir__nom", text: "Panneau de rédaction" }),
+    h("span", { class: "fr-spacer" }),
+    button("", { variant: "tertiary", size: "sm", icon: "x", title: "Refermer le panneau de droite", onClick: () => fermerTiroir() }),
   );
-  sideCol.appendChild(paletteCard);
-
+  sideCol.appendChild(sideHead);
   const tabsBar = h("div", { class: "fr-tabs", style: { marginBottom: "0" } });
   const panelBody = h("div", { class: "fr-card", id: "redaction-panel" });
   sideCol.appendChild(tabsBar);
   sideCol.appendChild(panelBody);
+  // La bibliothèque de variables vit désormais dans un ONGLET du tiroir : elle
+  // se construit à l'affichage de cet onglet, et non plus une fois pour toutes.
+  let varChips = null;
 
   // Le premier rendu vient APRÈS toutes les déclarations du corps de la
   // fonction : `paintBloc` et la bibliothèque lisent des constantes définies
@@ -544,124 +743,172 @@ export function renderRediger(root, params) {
     }
   }
 
-  function paintStatus() {
+  function paintStatus(forcer = false) {
     // Le texte peut avoir été réécrit depuis le dernier rendu de la page : on
     // recalcule le document pour que compteurs, écarts et contrôles soient justes.
     doc = compileDoc();
     paintBadge();
     renderTabs();
     // Le panneau se rafraîchit, sauf si le curseur y est : le reconstruire
-    // ferait perdre la saisie en cours.
+    // ferait perdre la saisie en cours. `forcer` sert aux gestes du tiroir
+    // lui-même (« Valider et suivant »), qui se cliquent DEPUIS le panneau et
+    // doivent pourtant le faire avancer.
     const a = document.activeElement;
-    if (!a || !panelBody.contains(a)) paintPanel();
+    if (forcer || !a || !panelBody.contains(a)) paintPanel();
+    // Filet de sécurité du brouillon partagé : cet écran se redessine après
+    // presque chaque geste, et la publication compare l'état à son dernier
+    // instantané — un chemin de saisie qui n'aurait pas pensé à publier est donc
+    // rattrapé ici. Sans rien à publier, l'appel ne coûte rien.
+    programmerPublication();
   }
 
+  // LA COLLABORATION, EN LIGNE VIVE (1.6.2). Trois choses, dans l'ordre de ce
+  // qu'elles changent pour l'agent qui écrit :
+  //   • un autre poste rédige le MÊME acte ;
+  //   • il est en train d'écrire, et son travail apparaît ici au fur et à mesure
+  //     (sauf les champs que nous remplissons nous-mêmes, jamais écrasés) ;
+  //   • cet acte a été ENREGISTRÉ ailleurs : nos modifications seront fusionnées
+  //     au prochain enregistrement, rien ne sera perdu.
+  function paintCollab() {
+    const box = root.querySelector("#rediger-collab");
+    if (!box) return;
+    clear(box);
+    const autre = draft.acteId ? quiRedige(draft.acteId) : null;
+    const distants = draft.acteId ? brouillonsDistants(draft.acteId) : [];
+    const modif = draft.acteId ? modificationDistante("actes", draft.acteId) : null;
+    if (!autre && !distants.length && !modif) return;
+    const lignes = [];
+    if (autre) {
+      lignes.push(h("p", { class: "fr-alert__title", text: "Cet acte est ouvert sur un autre poste" }));
+      lignes.push(h("p", { class: "fr-small", text: `${autre.byName} le rédige en ce moment. Vous pouvez continuer : ce que vous remplissez chacun de votre côté est conservé, et le reste vous apparaît au fur et à mesure.` }));
+    }
+    if (distants.length) {
+      const noms = distants.map((b) => b.byName).filter(Boolean).join(", ");
+      lignes.push(h("p", { class: "fr-small", text: `Travail en cours reçu de ${noms} : ses champs s'affichent ici dès qu'il les écrit. Les vôtres ne sont pas écrasés.` }));
+    }
+    if (modif) {
+      const quand = modif.at ? dateHeureFr(modif.at) : "";
+      lignes.push(h("p", { class: "fr-small", text: modif.supprime
+        ? `Cet acte a été supprimé de la base par un autre poste. Votre brouillon reste le vôtre : enregistrez-le pour le remettre au registre.`
+        : `Cet acte a été enregistré sur un autre poste${quand ? " le " + quand : ""}. Vos modifications et les siennes seront FUSIONNÉES à votre prochain enregistrement — rien n'est perdu, et un désaccord sur un même champ vous sera signalé.` }));
+    }
+    box.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { margin: "0 0 12px" } }, ...lignes));
+  }
+
+  // L'ÉTAT DE L'ACTE SE PEINT ICI, ET NULLE PART AILLEURS (P6) : la ligne d'état
+  // sous le titre, la ligne de contrôle en bas du document, le compte du tiroir
+  // et la ligne du parcours. Une seule passe, pour que ces morceaux ne puissent
+  // pas se contredire — c'est ce qui remplace le chapelet de pastilles.
   function paintBadge() {
-    const el = root.querySelector("#rediger-badge");
-    if (!el) return;
-    clear(el);
-    const blocking = doc.issues.filter((i) => i.level === "blocking").length;
-    const nbEcarts = doc.ecarts.length;
-    el.appendChild(h("span", { class: "fr-badge fr-badge--" + (blocking ? "error" : "success"), text: blocking ? `${blocking} bloquant(s)` : "prêt à exporter" }));
-    if (nbEcarts) {
-      el.appendChild(h("span", {
-        class: "fr-badge fr-badge--warning", style: { marginLeft: "6px" },
-        title: "Passages réécrits par rapport à la trame : visibles par les administrateurs, non bloquants.",
-        text: `${nbEcarts} écart${nbEcarts > 1 ? "s" : ""} à la trame`,
-      }));
-    }
-    // Les consignes laissées par la trame : un bouton, à côté de l'état de
-    // l'acte, pour qu'elles ne se perdent pas dans le fil de la lecture.
-    const nbNotes = (doc.notes || []).length;
-    if (nbNotes) {
-      el.appendChild(h("button", {
-        class: "fr-badge fr-badge--info", type: "button",
-        style: { marginLeft: "6px", cursor: "pointer" },
-        title: "Commentaires laissés par les administrateurs dans la trame — cliquez pour les lire",
-        text: `${nbNotes} consigne${nbNotes > 1 ? "s" : ""} de la trame`,
-        onClick: () => { ui.tab = "consignes"; redraw(); },
-      }));
-    }
-    paintParapheur();
-    paintRevision();
     paintParcours();
     paintSuite();
+    paintEtat();
+    paintControleLigne();
+    paintTiroir();
+    paintCollab();
   }
 
   // Où en est l'acte devant le réviseur : le rédacteur doit savoir que son
   // « envoi en signature » passera d'abord par un contrôle — et, si l'acte a été
   // REJETÉ, lire le motif sans quitter sa rédaction : c'est lui qui doit
-  // corriger.
-  function paintRevision() {
-    const el = root.querySelector("#rediger-revision");
-    if (!el) return;
-    clear(el);
+  // corriger. Une MENTION de la ligne d'état, pas une pastille de plus.
+  function mentionRevision() {
     const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
-    if (!acte) return;
+    if (!acte) return null;
     const rev = revisionPour(acte);
-    if (!rev.requise && !acte.revision) return;
+    if (!rev.requise && !acte.revision) return null;
     const etat = etatRevision(acte);
-    if (!etat) {
-      el.appendChild(h("span", { class: "fr-badge fr-badge--info", title: "Un réviseur contrôle cet acte entre l'envoi en signature et la signature.", text: "révision à venir" }));
-      return;
-    }
-    el.appendChild(h("span", {
-      class: "fr-badge fr-badge--" + (etat.caduque ? "warning" : etat.color),
-      title: "Révision de l'acte",
-      text: etat.caduque ? "révision caduque" : etat.label,
-    }));
     const r = acte.revision || {};
-    if (r.statut === "rejete" && r.motif) {
-      el.appendChild(h("span", {
-        class: "fr-small", style: { marginLeft: "6px" }, title: r.motif,
-        text: "Motif du rejet : « " + (r.motif.length > 120 ? r.motif.slice(0, 117) + "…" : r.motif) + " »",
-      }));
-    } else if (r.statut === "valide" && r.corrige) {
-      el.appendChild(h("span", { class: "fr-small fr-muted", style: { marginLeft: "6px" }, text: "texte corrigé par le réviseur" }));
-    } else if (r.statut === "en_attente") {
-      el.appendChild(h("span", { class: "fr-small fr-muted", style: { marginLeft: "6px" }, text: "en attente du réviseur" }));
-    }
+    if (!etat) return { text: "révision à venir", title: "Un réviseur contrôle cet acte entre l'envoi en signature et la signature." };
+    if (etat.caduque) return { text: "révision caduque", alerte: true, title: "Le texte a changé depuis la révision : elle doit être reprise." };
+    if (r.statut === "rejete" && r.motif) return { text: etat.label + " — motif : « " + resume(r.motif, 60) + " »", title: r.motif };
+    if (r.statut === "valide" && r.corrige) return { text: etat.label, title: "Le réviseur a corrigé le texte avant de le valider." };
+    if (r.statut === "en_attente") return { text: etat.label, title: "L'acte est chez le réviseur." };
+    return { text: etat.label, title: "Révision de l'acte" };
   }
 
-  // Où en est l'acte dans le circuit de validation : c'est une information de
-  // premier plan pour le rédacteur — il saura s'il doit relancer un valideur, et
-  // surtout que modifier un acte validé remet le circuit en jeu.
-  function paintParapheur() {
-    const el = root.querySelector("#rediger-parapheur");
-    if (!el) return;
-    clear(el);
-    // Aucun circuit applicable : rien à dire au rédacteur.
-    if (!parapheurActif()) return;
+  // Où en est l'acte dans le circuit de validation : information de premier plan
+  // pour le rédacteur — il saura s'il doit relancer un valideur, et surtout que
+  // modifier un acte validé remet le circuit en jeu.
+  function mentionParapheur() {
+    if (!parapheurActif()) return null;
     const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
-    if (!acte) {
-      el.appendChild(h("span", { class: "fr-badge", title: "Cet acte n'est pas encore parvenu au parapheur : enregistrez-le, puis soumettez-le.", text: "hors parapheur" }));
-      return;
-    }
+    if (!acte) return { text: "hors parapheur", title: "Cet acte n'est pas encore parvenu au parapheur : enregistrez-le, puis soumettez-le." };
     const v = acte.validation;
     if (!v) {
-      const circuit = circuitDe(acte);
-      if (!circuit) {
-        el.appendChild(h("span", { class: "fr-badge", title: "Aucun circuit du référentiel ne s'applique à cet acte.", text: "hors parapheur" }));
-        return;
-      }
-      el.appendChild(button("Soumettre au circuit", {
-        variant: "tertiary", size: "sm", icon: "upload",
-        title: `Circuit « ${circuit.label} » : ${circuit.steps.length} étape(s)`,
-        onClick: () => soumettre(acte),
-      }));
-      return;
+      return circuitDe(acte)
+        ? { text: "hors parapheur", title: "Un circuit s'applique à cet acte : « Soumettre au circuit », sous le document." }
+        : { text: "hors parapheur", title: "Aucun circuit du référentiel ne s'applique à cet acte." };
     }
     const caduque = !validationAJour(acte);
-    const etat = caduque ? { label: "Validation caduque", color: "warning" } : (VALIDATION_STATUTS[v.statut] || { label: v.statut, color: "info" });
-    el.appendChild(h("span", { class: "fr-badge fr-badge--" + etat.color, title: "Circuit « " + (v.circuitLabel || "") + " »", text: etat.label }));
+    const etat = caduque ? { label: "validation caduque" } : (VALIDATION_STATUTS[v.statut] || { label: v.statut });
+    if (caduque) return { text: etat.label, alerte: true, title: "Le texte validé n'est plus celui de l'acte : le circuit doit être repris." };
     const change = JSON.stringify(draft.values) !== JSON.stringify(acte.values);
     const ouverte = etapeActive(v);
-    const note = caduque
-      ? "Le texte validé n'est plus celui de l'acte : le circuit doit être repris."
-      : change
-        ? "Modifications non enregistrées : les enregistrer rendra la validation caduque."
-        : ouverte ? "En attente : " + ouverte.label : "";
-    if (note) el.appendChild(h("span", { class: "fr-small fr-muted", style: { marginLeft: "6px" }, text: note }));
+    return {
+      text: etat.label + (change ? " (modifications non enregistrées)" : ouverte && v.statut === "en_cours" ? " — " + ouverte.label : ""),
+      title: "Circuit « " + (v.circuitLabel || "") + " »" + (change ? " — enregistrer rendra la validation caduque." : ouverte ? " — étape ouverte : " + ouverte.label : ""),
+    };
+  }
+
+  // CE QUI EST ENREGISTRÉ, OÙ EN EST L'ACTE, CE QU'IL RESTE À COMPLÉTER — une
+  // ligne (P6), au lieu de trois pastilles en tête d'écran.
+  function paintEtat() {
+    const el = root.querySelector("#rediger-etat");
+    if (!el) return;
+    clear(el);
+    const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
+    const items = [];
+    if (!acte) {
+      items.push({ text: "Pas encore enregistré", alerte: true, title: "Rien n'est encore au registre : « Enregistrer » crée le brouillon." });
+    } else {
+      // La référence vit dans le brouillon : l'écran se redessine souvent, et
+      // l'état « enregistré » doit survivre au redessin.
+      const change = draft.reference != null && signatureBrouillon() !== draft.reference;
+      if (draft.reference == null) draft.reference = signatureBrouillon();
+      items.push(change
+        ? { text: "Modifications non enregistrées", alerte: true, title: "« Enregistrer » met vos modifications au registre — « Soumettre au circuit » commence par les enregistrer." }
+        : { text: "Enregistré" + (acte.updatedAt ? " à " + heureFr(acte.updatedAt) : ""), title: acte.updatedAt ? "Dernier enregistrement le " + dateHeureFr(acte.updatedAt) : "L'acte est au registre." });
+      items.push({ text: acteStatutLabel(acte.statut) });
+    }
+    const reste = requiredTodo();
+    items.push(reste
+      ? { text: `il reste ${reste} champ${reste > 1 ? "s" : ""}`, alerte: true, title: "Champs obligatoires à compléter — « Compléter l'acte » les présente un par un." }
+      : { text: "champs obligatoires complets" });
+    const mp = mentionParapheur();
+    if (mp) items.push(mp);
+    const mr = mentionRevision();
+    if (mr) items.push(mr);
+    el.appendChild(mentions(items));
+  }
+
+  // LE CONTRÔLE, EN UNE LIGNE, AU BAS DU DOCUMENT (P6) : « ✓ Rien à signaler ·
+  // 1 passage réécrit ». On ne descend plus dans un onglet pour savoir s'il y a
+  // quelque chose à voir ; l'onglet reste pour le DÉTAIL.
+  function paintControleLigne() {
+    const el = root.querySelector("#rediger-controle");
+    if (!el) return;
+    clear(el);
+    const blocking = doc.issues.filter((i) => i.level === "blocking").length;
+    const warnings = doc.issues.filter((i) => i.level === "warning").length;
+    const nbE = doc.ecarts.length;
+    const nbNotes = (doc.notes || []).length;
+    el.appendChild(mentions([
+      blocking
+        ? { text: `${blocking} point${blocking > 1 ? "s" : ""} bloquant${blocking > 1 ? "s" : ""}`, alerte: true, title: "Un acte ne part pas en signature avec un point bloquant : le détail est dans le panneau." }
+        : "✓ Rien à signaler",
+      warnings ? `${warnings} avertissement${warnings > 1 ? "s" : ""}` : null,
+      nbE ? `${nbE} passage${nbE > 1 ? "s" : ""} réécrit${nbE > 1 ? "s" : ""}` : null,
+      !blocking && !warnings && !nbE ? "conforme à la trame" : null,
+      nbNotes ? `${nbNotes} consigne${nbNotes > 1 ? "s" : ""} de la trame` : null,
+    ]));
+    el.appendChild(button("Voir le détail", {
+      variant: "tertiary", size: "sm", icon: "list",
+      title: nbNotes && !blocking && !warnings && !nbE
+        ? "Lire les consignes laissées par les administrateurs dans la trame"
+        : "Ouvrir le panneau sur « Contrôle & écarts »",
+      onClick: () => ouvrirTiroirSur(nbNotes && !blocking && !warnings && !nbE ? "consignes" : "controle"),
+    }));
   }
 
   // ------------------------------------------------------------- parcours
@@ -682,12 +929,20 @@ export function renderRediger(root, params) {
     clear(el);
     const acte = draft.acteId ? state.actes.find((x) => x.id === draft.acteId) : null;
     const parcours = parcoursDe(acte);
-    el.appendChild(bandeauParcours(parcours, { note: noteDeParcours(parcours, { avecExport: true }) }));
+    // Le fil, et À CÔTÉ le prochain geste du parcours (« Soumettre au circuit »,
+    // « Aller à la signature »). Il n'est plus le bouton mis en avant de
+    // l'en-tête — c'est « Enregistrer » (P6) — mais il reste sous les yeux, là
+    // où le fil vient de dire où en est l'acte.
+    el.appendChild(h("div", { class: "rediger-parcours__ligne" },
+      bandeauParcours(parcours, { note: noteDeParcours(parcours, { avecExport: true }) }),
+      h("span", { class: "fr-spacer" }),
+      h("span", { id: "rediger-suite" }),
+    ));
   }
 
-  // Le bouton mis en avant dans l'en-tête : le prochain geste, et lui seul.
-  // Ailleurs, les gestes utiles sont déjà là (enregistrer, exporter) ; ici on
-  // répond à « je fais quoi maintenant ? ».
+  // Le geste que le parcours appelle, à côté du fil : « Soumettre au circuit »,
+  // puis « Aller à la signature ». Secondaire, parce que le geste mis en avant
+  // de l'écran est d'écrire et d'enregistrer (P6).
   function paintSuite() {
     const el = root.querySelector("#rediger-suite");
     if (!el) return;
@@ -698,7 +953,7 @@ export function renderRediger(root, params) {
     const v = acte.validation;
     if (!v && circuit) {
       el.appendChild(button("Soumettre au circuit", {
-        variant: "primary", icon: "upload",
+        variant: "secondary", icon: "upload",
         title: `Circuit « ${circuit.label} » : ${circuit.steps.length} étape(s)`,
         onClick: () => soumettre(acte),
       }));
@@ -707,7 +962,7 @@ export function renderRediger(root, params) {
     if (validationAJour(acte) && v?.statut === "valide" && can("actes.signer")) {
       const signe = acte.original || ["signee", "publie", "en_attente"].includes(acte.statut || "");
       el.appendChild(button(signe ? "Signature et publication" : "Aller à la signature", {
-        variant: "primary", icon: "lock",
+        variant: "secondary", icon: "lock",
         title: signe ? "Signer puis publier l'acte" : "Le circuit est validé : l'acte passe à la signature",
         onClick: () => { state.signature = { tab: "circuit", acteId: acte.id }; navigate("signature"); },
       }));
@@ -839,7 +1094,12 @@ export function renderRediger(root, params) {
       // L'onglet du bloc désigné n'apparaît que quand un bloc l'est : il porte
       // ses réglages, ses éléments et sa suppression (voir `paintBloc`).
       ui.selPath ? { id: "bloc", label: "Bloc" } : null,
-      { id: "completer", label: "À compléter" + (nbTodo ? ` (${nbTodo})` : "") },
+      // Le compte du tiroir EST celui du bouton qui l'ouvre (P6) : un seul
+      // chiffre pour « ce qu'il reste à faire », pas deux.
+      { id: "completer", label: nbTodo ? `À compléter · ${nbTodo}` : "À compléter ✓" },
+      // Les variables du document : leur place est dans le tiroir (P6), et non
+      // dans une carte ouverte en permanence au-dessus des onglets.
+      { id: "variables", label: "Variables" },
       // Les consignes de la trame : l'onglet n'apparaît que s'il y en a, mais
       // elles s'affichent de toute façon DANS le document (voir ui/annotations.js).
       nbNotes ? { id: "consignes", label: `Consignes (${nbNotes})` } : null,
@@ -854,18 +1114,115 @@ export function renderRediger(root, params) {
   }
   function paintPanel() {
     clear(panelBody);
-    if (ui.tab === "bloc" && ui.selPath) paintBloc(panelBody);
+    counterEls = null;
+    if (ui.tab === "variables") paintVariables(panelBody);
+    else if (ui.tab === "bloc" && ui.selPath) paintBloc(panelBody);
     else if (ui.tab === "consignes" && (doc.notes || []).length) paintConsignes(panelBody);
     else if (ui.tab === "abrogations") paintAbrogations(panelBody);
     else if (ui.tab === "controle") paintControle(panelBody);
     else paintCompleter(panelBody);
   }
 
+  // ------------------------------------------------------------- le tiroir
+  // Ouvrir, refermer, et dire ce qu'il reste à faire. Le geste est le même
+  // partout : le bouton de l'en-tête, la ligne de contrôle en bas du document,
+  // le clic sur un bloc (qui a besoin du panneau pour montrer ses réglages).
+  //
+  // L'ÉTAT SE LIT DANS LE DOM, pas dans `ui.tiroir`. Les deux peuvent se
+  // désaccorder — un rendu partiel, un redessin, un état repris d'ailleurs —, et
+  // le bouton se trompait alors de sens : le premier clic REFERMAIT un panneau
+  // déjà fermé, et l'agent, qui venait de demander à compléter l'acte, ne voyait
+  // rien se passer. Le geste doit toujours faire ce qu'il annonce.
+  function tiroirOuvert() {
+    return !!(sideCol && sideCol.isConnected && !sideCol.hidden);
+  }
+  function paintTiroir() {
+    const el = root.querySelector("#rediger-tiroir-btn");
+    const n = requiredTodo();
+    // L'intention (`ui.tiroir`) est la source unique de l'état PEINT : c'est ici,
+    // et nulle part ailleurs, que le DOM se met d'accord avec elle. Lire l'état
+    // dans le DOM à cet instant donnerait l'état d'AVANT le geste — le bouton
+    // annoncerait « ouvert » sur une barre en train de se refermer.
+    const ouvert = !!ui.tiroir;
+    if (el) {
+      clear(el);
+      const bouton = button(`Compléter l'acte${n ? " · " + n : ""}`, {
+        variant: "secondary", icon: "panneau",
+        title: ouvert
+          ? "Refermer le panneau de droite"
+          : "Ouvrir le panneau de droite : les champs à compléter, les variables, les contrôles",
+        onClick: () => (tiroirOuvert() ? fermerTiroir() : ouvrirTiroirSur("completer")),
+      });
+      // Ce que le bouton FAIT est écrit sur le bouton : ouvert, il le dit
+      // (`aria-expanded`, et la barre prend la couleur d'action). C'est ce qui
+      // manquait pour comprendre qu'une barre apparaît à droite.
+      bouton.classList.add("rx-tiroir__bouton");
+      bouton.setAttribute("aria-expanded", ouvert ? "true" : "false");
+      bouton.setAttribute("aria-controls", "redaction-tiroir");
+      el.appendChild(bouton);
+    }
+    if (sideCol) sideCol.hidden = !ouvert;
+    if (cols) cols.classList.toggle("redaction-grid--ferme", !ouvert);
+  }
+
+  // L'ouverture se VOIT. Le panneau entre en glissant, la pastille du champ
+  // courant clignote dans le document, et le curseur est déjà dans le champ à
+  // renseigner : le geste « Compléter l'acte » mène quelque part, sans qu'il
+  // faille deviner que le travail se fait désormais dans la colonne de droite.
+  // `defiler` est mis à faux quand l'appelant veut garder la page où elle est
+  // (désigner un bloc : sa marque dans le texte est le retour visuel).
+  function revelerTiroir({ defiler = true } = {}) {
+    if (!sideCol || !sideCol.isConnected) return;
+    sideCol.classList.add("redaction-col--side--entree");
+    // La classe ne reste pas. On ne l'enlève PAS sur `animationend` : un onglet
+    // en arrière-plan ne fait pas courir l'horloge des animations, l'évènement
+    // n'arrive jamais, et la classe resterait posée. Un délai suffit — et la
+    // barre, elle, est visible par son style ordinaire (l'entrée ne joue que sur
+    // la position, voir la feuille de style).
+    setTimeout(() => sideCol.classList.remove("redaction-col--side--entree"), 400);
+    // Écran étroit : la barre passe AU-DESSUS du document (voir la feuille de
+    // style) — sans ce défilement, elle s'ouvrait hors de la vue, et le geste
+    // semblait perdu.
+    if (defiler && window.matchMedia("(max-width: 1100px)").matches) {
+      sideCol.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+    if (ui.tab === "completer" && ui.champCle) {
+      focusFieldWidget(paper, ui.champCle, { defiler: false });
+      focusChampTiroir(ui.champCle);
+    }
+  }
+
+  function ouvrirTiroirSur(onglet, options) {
+    const etaitFerme = !tiroirOuvert();
+    ui.tab = onglet || "completer";
+    ui.tiroir = true;
+    paintTiroir();
+    paintStatus(true);
+    if (etaitFerme) revelerTiroir(options);
+  }
+
+  function fermerTiroir() {
+    ui.tiroir = false;
+    paintTiroir();
+  }
+
   // ======================================================= bibliothèque de vars
-  // Toutes les variables du document, dans le panneau de droite, prêtes à être
-  // glissées dans le texte. C'était le principal manque de l'atelier : les
+  // Toutes les variables du document, dans le second onglet du tiroir, prêtes à
+  // être glissées dans le texte. C'était le principal manque de l'atelier : les
   // champs n'existaient que sous forme de pastilles dans les phrases, sans
   // moyen d'en poser un là où on en avait besoin.
+  function paintVariables(box) {
+    box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "0 0 8px" },
+      text: "Glissez une variable dans le document — ou cliquez-la, puis cliquez dans le texte à l'endroit voulu." }));
+    box.appendChild(h("input", {
+      class: "fr-input var-lib__search", type: "search", placeholder: "Chercher une variable…",
+      value: ui.rechercheVar || "",
+      on: { input: (e) => { ui.rechercheVar = e.target.value; paintPalette(); } },
+    }));
+    varChips = h("div", { class: "var-lib__chips" });
+    box.appendChild(varChips);
+    paintPalette();
+  }
   function puceVar(kind, label, token, icone) {
     const actif = !!ui.arme && ui.arme.token === token;
     const btn = h("button", {
@@ -916,7 +1273,13 @@ export function renderRediger(root, params) {
     ui.selPath = path;
     ui.tab = "bloc";
     for (const el of paper.querySelectorAll(".mv")) el.classList.toggle("mv--sel", el.dataset.node === path);
-    if (!deja) paintStatus();
+    // Le bloc désigné se règle dans le tiroir : le désigner l'ouvre donc (P6).
+    // Sans cela, cliquer un bloc ne montrerait rien — et l'on croirait le clic
+    // perdu. On ne fait pas défiler la page pour autant : le bloc vient d'être
+    // marqué dans le texte, sous les yeux de l'agent, et l'emmener d'autorité au
+    // panneau lui ferait perdre le bloc qu'il vient de désigner.
+    if (!tiroirOuvert()) ouvrirTiroirSur("bloc", { defiler: false });
+    else if (!deja) paintStatus(true);
   }
 
   // La liste de la TRAME qui porte un conteneur (`body`, `body.3.blocks`,
@@ -1416,45 +1779,94 @@ export function renderRediger(root, params) {
     const missing = all.filter((f) => isEmpty(f, draft.values[f.id]));
     const req = missing.filter((f) => f.required);
     const opt = missing.filter((f) => !f.required);
-    box.appendChild(h("div", { class: "fr-row" },
-      h("strong", { text: req.length ? `${req.length} champ(s) obligatoire(s) à compléter` : "Tous les champs obligatoires sont renseignés", style: { color: req.length ? "var(--error)" : "var(--success)" } }),
-      h("span", { class: "fr-spacer" }),
-      h("span", { class: "fr-small fr-muted", text: `${all.length - missing.length}/${all.length}` }),
-    ));
-    box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 10px" },
-      text: "Complétez dans le document (pastilles bleues) ou ici : les deux sont liés." }));
-    counterEls = { strong: box.querySelector("strong"), count: box.querySelector(".fr-small.fr-muted") };
+    const faites = all.length - missing.length;
 
-    if (!req.length && !opt.length) {
-      box.appendChild(h("p", { class: "fr-small", style: { color: "var(--success)" }, text: "✓ Rien à compléter. Relisez le document, puis enregistrez." }));
+    // L'AVANCEMENT, PUIS UN CHAMP À LA FOIS (revue d'interface, P6). La liste
+    // entière des champs ne s'affiche plus d'un bloc : on complète la chose
+    // courante, et « Valider et suivant » passe à la suivante. Ce qui est
+    // rempli reste atteignable, replié, pour la relecture et la correction.
+    const tete = h("strong", { class: "rx-tiroir__titre" });
+    box.appendChild(h("div", { class: "fr-row" },
+      tete,
+      h("span", { class: "fr-spacer" }),
+      h("span", { class: "fr-small fr-muted", text: `${faites}/${all.length}` }),
+    ));
+    box.appendChild(h("div", { class: "rx-avancement", "aria-hidden": "true" },
+      h("span", {
+        class: "rx-avancement__fait",
+        style: { width: `${all.length ? Math.round((faites / all.length) * 100) : 100}%` },
+      })));
+    counterEls = { strong: tete, count: null, bar: box.querySelector(".rx-avancement__fait") };
+    updateCounter();
+
+    const liste = [...req, ...opt];
+    if (!liste.length) {
+      box.appendChild(h("div", { class: "fr-alert fr-alert--success", style: { marginTop: "12px" } },
+        h("p", { class: "fr-alert__title", text: "✓ Rien à compléter" }),
+        h("p", { class: "fr-small", text: "Tous les champs sont renseignés. Relisez le document, puis enregistrez." })));
+      box.appendChild(relecture(all));
+      return;
     }
-    let currentGroup = null;
-    for (const f of req) {
-      const g = f.group || "Autres";
-      if (g !== currentGroup) { currentGroup = g; box.appendChild(h("div", { class: "rx-group", text: g })); }
-      box.appendChild(fieldRow(f));
-    }
-    if (opt.length) {
-      const det = h("details", { class: "rx-hidden", open: ui.showAll ? "" : null },
-        h("summary", { text: `${opt.length} champ(s) facultatif(s) non renseigné(s)` }));
-      det.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0" },
-        text: "Ces informations ne sont utiles que dans certains cas (par exemple : un plafond de chèque si les chèques sont admis)." }));
-      for (const f of opt) det.appendChild(fieldRow(f));
-      box.appendChild(det);
-    }
-    // Tous les champs, y compris ceux déjà renseignés (relecture, correction).
-    const done = all.filter((f) => !missing.includes(f));
-    if (done.length) {
-      const det = h("details", { class: "rx-hidden", open: ui.showAll ? "" : null },
-        h("summary", { text: `${done.length} champ(s) déjà renseigné(s)` }));
-      let g = null;
-      for (const f of done) {
-        const gname = f.group || "Autres";
-        if (gname !== g) { g = gname; det.appendChild(h("div", { class: "rx-group", text: g })); }
-        det.appendChild(fieldRow(f));
+
+    let i = liste.findIndex((f) => f.id === ui.champCle);
+    if (i < 0) i = 0;
+    const f = liste[i];
+    ui.champCle = f.id;
+
+    // Ce que fait « suivant » : passer au prochain champ ENCORE vide, en
+    // repartant du premier quand on a fait le tour. « Valider » exige que le
+    // champ obligatoire courant soit renseigné — c'est tout l'intérêt du geste :
+    // on ne valide pas un obligatoire qu'on vient de laisser vide.
+    const suivant = (valider) => {
+      if (valider && f.required && isEmpty(f, draft.values[f.id])) {
+        toast("Ce champ est obligatoire : renseignez-le, ou choisissez « Plus tard ».", "warning");
+        focusChampTiroir(f.id);
+        return;
       }
-      box.appendChild(det);
+      const reste = [...req, ...opt].filter((x) => isEmpty(x, draft.values[x.id]));
+      if (!reste.length) {
+        ui.champCle = "";
+        toast("Tous les champs obligatoires sont renseignés", "success");
+      } else {
+        // On repart de la place où l'on était : le prochain champ encore vide
+        // APRÈS celui-ci, et l'on ne revient au premier qu'après avoir fait le
+        // tour. Sauter au premier à chaque validation donnerait le sentiment de
+        // repartir de zéro.
+        const rang = new Map(liste.map((x, k) => [x.id, k]));
+        const apresMoi = reste.filter((x) => (rang.get(x.id) ?? -1) > i);
+        ui.champCle = (apresMoi[0] || reste.find((x) => x.id !== f.id) || reste[0]).id;
+      }
+      paintStatus(true);
+      focusFieldWidget(paper, ui.champCle);
+    };
+
+    box.appendChild(h("div", { class: "rx-un-champ" },
+      h("p", { class: "rx-un-champ__rang", text: `Champ ${i + 1} sur ${liste.length}`
+        + (req.length ? ` · ${req.length} obligatoire(s) restant(s)` : "") }),
+      fieldRow(f),
+      h("div", { class: "fr-row rx-un-champ__gestes" },
+        button("Plus tard", { variant: "secondary", onClick: () => suivant(false) }),
+        button("Valider et suivant", { variant: "primary", icon: "check", onClick: () => suivant(true) }),
+      ),
+    ));
+
+    // Ce qui reste après le champ courant : une ligne, cliquable d'un clic (on
+    // va droit au champ qu'on veut, sans dérouler la liste).
+    const apres = liste.filter((_, k) => k !== i);
+    if (apres.length) {
+      const resteEl = h("p", { class: "rx-reste" }, h("span", { class: "fr-muted", text: "ensuite : " }));
+      apres.slice(0, 6).forEach((x, k) => {
+        if (k) resteEl.appendChild(h("span", { class: "fr-muted", text: " · " }));
+        resteEl.appendChild(h("button", {
+          class: "rx-reste__lien", type: "button", title: "Aller à ce champ",
+          text: x.label, onClick: () => { ui.champCle = x.id; paintStatus(); },
+        }));
+      });
+      if (apres.length > 6) resteEl.appendChild(h("span", { class: "fr-muted", text: ` · + ${apres.length - 6}` }));
+      box.appendChild(resteEl);
     }
+
+    box.appendChild(relecture(all));
 
     // Passages masqués par une condition
     const hidden = hiddenPassages(trame, doc);
@@ -1466,6 +1878,26 @@ export function renderRediger(root, params) {
           h("strong", { text: pr.label }), h("span", { class: "fr-muted", text: " — si " + pr.when }))),
       ));
     }
+  }
+
+  // Relecture : TOUS les champs, repliés. Compléter se fait un champ à la fois,
+  // mais corriger un champ déjà rempli ne doit jamais devenir impossible — et
+  // le document, lui, garde ses pastilles pour cela.
+  function relecture(all) {
+    return h("details", { class: "rx-hidden", open: ui.showAll ? "" : null },
+      h("summary", { text: `Tous les champs (${all.length})` }),
+      ...all.map((f) => fieldRow(f)));
+  }
+
+  // Ramène le curseur dans le champ courant du tiroir : c'est LÀ qu'on complète
+  // maintenant, et un message d'alerte sans le curseur au bon endroit oblige à
+  // le chercher des yeux. Le contrôle de SAISIE d'abord (un champ, une liste) :
+  // les petits boutons de la ligne (aller à la pastille, réserver le numéro) ne
+  // doivent pas prendre le curseur à sa place.
+  function focusChampTiroir(id) {
+    const row = panelBody.querySelector(`.rx-field[data-champ="${CSS.escape(String(id))}"]`);
+    const cible = row?.querySelector("input, textarea, select") || row?.querySelector("button");
+    if (cible) cible.focus();
   }
 
   function applicableFields() {
@@ -1534,6 +1966,7 @@ export function renderRediger(root, params) {
   function fieldRow(f) {
     const empty = isEmpty(f, draft.values[f.id]);
     const row = h("div", { class: "rx-field" + (empty ? " rx-field--empty" : "") });
+    row.dataset.champ = f.id;
     const inText = fieldsInText.has(f.id);
     const head = h("div", { class: "rx-field__head" },
       h("span", { class: "rx-field__label", text: f.label }),
@@ -1599,15 +2032,16 @@ export function renderRediger(root, params) {
   }
 
   function updateCounter() {
-    if (ui.tab !== "completer" || !counterEls) return;
+    if (!counterEls) return;
     const all = applicableFields();
     const missing = all.filter((f) => isEmpty(f, draft.values[f.id]));
     const req = missing.filter((f) => f.required).length;
+    const faites = all.length - missing.length;
     if (counterEls.strong) {
       counterEls.strong.textContent = req ? `${req} champ(s) obligatoire(s) à compléter` : "Tous les champs obligatoires sont renseignés";
       counterEls.strong.style.color = req ? "var(--error)" : "var(--success)";
     }
-    if (counterEls.count) counterEls.count.textContent = `${all.length - missing.length}/${all.length}`;
+    if (counterEls.bar) counterEls.bar.style.width = `${all.length ? Math.round((faites / all.length) * 100) : 100}%`;
     renderTabs();
   }
 
@@ -2177,6 +2611,18 @@ export function renderRediger(root, params) {
       to: [],
     });
     toast(ecarts.length ? `Acte enregistré (${ecarts.length} écart(s) signalé(s))` : "Acte enregistré", "success");
+    draft.reference = signatureBrouillon();
+    // L'enregistrement remet le partage à zéro : ce qui vient d'être écrit est au
+    // registre (les autres postes le reçoivent par le flux), et ce que nous avons
+    // touché n'est plus « en cours ». On republie dans la foulée, pour que les
+    // autres postes cessent d'attendre un brouillon qui n'existe plus.
+    draft.touches = new Set();
+    draft.apercu = instantane(draft);
+    if (draft.acteId) {
+      oublierDistante("actes", draft.acteId);
+      publierMonBrouillon();
+      peintreCollab();
+    }
     redraw();
   }
 
@@ -2235,6 +2681,17 @@ export function renderRediger(root, params) {
   paintPalette();
   paintStatus();
   paintPanel();
+  // La vue est « vivante » : c'est par elle que le travail venu d'ailleurs se
+  // peint sans repasser par un redessin complet (voir le brouillon partagé, en
+  // tête de fichier). On ne retient que des fonctions et le papier — rien qui
+  // empêche un redessin de rendre l'ancienne vue au ramasse-miettes.
+  vueVivante = {
+    acteId: draft.acteId,
+    papier: paper,
+    peindrePapier: paintSoon,
+    peindreEtat: paintStatus,
+    peindreCollab: paintCollab,
+  };
 }
 
 // --------------------------------------------------------------------------

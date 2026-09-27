@@ -40,6 +40,12 @@
 //   ecrireEtat(json)          remplace l'état d'un bloc
 //   lireCollection(nom)       [{ id, rev, ord, payload }], triés (ord, id)
 //   lireRevisionCollection(nom)   la révision d'une collection
+//   ecrirePiece(piece)        range une PIÈCE (fichier joint à un acte) — HORS
+//                             de l'état : un scan de plusieurs mégaoctets n'a
+//                             rien à faire dans le document réécrit à chaque
+//                             écriture
+//   lirePiece(id)             la pièce, ou null
+//   supprimerPiece(id)        la retire
 //   synchroniser({…})         l'écriture par lots : révisions, conflits, journal
 //   sante()                   { moteur, collections } — LÈVE si le rangement est injoignable
 //   journaliserCourriel(…)    la trace d'un courriel expédié (ou non)

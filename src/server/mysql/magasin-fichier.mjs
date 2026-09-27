@@ -78,6 +78,12 @@ const LISEZ_MOI = [
   "publication. Les mots de passe n'y figurent jamais en clair (seule leur",
   "empreinte scrypt est conservée), mais tout le reste est lisible tel quel.",
   "",
+  "pieces/ contient les fichiers joints aux actes — l'original signé d'un acte",
+  "ancien, la version signée d'un acte signé hors de l'application. Ce sont les",
+  "seuls fichiers lourds du dossier : un fichier par pièce, en base64 dans un",
+  "document JSON. Ils sont PUBLICS (le recueil cite leur adresse) : sans valeur",
+  "secrète, mais à sauvegarder comme le reste.",
+  "",
   "SAUVEGARDE : copiez ce dossier entier. C'est tout.",
   "RESTAURATION : replacez-le à la place de celui-ci, service arrêté.",
   "",
@@ -169,6 +175,48 @@ export function creerMagasinFichier({ dossier = "./data", io = ioDisque(dossier)
       .map((l) => { try { return JSON.parse(l); } catch (e) { return null; } })
       .filter(Boolean)
       .map((r) => ({ ...r, envoye: r.envoye === true }));
+  }
+
+  // ------------------------------------------------------------- les pièces
+  // Les fichiers joints : l'original signé d'une reprise d'acte ancien, la
+  // version signée d'un acte du circuit externe. UN FICHIER PAR PIÈCE, et non
+  // l'état : une pièce pèse des mégaoctets, et `etat.json` est relu puis réécrit
+  // EN ENTIER à chaque écriture — le même raisonnement que pour la table
+  // `sb_piece` du rangement MySQL. Le contenu reste en base64 dans un document
+  // JSON : c'est la forme que l'API échange, et il n'y a donc rien à convertir
+  // d'un rangement à l'autre.
+  //
+  // L'identifiant est tiré au hasard par le service (`server.mjs`) et ne sert
+  // qu'à nommer le fichier : on le filtre ici pour qu'un identifiant reçu d'une
+  // requête ne puisse pas désigner un chemin hors du dossier.
+  const cheminPiece = (id) => "pieces/" + String(id || "").replace(/[^A-Za-z0-9_-]/g, "") + ".json";
+
+  async function ecrirePiece(piece) {
+    const id = String((piece && piece.id) || "");
+    if (!id || cheminPiece(id) === "pieces/.json") throw new Error("Pièce sans identifiant exploitable.");
+    await enfiler(async () => {
+      // Le dossier est créé ici aussi : une installation mise à jour sur place
+      // n'a pas reçu `pieces/` de sa préparation, et écrire dans un dossier
+      // absent échouerait au premier dépôt.
+      await io.creerDossier("pieces");
+      await ecrireAtomique(cheminPiece(id), JSON.stringify(piece));
+    });
+    return true;
+  }
+
+  async function lirePiece(id) {
+    const chemin = cheminPiece(id);
+    if (chemin === "pieces/.json") return null;
+    const texte = await io.lireTexte(chemin);
+    if (texte === null) return null;
+    try { return JSON.parse(texte); } catch (e) { return null; }
+  }
+
+  async function supprimerPiece(id) {
+    const chemin = cheminPiece(id);
+    if (chemin === "pieces/.json") return false;
+    await enfiler(() => io.supprimer(chemin));
+    return true;
   }
 
   // ------------------------------------------------------------- les secrets
@@ -319,6 +367,11 @@ export function creerMagasinFichier({ dossier = "./data", io = ioDisque(dossier)
 
     async lireRevisionCollection(nom) { return (await lireDoc(nom)).revision; },
 
+    // Les PIÈCES (voir plus haut) : un fichier par pièce, HORS de l'état.
+    ecrirePiece,
+    lirePiece,
+    supprimerPiece,
+
     async synchroniser(opts) {
       return enfiler(async () => {
         const doc = await lireDoc(opts.collection);
@@ -365,6 +418,7 @@ export function creerMagasinFichier({ dossier = "./data", io = ioDisque(dossier)
     async preparer() {
       await io.creerDossier("collections");
       await io.creerDossier("secrets");
+      await io.creerDossier("pieces");
       const version = await io.lireTexte("STOCKAGE.json");
       if (version === null) {
         await ecrireAtomique("STOCKAGE.json", JSON.stringify({ format: 1, cree: new Date().toISOString() }, null, 2) + "\n");

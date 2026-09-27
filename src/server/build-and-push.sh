@@ -11,9 +11,9 @@
 # Le registre n'est PAS un argument : il se donne par `DOCKER_REGISTRY`.
 #
 # EXEMPLES
-#   ./build-and-push.sh                          # Build local uniquement (scribae:1.6.1w)
-#   ./build-and-push.sh moncompte 1.6.1w true     # Build + tag :latest
-#   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte 1.6.1w   # Build + push
+#   ./build-and-push.sh                          # Build local uniquement (scribae:1.6.2)
+#   ./build-and-push.sh moncompte 1.6.2 true     # Build + tag :latest
+#   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte 1.6.2   # Build + push
 #
 # ENVIRONNEMENT
 #   DOCKER_REGISTRY   Registre de destination (ex: ghcr.io/, docker.io/) ; vide = pas de push
@@ -35,7 +35,7 @@ REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"  # Racine du dépôt
 # Valeurs par défaut (peuvent être écrasées par les arguments)
 REGISTRY="${DOCKER_REGISTRY:-}"          # Ex: ghcr.io/, docker.io/, ou vide pour local
 IMAGE_NAME="${1:-scribae}"               # Nom de l'image
-IMAGE_VERSION="${2:-1.6.1w}"            # Version (tag)
+IMAGE_VERSION="${2:-1.6.2}"            # Version (tag)
 PUSH_LATEST="${3:-false}"               # Ajouter un tag :latest ? (true/false)
 
 # Chemins
@@ -49,9 +49,9 @@ usage() {
   echo "Le registre se donne par DOCKER_REGISTRY (vide : build local seulement)."
   echo ""
   echo "Exemples:"
-  echo "  $0                                    # Build local (scribae:1.6.1w)"
-  echo "  $0 moncompte 1.6.1w true              # Build + tag :latest"
-  echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte 1.6.1w   # Build + push"
+  echo "  $0                                    # Build local (scribae:1.6.2)"
+  echo "  $0 moncompte 1.6.2 true              # Build + tag :latest"
+  echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte 1.6.2   # Build + push"
   exit 1
 }
 
