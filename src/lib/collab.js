@@ -39,6 +39,12 @@ export const PRESENCE = "presence";
 export const JOURNAL = "journal";
 
 export const PRESENCE_MS = 25000;   // battement de cœur
+// O-6 (audit ciblé du 22/09/2026) : en ÉTAT D'ERREUR, le battement s'ESPACE. Un
+// service qui refuse la présence (rôle, session) recevait sinon un battement
+// toutes les 25 secondes — donc une phrase d'erreur à l'écran et une entrée de
+// plus dans la file, indéfiniment. En repli, le poste se fait encore connaître,
+// mais sans marteler un service qui répond non.
+export const PRESENCE_REPLI_MS = 120000;
 export const EN_LIGNE_MS = 70000;   // au-delà : poste considéré parti
 const POLL_MS = 30000;
 const JOURNAL_MAX = 300;            // au-delà, les plus anciens sortent
@@ -394,6 +400,23 @@ export function setFluxActif(actif) {
 
 export const fluxOuvert = () => fluxActif;
 
+// Le délai du PROCHAIN battement : le rythme ordinaire, ou le repli quand le
+// dernier battement a échoué (O-6). Fonction PURE, pour que la règle se lise et
+// s'éprouve sans horloge.
+export const delaiPresence = ({ erreur = "" } = {}) => (erreur ? PRESENCE_REPLI_MS : PRESENCE_MS);
+
+// Le battement se RE-PLANIFIE lui-même (et non un `setInterval` fixe) : c'est ce
+// qui permet d'espacer le rythme en état d'erreur, et de le resserrer dès qu'un
+// battement passe.
+function bouclerBattement() {
+  battement = setTimeout(async () => {
+    try {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") await battre();
+    } catch (e) { /* `battre` ne lève pas : on garde la boucle vivante */ }
+    if (battement !== null) bouclerBattement();
+  }, delaiPresence({ erreur: derniereErreur }));
+}
+
 export async function demarrer(user) {
   declarerUtilisateur(user);
   if (!user) { await arreter(); return; }
@@ -403,7 +426,7 @@ export async function demarrer(user) {
     canal.onmessage = () => { rafraichir(); };
   } catch (e) { canal = null; }
   await battre();
-  if (!battement) battement = setInterval(() => { if (document.visibilityState !== "hidden") battre(); }, PRESENCE_MS);
+  if (battement === null) bouclerBattement();
   if (!sondage) sondage = setInterval(() => { if (document.visibilityState !== "hidden") rafraichir(); }, POLL_MS);
   document.addEventListener("visibilitychange", onVisible);
   window.addEventListener("pagehide", arreter);
@@ -422,7 +445,7 @@ function onVisible() {
 }
 
 export async function arreter() {
-  if (battement) { clearInterval(battement); battement = null; }
+  if (battement !== null) { clearTimeout(battement); battement = null; }
   if (sondage) { clearInterval(sondage); sondage = null; }
   if (battementVif) { clearTimeout(battementVif); battementVif = null; }
   brouillonEnAttente = false;

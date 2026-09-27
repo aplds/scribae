@@ -153,7 +153,8 @@ Un seul processus HTTP, deux familles de ressources :
 |---|---|---|
 | **Données** | `/v1/db/health`, `/v1/db/collections/{collection}`, `/v1/db/collections/{collection}/sync` | tables `sb_record` / `sb_collection` / `sb_journal` |
 | **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/publications…`, `/v1/eli/…`, `/v1/health`, `GET /v1/` (OpenAPI) | table `sb_etat` |
-| **Public** | `/v1/config`, `/v1/health`, `/v1/db/health`, `/v1/atelier/acces`, `/v1/informations` | ces routes sont servies **sans session** (hors de la porte de l'atelier) ; `/v1/informations` lit la collection `informations` dans `sb_record` |
+| **Public** | `/v1/config`, `/v1/health`, `/v1/atelier/acces`, `/v1/informations` | ces routes sont servies **sans session** (hors de la porte de l'atelier) ; `/v1/informations` lit la collection `informations` dans `sb_record` |
+| **Public en démonstration seulement** | `/v1/db/health` | servie sans session en mode « démonstration » ; en mode « mot de passe », elle exige une **session** (elle décrit l'hôte, le port, le schéma et la version du moteur — voir `src/docs/AUDIT-BUGS-2026-09-22.md`, point O-1) |
 
 Il n'ouvre **aucune connexion sortante** : il ne parle qu'à son **rangement** — la base MariaDB,
 ou le dossier de données en mode « fichiers » (§ 2.4).
@@ -785,7 +786,7 @@ propose *Tester la connexion*, *Envoyer les données à la base*, *Récupérer d
 
 | Ligne | La question | Ce qu'elle éprouve |
 |---|---|---|
-| **Le service répond** | y a-t-il quelqu'un au bout ? | `GET /v1/db/health` — ni session, ni anti-CSRF, ni jeton |
+| **Le service répond** | y a-t-il quelqu'un au bout ? | `GET /v1/db/health` — jamais d'anti-CSRF ni de jeton ; une **session** en mode « mot de passe » (c'est alors un `401` que l'écran de connexion lit comme « connexion requise »), rien du tout en mode « démonstration » |
 | **La base accepte les écritures** | peut-on enregistrer ? | `POST /v1/db/collections/meta/sync` **vide** : session, anti-CSRF, rôle et transaction compris, sans déposer le moindre enregistrement |
 
 Une pastille rouge peut donc vivre à côté d'un « le service répond » : c'est la **seconde** ligne
@@ -1854,15 +1855,31 @@ perdues. Attention : `docker compose restart` **relance le conteneur sans relire
 
 ### 7.2 Sonde de santé
 
-`GET /v1/db/health` (public) répond `200` avec l'état de la base et, par collection, le
-nombre d'enregistrements et la révision ; `503` si la base n'est pas prête (avec un champ
-`remede`). C'est la sonde à utiliser pour la supervision.
+Deux sondes, deux questions. **`GET /v1/health`** dit que le **processus** est vivant : elle est
+publique dans tous les modes, ne touche ni la base ni la session, et c'est **elle** qu'il faut
+brancher sur la supervision. **`GET /v1/db/health`** va plus loin — elle interroge la base — mais
+elle décrit l'hôte, le port, le schéma et la version du moteur : en mode « mot de passe » (le
+défaut du `.env`), elle **exige donc une session** (voir `src/docs/AUDIT-BUGS-2026-09-22.md`,
+point O-1) ; elle reste publique en mode « démonstration ».
+
+`GET /v1/db/health` répond `200` avec l'état de la base et, par collection, le nombre
+d'enregistrements et la révision ; `503` si la base n'est pas prête (avec un champ `remede`).
 
 ```bash
+# Le processus (public, dans tous les modes) :
+curl -fsS http://127.0.0.1:8080/v1/health | head -c 200
+
+# L'état de la base — mode « démonstration » :
 curl -fsS http://127.0.0.1:8080/v1/db/health | head -c 400
+
+# L'état de la base — mode « mot de passe » : une session d'abord, dans un pot à cookies.
+curl -fsS -c /tmp/scribae.jar -H 'content-type: application/json' \
+  -d '{"login":"admin","motDePasse":"…"}' https://api.exemple.fr/v1/auth/connexion >/dev/null
+curl -fsS -b /tmp/scribae.jar https://api.exemple.fr/v1/db/health | head -c 400
 ```
 
-Points à surveiller : réponse `200` et `collections.actes.records` croissant. Un `503
+Points à surveiller : réponse `200` et `collections.actes.records` croissant. Un `401
+session_absente` signifie que la sonde n'a pas de session (mode « mot de passe ») ; un `503
 base_indisponible` signifie que le schéma manque ou que les identifiants sont faux ; un `503
 jeton_non_configure` signifie qu'aucun jeton n'est configuré.
 
@@ -2079,7 +2096,9 @@ sauvegarde mensuelle de longue durée, copie hors site.
 3. `docker compose up -d --build` (le service `db-init` repose le compte et applique le schéma) ;
 4. `docker compose exec api node server.mjs --migrate` si l'on a mis `AUTO_MIGRATE=false` et que
    le schéma a changé ;
-5. vérifier `/v1/db/health` et ouvrir l'application.
+5. vérifier `/v1/health` (le processus) et, en mode « démonstration », `/v1/db/health` (la base —
+   en mode « mot de passe », cette dernière exige une session, voir § 7.2), puis ouvrir
+   l'application.
 
 Les mises à jour **ne touchent pas** aux données : la synchronisation est incrémentale et les
 migrations du référentiel (côté application) sont **additives** — un référentiel antérieur

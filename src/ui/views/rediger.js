@@ -46,7 +46,7 @@ import { avertissementAnnexesAutonomes } from "../../lib/abrogation-annexes.js";
 import { entreeEnVigueur } from "../../lib/execution.js";
 import { buildRedactionDoc, controlFor, focusFieldWidget, focusNodeWidget, hiddenPassages, bindConfig, closeTokenEditor } from "./wysiwyg.js";
 import { AUTO_TOKENS } from "../../lib/auto-tokens.js";
-import { annotationStrip, notesByPath, countNotes } from "../annotations.js";
+import { annotationStrip, notesByPath, countNotes, compteNotes } from "../annotations.js";
 import { signerPicker } from "../signer-picker.js";
 import { champFonction, roleDeFonction } from "../../lib/fonctions.js";
 import { ordresModifies, rangerCommeLaTrame, ordreConteneur, rangDe, deplacerVers } from "../../lib/ordre.js";
@@ -400,6 +400,7 @@ function chooserTrameCard(t, nbActes) {
   const config = state.config;
   const family = (config.families || []).find((f) => f.id === t.familyId);
   const commentaires = countNotes(t.body);
+  const notesEnAttente = countNotes(t.body, { ouvertes: true });
   const regles = (t.rules || []).length;
   const nbChamps = (t.fields || []).length;
   return h("div", { class: "fr-card fr-card--pied" },
@@ -417,7 +418,7 @@ function chooserTrameCard(t, nbActes) {
       `${nbChamps} champ${nbChamps > 1 ? "s" : ""}`,
       regles ? `${regles} règle${regles > 1 ? "s" : ""}` : null,
       nbActes ? `${nbActes} acte${nbActes > 1 ? "s" : ""}` : null,
-      commentaires ? `${commentaires} commentaire${commentaires > 1 ? "s" : ""}` : null,
+      commentaires ? `${commentaires} commentaire${commentaires > 1 ? "s" : ""}${notesEnAttente < commentaires ? ` (${notesEnAttente} en attente)` : ""}` : null,
       !tramePublishable(t) ? { text: "non publiable", alerte: true, title: "Les actes issus de cette trame ne sont pas publiés au recueil (actes individuels)." } : null,
     ]),
     h("div", { class: "fr-row", style: { justifyContent: "space-between", marginTop: "10px" } },
@@ -1726,14 +1727,23 @@ export function renderRediger(root, params) {
   // mène.
   function paintConsignes(box) {
     const groups = notesByPath(doc.notes || []);
+    const compte = compteNotes(doc.notes || []);
     const parChemin = new Map();
     const walk = (ns) => (ns || []).forEach((n) => { if (n.path) parChemin.set(n.path, n); walk(n.blocks); });
     walk(doc.nodes);
     box.appendChild(h("div", { class: "fr-row" },
       h("strong", { text: groups.size > 1 ? `${groups.size} passages commentés par la trame` : "Un passage commenté par la trame" }),
+      // Ce que la rédaction doit savoir d'un coup d'œil : reste-t-il une
+      // consigne à appliquer, et combien ont déjà été closes ? Le geste de
+      // clôture, lui, appartient aux administrateurs (voir views/editor.js).
+      compte.resolues ? h("span", {
+        class: "fr-badge fr-badge--success",
+        title: "Commentaires déjà traités par un administrateur — ils restent dans le document, marqués « Traité ».",
+        text: `${compte.ouvertes} en attente · ${compte.resolues} traité${compte.resolues > 1 ? "s" : ""}`,
+      }) : null,
     ));
     box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "4px 0 10px" },
-      text: "Consignes, explications ou points à arbitrer laissés par les administrateurs : ils accompagnent la rédaction et ne sont pas publiés avec l'acte. Le document les affiche aussi, sous chaque passage concerné." }));
+      text: "Consignes, explications ou points à arbitrer laissés par les administrateurs : ils accompagnent la rédaction et ne sont pas publiés avec l'acte. Le document les affiche aussi, sous chaque passage concerné — un commentaire marqué « Traité » a été appliqué ou tranché." }));
     for (const [path, list] of groups) {
       box.appendChild(h("div", { class: "cmt-group" },
         h("div", { class: "cmt-group__head" },

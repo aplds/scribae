@@ -54,6 +54,21 @@
 }
 .annot__btn:hover { color: var(--brand); background: var(--brand-soft); }
 .annot__btn--danger:hover { color: var(--error); background: var(--error-bg); }
+/* Un commentaire TRAITÉ : la consigne est appliquée (ou le point tranché).
+   Il reste sous le bloc concerné — on ne cache rien — mais s'efface
+   visuellement et porte la pastille « Traité ». Voir `src/ui/annotations.js`. */
+.annot__item--done .annot__text { text-decoration: line-through; text-decoration-thickness: 1px; opacity: .72; }
+.annot__item--done .annot__quote { opacity: .72; }
+.annot__done { text-transform: none; letter-spacing: 0; }
+.annot__btn--done.is-on, .annot__btn--done:hover { color: var(--success); background: rgba(0, 128, 0, .08); }
+/* Le FIL d'un commentaire : les réponses sous le commentaire, en retrait, et le
+   geste pour y ajouter la sienne. Voir `noteThread` (ui/annotations.js). */
+.annot__thread { margin: 5px 0 0; padding-left: 8px; border-left: 2px solid rgba(0, 0, 145, .14); }
+.annot__reply { margin-top: 5px; }
+.annot__reply-meta { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-muted); }
+.annot__reply-who { font-weight: 600; color: var(--ink-2); }
+.annot__reply-text { margin: 1px 0 0; white-space: pre-wrap; }
+.annot__count { margin-left: 3px; font-size: var(--t-xs); font-weight: 700; }
 .annot-flash { box-shadow: 0 0 0 3px var(--focus) !important; border-radius: 3px; }
 
 /* La pastille qui suit une sélection de texte dans la page : « Commenter ». */
@@ -87,6 +102,8 @@
 .cmt-group__body { padding: 6px; }
 .cmt-group__body .note-card { margin-bottom: 6px; }
 .cmt-group__body .note-card:last-child { margin-bottom: 0; }
+.cmt-filtre { margin-bottom: 8px; }
+.cmt-filtre .fr-choice { font-size: var(--t-xs); }
 
 /* Compteurs cliquables de l'en-tête de l'éditeur de trame. */
 .editor__counts {
@@ -254,6 +271,17 @@ html.dnd-actif .blk { outline: 1px dashed var(--border-strong); outline-offset: 
 .fcard[open] .fcard__chev { transform: rotate(0deg); }
 .fcard__corps { padding: 2px 12px 14px; }
 .fcard__pied { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
+/* Les questions rangées par GROUPE : le modèle porte `field.group` depuis
+   toujours (il range le formulaire du rédacteur), l'onglet des questions le
+   montre donc lui aussi. Voir `renderFieldsInspector` (views/editor.js). */
+.champs-sect {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px;
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-muted); background: var(--bg-alt);
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.champs-sect__nom { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.champs-sect--libre .champs-sect__nom { font-style: italic; font-weight: 400; text-transform: none; letter-spacing: 0; }
 
 .inspector__section { border-bottom: 1px solid var(--border); padding: 12px; }
 .inspector__section:last-child { border-bottom: 0; }
@@ -264,6 +292,16 @@ html.dnd-actif .blk { outline: 1px dashed var(--border-strong); outline-offset: 
 .note-card--question { border-left-color: var(--warning); }
 .note-card--watch { border-left-color: var(--success); }
 .note-card__head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: var(--t-xs); }
+/* Le commentaire clos, dans l'inspecteur : filet vert, fond retiré, et la
+   mention « Traité par X le Y » au-dessus du texte. Le texte lui-même ne peut
+   pas être barré (c'est une zone de saisie) : c'est le fond, la pastille et la
+   mention qui portent l'état. */
+.note-card.is-done { border-left-width: 4px; border-left-color: var(--success); background: var(--bg-alt); }
+.note-card.is-done .fr-textarea { opacity: .68; }
+.note-card__done { margin: 0 0 4px; font-size: var(--t-xs); font-weight: 600; color: var(--success); }
+/* Le fil, dans la carte de l'inspecteur : les réponses puis le geste. */
+.note-fil { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.note-fil .annot__thread { margin: 0 0 6px; }
 
 .rule-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; background: var(--bg); }
 .rule-card--blocking { border-left: 3px solid var(--error); }
@@ -816,10 +854,12 @@ th:hover > .tbl-tools, td:hover > .tbl-tools, .tbl-tools:focus-within { opacity:
 .doc-notes { margin-top: 2em; border-top: 1px dashed var(--border-strong); padding-top: 10px; font-family: var(--font-ui); font-size: var(--t-xs); }
 .doc-notes__title { font-size: var(--t-sm); margin-bottom: 6px; }
 .doc-notes__list { list-style: none; padding: 0; margin: 0; }
-.doc-notes__item { display: flex; gap: 6px; margin-bottom: 4px; }
+.doc-notes__item { display: flex; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
 .doc-notes__kind { font-size: var(--t-xs); text-transform: uppercase; color: var(--ink-muted); flex: none; min-width: 80px; }
 .doc-notes__quote { color: var(--ink-2); font-style: italic; flex: none; max-width: 40%; }
 .doc-notes__author { color: var(--ink-muted); }
+/* Le fil d'une note, dans l'annexe imprimée : la réponse sous son commentaire. */
+.doc-notes__reply { flex: 0 0 100%; margin-left: 86px; color: var(--ink-2); font-style: italic; }
 
 /* impression
    L'aperçu de l'application est déjà un papier A4 (21 × 29,7 cm, marges de

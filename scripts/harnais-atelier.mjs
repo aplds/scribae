@@ -339,11 +339,31 @@ async function monter(fs) {
   // Les épreuves chargent parfois un module par `await import("…")` DYNAMIQUE
   // (une chaîne dans une variable) : esbuild ne peut pas l'inliner. On le
   // détourne vers ce résolveur, qui rejoue la résolution virtuelle.
+  //
+  // LE REGISTRE PARTAGÉ, ET POURQUOI. `node --test` exécute UN FICHIER par
+  // PROCESSUS : dans un fichier, tous les `import` rendent le MÊME module (donc
+  // le même état). Le harnais, lui, construit un bundle par import dynamique :
+  // `charger("../src/lib/store.js")` et `charger("../src/lib/auth.js")` donnaient
+  // donc DEUX copies d'`auth.js`, et un test qui règle l'une ne se voyait pas
+  // dans l'autre — des échecs qui n'existaient que dans l'atelier (voir
+  // docs/ATELIER.md § 3.3). Le registre répare cela : `uneEpreuve` fait
+  // importer D'AVANCE, dans le bundle du fichier, tous les modules que la source
+  // cite en clair (ils sont alors partagés, puisque esbuild les inline), et le
+  // résolveur les sert ici au lieu de reconstruire un second bundle.
+  const registre = new Map();
+  globalThis.__dynEnregistrer = (cle, ns) => { registre.set(cle, ns); };
+  // Un registre vit le temps d'UN fichier d'épreuve : deux fichiers ne partagent
+  // jamais un module, exactement comme deux processus.
+  globalThis.__dynVider = () => { registre.clear(); __modules.clear(); };
   globalThis.__makeDyn = (dossierVirtuel) => async (spec) => {
     const s = String(spec);
     const vp = s.startsWith(".") ? normaliser(dossierVirtuel + "/" + s) : sansProtocole(s);
+    const candidats = [reel(vp), vp, "src/" + vp];
+    for (const candidat of candidats) {
+      if (registre.has(candidat)) return registre.get(candidat);
+    }
     let derniere = null;
-    for (const candidat of [reel(vp), vp, "src/" + vp]) {
+    for (const candidat of candidats) {
       try { await fs.readTextFile(candidat); return await importer(fs, esbuild, plugin, candidat); }
       catch (e) { derniere = e; }
     }
@@ -414,11 +434,49 @@ const decouvrir = () => [...__snapshot]
   .filter((p) => /[.]test[.]mjs$/.test(p) && (p.startsWith("src/tests/") || p.startsWith("src/server/")))
   .sort();
 
+// Les MODULES que la source cite EN CLAIR (« ../src/lib/…js », « ./actes.mjs ») :
+// ce sont eux que l'épreuve chargera. Les faire entrer dans SON bundle, c'est
+// garantir qu'un module importé deux fois est le MÊME — la règle de `node --test`
+// à l'intérieur d'un fichier. On ne retient que les chemins qui EXISTENT et qui
+// portent une extension de MODULE : la source cite aussi des fichiers qu'elle
+// LIT (`index.html`, `env.example`), et les importer ferait échouer la
+// construction.
+async function modulesPartages(fs, dossierVirtuel, source) {
+  const trouves = new Map();
+  for (const m of String(source).matchAll(/["']([.][.]?\/[^"'\n]*)["']/g)) {
+    const spec = m[1];
+    if (!/[.](m?js)$/.test(spec)) continue;
+    if (trouves.has(spec)) continue;
+    const vp = normaliser(dossierVirtuel + "/" + spec);
+    for (const cle of [reel(vp), vp, "src/" + vp]) {
+      try { await fs.readTextFile(cle); trouves.set(spec, cle); break; }
+      catch (e) { /* chemin suivant */ }
+    }
+  }
+  return [...trouves].map(([spec, cle]) => ({ spec, cle }));
+}
+
+// Ce qui les enregistre est ajouté À LA SOURCE, et non au bundle : c'est esbuild
+// qui doit voir ces `import` pour les INLINER (un import dynamique à littéral
+// est inliné dès lors qu'on ne découpe pas le bundle). Chaque entrée est
+// protégée : un module qui refuse de se charger hors navigateur reste
+// « introuvable » pour l'épreuve, comme avant — il ne fait pas tomber la
+// construction.
+const codePartage = (liste) => liste
+  .map(({ spec, cle }) => "try { globalThis.__dynEnregistrer(" + JSON.stringify(cle)
+    + ", await import(" + JSON.stringify(spec) + ")); } catch (e) { /* non partageable */ }")
+  .join("\n");
+
 async function uneEpreuve(fs, esbuild, plugin, fichier) {
   globalThis.__TESTS = [];
+  // UN FICHIER = UN PROCESSUS, comme sous `node --test` : rien de ce qu'un
+  // fichier a chargé ne doit survivre au suivant (voir `__dynVider`).
+  if (globalThis.__dynVider) globalThis.__dynVider();
   let code;
   try {
-    const res = await construire(fs, esbuild, plugin, fichier, await fs.readTextFile(fichier));
+    const source = await fs.readTextFile(fichier);
+    const partages = await modulesPartages(fs, virtuel(fichier).replace(/[/][^/]*$/, ""), source);
+    const res = await construire(fs, esbuild, plugin, fichier, source + "\n" + codePartage(partages));
     code = prelude(fichier, res.outputFiles[0].text);
   } catch (e) {
     return { fichier, erreur: "construction : " + message(e), ok: 0, total: 0, sautes: 0, echecs: [] };
@@ -492,7 +550,14 @@ export async function verifier({ fs, epreuvesAussi = true } = {}) {
   const rapport = { syntaxe, style, ok: syntaxe.fautes.length === 0 && style.code === 0 };
   if (epreuvesAussi) {
     rapport.epreuves = await epreuves({ fs });
-    rapport.ok = rapport.ok && rapport.epreuves.totalOk === rapport.epreuves.totalTests;
+    // UN SAUT N'EST PAS UN ÉCHEC. Les épreuves que le navigateur ne peut pas
+    // jouer — il n'y a pas de processus ici, ni de `node:crypto` complet, ni
+    // d'installation réelle à comparer — s'appellent elles-mêmes `t.skip`.
+    // Les compter comme des échecs rendrait le verdict faux, et ferait chasser
+    // un fantôme à chaque tour (voir src/docs/ATELIER.md § 3.3).
+    rapport.sauts = rapport.epreuves.resultats.reduce((n, r) => n + (r.sautes || 0), 0);
+    rapport.echecs = rapport.epreuves.resultats.reduce((n, r) => n + (r.echecs ? r.echecs.length : 0) + (r.erreur ? 1 : 0), 0);
+    rapport.ok = rapport.ok && rapport.echecs === 0;
   }
   return rapport;
 }
@@ -500,9 +565,11 @@ export async function verifier({ fs, epreuvesAussi = true } = {}) {
 const derniereLigne = (s) => String(s || "").trim().split("\n").filter(Boolean).slice(-1)[0] || "";
 
 // Un verdict court, fait pour être RENDU tel quel par l'outil de l'agent.
-// Il ne dit pas « à revoir » pour les écarts CONNUS du harnais (pas de processus,
-// pas de réseau, isolation de modules) : il les compte et renvoie à la liste de
-// `docs/ATELIER.md` § 3.3, car c'est le PLUS GRAND risque — chasser un fantôme.
+// Il distingue l'ÉCHEC (une régression : quelque chose qui marchait ne marche
+// plus) du SAUT (une épreuve que le navigateur ne peut pas jouer — pas de
+// processus, pas de `node:crypto` complet, pas d'installation réelle). Le second
+// est un fait d'environnement, listé dans `docs/ATELIER.md` § 3.3 ; le confondre
+// avec le premier est le PLUS GRAND risque de l'atelier — chasser un fantôme.
 export function texte(rapport) {
   const lignes = [];
   lignes.push("Syntaxe : " + rapport.syntaxe.controles + " fichier(s), " + rapport.syntaxe.fautes.length + " faute(s).");
@@ -512,7 +579,7 @@ export function texte(rapport) {
     const echecs = rapport.epreuves.resultats.reduce((n, r) => n + (r.echecs ? r.echecs.length : 0) + (r.erreur ? 1 : 0), 0);
     const sautes = rapport.epreuves.resultats.reduce((n, r) => n + (r.sautes || 0), 0);
     lignes.push("Épreuves : " + rapport.epreuves.totalOk + "/" + rapport.epreuves.totalTests
-      + " — " + echecs + " échec(s) et " + sautes + " saut(s) ; les écarts CONNUS sont listés dans src/docs/ATELIER.md § 3.3.");
+      + " — " + echecs + " échec(s) et " + sautes + " saut(s). Un saut n'est pas un échec (voir src/docs/ATELIER.md § 3.3) ; un échec, lui, est une régression.");
     for (const r of rapport.epreuves.resultats) {
       if (!r.erreur && r.ok === r.total && !r.echecs.length) continue;   // les fichiers verts n'encombrent pas
       const apercu = (r.echecs || []).slice(0, 2).map((e) => (e.length > 160 ? e.slice(0, 160) + "…" : e));
@@ -522,6 +589,8 @@ export function texte(rapport) {
   const faute = rapport.syntaxe.fautes.length > 0 || rapport.style.code !== 0;
   lignes.push("Verdict : " + (faute
     ? "À REVOIR — corriger la syntaxe ou le style ci-dessus"
-    : rapport.ok ? "tout est vert" : "syntaxe et style propres ; confronter les épreuves non vertes aux écarts connus"));
+    : rapport.ok
+      ? "tout est vert" + (rapport.sauts ? " (" + rapport.sauts + " saut(s) d'environnement)" : "")
+      : "À REVOIR — les épreuves ci-dessus portent un échec"));
   return lignes.join("\n");
 }

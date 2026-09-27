@@ -188,8 +188,18 @@ function appliquerMarqueDeploiement(config) {
 }
 
 // Charge les données du registre et rouvre la session enregistrée sur ce poste.
-async function chargeDonnees() {
-  const { config, trames, actes, reprises, users, session, informations, firstRun } = await bootstrap();
+//
+// `administrateur` : la session ouverte peut-elle écrire les collections que le
+// service réserve à l'administrateur (`config`, `users`) ? C'est la même règle
+// que celle du service (`comptes.estAdmin`, src/server/mysql/comptes.mjs). Un
+// agent qui n'est pas administrateur ne doit pas faire tenter, à chaque
+// démarrage, les migrations du référentiel et le semis des comptes : le service
+// répondrait `403 droit_requis`, la pastille d'erreur s'allumerait, et une phrase
+// d'action s'afficherait pour une opération que l'application n'avait pas à
+// demander (O-4 de l'audit ciblé du 22/09/2026). Le prochain administrateur qui
+// se connecte applique, lui, les migrations restées en attente.
+async function chargeDonnees({ administrateur = true } = {}) {
+  const { config, trames, actes, reprises, users, session, informations, firstRun } = await bootstrap({ administrateur });
   state.config = config;
   state.trames = trames;
   state.actes = actes;
@@ -410,7 +420,7 @@ export async function init() {
     state.config = appliquerMarqueDeploiement(seedConfigVierge());
     const s = await motdepasse.sessionCourante();
     if (s.ok && s.body && s.body.utilisateur) {
-      await chargeDonnees();
+      await chargeDonnees({ administrateur: hasRole(s.body.utilisateur, "administrateur") });
       const u = state.users.find((x) => x.id === s.body.utilisateur.id) || s.body.utilisateur;
       state.user = accountUsable(state.config, u) ? u : null;
       state.motDePasseAChanger = !!s.body.mustChange;
@@ -456,7 +466,9 @@ export async function login(userId) {
 // (cookie `HttpOnly`). Une fois la session ouverte, les données deviennent
 // lisibles — c'est seulement alors qu'on charge le registre.
 async function ouvrirSessionLocale(utilisateurServeur, { mustChange = false } = {}) {
-  await chargeDonnees();
+  // La session vient d'être ouverte : c'est le seul moment où l'on sait si le
+  // compte peut écrire `config` et `users` (voir `chargeDonnees`, O-4).
+  await chargeDonnees({ administrateur: hasRole(utilisateurServeur, "administrateur") });
   const u = state.users.find((x) => x.id === utilisateurServeur.id) || utilisateurServeur;
   state.user = accountUsable(state.config, u) ? u : null;
   state.motDePasseAChanger = !!mustChange;

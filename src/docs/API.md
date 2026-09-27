@@ -544,21 +544,23 @@ Les collections du référentiel, enregistrement par enregistrement.
 
 ### `GET /v1/db/health` — État de la base de données
 
-Le pilote de persistance et le nombre d'enregistrements par collection. C'est l'appel qui dit si la base répond, et qui alimente le badge de l'application.
+Le pilote de persistance et le nombre d'enregistrements par collection. C'est l'appel qui dit si la base répond, et qui alimente le badge de l'application. Elle décrit l'hôte, le port, le schéma et la version du moteur : en mode « password » ou « oidc », elle exige une session ouverte — l'application traite alors un `401` comme « connexion requise », jamais comme une panne.
 
-- **Authentification** : publique
+- **Authentification** : lecteur
 - **Service** : auto-hébergé
 
 **Exemple**
 
 ```bash
 curl -X GET 'https://api.exemple.fr/v1/db/health' \
-  -H 'accept: application/json'
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON'
 ```
 
 | Code | Signification |
 |---|---|
 | 200 | Base disponible |
+| 401 | Session absente (mode mot de passe) |
 | 503 | Base non prête (base_indisponible) |
 
 ### `GET /v1/db/collections/{collection}` — Lire une collection
@@ -2068,7 +2070,7 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/auth/comptes` | administrateur | État des mots de passe |
 | POST | `/v1/auth/comptes/{id}/mot-de-passe` | administrateur | Définir ou remettre un mot de passe |
 | DELETE | `/v1/auth/comptes/{id}/mot-de-passe` | administrateur | Retirer le mot de passe d'un compte |
-| GET | `/v1/db/health` | public | État de la base de données |
+| GET | `/v1/db/health` | lecteur | État de la base de données |
 | GET | `/v1/db/collections/{collection}` | lecteur | Lire une collection |
 | POST | `/v1/db/collections/{collection}/sync` | redacteur | Synchroniser une collection |
 | GET | `/v1/db/flux` | lecteur | Suivre les changements en temps réel |

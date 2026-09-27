@@ -16,7 +16,7 @@
 #
 # EXEMPLES
 #   ./build-and-push.sh                          # Build local (scribae:<version du dépôt>)
-#   ./build-and-push.sh scribae 1.6.3c true      # Build + tag :latest, version forcée
+#   ./build-and-push.sh scribae <version> true   # Build + tag :latest, version forcée
 #   DOCKER_REGISTRY=ghcr.io/ ./build-and-push.sh moncompte   # Build + push
 #
 # ENVIRONNEMENT
@@ -42,7 +42,7 @@ IMAGE_NAME="${1:-scribae}"               # Nom de l'image
 VERSION_FICHIER="$REPO_ROOT/src/lib/version.js"
 VERSION_DU_DEPOT=""
 if [ -r "$VERSION_FICHIER" ]; then
-  # `APP_VERSION = "1.6.3c";` → 1.6.3c. C'est la SEULE source du numéro : le
+  # `APP_VERSION = "<version>";` → <version>. C'est la SEULE source du numéro : le
   # dépôt n'en tient pas de copie (voir src/lib/version.js).
   VERSION_DU_DEPOT="$(sed -n 's/.*APP_VERSION *= *"\([^"]*\)".*/\1/p' "$VERSION_FICHIER" | head -n 1)"
 fi
@@ -62,7 +62,7 @@ usage() {
   echo ""
   echo "Exemples:"
   echo "  $0                                    # Build local (scribae:<version du dépôt>)"
-  echo "  $0 scribae 1.6.3c true                # Build + tag :latest (version forcée)"
+  echo "  $0 scribae <version> true             # Build + tag :latest (version forcée)"
   echo "  DOCKER_REGISTRY=ghcr.io/ $0 moncompte # Build + push"
   exit 1
 }

@@ -194,6 +194,46 @@ test("le no-op `revision = revision` ne transforme pas la révision en texte", a
 });
 
 // ---------------------------------------------------------------------------
+// La lecture d'une collection — le « prochain gisement de performance » ?
+//
+// `docs/PERFORMANCE.md` § 6 laissait la question ouverte : « une lecture de
+// collection coûte une dizaine d'ordres SQL. S'il s'agit d'un balayage ligne
+// par ligne, c'est le prochain gisement — et la campagne `--latence` est faite
+// pour le montrer ». La réponse, ici, est dans le code du magasin : la lecture
+// est UN ordre paramétré, et son coût ne dépend PAS du nombre d'enregistrements.
+// Ce qui reste cher, sur une base lointaine, n'est donc pas la lecture elle-même
+// mais la SESSION (deux lectures ponctuelles : la session, puis le compte), que
+// `compteDeSession` (src/server/mysql/comptes.mjs) fait à chaque requête
+// authentifiée. Cette épreuve fige le constat : que personne ne « corrige » un
+// balayage ligne à ligne qui n'existe pas, et qu'un ajout de requête par
+// enregistrement ne passe pas inaperçu.
+// ---------------------------------------------------------------------------
+test("lire une collection, c'est UN ordre SQL — pas un balayage par enregistrement", async () => {
+  const ordres = [];
+  const base = await basePrete({ journaliser: (o) => ordres.push(o.sql) });
+  const magasin = await creerMagasinMysql({ DB, mysql: base });
+
+  const cinquante = Array.from({ length: 50 }, (_, i) => rec("a" + i, { i }));
+  await magasin.synchroniser({ collection: "actes", upserts: cinquante });
+
+  // La LECTURE : cinquante enregistrements, un seul ordre.
+  ordres.length = 0;
+  const lus = await magasin.lireCollection("actes");
+  assert.equal(lus.length, 50, "les cinquante enregistrements sont bien rendus");
+  assert.equal(ordres.length, 1, "cinquante enregistrements se lisent en UN ordre, non cinquante");
+  assert.match(ordres[0], /FROM sb_record WHERE collection = \?/i,
+    "la lecture balaie la table PAR COLLECTION (une clause, un index), non ligne à ligne");
+
+  // La RÉVISION de la collection : un ordre ponctuel, lui aussi. Sa valeur est
+  // le CLOCK de la collection — elle avance d'un cran par ENREGISTREMENT écrit
+  // (voir `synchroniserCommun`, src/server/mysql/magasin.mjs), non par appel.
+  ordres.length = 0;
+  assert.equal(await magasin.lireRevisionCollection("actes"), 50, "la révision avance d'un cran par enregistrement");
+  assert.equal(ordres.length, 1);
+  assert.match(ordres[0], /FROM sb_collection WHERE name = \?/i);
+});
+
+// ---------------------------------------------------------------------------
 // Les PIÈCES JOINTES — la table `sb_piece` (migration 2).
 //
 // C'est la voie MySQL des pièces : l'original signé d'une reprise d'acte ancien

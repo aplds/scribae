@@ -38,6 +38,7 @@ import { MODES_CONTROLE_LEGALITE, modeControleLegalite } from "../../lib/legalit
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
 import { DEMO_TEXT } from "../notice.js";
 import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
+import { avertissementSite } from "../../lib/sites.js";
 import { optionsDeployees, poseParLeDeploiement } from "../../lib/deploiement-config.js";
 import { post, errorMessage } from "../../lib/remote.js";
 import { comptesDuDeploiement, sessionDeService } from "../../lib/auth.js";
@@ -777,10 +778,12 @@ function databasePanel() {
         live.appendChild(h("span", { class: "fr-small fr-muted", text: "Test en cours…" }));
         const res = await db.test(d);
         // DEUX questions, deux réponses : le service répond-il, et accepte-t-il
-        // d'ÉCRIRE ? La route de santé ne demande ni session ni anti-CSRF : elle
-        // peut répondre 200 pendant que la base refuse chaque geste — l'écran
-        // montrait alors « Connexion réussie » à côté d'une pastille rouge et
-        // d'une file d'écritures en attente (voir CHANGELOG, note 1.3.2k).
+        // d'ÉCRIRE ? La route de santé ne demande JAMAIS l'anti-CSRF (et, en mode
+        // « mot de passe », elle exige une session — O-1) : une session suffit
+        // donc pour qu'elle réponde 200 pendant que la base refuse chaque geste
+        // par `csrf_invalide` — l'écran montrait alors « Connexion réussie » à
+        // côté d'une pastille rouge et d'une file d'écritures en attente (voir
+        // CHANGELOG, note 1.3.2k).
         ui.dbEssai = { ...res, dirty, at: new Date().toISOString(), partage: db.modeById(d.mode).shared, base: d.mode === "external" ? (d.url || "") : "" };
         clear(live);
         for (const noeud of renduEssai(ui.dbEssai)) live.appendChild(noeud);
@@ -812,11 +815,23 @@ function databasePanel() {
   const paintFields = () => {
     clear(fields);
     if (d.mode === "external") {
+      // O-5 (audit ciblé du 22/09/2026) : l'avertissement inter-site se dit À LA
+      // FRAPPE, avant l'essai. Les cookies du service sont `SameSite=Lax` : sur
+      // un autre site que l'application, ils ne traversent pas, et chaque
+      // écriture est refusée (`session_absente`) alors que le service répond.
+      const avis = h("p", { class: "fr-small fr-error-text", style: { margin: "4px 0 0" }, hidden: true });
+      const majAvis = (valeur) => {
+        const motif = avertissementSite(valeur === undefined ? d.url : valeur);
+        avis.hidden = !motif;
+        avis.textContent = motif || "";
+      };
       fields.appendChild(textField({
         label: "Adresse du service de données", value: d.url || "", placeholder: "https://donnees.valmont-sur-loire.fr",
         help: "L'URL de base du serveur déployé (voir src/server/README.md). Laissez vide si l'application est servie par ce même serveur — c'est le cas du déploiement auto-hébergé ; sinon les chemins /v1/db/… y sont ajoutés.",
-        onChange: (v) => { d.url = v.trim(); },
+        onChange: (v) => { d.url = v.trim(); majAvis(v.trim()); },
       }));
+      fields.appendChild(avis);
+      majAvis();
       // Mode « comptes locaux (mot de passe) » : la porte est la SESSION du
       // service (identifiant et mot de passe, cookie), et les écritures portent
       // l'anti-CSRF de la page — le jeton d'API n'est PAS utilisé. Le champ
@@ -969,7 +984,13 @@ function databasePanel() {
   wrap.appendChild(choiceField({
     label: "Mode de persistance",
     value: d.mode,
-    options: db.MODES.map((m) => ({ value: m.id, label: m.label })),
+    // Une entrée que CE déploiement ne peut pas mener est montrée barrée, avec sa
+    // raison en infobulle (O-2 : le mode « service de démonstration » suppose un
+    // socket qui n'existe pas en auto-hébergement). La cacher ferait chercher.
+    options: db.MODES.map((m) => ({
+      value: m.id, label: m.label,
+      disabled: m.available === false, disabledHint: m.help,
+    })),
     onChange: (v) => { d.mode = v; redrawView(); },
   }));
   wrap.appendChild(h("p", { class: "fr-hint", text: db.modeById(d.mode).help }));
@@ -1066,9 +1087,12 @@ function stateBadge(st) {
 
 // Une ligne de verdict d'essai : la question posée, et le mot du service.
 // « oui » et « non » disent l'essentiel ; le message du service dit le reste.
-function ligneEssai(question, ok, detail) {
+// `ton` permet le cas neutre : un service qui répond « connexion requise »
+// (O-1) n'est pas en panne, il attend qu'on se connecte.
+function ligneEssai(question, ok, detail, ton = null) {
+  const teinte = ton || (ok ? "success" : "error");
   return h("div", { class: "fr-row", style: { gap: "8px", alignItems: "baseline", flexWrap: "wrap" } },
-    h("span", { class: `fr-badge fr-badge--${ok ? "success" : "error"}`, text: question }),
+    h("span", { class: `fr-badge fr-badge--${teinte}`, text: question }),
     detail ? h("span", { class: "fr-small fr-muted", text: detail }) : null,
   );
 }
@@ -1082,8 +1106,18 @@ function renduEssai(essai) {
   // Le refus est constaté ; la PISTE dit quoi faire. Sans elle, « csrf_invalide »
   // ne dit rien à personne (voir CHANGELOG, note 1.3.2m).
   const piste = echec ? db.expliquerRefus({ code: essai.ecriture.code, base: essai.base }) : "";
+  // Un service qui répond « connexion requise » (O-1 : la route de santé décrit
+  // l'infrastructure, donc elle exige la session en mode « mot de passe ») a bien
+  // répondu : le dire en neutre, jamais en rouge — sinon l'écran annoncerait une
+  // panne là où il ne manque qu'une connexion.
+  const attendLaSession = !!essai.sessionRequise && !essai.ok && essai.partage !== false;
   return [
-    ligneEssai(essai.partage === false ? "Le stockage du navigateur répond" : "Le service répond", !!essai.ok, essai.detail || ""),
+    ligneEssai(
+      essai.partage === false ? "Le stockage du navigateur répond"
+        : attendLaSession ? "Le service répond — connexion requise"
+          : "Le service répond",
+      attendLaSession ? true : !!essai.ok, essai.detail || "",
+      attendLaSession ? "info" : null),
     essai.ecriture ? ligneEssai("La base accepte les écritures", !!essai.ecriture.ok, essai.ecriture.detail || "") : null,
     piste ? h("p", { class: "fr-small fr-muted", style: { flexBasis: "100%", margin: "2px 0 0" }, text: piste }) : null,
     h("span", { class: "fr-small fr-muted", text: `${essai.dirty
@@ -1117,7 +1151,14 @@ function blocEnAttente(info) {
     h("span", { class: "fr-small fr-muted", text: `en attente depuis ${depuisQuand(info.depuis)}` }),
   ));
   box.appendChild(h("p", { class: "fr-small", style: { margin: "8px 0 0" },
-    text: `Par collection : ${info.collections.map((c) => `${c.label} (${c.count})`).join(" · ")}.` }));
+    text: `Par collection : ${info.collections.map((c) => `${c.label} (${c.count})${c.refusee ? " — refusée, en attente d'un geste" : ""}`).join(" · ")}.` }));
+  // Une collection REFUSÉE par nature ne repart pas au renvoi automatique (O-3) :
+  // sans cette phrase, la file paraîtrait simplement lente alors qu'elle attend
+  // un geste.
+  if (info.refusees.length) {
+    box.appendChild(h("p", { class: "fr-small", style: { margin: "4px 0 0" },
+      text: `La base a refusé ${info.refusees.map((c) => `« ${c.label} »`).join(", ")} pour une raison qui ne vient PAS du réseau : ces écritures ne repartiront pas toutes seules. Corrigez la cause (le rôle de la session, la clé d'API…), puis cliquez « Renvoyer maintenant » — ou abandonnez-les.` }));
+  }
   if (info.derniereErreur) {
     // Le nom de la collection refusée est dans le motif : sans lui, « la base a
     // refusé le renvoi » ne dit pas QUOI renvoyer — et c'est justement ce qu'il
@@ -1129,7 +1170,9 @@ function blocEnAttente(info) {
         (info.derniereErreur.status ? ` (HTTP ${info.derniereErreur.status})` : "") }));
   }
   box.appendChild(h("p", { class: "fr-small fr-muted", style: { margin: "6px 0 0" },
-    text: "Ces écritures sont gardées sur CE poste et renvoyées automatiquement dès que la base répond (toutes les trente secondes). Tant qu'elles attendent, elles ne sont PAS dans la base : les autres postes ne les voient pas encore." }));
+    text: "Ces écritures sont gardées sur CE poste et renvoyées automatiquement dès que la base répond (toutes les trente secondes)"
+      + (info.refusees.length ? " — sauf celles que la base a REFUSÉES, qui attendent un geste (voir ci-dessus)" : "")
+      + ". Tant qu'elles attendent, elles ne sont PAS dans la base : les autres postes ne les voient pas encore." }));
   box.appendChild(h("div", { class: "fr-row", style: { flexWrap: "wrap", gap: "8px", marginTop: "8px" } },
     button("Renvoyer maintenant", {
       variant: "primary", size: "sm", icon: "refresh",
@@ -1141,7 +1184,10 @@ function blocEnAttente(info) {
         // jeton anti-CSRF relu avec la session, pilote refait — sinon un refus
         // d'anti-CSRF ou de session se répéterait à l'identique.
         await db.reparerPilote({ force: true }).catch(() => {});
-        const r = await db.flushPending();
+        // `force` : c'est LE geste explicite. Le renvoi automatique saute les
+        // collections dont le refus définitif est mémorisé (O-3) ; ce bouton,
+        // lui, les rejoue toutes — c'est là que la cause a pu changer.
+        const r = await db.flushPending({ force: true });
         // Le bloc est reconstruit juste après : c'est LUI qui porte le motif du
         // refus (« Dernier renvoi refusé… »). Le toast, lui, dit que le geste a
         // bien eu lieu — sans quoi un échec identique au précédent ne se verrait
@@ -2696,7 +2742,7 @@ function accesAtelierBloc(save, redraw) {
     if (minuteurEtat) clearTimeout(minuteurEtat);
     minuteurEtat = setTimeout(async () => {
       minuteurEtat = null;
-      await chargerAcces({ silencieuse: true }).catch(() => null);
+      await chargerAcces({ silencieux: true }).catch(() => null);
       majEtat();
     }, 700);
   }

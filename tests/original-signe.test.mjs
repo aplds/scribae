@@ -31,7 +31,18 @@ const sha256 = (s) => createHash("sha256").update(String(s), "utf8").digest("hex
 async function lireIndex() {
   try {
     const { readFile } = await import("node:fs/promises");
-    for (const p of ["index.html", "../../index.html", "../index.html"]) {
+    // L'adresse ANCRÉE à ce fichier d'abord : `index.html` vit à la racine du
+    // dépôt, deux crans au-dessus de `tests/` — elle ne dépend donc ni du dossier
+    // courant, ni de la disposition (dépôt livré ou atelier). Le calcul est
+    // protégé : l'adresse d'un module peut n'être pas hiérarchique (harnais de
+    // navigateur), et les essais suivants prennent alors la suite.
+    const chemins = [];
+    try {
+      const { fileURLToPath } = await import("node:url");
+      chemins.push(fileURLToPath(new URL("../../index.html", import.meta.url)));
+    } catch (e) { /* node:url indisponible, ou adresse de module non hiérarchique */ }
+    chemins.push("index.html", "../../index.html", "../index.html");
+    for (const p of chemins) {
       try { return await readFile(p, "utf8"); } catch (e) { /* essai suivant */ }
     }
   } catch (e) { /* node:fs indisponible */ }

@@ -3,6 +3,87 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Version 1.6.3d — la chaîne rouge, nommée et sa première cause réparée (livré)
+
+Demande : « Ok, le 1, j'ai fait, donc occupe-toi des 3 et 4 » — autrement dit : la livraison est
+faite de votre côté (dépôt à jour, doublons retirés), traite la **qualité et l'industrialisation**
+(point 3) puis le **backlog produit** (point 4) du récapitulatif.
+
+- [x] **La chaîne d'intégration, OBSERVÉE** (le point 1, côté vérification) : le travail « Image
+      Docker, construite et mise en service » **passe** — « ça s'installe en Docker » n'est plus une
+      parole, c'est un résultat rejoué à chaque envoi. Les **deux travaux d'épreuves** étaient
+      rouges, et l'étaient depuis au moins la 1.6.1w : **quatre envois sur quatre**, dans les deux
+      lignées, sans que personne ait jamais pu dire pourquoi.
+- [x] **La première cause, nommée et corrigée** : l'épreuve des modèles de `.env`
+      (`src/server/mysql/variables.test.mjs`) lisait `src/server/env.example` par un chemin relatif
+      au **dossier courant** ; le travail « Service auto-hébergé » part de `src/server/mysql` (son
+      `working-directory`), donc l'épreuve ne trouvait que le modèle du service et déclarait
+      manquantes les **cinq variables** qui ne vivent que dans celui du dépôt (`DB_ROOT_PASSWORD`,
+      `API_TOKEN`, `API_BASE`, `HTTP_PORT`, `APP_DIR`). Cinq échecs certains, à chaque envoi. Les
+      chemins des épreuves qui lisent un fichier sont désormais **ancrés à l'adresse du fichier**
+      (`import.meta.url`) — cinq épreuves corrigées. NC-I-008 repasse en **Régression**, comme elle
+      l'avait elle-même annoncé.
+- [x] **La chaîne dit maintenant CE QUI a échoué** : `scripts/annoncer-echecs.sh` transforme chaque
+      épreuve rouge en **annotation** publique (onglet « Checks », et API) — le journal n'étant
+      lisible que par un administrateur du dépôt, c'est ce qui manquait pour instruire la fiche
+      quatre livraisons durant. Le premier travail installe aussi les dépendances du service
+      (`npm test` exécute son domaine), et `workflow_dispatch` rejoue la chaîne sans rien livrer.
+
+Reste ouvert, et dit comme tel :
+
+- [ ] **La seconde cause de la chaîne rouge** — celle du travail « Syntaxe, style et tests », qui
+      part de la racine du dépôt. Les annotations du prochain envoi la nommeront ; NC-I-008 reste
+      **ouverte** jusque-là. (Éliminé par recoupement en 1.6.3d : `variables.test.mjs` passe depuis la
+      racine, `industrialisation.test.mjs` a bien son groupe de capture et ses deux assertions nginx
+      passent, aucun import des 61 fichiers du travail racine ne se résout mal, aucune API Node ≥ 21
+      n'est employée, `purs.test.mjs` saute `DOMParser` en Node. Le journal de la chaîne n'est lisible
+      que par un administrateur du dépôt (403) : c'est l'annotation du prochain envoi qui la nommera.)
+- [x] **Rejouer les parcours du navigateur en intégration continue** (Playwright) — FAIT en 1.6.3d.
+      `src/tests/parcours-navigateur.mjs` rejoue les 29 parcours dans un vrai Chromium : serveur de
+      fichiers local, applications montées en édition statique, session d'administration ouverte,
+      verdict + annotations `::error::` + capture d'écran en artefact. Travail `parcours` ajouté à
+      `src/github/ci.yml` (avisant : `continue-on-error`). Vérifié dans l'aperçu : **29/29** sur un
+      profil vierge. NC-I-002 peut être levée.
+- [ ] **`piece-depot` est instable sous l'émulateur de l'éditeur** — observé une fois en 1.6.3d
+      (échec sur « la pièce déposée ne se retire pas », `tests/parcours.mjs` étape 4), puis passé
+      deux fois de suite en reprise. C'est vraisemblablement le budget de calcul du service de
+      démonstration, non le geste ; si cela se reproduit, faire dire au parcours le **statut** du
+      refus au lieu de conclure « ne se retire pas ».
+
+### Version 1.6.3d — la qualité et le backlog (point 3 et point 4)
+
+Suite de la livraison, sur la demande « occupe-toi des 3 et 4 ».
+
+- [x] **NC-I-003 — le découpage des gros modules de vue (commencé).** `src/ui/views/signature.js`
+      passe de **3 994 à 3 571 lignes** : la PRESENTATION du circuit (les marches, leurs états, leurs
+      dates et empreintes, et le vocabulaire de publication qui les intitule) vit désormais dans
+      `src/ui/views/signature-circuit.js` (455 lignes) ; les GESTES (envoyer, signer, publier) restent
+      dans `signature.js`. Aucun cycle d'imports. Filets : 240 fichiers sans faute de syntaxe, aucune
+      remarque de style, 448/459 épreuves vertes, et les trois circuits (simple, interne, externe)
+      rendus à l'écran dans l'aperçu.
+- [x] **Performance — l'hypothèse du balayage ligne à ligne est REFUTÉE.** Une lecture de collection
+      est **un seul** ordre paramétré, de coût indépendant du nombre d'enregistrements ; une lecture
+      authentifiée coûte 4 ordres (2 session, 1 enregistrements, 1 révision). Épreuve qui fige le
+      constat ; décision « pas de cache de session » (la révocation immédiate est une propriété de
+      sécurité). Voir `docs/PERFORMANCE.md` § 6 et la section Performance ci-dessus.
+- [ ] **Le backlog produit (point 4)** — les chantiers listés plus bas, un à la fois, chacun avec son
+      épreuve et sa ligne de changelog. En cours.
+      - [x] **Le cran de zoom est un réglage de poste** — le parcours `zoom-memorise` le pose, le
+            relit au rechargement, et vérifie que « Ajuster » l'efface.
+      - [x] **Marquer un commentaire comme traité** — clôture (qui, quand), partage « ouvert /
+            traité » dans l'onglet « Commentaires », filtre « En attente », et la clôture qui
+            voyage dans les exports (Akoma Ntoso, Markdown, annexe des notes). Parcours
+            `commentaire-traite` (le 28e) + épreuve d'import de trame.
+      - [x] **Répondre à un commentaire (fil)** — réponses datées signées de leur service, lues
+            sous le commentaire et dans la bande du document, supprimables une à une ; la fenêtre
+            de réponse ne demande pas de nature ; le fil voyage dans les exports. Même parcours
+            `commentaire-traite`.
+      - [x] **Ranger les questions par groupe** — l'onglet « Questions » montre les sections du
+            modèle (`field.group`), le groupe se règle sur la fiche, et le glisser-déposer range
+            dans le groupe visé. Parcours `questions-par-groupe` (le 29e).
+      - [ ] Reste : voir les sections « Reste ouvert » ci-dessous (trames guidées, canvas des
+            autres aperçus, fils de commentaires, plusieurs signataires, journal d'audit…).
+
 ## Version 1.6.3c — l'image Docker éprouvée, et les non-conformités soldées (livré)
 
 Demande : « à trancher : pas d'avis, je te fais confiance / audit : le contrôle de légalité ne peut
@@ -32,8 +113,9 @@ en prod via docker ».
 
 Reste ouvert, et dit comme tel :
 
-- [ ] **L'essai de la chaîne sur un envoi réel** : le travail `image` se juge à la première
-      poussée ; s'il était rouge, NC-I-008 repasserait en « Régression ».
+- [x] **L'essai de la chaîne sur un envoi réel** : FAIT en 1.6.3d. Le travail `image` **passe** ;
+      les deux travaux d'épreuves étaient rouges, et NC-I-008 est repassée en « Régression », comme
+      cette ligne l'annonçait. Voir la section 1.6.3d ci-dessus.
 - [ ] **L'identifiant ELI reste une forme `eli:`** (un identifiant, non une adresse). C'est un
       choix nommé (`src/lib/eli.js`) : l'adresse HTTP est publiée à côté (`eliAdresse`, `eli:uri`
       du JSON-LD, `FRBRuri` d'Akoma Ntoso). En faire l'identifiant canonique **changerait les
@@ -534,15 +616,23 @@ Reste ouvert, par ordre d'intérêt :
 Le gel des connexions simultanées est corrigé (dérivé de mot de passe asynchrone).
 Ce que la campagne de charge a montré **sans le corriger** :
 
-- [ ] **La vérification de session coûte deux lectures** (la session, puis le compte)
-      à chaque requête authentifiée — 17 ms sur une base à 2 ms de latence. Un cache
-      court par jeton de session le supprimerait, au prix d'un délai de propagation
-      pour la révocation. À mesurer avant de trancher : la révocation immédiate est
-      une propriété de sécurité, pas un détail.
-- [ ] **Une lecture de collection coûte une dizaine d'ordres SQL.** S'il s'agit d'un
-      balayage ligne par ligne, c'est le prochain gisement de performance.
+- [x] ~~**Une lecture de collection coûte une dizaine d'ordres SQL.**~~ **Répondu en 1.6.3d : non.**
+      Le magasin adresse **un seul** ordre paramétré (`SELECT … FROM sb_record WHERE collection = ?`),
+      et son coût ne dépend pas du nombre d'enregistrements ; la révision de collection est un second
+      ordre ponctuel. Une lecture authentifiée coûte donc **4 ordres** : 2 pour la session, 1 pour les
+      enregistrements, 1 pour la révision. Le gisement n'est pas la lecture, c'est la session (ci-dessous).
+      Constat **figé par une épreuve** (`src/server/mysql/magasin-mysql.test.mjs`, « lire une collection,
+      c'est UN ordre SQL »). Voir `docs/PERFORMANCE.md` § 6.2.
+- [x] **La vérification de session coûte deux lectures** — **tranché en 1.6.3d : PAS de cache.** La
+      révocation immédiate (un compte désactivé perd l'accès sur-le-champ) est une propriété de sécurité,
+      pas un détail : un cache court la dégraderait pour quelques millisecondes. La piste qui ne coûte rien
+      en sécurité — **une** lecture au lieu de deux, par une jointure `sb_session ⋈ sb_compte` portée par le
+      magasin — reste ouverte, et demandera une méthode au contrat des trois magasins. À faire quand une
+      campagne aura chiffré ce que les 17 ms pèsent. Voir `docs/PERFORMANCE.md` § 6.1.
 - [ ] **Chiffrer `UV_THREADPOOL_SIZE`** (8 et 16) sur le scénario d'affluence, plutôt
-      que de le recommander de principe.
+      que de le recommander de principe. (Le réglage est **exposé** — `docker-compose.yml`,
+      `UV_THREADPOOL_SIZE: ${UV_THREADPOOL_SIZE:-4}`, avec le rappel mémoire du pool — ; le
+      **chiffrage**, lui, demande une campagne, donc Node, donc la CI.)
 
 ## Demandes 1.5.3 (livrées en 1.5.3)
 
@@ -997,8 +1087,12 @@ onglets renommés. Restent ouverts :
       déduire d'un modèle de départ.
 - [ ] **Modèles de départ de trame** (arrêté individuel, décision, délibération…) : partir d'un
       exemple est plus simple que d'un document vide.
-- [ ] **Ranger les questions par groupe.** Les groupes existent dans le modèle (`field.group`) et
-      organisent le formulaire du rédacteur, mais l'onglet « Questions » les ignore encore.
+- [x] **Ranger les questions par groupe.** **Livré (1.6.3d)** : l'onglet « Questions » affiche les
+      sections du modèle (`field.group`), dans l'ordre de première apparition et avec leur compte ;
+      le groupe se règle sur la fiche (menu : groupes du modèle, « Aucun groupe », « Nouveau
+      groupe… ») au lieu d'être caché dans les réglages avancés ; la fiche pliée le rappelle ; et
+      déposer une question sur une autre la range dans son groupe. Parcours
+      `questions-par-groupe` (le 29e).
 - [ ] **Annuler / rétablir** dans l'éditeur de trame : supprimer un bloc est aujourd'hui
       définitif — la corbeille de l'accueil ne rattrape qu'une *trame*, jamais un bloc.
 - [x] **Le geste tactile.** **Livré** : le glisser-déposer ne repose plus sur l'API HTML5 — qui ne
@@ -1035,9 +1129,11 @@ Restent ouverts :
       défilement natif, rendu possible par la taille du plateau) et la barre règle le cran ; le
       pincement à deux doigts n'est pas repris. Le capter demanderait de poser `touch-action` et
       d'écrire le geste — au prix du défilement natif, que l'on ne veut pas perdre.
-- [ ] **Le cran ne survit pas au rechargement.** Il vit dans `state.ui.zooms` (mémoire de la
-      session), comme l'état des écrans. Le mémoriser par poste — comme l'apparence claire/sombre
-      (`src/lib/theme.js`) — serait cohérent.
+- [x] **Le cran ne survit pas au rechargement.** **Livré (1.6.3d)** : le cran CHOISI (boutons,
+      molette, « 100 % ») est posé dans les préférences du POSTE (`src/lib/prefs.js`, clé
+      `zoom.<cle>`) et relu à l'ouverture — comme l'apparence claire/sombre. « Ajuster » n'est pas
+      un cran et **efface** la préférence. Le parcours `zoom-memorise` (27e) tient les trois
+      gestes.
 - [ ] **Étendre le canvas aux autres aperçus A4.** « Modifier un acte », l'aperçu des feuilles de
       style et l'écran de signature réduisent encore la feuille par l'ancien ajustement à la
       largeur (`fitPaper`, `src/ui/dom.js`), qui ne sait que **réduire** : on ne peut pas y zoomer.
@@ -1230,12 +1326,20 @@ d'en-tête). Voir `SPEC.md` § 2.2.5 et `src/ui/annotations.js`.
 
 Restent ouverts :
 
-- [ ] **Répondre à un commentaire (fil).** Un commentaire est une note isolée : on ne peut pas y
-      répondre. Un fil (réponses datées, chacune signée de son service) serait la suite logique
-      pour les points à arbitrer, qui se discutent avant d'être tranchés.
-- [ ] **Marquer un commentaire comme traité.** Rien ne distingue une consigne appliquée d'une
-      consigne en attente : une case « traité » (par qui, quand) permettrait de relire une trame
-      en ne voyant que ce qui reste ouvert.
+- [x] **Répondre à un commentaire (fil).** **Livré (1.6.3d)** : chaque commentaire porte ses
+      réponses (datées, signées du service de leur auteur, dans l'ordre), lisibles sous le
+      commentaire — dans la page comme dans l'onglet « Commentaires » — et supprimables une à une ;
+      la fenêtre de réponse rappelle le commentaire visé et ne demande pas de nature. Le fil voyage
+      avec l'acte (Akoma Ntoso, Markdown, annexe des notes). **Reste ouvert** : répondre depuis la
+      rédaction — le rédacteur lit le fil, il ne peut pas y écrire, parce que le geste modifierait
+      la TRAME depuis un écran qui rédige un acte (même question de droit d'écriture que le verrou
+      de rédaction, plus haut).
+- [x] **Marquer un commentaire comme traité.** **Livré (1.6.3d)** : le geste est posé dans la bande
+      du document et sur chaque carte de l'onglet « Commentaires », il retient qui a clos et quand,
+      l'onglet annonce son partage (« Tout · En attente · Traités ») et filtre sur ce qui reste
+      ouvert ; le commentaire clos reste dans le document, barré et marqué « Traité », et la clôture
+      voyage avec l'acte (Akoma Ntoso, Markdown, annexe des notes). Voir `src/ui/annotations.js`,
+      le parcours `commentaire-traite` et l'épreuve d'import de trame.
 - [ ] **Commenter dans la modification d'un acte publié.** L'atelier de rédaction affiche les
       consignes de la trame ; l'écran « Modifier » (acte en vigueur, `views/amend-editor.js`) ne
       les affiche pas encore — la question se pose pourtant, la modification s'expliquant souvent

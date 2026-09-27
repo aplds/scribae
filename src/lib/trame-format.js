@@ -14,7 +14,7 @@
 // ============================================================================
 import { uid } from "./util.js";
 import {
-  newNode, newField, newRule, newNote, newTrame,
+  newNode, newField, newRule, newNote, newReponse, newTrame,
   NODE_MAP, NODE_TYPES, FIELD_TYPES, RULE_LEVELS, NOTE_KINDS,
 } from "./schema.js";
 import { MODES_TRAME } from "./externe.js";
@@ -80,7 +80,7 @@ const AIDE = {
     ],
   },
   "natures de commentaire (notes[].kind)": list(NOTE_KINDS),
-  commentaire: "id, kind, author, date, text, quote, ruleId. Les commentaires accompagnent la préparation : ils ne sont pas publiés. « quote » est le passage du document que le commentaire vise (la phrase sélectionnée dans la page) ; il s'affiche au-dessus du commentaire, sous le bloc concerné.",
+  commentaire: "id, kind, author, date, text, quote, ruleId, resolu (booléen : le commentaire est traité), resoluPar et resoluLe (qui l'a clos, et quand), reponses (fil : [ { id, author, date, text } ] — les prises de parole des services, dans l'ordre). Les commentaires accompagnent la préparation : ils ne sont pas publiés. « quote » est le passage du document que le commentaire vise (la phrase sélectionnée dans la page) ; il s'affiche au-dessus du commentaire, sous le bloc concerné. Une réponse se lit sous le commentaire qu'elle suit ; elle est signée du service de son auteur et datée.",
   "jetons de texte {{…}}": "Dans tout texte (title, para, heading, items…), {{chemin}} est remplacé à la compilation : {{objet}}, {{beneficiaire.lastName}}, {{entity.nameWithArt}}, {{dateSignature|date-long}}. Filtres : |upper, |lower, |capitalize, |date-long, |date-short, |money. Conditions : {{dateEffet ? \"le \" + dateEffet : \"au lendemain de la publication\"}}.",
 };
 
@@ -176,11 +176,34 @@ function normalizeNote(raw, warnings) {
   // Le passage cité : la phrase que l'éditeur avait sélectionnée dans la page
   // au moment d'écrire le commentaire (voir src/ui/annotations.js).
   n.quote = asString(raw.quote);
+  // Le commentaire est-il TRAITÉ ? On garde le drapeau, qui l'a clos et quand :
+  // une consigne appliquée cesse d'encombrer la relecture, sans disparaître du
+  // document (voir src/ui/annotations.js).
+  n.resolu = raw.resolu === true;
+  n.resoluPar = n.resolu ? asString(raw.resoluPar) : "";
+  n.resoluLe = n.resolu ? asString(raw.resoluLe) : "";
+  // Le fil du commentaire : les réponses, dans l'ordre reçu.
+  n.reponses = Array.isArray(raw.reponses)
+    ? raw.reponses.map((r) => normalizeReponse(r, warnings)).filter(Boolean)
+    : [];
   if (!NOTE_KINDS.some((k) => k.id === n.kind)) {
     warnings.push(`Nature de commentaire inconnue « ${raw.kind} » remplacée par « instruction »`);
     n.kind = "instruction";
   }
   return n;
+}
+
+// Une réponse de fil : bornée comme un commentaire (auteur, date, texte). Une
+// réponse sans texte ne dit rien : elle est écartée, et l'import le SIGNALE.
+function normalizeReponse(raw, warnings) {
+  if (!raw || typeof raw !== "object") return null;
+  const r = newReponse();
+  r.id = asString(raw.id) || r.id;
+  r.author = asString(raw.author);
+  r.date = asString(raw.date);
+  r.text = asString(raw.text).trim();
+  if (!r.text) { warnings.push("Réponse sans texte ignorée dans un commentaire"); return null; }
+  return r;
 }
 
 function normalizeItem(raw, warnings) {

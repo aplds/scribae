@@ -3022,7 +3022,7 @@ Trois routes, implémentées **deux fois** — par le service partagé de démon
 
 | Route | Rôle |
 |---|---|
-| `GET /v1/db/health` | état du service et de chaque collection |
+| `GET /v1/db/health` | état du service et de chaque collection — **session requise en mode « mot de passe »** (elle décrit l'hôte, le port, le schéma et la version du moteur), publique en mode « démonstration » |
 | `GET /v1/db/collections/{collection}` | tous les enregistrements, avec leur révision |
 | `POST /v1/db/collections/{collection}/sync` | `upserts` / `deletes` / `force` → `applied` + `conflicts` |
 
@@ -3035,13 +3035,18 @@ main. Voir `src/server/mysql/README.md` (le service et sa base) et
 `src/server/README.md` (installation Docker, jetons, TLS, sauvegardes).
 
 > **Éprouver une connexion ne se fait pas par la santé de la base.**
-> `GET /v1/db/health` ne demande ni session ni anti-CSRF : elle répond 200 même
-> quand le service refuse ensuite chaque écriture — d'où un écran qui annonçait
-> « Connexion réussie » à côté d'une pastille rouge. Le bouton *Tester la
-> connexion* envoie donc **aussi** une synchronisation VIDE
+> `GET /v1/db/health` ne demande **jamais** l'anti-CSRF : en mode « mot de passe »
+> elle exige bien une session (O-1), mais une session suffit — elle répond 200
+> même quand le service refuse ensuite chaque écriture par `csrf_invalide` — d'où
+> un écran qui annonçait « Connexion réussie » à côté d'une pastille rouge. Le
+> bouton *Tester la connexion* envoie donc **aussi** une synchronisation VIDE
 > (`POST /v1/db/collections/meta/sync`, `upserts: []`, `deletes: []`) : elle
 > traverse toute la garde — session, anti-CSRF, rôle, transaction — sans déposer
 > le moindre enregistrement (voir `essaiEcriture`, `src/lib/db/service.js`).
+>
+> Elle est aussi lue **avant toute session** (écran de connexion,
+> `rafraichirPilote`) : un `401` y vaut donc « connexion requise », jamais
+> « panne », et laisse la pastille neutre (voir `health`, `src/lib/db/index.js`).
 
 > **Ce que le service de démonstration ne peut pas faire** : son bac à sable
 > n'ouvre aucune connexion sortante. Il ne peut donc **pas** parler à MySQL — il
@@ -3325,7 +3330,7 @@ src/pdfa/                 RESSOURCES DE L'EXPORT PDF/A (voir src/pdfa/README.md)
 src/ui/
   dom.js                  primitives DOM (h, boutons, champs, modale, info-bulle…)
   components.js           compositions (formulaires, dialogues, états vides, `mentions` — la ligne grise d'une carte —, `menuButton` — le « ⋯ » —, `aideEcran`/`pageTitle`/`notePlier` — l'aide à la demande)
-  annotations.js          LES COMMENTAIRES D'UNE TRAME : la bande posée sous le bloc commenté (nature, auteur, date, passage cité, crayon et corbeille), la fenêtre d'écriture, la pastille « Commenter » qui suit une sélection de texte, le repère de marge et la mise en évidence d'un bloc — partagé par l'éditeur de trame (où l'on écrit) et la rédaction (où on les lit)
+  annotations.js          LES COMMENTAIRES D'UNE TRAME : la bande posée sous le bloc commenté (nature, auteur, date, passage cité, crayon et corbeille), le FIL de chaque commentaire (réponses datées signées de leur service), la clôture « traité » (par qui, quand), la fenêtre d'écriture et celle de réponse, la pastille « Commenter » qui suit une sélection de texte, le repère de marge et la mise en évidence d'un bloc — partagé par l'éditeur de trame (où l'on écrit) et la rédaction (où on les lit)
   signer-picker.js        CHOIX DU SIGNATAIRE en deux temps : la fonction, puis qui la tient (sélecteur partagé)
   assistant.js            LES DEUX PASTILLES D'ASSISTANCE (Plume dans l'atelier, Publia sur le recueil) : personnage, panneau de conversation ouvert à la demande (au-delà de 1 200 px la page lui RÉSERVE sa colonne à droite, sans recouvrir le document), réponse en flux, liens des réponses suivis dans l'application, questions de l'acte consulté, et le bloc « Assistants » du menu du compte (masquer pour soi)
   pdfa.js                 LE BOUTON DE L'EXPORT PDF/A : montre son attente, fabrique le fichier (lib/pdfa.js), le télécharge et le dit — posé à côté de « Imprimer / PDF » dans les écrans d'export, deux niveaux (PDF/A-2b, PDF/A-1b)
@@ -3392,6 +3397,7 @@ src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
   generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`src/lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
   generer-logiciel.mjs    engendre `src/server/mysql/logiciel-engendre.mjs` depuis `src/lib/version.js` et `src/lib/logiciel.js` : l'image du service, qui ne contient que son dossier, peut ainsi annoncer la version RÉELLE dans sa bannière de démarrage
   harnais-atelier.mjs     LE BANC D'ÉPREUVES DE L'ATELIER : rejoue, sans terminal, la syntaxe, le style, les épreuves et les générateurs en chargeant LES SCRIPTS LIVRÉS eux-mêmes (doublures de `node:fs`/`node:path`/`node:url`/`node:crypto`, esbuild) — voir `docs/ATELIER.md` § 3
+  annoncer-echecs.sh      L'ÉPREUVE ROUGE DEVIENT LISIBLE : appelé par la chaîne d'intégration après un échec, il attache chaque épreuve rouge en ANNOTATION (« ::error:: », avec son message d'assertion) et résume le journal dans le récapitulatif du travail — le journal brut n'étant lisible que par un administrateur du dépôt, c'est ce qui permet de savoir CE QUI a lâché (voir `docs/INDUSTRIALISATION.md` § 3)
 src/compose-exemple/      EXEMPLE DE PREMIER DÉPLOIEMENT — dans le dépôt livré : `compose-exemple/` : MariaDB et l'image publiée `aplds/scribae`, deux services, rien à construire (docker-compose.yml, env.example, README.md)
 src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export les recopie, ils ne restent pas sous src/) :
   ci.yml                  → `<racine>/.github/workflows/ci.yml` : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
@@ -3553,6 +3559,12 @@ est **figée en pixels** sur le contenu, que `ResizeObserver` surveille pour que
 document qui grandit (un article ajouté, une division ouverte). Le cran et le défilement sont rangés
 dans `state.ui.zooms[cle]` : un écran se redessine souvent, et le cran choisi ne s'y perd pas.
 
+**Le cran choisi est un réglage de POSTE** : il se range à côté du thème clair/sombre, dans
+`src/lib/prefs.js`, et survit donc au rechargement — un agent qui règle sa feuille à 125 % la
+retrouve à 125 %. « Ajuster » n'est PAS un cran, c'est « suis la largeur » : le geste **efface** la
+préférence, pour qu'un recadrage ne fige pas la largeur d'un écran sur un autre. Le parcours
+`zoom-memorise` tient la règle (poser, vider la mémoire de session, rouvrir, effacer).
+
 L'éditeur de trame occupe par ailleurs **toute la fenêtre** (`.app--plein` quand la route est
 `trame`) : ses volets défilent sur place au lieu d'allonger la page — c'est aussi ce qui donne au
 canvas de la feuille une vraie fenêtre à déplacer. Depuis 1.6.2, la coquille entière est de toute
@@ -3563,7 +3575,7 @@ app-base.css) ; l'écran « plein » est ce qui retire le défilement à la zone
 
 **Autre règle de conception, non négociable** (elle vient d'un reproche d'usage : « le système de
 commentaire n'est pas facile d'utilisation », et « les commentaires ne sont pas visibles par les
-éditeurs »). Un commentaire de trame obéit à deux exigences, tenues par `src/ui/annotations.js` :
+éditeurs »). Un commentaire de trame obéit à quatre exigences, tenues par `src/ui/annotations.js` :
 
 1. **On commente ce qu'on voit.** Trois chemins, tous partant de la page : le bouton « commenter »
    de la barre d'outils d'un bloc (l'article, le paragraphe que l'on regarde) ; la **sélection de
@@ -3576,9 +3588,21 @@ commentaire n'est pas facile d'utilisation », et « les commentaires ne sont pa
    À la **rédaction**, la même bande porte les consignes de la trame sous le passage concerné
    (`attacherConsignes`, dans `views/wysiwyg.js`), avec l'onglet « Consignes » et un compteur
    cliquable dans l'en-tête de l'acte.
+3. **Un commentaire se discute — le fil.** Chaque commentaire porte ses **réponses** (`noteThread`) :
+   datées, **signées du service** de leur auteur, dans l'ordre, lisibles sous le commentaire dans
+   la page comme dans l'onglet « Commentaires », et supprimables une à une. La fenêtre de réponse
+   est la même que celle d'écriture, en mode `reponse` : elle rappelle le commentaire visé et ne
+   demande pas de nature (une réponse est une prise de parole, pas une consigne). Répondre est un
+   geste de l'éditeur de trame : la rédaction lit le fil, elle ne l'écrit pas.
+4. **Un commentaire se clos.** « Marquer comme traité » retient **qui** a clos et **quand**
+   (`resolu`, `resoluPar`, `resoluLe`) ; l'onglet « Commentaires » annonce le partage — « Tout (n)
+   · En attente (n) · Traités (n) » — et se filtre, pour relire une trame en ne voyant que ce qui
+   reste ouvert. Un commentaire clos **reste** dans le document, barré et marqué « Traité ».
 
 Le passage cité suit le commentaire partout : bande, inspecteur, Akoma Ntoso (`<p data-quote>`,
-relu par `akn.js`), Markdown et rapport de conformité.
+relu par `akn.js`), Markdown et rapport de conformité. Le **fil** et la **clôture** voyagent de
+même : `data-reponse` et `data-resolu` dans l'export Akoma Ntoso, « ↳ » et « (traité par …) » dans
+le Markdown, mentions dans l'annexe des notes du rendu.
 
 ### Le guide d'utilisation (src/wiki.js + src/ui/views/aide.js)
 
@@ -3760,7 +3784,7 @@ directe »), en 390 × 844 et en 1600 × 950.
 Vérifier l'outillage depuis l'atelier : l'aperçu du navigateur n'a ni système de
 fichiers ni processus, il ne peut donc pas lancer `scripts/verifier-style.mjs` tel
 qu'il est livré. C'est le rôle du **harnais de l'atelier** —
-**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3c
+**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3b
 (il n'est pas une épreuve : `npm test` ne le voit pas, `npm run syntaxe` le parse
 comme un module). Il monte la disposition livrée dans un système de fichiers
 virtuel (la table ci-dessus, la racine virtuelle étant `src/`), remplace les
@@ -3775,13 +3799,22 @@ Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
 (pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
 **virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
 import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
-1.6.3c, **huit échecs et onze sauts attendus** sur 440 épreuves — tous connus,
+1.6.3d, **huit échecs et onze sauts attendus** sur 440 épreuves — tous connus,
 tous dus à l'absence de Node et de réseau. Les recettes, les chiffres et la
 lecture des écarts sont dans `docs/ATELIER.md` § 3 : c'est le document à lire
 avant de travailler dans l'atelier.
 
 ## Pièges connus
 
+- **Une épreuve qui lit un fichier ne doit pas dépendre du DOSSIER COURANT.** `node --test` peut
+  partir de la racine du dépôt (travail « Syntaxe, style et tests ») **ou** de `src/server/mysql`
+  (travail « Service auto-hébergé », dont le `working-directory` est celui-là) : un chemin comme
+  `"src/server/env.example"` ne veut pas dire la même chose dans les deux cas, et ne trouve **rien**
+  dans le second. Une épreuve qui échoue à cause de cela ne dit rien du code — elle ne dit que son
+  propre dossier de départ. Ancrez le repère au fichier : `fileURLToPath(new URL("../env.example",
+  import.meta.url))` — et protégez ce calcul (`try`), car dans un harnais de navigateur l'adresse
+  d'un module n'est pas hiérarchique. Les chemins relatifs peuvent rester, **essayés ensuite** ;
+  c'est ainsi que la chaîne est restée rouge quatre livraisons durant (NC-I-008).
 - **Une feuille de style écrite dans un littéral gabarit ne peut pas contenir de backtick** —
   et `\00a0` (échappement octal) y est refusé aussi. `CSS_DOCUMENT_WEB`
   (`src/lib/recueil.js`) et le `<style>` de `buildWebVersion` (`src/lib/eli.js`) sont

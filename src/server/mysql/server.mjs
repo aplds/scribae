@@ -837,6 +837,12 @@ async function etatDeLAtelier(ip, { simulation = false } = {}) {
 // répondent 403. Les routes PUBLIQUES (recueil, publications, résolution ELI,
 // santé, configuration du service, état de l'accès) ne passent jamais par cette
 // porte : un visiteur extérieur doit pouvoir lire le recueil.
+//
+// `/v1/db/health` est ici parce qu'elle ne relève pas de la porte de l'ATELIER,
+// mais elle porte sa PROPRE garde depuis O-1 (audit ciblé du 22/09/2026) :
+// en mode « mot de passe », elle exige une session, car elle décrit l'hôte, le
+// port, le schéma et la version du moteur. En mode « démonstration », elle
+// reste ouverte — c'est par elle que la démonstration annonce sa base.
 const ATELIER_PUBLIC = new Set(["/v1/config", "/v1/health", "/v1/db/health", "/v1/atelier/acces", "/v1/auth/config"]);
 const estRouteAtelier = (pathname) => {
   if (ATELIER_PUBLIC.has(pathname)) return false;
@@ -913,7 +919,7 @@ function dbPaths() {
     : "Les lectures sont publiques ; les écritures exigent un jeton d'API (Authorization: Bearer).";
   return {
     "/v1/db/flux": { get: { operationId: "fluxDesChangements", summary: "Flux des changements (temps réel)", description: `Ouvre un flux SSE sur lequel le service pousse chaque changement : \`{ type: "collection", collection, revision, n, ids }\` — le NOM de la collection, sa révision et l'identifiant des enregistrements touchés, JAMAIS leur contenu. Le poste relit ensuite la collection par la route de lecture, avec ses droits. Un poste lent (tampon plein) est ABANDONNÉ pour cet évènement et reçoit \`{ type: "resync" }\` : il relit tout. Un battement (commentaire SSE) est émis toutes les ${Math.round(FLUX_BATTEMENT_MS / 1000)} secondes. Même autorisation que la LECTURE. ${garde}`, tags: ["Base de données"], responses: { 200: { description: "Flux ouvert (text/event-stream)" }, 401: { description: "Session absente (mode mot de passe)" }, 429: { description: "Trop de flux ouverts depuis cette adresse" }, 503: { description: "Limite de flux ouverts atteinte (code `flux_sature`)" } } } },
-    "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées).", tags: ["Base de données"], responses: { 200: { description: "Base disponible" } } } },
+    "/v1/db/health": { get: { operationId: "santeBase", summary: "État de la base de données", description: "Donne le pilote de persistance et le nombre d'enregistrements par collection (référentiel, trames, actes, comptes, métadonnées). Elle décrit l'hôte, le port, le schéma et la version du moteur : en mode « mot de passe », elle exige donc une SESSION ouverte (401 `session_absente` sinon) ; en mode « démonstration », elle reste publique.", tags: ["Base de données"], responses: { 200: { description: "Base disponible" }, 401: { description: "Session absente (mode mot de passe)" }, 503: { description: "Base non prête (code `base_indisponible`)" } } } },
     "/v1/db/collections/{collection}": { get: { operationId: "lireCollection", summary: "Lire une collection", description: `Renvoie tous les enregistrements d'une collection, chacun avec sa révision. ${garde}`, tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string", enum: COLLECTIONS } }], responses: { 200: { description: "Les enregistrements de la collection" }, 401: { description: "Session absente (mode mot de passe)" }, 404: { description: "Collection inconnue" } } } },
     "/v1/db/collections/{collection}/sync": { post: { operationId: "synchroniserCollection", summary: "Synchroniser une collection", description: `Applique des écritures et des suppressions enregistrement par enregistrement. Chaque écriture porte la révision connue du client : si le serveur en détient une autre, l'enregistrement est renvoyé en conflit au lieu d'être écrasé. ${garde}`, security: [{ bearerAuth: [] }], tags: ["Base de données"], parameters: [{ name: "collection", in: "path", required: true, schema: { type: "string" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { upserts: { type: "array", items: { type: "object" } }, deletes: { type: "array", items: { type: "object" } }, force: { type: "boolean", description: "Écrase sans contrôle de révision (reprise de données). Réservé à l'administrateur : toute autre clé ou session reçoit 403 `force_reserve_admin`." } } } } } }, responses: { 200: { description: "Synchronisation appliquée (avec la liste des conflits éventuels)" }, 401: { description: "Session ou jeton absent" }, 403: { description: "Session, jeton ou rôle insuffisant (ou `force` sans le rôle administrateur)" }, 413: { description: "Trop d'enregistrements" }, 507: { description: "Base pleine" } } } },
   };
@@ -1329,6 +1335,17 @@ async function handle(req, res) {
   }
 
   if (pathname === "/v1/db/health" && req.method === "GET") {
+    // O-1 (audit ciblé du 22/09/2026) : cette route dit l'hôte, le port, le
+    // schéma et la VERSION du moteur. Elle est donc réservée à la session quand
+    // la porte est un mot de passe : un anonyme n'énumère pas l'infrastructure.
+    // Le mode `demo` (et les modes sans identification) la garde ouverte : il n'y
+    // a alors rien à protéger, et c'est par elle que la démonstration annonce sa
+    // base.
+    //
+    // C'est le CLIENT qui fait le reste : il lit cette route AVANT toute session
+    // (écran de connexion, `rafraichirPilote`), donc un `401` y vaut « session
+    // requise » — jamais « panne » (voir `src/lib/db/service.js`, `santeBase`).
+    if (MOT_DE_PASSE && !(await sessionHTTP(req))) { send(req, res, 401, refusSession().body); return; }
     try {
       noterBase(true);
       send(req, res, 200, await health());

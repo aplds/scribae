@@ -412,7 +412,22 @@ export function newRule(patch = {}) {
 }
 
 export function newNote(patch = {}) {
-  return { id: uid("c"), kind: "instruction", author: "", date: "", text: "", quote: "", ruleId: "", ...patch };
+  // `resolu` distingue une consigne APPLIQUÉE d'une consigne en attente, avec
+  // qui l'a close et quand : c'est ce qui permet de relire une trame en ne
+  // voyant que ce qui reste ouvert (voir src/ui/annotations.js).
+  // `reponses` est le FIL du commentaire : un point à arbitrer se discute avant
+  // d'être tranché (voir `newReponse`).
+  return {
+    id: uid("c"), kind: "instruction", author: "", date: "", text: "", quote: "", ruleId: "",
+    resolu: false, resoluPar: "", resoluLe: "", reponses: [],
+    ...patch,
+  };
+}
+
+// Une réponse dans le fil d'un commentaire : signée du SERVICE de son auteur,
+// datée, sans nature (c'est une prise de parole, pas une consigne).
+export function newReponse(patch = {}) {
+  return { id: uid("r"), author: "", date: "", text: "", ...patch };
 }
 
 export function newTrame(patch = {}) {

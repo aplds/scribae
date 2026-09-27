@@ -582,6 +582,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
   padding: 5px 10px; font-size: var(--t-sm); cursor: pointer; background: var(--bg);
 }
 .fr-choice.is-on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.fr-choice.is-disabled { opacity: .55; cursor: not-allowed; text-decoration: line-through; text-decoration-color: var(--border-strong); }
 
 .fr-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
 .fr-tabs .fr-tab {

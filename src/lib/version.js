@@ -23,10 +23,10 @@
 //     dit la vérité, et il faut corriger `APP_VERSION`.
 // ============================================================================
 
-export const APP_VERSION = "1.6.3c";
+export const APP_VERSION = "1.6.3d";
 
 // Date de la version courante (ISO, AAAA-MM-JJ).
-export const APP_RELEASED = "2026-09-27";
+export const APP_RELEASED = "2026-09-28";
 
 // Le changelog est un fichier du dépôt, pas une donnée recopiée dans le code :
 // l'écran « Documentation technique » le lit tel quel (comme README/SPEC/TODO).

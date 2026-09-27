@@ -239,11 +239,11 @@ export const API_REFERENCE = [
 
   // ============================================ Persistance partagée
   {
-    id: "db-health", groupe: "persistance", methode: "GET", chemin: "/v1/db/health", auth: "public",
+    id: "db-health", groupe: "persistance", methode: "GET", chemin: "/v1/db/health", auth: "lecteur",
     resume: "État de la base de données",
     service: "auto-heberge",
-    description: "Le pilote de persistance et le nombre d'enregistrements par collection. C'est l'appel qui dit si la base répond, et qui alimente le badge de l'application.",
-    reponses: [{ code: 200, description: "Base disponible" }, { code: 503, description: "Base non prête (base_indisponible)" }],
+    description: "Le pilote de persistance et le nombre d'enregistrements par collection. C'est l'appel qui dit si la base répond, et qui alimente le badge de l'application. Elle décrit l'hôte, le port, le schéma et la version du moteur : en mode « password » ou « oidc », elle exige une session ouverte — l'application traite alors un `401` comme « connexion requise », jamais comme une panne.",
+    reponses: [{ code: 200, description: "Base disponible" }, { code: 401, description: "Session absente (mode mot de passe)" }, { code: 503, description: "Base non prête (base_indisponible)" }],
   },
   {
     id: "db-lire", groupe: "persistance", methode: "GET", chemin: "/v1/db/collections/{collection}", auth: "lecteur",

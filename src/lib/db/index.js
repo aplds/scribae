@@ -15,7 +15,7 @@
 import * as localDriver from "./local.js";
 import * as serviceDriver from "./service.js";
 import {
-  COLLECTIONS, SHARED_COLLECTIONS, DOCUMENT_COLLECTIONS, SILENT_COLLECTIONS,
+  COLLECTIONS, SHARED_COLLECTIONS, DOCUMENT_COLLECTIONS, SILENT_COLLECTIONS, SELF,
   recordsOf, indexOf, diffRecords, reconcile, stableStringify, isLocalOnly, isSingleton,
 } from "./contract.js";
 import { definirCleService } from "../cle-service.js";
@@ -65,7 +65,37 @@ if (globalThis.__SCRIBA_STATIC__) {
   }
 }
 
+// Auto-hébergement : le mode « service de démonstration » n'a **pas de sens** ici
+// (O-2 de l'audit ciblé du 22/09/2026). Il n'y a pas de socket de démonstration
+// côté serveur (`src/lib/hosts.js`, `hostSocketFactory`) : choisir cette entrée
+// donne un pilote « socket » dont les appels passent en réalité par HTTP
+// (`src/lib/remote.js`, `useHttp()`). Deux conséquences silencieuses : la limite
+// de taille appliquée est celle du socket (850 Kio au lieu de 8 Mio,
+// `src/lib/db/contract.js`), et l'essai d'écriture du bouton *Tester la
+// connexion* n'est **pas** exécuté (`src/lib/db/service.js`, le transport socket
+// en est exclu) — alors que l'aide promettait « 50 Mio durables », vrai sur
+// Perchance, faux ici. On marque donc l'entrée indisponible, et l'on dit
+// pourquoi.
+const MODE_DE_REPLI = () => (globalThis.__SCRIBA_SELF_HOSTED__ ? "external" : "local");
+if (globalThis.__SCRIBA_SELF_HOSTED__) {
+  const service = MODES.find((m) => m.id === "service");
+  if (service) {
+    service.available = false;
+    service.label = "Service de démonstration — partagé (indisponible ici)";
+    service.help = "Indisponible dans un déploiement auto-hébergé : il n'y a pas de socket de démonstration, et les appels passeraient en réalité par HTTP, avec la limite de taille du socket (850 Kio au lieu de 8 Mio) et sans l'essai d'écriture du bouton « Tester la connexion ». Choisissez « Serveur externe » : c'est le service de ce déploiement, sur la même origine.";
+  }
+}
+
 export const modeById = (id) => MODES.find((m) => m.id === id) || MODES[0];
+
+// Un mode qui n'est pas OFFERT ici ne doit ni se choisir ni RESTER : un réglage
+// enregistré avant une bascule (ou par un poste à l'ancien réglage) se corrige
+// tout seul, plutôt que de bâtir un pilote sur un transport qui n'existe pas.
+export const modeDisponible = (id) => {
+  const m = MODES.find((x) => x.id === id);
+  return !!m && m.available !== false;
+};
+const modeLisible = (id) => (modeDisponible(id) ? id : MODE_DE_REPLI());
 
 const SETTINGS_FOLDER = "actesDb";
 const MIRROR_FOLDER = "actesMirror";
@@ -166,6 +196,10 @@ function compacterFile(file) {
 export async function init() {
   const saved = await kvGet(SETTINGS_FOLDER, "data", null);
   if (saved && typeof saved === "object") settings = { ...DEFAULT_SETTINGS, ...reglagesPropres(saved) };
+  // Un mode qui n'est pas offert par ce déploiement (O-2 : le mode « service de
+  // démonstration » en auto-hébergement) ne reste pas : on retombe sur le mode de
+  // ce déploiement, et le pilote se bâtit sur un transport qui existe.
+  settings.mode = modeLisible(settings.mode);
   definirCleService(settings.token);
   const queue = await kvGet(PENDING_FOLDER, "data", null);
   if (Array.isArray(queue)) {
@@ -180,6 +214,16 @@ export async function init() {
       depuis: motif.depuis || null,
       derniereErreur: motif.derniereErreur && typeof motif.derniereErreur === "object" ? motif.derniereErreur : null,
     };
+    // O-3 : la mémoire des refus définitifs, relue telle qu'elle a été rangée.
+    refusDefinitifs = new Map(
+      (Array.isArray(motif.refusDefinitifs) ? motif.refusDefinitifs : [])
+        .filter((r) => r && r.collection)
+        .map((r) => [r.collection, { at: r.at || null, status: r.status || 0, code: r.code || "", message: r.message || "" }]),
+    );
+    // Une entrée qui n'est plus en file n'a plus de refus à mémoriser.
+    for (const collection of [...refusDefinitifs.keys()]) {
+      if (!pending.some((x) => x.collection === collection)) refusDefinitifs.delete(collection);
+    }
   }
   try {
     driver = makeDriver();
@@ -198,6 +242,41 @@ export async function init() {
 // Les refus définitifs (jeton invalide, configuration) ne sont pas mis en file :
 // il faut d'abord corriger le réglage.
 const fatalStatus = (e) => e && (e.status === 401 || e.status === 403);
+
+// O-3 (audit ciblé du 22/09/2026) : un refus DÉFINITIF (401/403) ne se rejoue pas
+// tout seul.
+//
+// Depuis C-1, une entrée refusée ne bloque plus les autres — mais elle reste en
+// file, et le renvoi automatique (toutes les trente secondes, `repriseTick`) la
+// représente indéfiniment. Un poste qui tient une écriture refusée par nature
+// (un `users` mis de côté par une session d'administrateur, rejoué après qu'un
+// compte ordinaire a pris la place : 403 `droit_requis`) envoie donc une requête
+// vouée au refus toute les trente secondes, tant que la page reste ouverte.
+//
+// On garde la MÉMOIRE du dernier refus définitif, par collection : la file
+// conserve l'écriture (rien n'est perdu), mais le renvoi AUTOMATIQUE la saute.
+// Elle repart au prochain geste explicite — « Renvoyer maintenant », qui rejoue
+// tout —, après une reconnexion (le pilote est refait : `rafraichirPilote`,
+// `setSettings`), ou quand une nouvelle écriture de la même collection est
+// déposée. L'écran, lui, le dit : « refusée, en attente d'un geste ».
+let refusDefinitifs = new Map();       // collection → { at, status, code, message }
+// Un refus est DÉFINITIF quand la base le refuse PAR NATURE (401/403) et que
+// « réparer le pilote » n'y changerait rien. Les deux refus que `reparerPilote`
+// sait lever — `csrf_invalide` (403) et `session_absente` (401) — sont donc
+// exclus : les mémoriser bloquerait la réparation qui les répare (C-6). Ceux
+// qui restent (`droit_requis`, `force_reserve_admin`, `jeton_invalide`…) ne
+// repartiront pas sans un geste : autant ne pas les redemander.
+const estRefusDefinitif = (e) => !!e && (e.status === 401 || e.status === 403) && !REJOUABLE.has((e && e.code) || "");
+const oublierRefus = () => { if (refusDefinitifs.size) refusDefinitifs = new Map(); };
+const retenirRefus = (collection, e) => {
+  if (!estRefusDefinitif(e)) return;
+  refusDefinitifs.set(collection, {
+    at: new Date().toISOString(),
+    status: (e && e.status) || 0,
+    code: (e && e.code) || "",
+    message: (e && e.message) || String(e || "refus sans message"),
+  });
+};
 
 // Le libellé d'une collection, pour nommer dans une phrase ce qui est refusé.
 const libelleCollection = (name) => (name && COLLECTIONS[name] && COLLECTIONS[name].label) || "";
@@ -249,7 +328,14 @@ export function expliquerRefus({ code, base, collection } = {}) {
   return "La page n'a pas trouvé de jeton anti-CSRF : le cookie a pu être refusé par le navigateur (un essai en clair avec COOKIE_SECURE=true), ou la session a été ouverte par un autre outil. Rechargez la page ; si cela persiste, reconnectez-vous.";
 }
 
-const memoireFile = () => ({ depuis: pendingMeta.depuis, derniereErreur: pendingMeta.derniereErreur });
+const memoireFile = () => ({
+  depuis: pendingMeta.depuis,
+  derniereErreur: pendingMeta.derniereErreur,
+  // O-3 : la mémoire des refus définitifs survit au rechargement de la page —
+  // sans quoi chaque rechargement rejouerait une fois de plus ce que la base
+  // vient de refuser, et l'écran repartirait sans le dire.
+  refusDefinitifs: [...refusDefinitifs.entries()].map(([collection, r]) => ({ collection, ...r })),
+});
 
 async function sauverFile() {
   await kvSet(PENDING_FOLDER, "data", pending);
@@ -276,6 +362,12 @@ async function queueWrite(entry, e) {
   const remplace = dejaLa.length > 0 && (!!entry.force || !dejaLa.some((x) => x.force));
   const at = remplace ? dejaLa[0].at : new Date().toISOString();
   if (remplace) pending = pending.filter((x) => x.collection !== entry.collection);
+  // Une écriture déposée est un GESTE : elle efface la mémoire du refus définitif
+  // de cette collection (O-3), qui mérite une nouvelle tentative. (Un refus
+  // DÉFINITIF sur une écriture directe n'arrive pas ici : elle n'est pas mise en
+  // file — voir `ecrire`, `fatalStatus`. C'est au RENVOI d'une entrée mise de
+  // côté hors ligne qu'un `droit_requis` apparaît, et `flushPending` le retient.)
+  refusDefinitifs.delete(entry.collection);
   pending.push({ at, ...entry });
   pendingMeta = {
     depuis: pendingMeta.depuis || new Date().toISOString(),
@@ -298,13 +390,22 @@ export const pendingCount = () => pending.length;
 export function pendingInfo() {
   const parCollection = new Map();
   for (const e of pending) parCollection.set(e.collection, (parCollection.get(e.collection) || 0) + 1);
+  const collections = [...parCollection.entries()]
+    .map(([name, count]) => ({
+      name, label: (COLLECTIONS[name] && COLLECTIONS[name].label) || name, count,
+      // O-3 : une collection dont le refus définitif est mémorisé ne repartira
+      // pas au prochain renvoi automatique. L'écran doit pouvoir le DIRE, sinon
+      // la file paraît simplement lente alors qu'elle attend un geste.
+      refusee: refusDefinitifs.has(name),
+      refus: refusDefinitifs.get(name) || null,
+    }))
+    .sort((a, b) => b.count - a.count);
   return {
     count: pending.length,
     depuis: pendingMeta.depuis || null,
     derniereErreur: pendingMeta.derniereErreur || null,
-    collections: [...parCollection.entries()]
-      .map(([name, count]) => ({ name, label: (COLLECTIONS[name] && COLLECTIONS[name].label) || name, count }))
-      .sort((a, b) => b.count - a.count),
+    collections,
+    refusees: collections.filter((c) => c.refusee).map((c) => ({ name: c.name, label: c.label, count: c.count, refus: c.refus })),
   };
 }
 
@@ -316,6 +417,7 @@ export async function viderPending() {
   const avant = pending.length;
   pending = [];
   pendingMeta = { depuis: null, derniereErreur: null };
+  oublierRefus();          // O-3 : plus d'écriture, plus de refus à mémoriser
   await sauverFile();
   return avant;
 }
@@ -335,9 +437,10 @@ export async function viderPending() {
 // l'identique, et il ne restait que « Abandonner », qui perd le travail de tout
 // le monde. On essaie donc CHAQUE entrée, on garde celles qui échouent (rien
 // n'est perdu), et on rapporte le premier motif.
-export async function flushPending() {
+export async function flushPending({ force = false } = {}) {
   if (!driver.shared || !pending.length) return { flushed: 0, left: pending.length, error: null };
   const reste = [];
+  const sautees = [];             // O-3 : refus définitifs connus, non retentés
   const touched = new Set();
   let flushed = 0;
   let error = null;
@@ -349,10 +452,17 @@ export async function flushPending() {
     if (r.conflicts && r.conflicts.length && !SILENT_COLLECTIONS.has(entry.collection)) {
       notify(conflictListeners, { collection: entry.collection, conflicts: r.conflicts });
     }
+    // L'écriture est passée : son refus mémorisé n'a plus lieu d'être (O-3).
+    refusDefinitifs.delete(entry.collection);
     touched.add(entry.collection);
     flushed += 1;
   };
   for (const entry of [...pending]) {
+    // O-3 : le renvoi AUTOMATIQUE saute une collection dont le refus définitif
+    // est mémorisé — la redemander toutes les trente secondes ne la ferait pas
+    // passer. Le geste explicite (« Renvoyer maintenant », `force`) les rejoue
+    // toutes : c'est le moment où la cause a pu changer.
+    if (!force && refusDefinitifs.has(entry.collection)) { sautees.push(entry); reste.push(entry); continue; }
     let refus = null;
     for (let essai = 0; essai < 2; essai += 1) {
       try {
@@ -379,6 +489,7 @@ export async function flushPending() {
       }
     }
     if (refus) {
+      retenirRefus(entry.collection, refus);   // O-3
       if (!error) error = refus;
       reste.push(entry);
     }
@@ -397,6 +508,14 @@ export async function flushPending() {
     setStatus(definitif ? "error" : "offline",
       `Écritures en attente : la base a refusé le renvoi de ${libelleCollection(error.collection) ? `« ${libelleCollection(error.collection)} »` : "l'une des collections"} (${error.message}). ` +
       (flushed ? `${flushed} autre(s) écriture(s) ont été transmises. ` : "") + suite);
+  } else if (sautees.length) {
+    // Aucune tentative n'a eu lieu : la file est faite de refus définitifs connus
+    // (O-3). Le dire calmement — c'est un état stable, pas une panne en cours.
+    const noms = [...new Set(sautees.map((e) => libelleCollection(e.collection) || e.collection))];
+    const premier = refusDefinitifs.get(sautees[0].collection) || {};
+    setStatus("error",
+      `${sautees.length} écriture(s) refusée(s), en attente d'un geste : ${noms.join(", ")} (${premier.message || "refus de la base"}). ` +
+      "Le renvoi automatique ne les représente plus : le refus ne vient pas du réseau, il ne se lèvera pas tout seul. Corrigez la cause puis « Renvoyer maintenant », ou abandonnez-les depuis l'écran « Base de données ».");
   } else if (flushed) {
     setStatus("ok", `${flushed} écriture(s) différée(s) transmise(s) à la base.`);
   }
@@ -471,6 +590,8 @@ export async function setSettings(patch, { silent = false } = {}) {
   const prevSettings = settings;
   const prevDriver = driver;
   settings = { ...settings, ...reglagesPropres(patch) };
+  settings.mode = modeLisible(settings.mode);   // voir `init` (O-2)
+  oublierRefus();                               // réglage neuf : la file mérite un essai (O-3)
   definirCleService(settings.token);
   try {
     driver = makeDriver();
@@ -512,6 +633,10 @@ export async function rafraichirPilote() {
     driver = localDriver;
     piloteParSession = null;
   }
+  // Le régime a changé (session ouverte ou fermée, mode annoncé autrement) : un
+  // refus définitif mémorisé (O-3) appartenait à l'ANCIEN pilote. On l'oublie —
+  // c'est la « reconnexion » qui doit rendre à la file une chance de repartir.
+  oublierRefus();
   setStatus("unknown", driver.shared ? "Connexion au service de données…" : "Stockage du navigateur.");
   await health();
   return true;
@@ -587,6 +712,14 @@ export async function health() {
     return statusInfo;
   }
   const res = await driver.health();
+  // O-1 : « session requise » n'est pas une panne. La route de santé est
+  // réservée à la session quand la porte est un mot de passe — l'écran de
+  // connexion, qui la lit avant toute session, doit donc laisser la pastille
+  // NEUTRE, et non rouge.
+  if (res.sessionRequise) {
+    setStatus("unknown", res.detail || "Connexion requise pour interroger la base.");
+    return { ...statusInfo, info: null, httpStatus: res.status || 0 };
+  }
   // Un jeton refusé ou un service mal configuré est une erreur ; un service
   // momentanément injoignable est une indisponibilité (l'application continue
   // sur le miroir local).
@@ -628,12 +761,12 @@ export async function test(patch = {}) {
   });
   const res = await probe.health();
   // Le test doit dire ce qui COMPTE : la base accepte-t-elle d'écrire ? La route
-  // de santé répond sans session et sans anti-CSRF — elle peut donc réussir
-  // pendant que chaque geste est refusé, et l'écran affichait alors « Connexion
-  // réussie » à côté d'une pastille rouge et d'une file d'écritures en attente
-  // (voir CHANGELOG, note 1.3.2k).
+  // de santé exige la session (O-1) mais jamais l'anti-CSRF — elle peut donc
+  // réussir pendant que chaque geste est refusé, et l'écran affichait alors
+  // « Connexion réussie » à côté d'une pastille rouge et d'une file d'écritures
+  // en attente (voir CHANGELOG, note 1.3.2k).
   const ecriture = typeof probe.essaiEcriture === "function" ? await probe.essaiEcriture() : null;
-  return { ok: res.ok, detail: res.detail, info: res.info, ecriture };
+  return { ok: res.ok, detail: res.detail, info: res.info, ecriture, sessionRequise: !!res.sessionRequise };
 }
 
 // ---------------------------------------------------------------- lecture
@@ -663,6 +796,13 @@ export async function read(name, { fresh = false } = {}) {
       return value;
     } catch (e) {
       const mirror = await kvGet(MIRROR_FOLDER, name, null);
+      // O-6 (audit ciblé du 22/09/2026) : les collections de FOND (`presence`,
+      // `journal`) ne pilotent pas la pastille d'état. Leur lecture échoue à
+      // chaque battement de cœur : en remontant le refus, l'écran recevait un
+      // message d'erreur toutes les 25 secondes — un état rouge qui ne dit rien
+      // de plus que « le service refuse la présence », alors que les actes, eux,
+      // peuvent très bien passer.
+      if (SILENT_COLLECTIONS.has(name)) return mirror;
       if (fatalStatus(e)) {
         // Le service répond, mais refuse : clé absente, invalide, ou service non
         // provisionné. Ce n'est pas une panne réseau — le dire clairement évite
@@ -774,11 +914,23 @@ async function ecrire(name, value, force) {
         const suite = expliquerRefus({ code: (e && e.code) || "", collection: name }) || (sessionDeService()
           ? "Rechargez la page ; si cela persiste, reconnectez-vous."
           : "Vérifiez le réglage de la base.");
-        setStatus("error", `Écriture refusée par le service (${(e && e.message) || e}). ${suite}`);
+        // O-6 : un refus de `presence` ou de `journal` (collections de FOND,
+        // SILENT_COLLECTIONS) ne remonte pas à l'écran. Le battement de cœur les
+        // réécrit toutes les 25 secondes : la pastille serait rouge CONTINUELLEMENT,
+        // et l'agent chercherait une panne qui ne l'empêche pas de travailler. Le
+        // refus reste connu du module qui écrit (collab : `etat().erreur`), et le
+        // journal du navigateur le garde pour le diagnostic.
+        if (SILENT_COLLECTIONS.has(name)) {
+          console.warn(`Écriture refusée pour « ${name} » :`, (e && e.message) || e);
+        } else {
+          setStatus("error", `Écriture refusée par le service (${(e && e.message) || e}). ${suite}`);
+        }
         return { ok: false, error: (e && e.message) || String(e), code: (e && e.code) || "" };
       }
       await queueWrite({ collection: name, upserts, deletes, force }, e);
-      setStatus("offline", `Écriture différée (${(e && e.message) || e}). Elle sera transmise dès que la base répondra — l'écran « Base de données » en tient la liste et le motif.`);
+      if (!SILENT_COLLECTIONS.has(name)) {
+        setStatus("offline", `Écriture différée (${(e && e.message) || e}). Elle sera transmise dès que la base répondra — l'écran « Base de données » en tient la liste et le motif.`);
+      }
       return { ok: false, deferred: true, error: (e && e.message) || String(e) };
     }
   }

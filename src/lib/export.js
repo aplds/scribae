@@ -115,11 +115,21 @@ export function exportAkn(doc, config, trame) {
   if (doc.notes?.length) {
     p('      <notes source="#preparation">');
     doc.notes.forEach((n, i) => {
-      p(`        <note eId="note_${i + 1}" author="${esc(n.author || "")}" date="${esc(n.date || "")}" type="${esc(n.kind)}" data-target="${esc(n.path)}">`);
+      // Le commentaire CLOS garde sa trace dans l'export : `data-resolu`, et
+      // qui l'a clos quand (voir src/ui/annotations.js). Un acte relu par un
+      // tiers doit pouvoir distinguer une consigne appliquée d'une consigne en
+      // attente — la même distinction que celle faite à l'écran.
+      p(`        <note eId="note_${i + 1}" author="${esc(n.author || "")}" date="${esc(n.date || "")}" type="${esc(n.kind)}" data-target="${esc(n.path)}"${n.resolu ? ` data-resolu="true" data-resolu-par="${esc(n.resoluPar || "")}" data-resolu-le="${esc(n.resoluLe || "")}"` : ""}>`);
       p(`          <p>${esc(n.text)}</p>`);
       // Le passage cité vient APRÈS le texte : la première balise <p> d'une note
       // reste son texte, ce que lit la relecture d'Akoma Ntoso (voir akn.js).
-      if (n.quote) p(`          <p data-quote="true">${esc(n.quote)}</p>`);      p("        </note>");
+      if (n.quote) p(`          <p data-quote="true">${esc(n.quote)}</p>`);
+      // Le fil du commentaire, après le passage cité : chaque réponse est une
+      // prise de parole datée, signée de son service (voir ui/annotations.js).
+      for (const r of (n.reponses || [])) {
+        p(`          <p data-reponse="true" data-auteur="${esc(r.author || "")}" data-date="${esc(r.date || "")}">${esc(r.text)}</p>`);
+      }
+      p("        </note>");
     });
     p("      </notes>");
   }
@@ -372,7 +382,7 @@ export function exportAkn(doc, config, trame) {
       // intitulé, ses visas, ses articles et divisions, ses mentions — sans
       // signature (elle n'en a pas).
       p('        <block name="texteAnnexe">');
-      if (joint.doc) for (const n of joint.doc.nodes || []) p(indentXml(annexeNodeXml(n, config), 10));
+      if (joint.doc) for (const n of joint.doc.nodes || []) p(indentXml(annexeNodeXml(n), 10));
       p("        </block>");
       p("      </attachment>");
     });
@@ -723,7 +733,12 @@ export function exportMarkdown(doc, config, opts = {}) {
   // l'acte. Voir `src/ui/views/signature.js`.
   if (opts.notes !== false && doc.notes?.length) {
     lines.push("---", "", "## Notes de préparation", "");
-    for (const n of doc.notes) lines.push(`- **[${n.kind}]**${n.quote ? " « " + n.quote + " »" : ""} ${n.text}${n.author ? " — " + n.author : ""}`);
+    for (const n of doc.notes) {
+      const close = n.resolu ? ` *(traité${n.resoluPar ? " par " + n.resoluPar : ""}${n.resoluLe ? ", le " + n.resoluLe : ""})*` : "";
+      lines.push(`- **[${n.kind}]**${n.quote ? " « " + n.quote + " »" : ""} ${n.text}${n.author ? " — " + n.author : ""}${close}`);
+      // Le fil : chaque réponse sous la sienne, en retrait.
+      for (const r of (n.reponses || [])) lines.push(`  - ↳ ${r.text}${r.author ? " — " + r.author : ""}${r.date ? ", " + r.date : ""}`);
+    }
   }
   if (tracking && doc.trail?.length) {
     lines.push("---", "", "## " + (doc.trailTitle || (config.vocab?.amendment?.trailTitle) || "Tableau des modifications"), "");

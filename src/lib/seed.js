@@ -79,6 +79,7 @@ export function seedConfig() {
     supportName: "Service des affaires générales",
     supportPhone: "",
     supportEmail: "",
+    mentionScribae: true,
     demo: true,
     demoText: "",
   };

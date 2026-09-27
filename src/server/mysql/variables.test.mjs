@@ -219,15 +219,35 @@ test("chaque variable du registre se pose dans un `.env.example`", async (t) => 
   let readFile = null;
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return t.skip("lecture de fichier indisponible hors dépôt");
+  // LE DOSSIER DE CE FICHIER EST LE SEUL REPÈRE SÛR. `node --test` peut partir de
+  // la RACINE du dépôt (travail « Syntaxe, style et tests ») ou de CE dossier
+  // (travail « Service auto-hébergé », dont le `working-directory` est
+  // `src/server/mysql`) : un chemin écrit pour l'un ne trouve rien dans l'autre.
+  // C'est ainsi que la chaîne est restée rouge sans que personne ne voie
+  // pourquoi — le modèle de `.env` du DÉPÔT est à `../env.example` d'ici, et
+  // cette adresse ne dépend ni du dossier courant ni de la disposition.
+  let ici = () => null;
+  try {
+    const { fileURLToPath } = await import("node:url");
+    const base = import.meta.url;
+    // Le calcul est protégé ICI : dans un harnais de navigateur, l'adresse du
+    // module n'est pas une adresse hiérarchique, et résoudre un chemin relatif
+    // contre elle lève. L'essai rend alors `null` et les chemins relatifs
+    // prennent la suite — l'épreuve est SAUTÉE, jamais fausse.
+    ici = (rel) => { try { return fileURLToPath(new URL(rel, base)); } catch (e) { return null; } };
+  } catch (e) { /* node:url indisponible : les chemins relatifs restent la seule voie */ }
   const lire = async (chemins) => {
-    for (const c of chemins) { try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ } }
+    for (const c of chemins) {
+      if (!c) continue;
+      try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ }
+    }
     return null;
   };
-  // Chemins relatifs au dépôt (le dossier courant de `node --test`), avec le
-  // repli « racine = src/ » si l'outillage est déplacé un jour.
+  // D'abord les chemins ancrés à ce fichier, puis ceux du dossier courant (le
+  // dépôt livré), avec le repli « racine = src/ » si l'outillage est déplacé.
   const modeles = [
-    await lire(["src/server/env.example", "server/env.example"]),
-    await lire(["src/server/mysql/env.example", "server/mysql/env.example", "env.example"]),
+    await lire([ici("../env.example"), "src/server/env.example", "server/env.example"]),
+    await lire([ici("./env.example"), "src/server/mysql/env.example", "server/mysql/env.example", "env.example"]),
   ].filter(Boolean);
   assert.ok(modeles.length, "les modèles de `.env` sont introuvables");
   const manquantes = VARIABLES

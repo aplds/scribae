@@ -26,7 +26,7 @@ A4), Word, Markdown.
 
 | | |
 |---|---|
-| **Version courante** | **1.6.3c**, 27 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
+| **Version courante** | **1.6.3d**, 28 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
 | **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), épreuves du domaine du service, et **construction de l'image Docker, mise en service contre une vraie base** puis éprouvée (santé, schéma, façade, code servi) |
 | **Démonstration publiée** | <https://demo.scribae.eu> — GitHub Pages, édition **statique** : référentiel et actes vivent dans le navigateur du visiteur, rien n'est partagé entre collègues |
 | **Démonstration partagée** | aucune instance publique : la pile auto-hébergée (`src/server/`, nginx + Node + MariaDB) se monte en quelques minutes |

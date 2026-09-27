@@ -170,6 +170,52 @@ test("compile : un acte d'assemblée porte la formule du conseil", async (t) => 
 });
 
 // ------------------------------------------------------------------ ELI
+// ----------------------------------------------------------- commentaires
+test("trames : un commentaire clos se relit, et un commentaire rouvert s'oublie", async (t) => {
+  const fmt = await charger("../src/lib/trame-format.js");
+  if (!fmt || !fmt.readTrameFile) return t.skip("module indisponible hors navigateur");
+  // Deux commentaires : l'un clos (avec son auteur de clôture et sa date),
+  // l'autre ouvert — mais dont le fichier porte malgré tout des champs de
+  // clôture (fichier bricolé à la main, ou état incohérent). L'import doit
+  // remettre les choses d'aplomb.
+  const notes = [
+    {
+      id: "c-1", kind: "instruction", author: "Secrétariat", date: "2026-01-02", text: "Appliquer", quote: "Texte", ruleId: "",
+      resolu: true, resoluPar: "Direction", resoluLe: "2026-02-03",
+      // Le fil : une réponse recevable, et une coquille (sans texte) que
+      // l'import doit écarter en le DISANT.
+      reponses: [
+        { id: "r-1", author: "Bureau des élections", date: "2026-02-04", text: "Vérifié avec le service." },
+        { id: "r-2", author: "Bureau des élections", date: "2026-02-04", text: "   " },
+      ],
+    },
+    { id: "c-2", kind: "question", author: "Secrétariat", date: "2026-01-02", text: "À trancher", ruleId: "", resolu: false, resoluPar: "Direction", resoluLe: "2026-02-03" },
+  ];
+  const fichier = { trame: { name: "T", version: "26.01", body: [{ id: "n-1", type: "para", text: "Texte", when: "", notes }] } };
+  const r = fmt.readTrameFile(JSON.stringify(fichier));
+  assert.deepEqual(r.issues, []);
+  const lues = r.trames[0].body[0].notes;
+  assert.equal(lues.length, 2);
+  // Le commentaire traité garde QUI l'a clos et QUAND : c'est ce qui permet de
+  // relire une trame en ne voyant que ce qui reste ouvert.
+  assert.equal(lues[0].resolu, true);
+  assert.equal(lues[0].resoluPar, "Direction");
+  assert.equal(lues[0].resoluLe, "2026-02-03");
+  // Un commentaire OUVERT ne garde aucune trace de clôture : sans cela, un
+  // commentaire rouvert s'afficherait « Traité » à l'écran.
+  assert.equal(lues[1].resolu, false);
+  assert.equal(lues[1].resoluPar, "");
+  assert.equal(lues[1].resoluLe, "");
+  // Le fil survit, dans l'ordre, avec qui a parlé et quand ; la réponse sans
+  // texte est écartée, et l'import le signale.
+  assert.equal(lues[0].reponses.length, 1);
+  assert.equal(lues[0].reponses[0].text, "Vérifié avec le service.");
+  assert.equal(lues[0].reponses[0].author, "Bureau des élections");
+  assert.equal(lues[0].reponses[0].date, "2026-02-04");
+  assert.deepEqual(lues[1].reponses, []);
+  assert.ok(r.warnings.some((w) => /Réponse sans texte/.test(w)), "la réponse vide doit être signalée");
+});
+
 test("eli : l'identifiant et l'adresse ne se confondent pas", async (t) => {
   const e = await charger("../src/lib/eli.js");
   if (!e) return t.skip("module indisponible hors navigateur");
@@ -636,14 +682,28 @@ test("service : les champs que le client lit de `GET /v1/auth/config` lui sont t
   let readFile = null;
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return t.skip("lecture de fichier indisponible hors dépôt");
+  // Le dossier de CE fichier est le repère sûr : `node --test` peut partir de la
+  // racine du dépôt comme de `tests/`. Les deux dispositions sont essayées — le
+  // dépôt livré (`../src/…`) et l'atelier, où le code et l'outillage voisinent
+  // (`../…`) —, puis les chemins du dossier courant, qui couvrent les autres cas.
+  let ici = () => null;
+  try {
+    const { fileURLToPath } = await import("node:url");
+    const base = import.meta.url;
+    // Le calcul est protégé ICI : dans un harnais de navigateur, l'adresse du
+    // module n'est pas hiérarchique, et résoudre un chemin relatif contre elle
+    // lève. L'essai rend alors `null`, et les chemins relatifs prennent la suite.
+    ici = (rel) => { try { return fileURLToPath(new URL(rel, base)); } catch (e) { return null; } };
+  } catch (e) { /* node:url indisponible : les chemins relatifs restent la seule voie */ }
   const lire = async (chemins) => {
-    for (const c of chemins) { try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ } }
+    for (const c of chemins) {
+      if (!c) continue;
+      try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ }
+    }
     return null;
   };
-  // Chemins relatifs au dépôt (le dossier courant de `node --test`), avec le
-  // repli « racine = src/ » si l'outillage est déplacé un jour.
-  const auth = await lire(["src/lib/auth.js", "lib/auth.js"]);
-  const etat = await lire(["src/ui/state.js", "ui/state.js"]);
+  const auth = await lire([ici("../src/lib/auth.js"), ici("../lib/auth.js"), "src/lib/auth.js", "lib/auth.js"]);
+  const etat = await lire([ici("../src/ui/state.js"), ici("../ui/state.js"), "src/ui/state.js", "ui/state.js"]);
   if (!auth || !etat) return t.skip("sources illisibles hors du dépôt");
 
   const debut = auth.indexOf("export function setDeploiementAuth");
@@ -665,7 +725,7 @@ test("service : les champs que le client lit de `GET /v1/auth/config` lui sont t
   // Le RATTRAPAGE du mode (`reparerPilote`, src/lib/db/index.js) interroge lui
   // aussi le service, après un appel refusé : c'est l'autre porte par laquelle le
   // drapeau peut manquer, et il n'ouvre le reste de l'état qu'en second.
-  const bd = await lire(["src/lib/db/index.js", "lib/db/index.js"]);
+  const bd = await lire([ici("../src/lib/db/index.js"), ici("../lib/db/index.js"), "src/lib/db/index.js", "lib/db/index.js"]);
   assert.ok(bd, "src/lib/db/index.js est introuvable");
   assert.match(bd, /setDeploiementAuth\(\{[\s\S]{0,400}?annuaireService/,
     "le rattrapage du mode doit reprendre `annuaireService` du service");

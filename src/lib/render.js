@@ -495,9 +495,16 @@ function notesAppendix(doc, config) {
   for (const n of doc.notes || []) {
     const li = el("li", "doc-notes__item");
     li.appendChild(el("span", "doc-notes__kind", n.kind));
+    // Une consigne close reste visible, mais marquée : le lecteur voit d'un
+    // coup d'œil ce qui a été traité et ce qui attend encore.
+    if (n.resolu) li.appendChild(el("span", "doc-notes__done", "traité" + (n.resoluPar ? " par " + n.resoluPar : "") + (n.resoluLe ? " le " + n.resoluLe : "")));
     if (n.quote) li.appendChild(el("span", "doc-notes__quote", "« " + n.quote + " »"));
     li.appendChild(el("span", "doc-notes__text", n.text));
     if (n.author) li.appendChild(el("span", "doc-notes__author", "— " + n.author + (n.date ? ", " + n.date : "")));
+    // Le fil : les réponses sous leur commentaire, en retrait.
+    for (const r of (n.reponses || [])) {
+      li.appendChild(el("span", "doc-notes__reply", "↳ " + r.text + (r.author ? " — " + r.author : "") + (r.date ? ", " + r.date : "")));
+    }
     ul.appendChild(li);
   }
   box.appendChild(ul);

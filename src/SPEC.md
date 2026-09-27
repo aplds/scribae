@@ -838,7 +838,7 @@ juridique, consigne de rédaction, point à arbitrer, veille normative), un **te
 **auteur** (le **service** du compte, jamais l'agent — § 1.3) et sa date ; il peut en outre citer
 un **passage** (`quote`) : la phrase du document sur laquelle il porte.
 
-Deux règles gouvernent le dispositif (`src/ui/annotations.js`) :
+Trois règles gouvernent le dispositif (`src/ui/annotations.js`) :
 
 1. **On commente ce qu'on voit.** Le commentaire ne se pose pas depuis une liste : un bouton
    « commenter » est posé sur chaque bloc de la page, et **sélectionner un passage** dans le
@@ -851,6 +851,23 @@ Deux règles gouvernent le dispositif (`src/ui/annotations.js`) :
    l'éditeur annonce le compte et ouvre la liste d'un clic ; l'inspecteur a un onglet
    **« Commentaires »** qui les rassemble tous, rangés par bloc, chacun menant au passage visé.
    L'« Aperçu » compilé les reprend à la fin du document (`showNotes`, `notesAppendix`).
+3. **Un commentaire se clos.** Le geste « Marquer comme traité » — offert dans la bande du
+   document et sur chaque carte de l'inspecteur — retient **qui** a clos et **quand** (`resolu`,
+   `resoluPar`, `resoluLe`). Un commentaire clos **reste** dans le document : il est barré, porte
+   la pastille « Traité » et ne compte plus dans ce qui reste ouvert. L'onglet « Commentaires »
+   annonce son partage — « Tout (n) · En attente (n) · Traités (n) » — et un filtre permet de ne
+   relire qu'un seul versant, « En attente » étant la question qu'on se pose en relisant une
+   trame. La clôture voyage avec le document : `data-resolu` et ses deux compagnons dans
+   l'export Akoma Ntoso, mention « (traité par …) » dans le Markdown, marque dans l'annexe des
+   notes du rendu.
+4. **Un commentaire se discute.** Chaque commentaire porte un **fil** : des réponses datées,
+   **signées du service** de leur auteur, dans l'ordre où elles ont été écrites (jamais de nature
+   — une réponse est une prise de parole, pas une consigne). Le fil se lit sous le commentaire,
+   dans la bande du document comme dans l'onglet « Commentaires » ; une réponse se retire une à
+   une. Répondre est un geste de l'**éditeur de trame** : la rédaction lit le fil, elle ne l'écrit
+   pas (le geste modifierait la trame depuis l'écran qui rédige l'acte). Le fil voyage avec le
+   document : `data-reponse` dans l'export Akoma Ntoso, « ↳ » dans le Markdown, mention dans
+   l'annexe des notes du rendu.
 
 **Le rédacteur les voit aussi.** Ils ne servent à rien s'ils restent dans l'atelier de la trame :
 à la **rédaction**, chaque commentaire de la trame apparaît en **consigne** sous le passage
@@ -3377,7 +3394,10 @@ POST /v1/db/collections/{collection}/sync → { upserts:[{id,rev,ord,payload}], 
 ```
 
 Les écritures exigent un jeton (`Authorization: Bearer`) ; le service n'en
-conserve que l'empreinte SHA-256. Le serveur MySQL recopie dans des colonnes
+conserve que l'empreinte SHA-256. En mode « mot de passe », les lectures — **et la
+route de santé `/v1/db/health` elle-même**, qui décrit l'hôte, le port, le schéma
+et la version du moteur — exigent une **session** (cookie) ; en mode
+« démonstration », lecture et santé restent publiques. Le serveur MySQL recopie dans des colonnes
 indexées les champs utiles aux recherches (`numero`, `statut`, `service_id`,
 `bureau_id`, `entity_id`, `kind`) et journalise chaque écriture dans
 `sb_journal` : la base demeure interrogeable en SQL (vues `v_acte`, `v_trame`,

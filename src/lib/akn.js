@@ -353,15 +353,28 @@ function readNotes(act) {
     // Le passage cité est la seule balise <p> marquée `data-quote` (elle suit le
     // texte — voir export.js). Le texte de la note reste la première balise <p>.
     const quote = ps.find((x) => x.getAttribute("data-quote") === "true");
+    // Les réponses du fil suivent le texte : elles sont marquées `data-reponse`
+    // (voir export.js). Elles ne doivent être prises NI pour le texte de la
+    // note, NI pour le passage cité.
+    const reponses = ps.filter((x) => x.getAttribute("data-reponse") === "true")
+      .map((x) => ({ id: uid("r"), author: attr(x, "data-auteur"), date: attr(x, "data-date"), text: txt(x) }))
+      .filter((r) => r.text);
     out.push({
       id: uid("c"),
       kind: attr(n, "type") || "instruction",
       author: attr(n, "author"),
       date: attr(n, "date"),
-      text: quote ? txt(ps.find((x) => x !== quote)) : txt(ps[0]),
+      text: txt(ps.find((x) => x !== quote && x.getAttribute("data-reponse") !== "true")),
       quote: txt(quote),
       ruleId: "",
       path: attr(n, "data-target"),
+      // La clôture d'un commentaire (« traité », par qui, quand) VOYAGE avec
+      // l'acte : un acte relu par un tiers distingue une consigne appliquée
+      // d'une consigne en attente (voir src/ui/annotations.js).
+      resolu: attr(n, "data-resolu") === "true",
+      resoluPar: attr(n, "data-resolu-par"),
+      resoluLe: attr(n, "data-resolu-le"),
+      reponses: reponses,
     });
   }
   return out;

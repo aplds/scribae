@@ -8,7 +8,7 @@ Il expose **deux familles de ressources** :
 
 | Famille | Ressources | Persistance |
 |---|---|---|
-| **Données** | `GET /v1/db/health`, `GET /v1/db/collections/{collection}`, `POST /v1/db/collections/{collection}/sync` | `sb_record`, `sb_collection`, `sb_journal` |
+| **Données** | `GET /v1/db/health` (**session en mode « mot de passe »** — elle décrit l'hôte, le port, le schéma et la version du moteur ; publique en mode « démonstration »), `GET /v1/db/collections/{collection}`, `POST /v1/db/collections/{collection}/sync` | `sb_record`, `sb_collection`, `sb_journal` |
 | **Actes** | `/v1/actes…`, `/v1/signatures…`, `/v1/webhooks/signature`, `/v1/actes/{id}/transmission`, `/v1/actes/{id}/dossier-signature`, `/v1/publications…`, `/v1/eli/…`, `POST /v1/admin/purge`, `GET /v1/health`, `GET /v1/` (OpenAPI) | `sb_etat` |
 | **Courriel** | `GET /v1/courriel`, `POST /v1/courriel/envoi`, `POST /v1/courriel/test` | `sb_courriel` (+ `SMTP_*` du `.env`) |
 | **Réglages** | `GET /v1/config` (réglages de référentiel posés par le `.env`, voir § 9) | — |

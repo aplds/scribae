@@ -142,14 +142,26 @@ export function create({
       const body = check(res, "État du service");
       return { ok: true, detail: body.message || "Service de données disponible.", info: body };
     } catch (e) {
-      return { ok: false, status: e && e.status, detail: (e && e.message) || String(e), info: null };
+      const statut = e && e.status;
+      const code = (e && e.code) || "";
+      // O-1 (audit ciblé du 22/09/2026) : la route de santé est réservée à la
+      // SESSION quand la porte est un mot de passe — elle décrit l'hôte, le port
+      // et la version du moteur. Un `401` n'est donc pas une panne : c'est
+      // « session requise », et c'est ce que voit l'écran de CONNEXION. L'appeler
+      // une erreur allumerait la pastille rouge avant même que l'agent se
+      // connecte ; on le dit donc pour ce qu'il est.
+      if (statut === 401 || code === "session_absente") {
+        return { ok: false, sessionRequise: true, status: statut, detail: "Connexion requise pour interroger la base.", info: null };
+      }
+      return { ok: false, status: statut, detail: (e && e.message) || String(e), info: null };
     }
   }
 
   // Éprouve la voie d'ÉCRITURE — sans rien écrire.
   //
-  // La route de santé (`/v1/db/health`) ne demande ni session ni anti-CSRF :
-  // elle répond 200 même quand le service refuse ensuite chaque écriture. Un
+  // La route de santé (`/v1/db/health`) exige bien la SESSION quand la porte est
+  // un mot de passe (O-1), mais elle ne demande JAMAIS l'anti-CSRF : elle peut
+  // donc répondre 200 pendant que le service refuse ensuite chaque écriture. Un
   // « test de connexion » qui ne l'interrogeait qu'elle annonçait donc
   // « Connexion réussie » pendant qu'aucun geste ne s'enregistrait, et que la
   // file des écritures en attente grossissait — l'écran se contredisait (voir

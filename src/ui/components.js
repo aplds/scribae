@@ -113,10 +113,13 @@ export function choiceField({ label, value, options, onChange, help, required, m
     [...wrap.children].forEach((b, i) => b.classList.toggle("is-on", isOn(options[i].value)));
   };
   for (const o of options) {
+    const bloque = o.disabled === true;
     wrap.appendChild(h("button", {
-      type: "button", class: "fr-choice" + (isOn(o.value) ? " is-on" : ""),
+      type: "button", class: "fr-choice" + (isOn(o.value) ? " is-on" : "") + (bloque ? " is-disabled" : ""),
+      ...(bloque ? { disabled: "", title: o.disabledHint || "Indisponible dans ce déploiement" } : {}),
       on: {
         click: () => {
+          if (bloque) return;
           if (multi) {
             const arr = Array.isArray(value) ? [...value] : [];
             const i = arr.indexOf(o.value);

@@ -59,10 +59,18 @@
 // Le cran et le défilement sont rangés dans `state.ui.zooms[cle]` : un écran se
 // redessine souvent (une frappe, une écriture du référentiel), et le cran choisi
 // ne doit pas s'y perdre.
+//
+// LE CRAN CHOISI SURVIT AUSSI AU RECHARGEMENT. Un agent qui a réglé sa feuille à
+// 140 % (ou l'arbre à 80 %) ne doit pas la retrouver ajustée à chaque
+// rechargement de la page : c'est un réglage de POSTE, comme le thème
+// clair/sombre, et il se range à côté (`src/lib/prefs.js`). « Ajuster », lui,
+// n'est pas un cran — c'est « suis la largeur » —, et n'est donc pas mémorisé :
+// le geste l'EFFACE, pour qu'un recadrage ne fige pas une largeur d'écran.
 // ============================================================================
 
 import { state } from "./state.js";
 import { h } from "./dom.js";
+import { pref, setPref } from "../lib/prefs.js";
 
 const MIN = 0.35;      // on ne descend pas plus bas : le texte devient illisible
 const MAX = 3;
@@ -132,9 +140,22 @@ export function cadreZoom(contenu, opts = {}) {
   // faire tenir entier rendrait ses noms illisibles ; « Ajuster » reste là pour
   // qui veut la vue d'ensemble.
   const depart = opts.depart != null ? opts.depart : (mode === "canvas" ? 1 : null);
+  const borner = (s) => Math.max(min, Math.min(max, s));
+  // La préférence de poste qui retient le cran CHOISI (voir l'en-tête) : une clé
+  // par canvas, puisqu'ils se règlent indépendamment.
+  const clePref = "zoom." + cle;
+
   const memoire = magasin();
   let etat = memoire[cle];
-  if (!etat) etat = memoire[cle] = { s: depart, sx: 0, sy: 0, auto: depart == null };
+  if (!etat) {
+    // Aucun cran en mémoire : celui du poste, s'il en a un. Il est BORNÉ avant
+    // d'être adopté — une borne resserrée depuis (min/max passés en option) ne
+    // doit pas laisser un cran hors limites.
+    const memorise = nombre(pref(clePref, ""));
+    etat = memoire[cle] = memorise > 0
+      ? { s: borner(memorise), sx: 0, sy: 0, auto: false }
+      : { s: depart, sx: 0, sy: 0, auto: depart == null };
+  }
 
   contenu.classList.add("zoom__contenu");
   const plateau = h("div", { class: "zoom__plateau" }, contenu);
@@ -181,7 +202,6 @@ export function cadreZoom(contenu, opts = {}) {
     if (h) plateau.style.height = h;
     contenu.style.width = natW + "px";
   };
-  const borner = (s) => Math.max(min, Math.min(max, s));
 
   const peindre = () => {
     const s = etat.s || 1;
@@ -208,6 +228,9 @@ export function cadreZoom(contenu, opts = {}) {
     etat.s = s;
     etat.auto = true;
     etat.sx = 0; etat.sy = 0;
+    // « Ajuster » efface le cran mémorisé : ce n'est pas un cran, c'est « suis la
+    // largeur », et le retenir figerait la largeur d'un poste sur un autre écran.
+    setPref(clePref, null);
     peindre();
     cadre.scrollLeft = 0;
     cadre.scrollTop = 0;
@@ -223,6 +246,9 @@ export function cadreZoom(contenu, opts = {}) {
     const v = (cy - r1.top) / s1;
     etat.s = s2;
     etat.auto = false;
+    // Le cran est un choix : il se retient (voir l'en-tête) — c'est ce geste, et
+    // lui seul, qui pose la préférence de poste.
+    setPref(clePref, String(s2));
     peindre();
     const r2 = contenu.getBoundingClientRect();
     cadre.scrollLeft += (r2.left + u * s2) - cx;

@@ -19,6 +19,13 @@
 #   tests      les épreuves des modules purs (`tests/`) et celles du domaine du
 #              service (`src/server/mysql/`, `src/server/charge/`).
 #
+# LE QUATRIÈME TRAVAIL REJOUE LES PARCOURS CRITIQUES DANS UN VRAI NAVIGATEUR
+# (`tests/parcours-navigateur.mjs`, audit NC-I-002). C'est le seul travail qui
+# ait besoin d'un navigateur, et le seul qui puisse dire ce qu'un agent VOIT :
+# les épreuves pures et le domaine du service sont verts quand un écran entier
+# ne s'ouvre pas — les deux défauts de la 1.6.1 en sont la preuve. Il est
+# AVISANT pour l'instant (`continue-on-error`), voir son commentaire plus bas.
+#
 # LE TROISIÈME TRAVAIL CONSTRUIT L'IMAGE DOCKER ET LA MET EN SERVICE, sur une
 # vraie MariaDB : c'est la seule chose que l'atelier ne peut pas faire, et c'est
 # pourtant ce qui décide si « ça marche en production ». Il ne pousse aucune
@@ -41,10 +48,25 @@ name: Intégration continue
 on:
   push:
   pull_request:
+  # Ce déclencheur permet de REJOUER la chaîne sans rien livrer — utile quand un
+  # travail a échoué pour une raison d'environnement, et pour relire l'état d'un
+  # dépôt qu'on n'a pas touché.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# CE QUE FAIT LA CHAÎNE QUAND ELLE ÉCHOUE. `node --test` écrit son verdict dans
+# le journal du travail, et ce journal n'est lisible que par un administrateur du
+# dépôt : qui voit la chaîne rouge n'apprend pas QUELLE épreuve a lâché, ni
+# pourquoi. Une chaîne rouge dont personne ne distingue la cause ne rend pas le
+# service qu'une chaîne rend (audit, NC-I-008). Les deux travaux d'épreuves
+# passent donc leur journal à `scripts/annoncer-echecs.sh`, qui transforme
+# chaque épreuve rouge en ANNOTATION (« ::error:: ») : les annotations sont
+# attachées au commit, visibles dans l'onglet Checks, et interrogeables par
+# l'API publique — donc lisibles par quiconque, pas seulement par le dépôt.
+# Le déclencheur `workflow_dispatch` permet de REJOUER la chaîne sans rien
+# livrer, ce qui est la façon de relire un échec qu'on vient de corriger.
 jobs:
   verifier:
     name: Syntaxe, style et tests
@@ -59,8 +81,22 @@ jobs:
         run: npm run syntaxe
       - name: Contrôle de style (aucun avertissement toléré)
         run: npm run style
+      # LES ÉPREUVES DU DOMAINE VIVENT SOUS `src/server/mysql/` ET SONT AUSSI
+      # EXÉCUTÉES ICI (`npm test` les inclut) : leurs dépendances doivent donc
+      # être installées, sinon `node --test` échouerait sur un module manquant
+      # plutôt que sur une épreuve — et personne ne saurait pourquoi.
+      - name: Installer les dépendances du service (`npm test` couvre son domaine)
+        run: npm ci --no-audit --no-fund --prefix src/server/mysql
       - name: Tests (modules purs et domaine du service)
-        run: npm test
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/epreuves.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            bash scripts/annoncer-echecs.sh "$RUNNER_TEMP/epreuves.log"
+          fi
+          exit "$code"
 
   service:
     name: Service auto-hébergé
@@ -77,7 +113,16 @@ jobs:
       - name: Installer les dépendances du service
         run: npm ci --no-audit --no-fund
       - name: Tests du domaine des comptes et de la signature
-        run: npm test
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/epreuves-service.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            # Le dossier courant est `src/server/mysql` (voir `defaults` ci-dessus).
+            bash ../../scripts/annoncer-echecs.sh "$RUNNER_TEMP/epreuves-service.log"
+          fi
+          exit "$code"
 
   image:
     name: Image Docker, construite et mise en service
@@ -135,3 +180,42 @@ jobs:
       - name: Arrêter
         if: always()
         run: docker rm -f scribae || true
+
+  parcours:
+    name: Parcours critiques, dans un vrai navigateur
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # AVISANT, ET POURQUOI. Ce travail rejoue `tests/parcours.mjs` — les
+    # parcours critiques — sur l'application réelle, montée en édition statique
+    # dans un Chromium sans interface (voir `tests/parcours-navigateur.mjs`).
+    # C'est le seul travail qui puisse dire ce qu'un agent VOIT, et il vient
+    # d'être écrit : le rendre bloquant ferait rougir la chaîne pour une cause
+    # qui n'est pas encore celle du dépôt. Ses échecs s'affichent donc en
+    # ANNOTATIONS sans arrêter la livraison. À RETIRER dès qu'il aura été vu
+    # vert deux fois de suite : un avertissement permanent ne se lit plus.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # RIEN N'ENTRE DANS LE DÉPÔT. Playwright est installé HORS VERROU
+      # (`--no-save --no-package-lock`) et son navigateur dans le cache de la
+      # machine : `npm ci` reste reproductible et `package-lock.json` ne bouge
+      # pas — ajouter une dépendance de navigateur au verrou obligerait à
+      # regénérer le verrou à chaque montée de version de Chromium.
+      - name: Installer Playwright (hors verrou) et son navigateur
+        run: |
+          npm install --no-save --no-package-lock --no-audit --no-fund playwright@1.49.1
+          ./node_modules/.bin/playwright install --with-deps chromium
+      - name: Rejouer les parcours critiques
+        run: node tests/parcours-navigateur.mjs
+      # Une image, parce qu'aucune annotation ne dit ce qui était à l'écran.
+      - name: Capture d'écran de l'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parcours-echec
+          path: parcours-echec.png
+          if-no-files-found: ignore
+          retention-days: 7

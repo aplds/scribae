@@ -121,11 +121,26 @@ async function demarrerServiceInterne({ args, journal }) {
   const url = "http://127.0.0.1:" + port;
   const limite = Date.now() + 30000;
   let dernier = "";
+  // La route de santé de la BASE exige une session quand la porte est un mot de
+  // passe (voir src/docs/AUDIT-BUGS-2026-09-22.md, point O-1 — elle décrit
+  // l'hôte, le port, le schéma et la version du moteur). On ouvre donc d'abord
+  // la session d'administration — celle que l'amorçage vient de poser —, puis on
+  // interroge la base AVEC elle : c'est aussi la seule façon de vérifier que le
+  // SCHÉMA est appliqué, et pas seulement que le processus écoute.
+  const sonde = creerClient({ base: url, jeton: "" });
+  const pot = potVide();
+  let session = false;
   while (Date.now() < limite) {
     try {
-      const r = await fetch(url + "/v1/db/health");
-      if (r.ok) { journal("Service prêt : " + url); return { url, base: globalThis.__SCRIBA_BASE__ || null }; }
-      dernier = "HTTP " + r.status;
+      if (!session) {
+        const r = await sonde.envoyer(pot, { method: "POST", chemin: "/v1/auth/connexion", corps: { login: "charge-admin", motDePasse: MDP_DE_CHARGE } });
+        if (r.status === 200) { if (r.json && r.json.csrf) pot.enteteCsrf = r.json.csrf; session = true; }
+        else dernier = "connexion HTTP " + r.status;
+      } else {
+        const r = await sonde.envoyer(pot, { method: "GET", chemin: "/v1/db/health" });
+        if (r.status === 200) { journal("Service prêt : " + url); return { url, base: globalThis.__SCRIBA_BASE__ || null }; }
+        dernier = "HTTP " + r.status;
+      }
     } catch (e) { dernier = String((e && e.message) || e); }
     await new Promise((r) => setTimeout(r, 200));
   }

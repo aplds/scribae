@@ -138,7 +138,7 @@ tels quels, sans qu'aucune règle ne soit recopiée.
 
 **Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
 `import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3c), tous dus à
+écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3d), tous dus à
 l'absence de Node et de réseau : la liste, la lecture de chaque écart et les
 chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
 
@@ -207,14 +207,19 @@ s'installer (module absent) est **sauté**, jamais vert par accident.
 ## 3. L'intégration continue
 
 `src/github/ci.yml` (recopié par l'export en `.github/workflows/ci.yml`) exécute
-**trois** travaux à chaque `push` et chaque demande de fusion :
+**trois** travaux à chaque `push`, chaque demande de fusion, et **sur demande**
+(`workflow_dispatch` — de quoi rejouer la chaîne sans rien livrer, ce qui est la
+façon de relire un échec qu'on vient de corriger) :
 
 1. **Syntaxe, style et tests** — trois étapes SÉPARÉES (`npm run syntaxe`,
    `npm run style`, `npm test`), pour qu'un échec dise du premier coup laquelle a
    lâché : une chaîne rouge dont personne ne distingue la cause ne rend pas le
    service qu'une chaîne rend (audit, NC-I-008). Le style est en mode **strict** —
    un import jamais employé, un `var`, un `console.log` de client font donc
-   échouer la chaîne ;
+   échouer la chaîne. Ce travail installe les dépendances du service (`npm ci`
+   dans `src/server/mysql`) : `npm test` exécute AUSSI le domaine du service, qui
+   doit trouver `mysql2` — sans quoi il échouerait sur un module manquant plutôt
+   que sur une épreuve, et la cause serait encore illisible ;
 2. **Service auto-hébergé** — installation des dépendances de `src/server/mysql`
    et ses tests (aucune base requise).
 3. **Image Docker, construite et mise en service** — `docker build -f
@@ -226,6 +231,26 @@ s'installer (module absent) est **sauté**, jamais vert par accident.
    n'est poussée : aucun secret n'entre dans la chaîne. C'est la seule chose que
    l'atelier ne peut pas faire, et c'est celle qui décide si une livraison
    s'installe.
+
+**QUAND ELLE ÉCHOUE, ELLE DIT MAINTENANT POURQUOI.** Le journal d'un travail n'est
+lisible que par un administrateur du dépôt : qui voit la chaîne rouge n'apprend pas
+**quelle** épreuve a lâché. Les deux travaux d'épreuves passent donc leur journal à
+`scripts/annoncer-echecs.sh`, qui attache chaque épreuve rouge en **annotation**
+(« `::error::` », avec son message d'assertion) et résume le journal dans le
+récapitulatif du travail. Les annotations sont visibles dans l'onglet « Checks » **et
+interrogeables par l'API publique** — donc lisibles par quiconque, pas seulement par
+le dépôt. Cette lacune est ce qui a laissé NC-I-008 ouverte quatre livraisons durant :
+le verdict existait, sa cause non.
+
+> **État observé (2026-09-28, note 1.6.3d).** Sur l'envoi de la 1.6.3c, le troisième
+> travail **passe** et les deux travaux d'épreuves **échouent** — et c'était le cas
+> depuis au moins la 1.6.1w (quatre envois sur quatre, dans les deux lignées). La
+> **première cause** est nommée, réparée, et elle ne pouvait se voir qu'en exécution :
+> les épreuves qui lisent un fichier le faisaient par un chemin relatif au **dossier
+> courant**, or le second travail part de `src/server/mysql` (son `working-directory`)
+> — les chemins sont désormais **ancrés à l'adresse du fichier de l'épreuve**
+> (`import.meta.url`). La **seconde** (le travail qui part de la racine) reste à
+> nommer : NC-I-008 est repassée en « **Régression** ».
 
 Le second travail installe ses dépendances par **`npm ci`**, sur le verrou
 `src/server/mysql/package-lock.json` : chaque paquet est épinglé (version, adresse de

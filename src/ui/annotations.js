@@ -11,6 +11,9 @@
 //      page, sous le bloc qu'il vise, en bande nettement distincte du texte de
 //      l'acte. (C'est la différence voulue avec un commentaire Word, qui dort
 //      dans une marge, ou dans une bulle qu'on n'ouvre jamais.)
+//   3. un commentaire se CLOS — « traité », par qui et quand. Une trame se
+//      relit alors en ne montrant que ce qui reste ouvert, sans que les
+//      consignes appliquées disparaissent du document.
 //
 // Le module ne connaît ni la trame ni la vue : il reçoit des notes et des
 // rappels (`onEdit`, `onDelete`, `onAdd`). Il sert donc les deux écrans qui
@@ -23,11 +26,61 @@ import { NOTE_KINDS } from "../lib/schema.js";
 export const noteKind = (id) => NOTE_KINDS.find((k) => k.id === id) || NOTE_KINDS[1];
 
 // ------------------------------------------------------------------ lecture
-export function countNotes(body) {
+// Le FIL d'un commentaire : ses réponses, dans l'ordre où elles ont été écrites,
+// chacune signée du service de son auteur et datée. Un point à arbitrer se
+// discute avant d'être tranché — le fil garde la discussion, là où le commentaire
+// ne gardait qu'une voix (voir `noteComposer`, mode « reponse »).
+export function noteThread(reponses, { editable = false, onDelete } = {}) {
+  const list = (reponses || []).filter(Boolean);
+  if (!list.length) return null;
+  const box = h("div", { class: "annot__thread" });
+  list.forEach((r, i) => box.appendChild(h("div", { class: "annot__reply" },
+    h("div", { class: "annot__reply-meta" },
+      h("span", { class: "annot__reply-who", text: r.author || "—" }),
+      r.date ? h("span", { class: "annot__when", text: r.date }) : null,
+      h("span", { class: "fr-spacer" }),
+      editable && onDelete ? h("button", {
+        class: "annot__btn annot__btn--danger", type: "button", title: "Supprimer cette réponse",
+        onClick: (e) => { e.stopPropagation(); onDelete(r, i); },
+      }, icon("trash", 11)) : null,
+    ),
+    h("p", { class: "annot__reply-text", text: r.text || "—" }),
+  )));
+  return box;
+}
+
+// Un commentaire TRAITÉ : la consigne a été appliquée (ou le point tranché).
+// L'état est porté par le commentaire lui-même (`resolu`, `resoluPar`,
+// `resoluLe`) et voyage donc avec la trame, ses exports et ses imports — voir
+// `lib/trame-format.js` et `lib/export.js`.
+export const noteResolue = (nt) => !!(nt && nt.resolu === true);
+
+// « Traité par X le Y » — la mention qui accompagne la pastille, et que les
+// écrans reprennent telle quelle.
+export function mentionTraite(nt) {
+  const qui = nt && nt.resoluPar ? " par " + nt.resoluPar : "";
+  const quand = nt && nt.resoluLe ? " le " + nt.resoluLe : "";
+  return "Traité" + qui + quand;
+}
+
+// `ouvertes` ne compte que les commentaires NON traités : c'est la question
+// qu'on se pose en relisant une trame (« qu'est-ce qui reste ouvert ? »).
+export function countNotes(body, { ouvertes = false } = {}) {
   let n = 0;
-  const walk = (nodes) => (nodes || []).forEach((x) => { if (!x) return; n += (x.notes || []).length; walk(x.blocks); });
+  const walk = (nodes) => (nodes || []).forEach((x) => {
+    if (!x) return;
+    for (const nt of (x.notes || [])) if (!ouvertes || !noteResolue(nt)) n += 1;
+    walk(x.blocks);
+  });
   walk(body || []);
   return n;
+}
+
+// Le compte d'une liste plate de commentaires : total, ouverts, traités.
+export function compteNotes(notes) {
+  const list = (notes || []).filter(Boolean);
+  const resolues = list.filter(noteResolue).length;
+  return { total: list.length, resolues, ouvertes: list.length - resolues };
 }
 
 // Les blocs qui portent au moins un commentaire, dans l'ordre du document.
@@ -62,7 +115,7 @@ export function notesByPath(notes) {
 // Ce qu'on voit dans la page, sous chaque bloc commenté. `editable` laisse
 // apparaître le crayon et la corbeille ; sans lui, c'est une CONSIGNE, que le
 // rédacteur lit mais ne modifie pas.
-export function annotationStrip({ notes, editable = false, title = "", variant = "", bare = false, onEdit, onDelete, onAdd } = {}) {
+export function annotationStrip({ notes, editable = false, title = "", variant = "", bare = false, onEdit, onDelete, onAdd, onToggle, onReply } = {}) {
   const list = (notes || []).filter(Boolean);
   if (!list.length) return null;
   const box = h("div", { class: "annot" + (variant ? " annot--" + variant : "") + (bare ? " annot--bare" : ""), contenteditable: "false" });
@@ -80,13 +133,33 @@ export function annotationStrip({ notes, editable = false, title = "", variant =
     }
     box.appendChild(head);
   }
-  list.forEach((nt, i) => box.appendChild(annotationItem(nt, i, { editable, onEdit, onDelete })));
+  list.forEach((nt, i) => box.appendChild(annotationItem(nt, i, { editable, onEdit, onDelete, onToggle, onReply })));
   return box;
 }
 
-function annotationItem(nt, i, { editable, onEdit, onDelete }) {
+function annotationItem(nt, i, { editable, onEdit, onDelete, onToggle, onReply }) {
   const kind = noteKind(nt.kind);
+  const resolu = noteResolue(nt);
   const actions = [];
+  // Répondre : le fil du commentaire. C'est la suite naturelle d'un point à
+  // arbitrer, qui se discute avant d'être tranché.
+  if (onReply) {
+    const nb = (nt.reponses || []).length;
+    actions.push(h("button", {
+      class: "annot__btn" + (nb ? " is-on" : ""), type: "button",
+      title: nb ? `Répondre (${nb} réponse${nb > 1 ? "s" : ""} déjà dans le fil)` : "Répondre à ce commentaire",
+      onClick: (e) => { e.stopPropagation(); onReply(nt, i); },
+    }, icon("bulle", 12), nb ? h("span", { class: "annot__count", text: String(nb) }) : null));
+  }
+  // Le geste « traité » est offert dès qu'un appelant l'ouvre (`onToggle`) :
+  // l'éditeur de trame le propose, la rédaction se contente de le MONTRER.
+  if (onToggle) {
+    actions.push(h("button", {
+      class: "annot__btn annot__btn--done" + (resolu ? " is-on" : ""), type: "button",
+      title: resolu ? "Rouvrir ce commentaire" : "Marquer ce commentaire comme traité",
+      onClick: (e) => { e.stopPropagation(); onToggle(nt, i); },
+    }, icon(resolu ? "refresh" : "check", 12)));
+  }
   if (editable && onEdit) {
     actions.push(h("button", {
       class: "annot__btn", type: "button", title: "Modifier ce commentaire",
@@ -99,9 +172,10 @@ function annotationItem(nt, i, { editable, onEdit, onDelete }) {
       onClick: (e) => { e.stopPropagation(); onDelete(nt, i); },
     }, icon("trash", 12)));
   }
-  return h("div", { class: "annot__item" },
+  return h("div", { class: "annot__item" + (resolu ? " annot__item--done" : "") },
     h("div", { class: "annot__meta" },
       h("span", { class: "fr-badge fr-badge--" + kind.color, text: kind.label }),
+      resolu ? h("span", { class: "fr-badge fr-badge--success annot__done", title: mentionTraite(nt), text: "Traité" }) : null,
       nt.author ? h("span", { class: "annot__who", text: nt.author }) : null,
       nt.date ? h("span", { class: "annot__when", text: nt.date }) : null,
       h("span", { class: "fr-spacer" }),
@@ -109,55 +183,68 @@ function annotationItem(nt, i, { editable, onEdit, onDelete }) {
     ),
     nt.quote ? h("p", { class: "annot__quote", text: nt.quote }) : null,
     h("p", { class: "annot__text", text: nt.text || "—" }),
+    noteThread(nt.reponses),
   );
 }
 
 // ------------------------------------------------------------------ composer
 // La fenêtre d'écriture. Elle sert pour un commentaire neuf (éventuellement
 // adossé à un passage) comme pour la reprise d'un commentaire existant.
-export function noteComposer({ note = null, quote = "", author = "", date = "", context = "", onSave, onDelete } = {}) {
-  const editing = !!note;
+export function noteComposer({ note = null, quote = "", author = "", date = "", context = "", mode = "note", onSave, onDelete } = {}) {
+  const repondre = mode === "reponse";
+  const editing = !!note && !repondre;
   const wrap = h("div", { class: "fr-stack" });
 
   if (context) wrap.appendChild(h("p", { class: "note-context", text: context }));
   if (quote) wrap.appendChild(h("blockquote", { class: "note-quote", text: quote }));
+  // En réponse, on rappelle le commentaire auquel on répond : le fil se lit
+  // depuis la carte du commentaire, mais la fenêtre doit dire sur quoi on parle.
+  if (repondre && note) wrap.appendChild(h("blockquote", { class: "note-quote", text: note.text || "—" }));
 
-  wrap.appendChild(h("p", { class: "inspector__label", text: "Nature du commentaire" }));
-  const natures = h("div", { class: "fr-choices" });
+  // La nature qualifie une CONSIGNE : une réponse n'en porte pas.
   let kind = note?.kind || "instruction";
-  for (const k of NOTE_KINDS) {
-    natures.appendChild(h("button", {
-      type: "button", class: "fr-choice" + (k.id === kind ? " is-on" : ""),
-      onClick: (e) => {
-        kind = k.id;
-        for (const b of natures.children) b.classList.toggle("is-on", b === e.currentTarget);
-      },
-    }, k.label));
+  if (!repondre) {
+    wrap.appendChild(h("p", { class: "inspector__label", text: "Nature du commentaire" }));
+    const natures = h("div", { class: "fr-choices" });
+    for (const k of NOTE_KINDS) {
+      natures.appendChild(h("button", {
+        type: "button", class: "fr-choice" + (k.id === kind ? " is-on" : ""),
+        onClick: (e) => {
+          kind = k.id;
+          for (const b of natures.children) b.classList.toggle("is-on", b === e.currentTarget);
+        },
+      }, k.label));
+    }
+    wrap.appendChild(natures);
   }
-  wrap.appendChild(natures);
 
-  const ta = h("textarea", { class: "fr-textarea", rows: 4, placeholder: "Ex. : vérifier que l'agent n'a pas déjà une délégation sur ce périmètre…" });
-  ta.value = note?.text || "";
-  wrap.appendChild(h("p", { class: "inspector__label", style: { marginTop: "10px" }, text: "Le commentaire" }));
+  const ta = h("textarea", {
+    class: "fr-textarea", rows: 4,
+    placeholder: repondre ? "Ex. : vérifié avec le service, la délégation a été retirée le 12…" : "Ex. : vérifier que l'agent n'a pas déjà une délégation sur ce périmètre…",
+  });
+  ta.value = repondre ? "" : (note?.text || "");
+  wrap.appendChild(h("p", { class: "inspector__label", style: { marginTop: repondre ? "0" : "10px" }, text: repondre ? "Votre réponse" : "Le commentaire" }));
   wrap.appendChild(ta);
-  const err = h("p", { class: "fr-error-text", hidden: true, text: "Écrivez d'abord le commentaire." });
+  const err = h("p", { class: "fr-error-text", hidden: true, text: repondre ? "Écrivez d'abord la réponse." : "Écrivez d'abord le commentaire." });
   wrap.appendChild(err);
 
   wrap.appendChild(h("p", { class: "fr-small fr-muted", style: { marginTop: "8px" },
-    text: `Signé du service de votre compte (${author}${date ? " · " + date : ""}). Les commentaires accompagnent la préparation : ils ne sont pas publiés, mais ils restent dans le document et partent dans les exports.` }));
+    text: repondre
+      ? `Signée du service de votre compte (${author}${date ? " · " + date : ""}). La réponse s'ajoute au fil du commentaire : elle reste dans le document, avec les autres.`
+      : `Signé du service de votre compte (${author}${date ? " · " + date : ""}). Les commentaires accompagnent la préparation : ils ne sont pas publiés, mais ils restent dans le document et partent dans les exports.` }));
 
   const m = modal({
-    title: editing ? "Modifier le commentaire" : "Nouveau commentaire",
+    title: repondre ? "Répondre au commentaire" : (editing ? "Modifier le commentaire" : "Nouveau commentaire"),
     body: wrap,
     actions: (close) => [
       editing && onDelete ? button("Supprimer", { variant: "tertiary", icon: "trash", onClick: () => { onDelete(); close(); } }) : null,
       button("Annuler", { variant: "secondary", onClick: close }),
-      button(editing ? "Enregistrer" : "Ajouter le commentaire", {
+      button(repondre ? "Répondre" : (editing ? "Enregistrer" : "Ajouter le commentaire"), {
         variant: "primary", icon: "check",
         onClick: () => {
           const text = ta.value.trim();
           if (!text) { err.hidden = false; ta.focus(); return; }
-          onSave({ kind, text: text, quote: quote });
+          onSave(repondre ? { text: text } : { kind, text: text, quote: quote });
           close();
         },
       }),

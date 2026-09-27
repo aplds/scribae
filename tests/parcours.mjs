@@ -516,7 +516,7 @@ declarer({
     const { state, navigate } = ctx.modules();
     const dom = ctx.dom();
     if (!state.ready || !state.user) return "";             // parcours sans objet
-    const { redrawView } = await import(RACINE_CODE + "ui/state.js");
+    const { redrawView, touch } = await import(RACINE_CODE + "ui/state.js");
     const avant = ctx.route();
     const ongletAvant = state.ui && state.ui.refTab;
     const taper = (texte) => {
@@ -1266,6 +1266,393 @@ declarer({
     } finally {
       try { state.signature.acteId = null; } catch (e) { /* rien à faire */ }
       await ctx.revenir(avant);
+    }
+  },
+});
+
+// ------------------------- 27. le cran de zoom est un réglage de POSTE (1.6.3d)
+declarer({
+  id: "zoom-memorise",
+  nom: "Le cran de zoom choisi survit au rechargement",
+  pourquoi: "le cran vit dans la mémoire de la session (`state.ui.zooms`) ; s'il n'est plus POSÉ dans les préférences du poste ni RELU à l'ouverture, l'agent retrouve sa feuille ajustée à chaque rechargement — sans aucun message, et sans qu'on sache pourquoi. Le geste inverse compte aussi : « Ajuster » n'est PAS un cran, et doit l'effacer (sinon un recadrage figerait la largeur d'un écran sur un autre)",
+  async jouer(ctx) {
+    let zoom = null;
+    let prefs = null;
+    try { zoom = await import(RACINE_CODE + "ui/zoom.js"); } catch (e) { return "ui/zoom.js illisible : " + e.message; }
+    try { prefs = await import(RACINE_CODE + "lib/prefs.js"); } catch (e) { return "lib/prefs.js illisible : " + e.message; }
+
+    const CLE = "parcours-zoom";
+    const PREF = "zoom." + CLE;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const poser = () => {
+      const contenu = document.createElement("div");
+      contenu.style.width = "400px";
+      contenu.style.minHeight = "300px";
+      const enveloppe = zoom.cadreZoom(contenu, { mode: "canvas", cle: CLE });
+      enveloppe.classList.add("parcours-zoom");
+      document.body.appendChild(enveloppe);
+      return enveloppe;
+    };
+    const pct = (e) => (e.querySelector(".zoom__pct") || {}).textContent || "";
+    const bouton = (e, t) => [...e.querySelectorAll(".zoom__btn")].find((b) => (b.textContent || "").trim() === t);
+    const oublier = () => { try { delete ctx.etat().ui.zooms[CLE]; } catch (e) { /* rien à oublier */ } };
+
+    try {
+      prefs.setPref(PREF, null);
+      oublier();
+
+      // 1. Un canvas NEUF, sans préférence de poste, s'ouvre à 100 %.
+      const premier = poser();
+      await frame();
+      if (pct(premier) !== "100 %") return "un canvas neuf doit s'ouvrir à 100 %, obtenu « " + pct(premier) + " »";
+
+      // 2. Le geste « + » est un CHOIX : il se pose dans les préférences du poste.
+      bouton(premier, "+").click();
+      await frame();
+      if (pct(premier) !== "125 %") return "après un « + », le cran devrait valoir 125 %, obtenu « " + pct(premier) + " »";
+      const pose = parseFloat(prefs.pref(PREF, ""));
+      if (!(pose > 1)) return "le cran choisi n'a pas été posé dans les préférences du poste : « " + prefs.pref(PREF, null) + " »";
+
+      // 3. Un écran NEUF (mémoire vidée — c'est le rechargement) REPREND le cran
+      //    du poste : c'est tout l'objet de la règle.
+      premier.remove();
+      oublier();
+      const second = poser();
+      await frame();
+      if (pct(second) !== "125 %") return "le cran du poste doit être repris à l'ouverture, obtenu « " + pct(second) + " »";
+
+      // 4. « Ajuster » n'est PAS un cran : il l'EFFACE.
+      bouton(second, "Ajuster").click();
+      await frame();
+      if (prefs.pref(PREF, null) !== null) return "« Ajuster » doit effacer le cran mémorisé, obtenu « " + prefs.pref(PREF, null) + " »";
+      return "";
+    } finally {
+      for (const e of [...document.querySelectorAll(".parcours-zoom")]) e.remove();
+      oublier();
+      prefs.setPref(PREF, null);
+    }
+  },
+});
+
+// --------- 28. un commentaire se discute, se CLOS, et se relit « en attente »
+declarer({
+  id: "commentaire-traite",
+  nom: "Un commentaire de trame se discute (fil), se marque comme traité, et se filtre",
+  pourquoi: "un commentaire était une note isolée : on ne pouvait pas y répondre, et une consigne appliquée ne se distinguait pas d'une consigne en attente — relire une trame obligeait à relire TOUS ses commentaires, sans savoir qui avait tranché quoi. Le fil et la clôture doivent tenir au commentaire lui-même — donc voyager dans l'export et revenir par l'import —, et le filtre « En attente » ne doit plus montrer que ce qui reste ouvert",
+  async jouer(ctx) {
+    const ann = await import(RACINE_CODE + "ui/annotations.js");
+    const schema = await import(RACINE_CODE + "lib/schema.js");
+    const ex = await import(RACINE_CODE + "lib/export.js");
+    const akn = await import(RACINE_CODE + "lib/akn.js");
+    const { state, navigate } = ctx.modules();
+    const dom = ctx.dom();
+
+    // ---- 1. le modèle : un commentaire neuf est OUVERT, et la mention dit tout
+    const neuf = schema.newNote({ text: "Consigne", author: "A", date: "2026-01-01" });
+    if (ann.noteResolue(neuf)) return "un commentaire neuf se déclare déjà traité";
+    if (ann.compteNotes([neuf]).ouvertes !== 1) return "le compte des commentaires ouverts est faux pour un commentaire neuf";
+    neuf.resolu = true; neuf.resoluPar = "Direction"; neuf.resoluLe = "2026-02-03";
+    if (ann.mentionTraite(neuf) !== "Traité par Direction le 2026-02-03") {
+      return "la mention d'un commentaire clos se lit « " + ann.mentionTraite(neuf) + " »";
+    }
+    const partage = ann.compteNotes([neuf, { resolu: false }]);
+    if (partage.total !== 2 || partage.resolues !== 1 || partage.ouvertes !== 1) {
+      return "le partage ouvert/traité est faux (" + JSON.stringify(partage) + ")";
+    }
+
+    // ---- 2. la clôture VOYAGE : l'export Akoma Ntoso la porte, l'import la relit
+    const commentaire = {
+      id: "c1", kind: "instruction", author: "A", date: "2026-01-01", text: "Consigne",
+      quote: "Passage cité", ruleId: "", path: "body.0",
+      resolu: true, resoluPar: "Direction", resoluLe: "2026-02-03",
+      reponses: [{ id: "r1", author: "Bureau des élections", date: "2026-02-04", text: "Vérifié avec le service." }],
+    };
+    const doc = {
+      kind: "original",
+      meta: { actTypeId: "decision", dateSignature: "2026-01-01", numero: "2026-001", entity: { id: "e" }, eli: "" },
+      nodes: [], notes: [commentaire],
+    };
+    let xml = "";
+    try { xml = ex.exportAkn(doc, state.config || {}, null); } catch (e) { return "l'export Akoma Ntoso a échoué : " + e.message; }
+    if (!/data-resolu="true"/.test(xml)) return "l'export Akoma Ntoso ne dit pas que le commentaire est clos";
+    if (!/data-reponse="true"/.test(xml)) return "l'export Akoma Ntoso ne porte pas le fil du commentaire";
+    let relu = null;
+    try { relu = akn.parseAkn(xml); } catch (e) { return "la relecture de l'export Akoma Ntoso a échoué : " + e.message; }
+    const retrouve = (relu.notes || [])[0] || {};
+    if (retrouve.resolu !== true || retrouve.resoluPar !== "Direction" || retrouve.resoluLe !== "2026-02-03") {
+      return "l'aller-retour Akoma Ntoso perd la clôture du commentaire (" + JSON.stringify({ resolu: retrouve.resolu, par: retrouve.resoluPar, le: retrouve.resoluLe }) + ")";
+    }
+    if (retrouve.text !== "Consigne" || retrouve.quote !== "Passage cité") {
+      return "l'aller-retour Akoma Ntoso perd le texte du commentaire ou le passage cité";
+    }
+    const reponse = (retrouve.reponses || [])[0] || {};
+    if ((retrouve.reponses || []).length !== 1 || reponse.text !== "Vérifié avec le service."
+      || reponse.author !== "Bureau des élections" || reponse.date !== "2026-02-04") {
+      return "l'aller-retour Akoma Ntoso perd le fil du commentaire";
+    }
+    const md = ex.exportMarkdown(doc, state.config || {});
+    if (!/↳ Vérifié avec le service/.test(md)) return "le Markdown exporté ne porte pas le fil du commentaire";
+
+    // ---- 3. le geste, dans l'éditeur de trame — c'est là qu'on écrit les commentaires
+    if (!state.ready || !state.user) return "";              // parcours sans objet
+    const { redrawView } = await import(RACINE_CODE + "ui/state.js");
+    const boutNode = (trame, minimum = 1) => {
+      let ou = null;
+      const walk = (ns) => (ns || []).forEach((n) => {
+        if (ou || !n) return;
+        if ((n.notes || []).length >= minimum) { ou = n; return; }
+        walk(n.blocks);
+      });
+      walk(trame.body || []);
+      return ou;
+    };
+    // On choisit de préférence une trame dont un bloc porte PLUSIEURS
+    // commentaires : c'est là que le partage ouvert/traité et ses filtres se
+    // lisent vraiment (un commentaire ouvert à côté d'un commentaire clos).
+    const trames = state.trames || [];
+    const trame = trames.find((t) => boutNode(t, 2)) || trames.find((t) => boutNode(t, 1));
+    if (!trame) return "";                                   // aucune trame commentée : sans objet
+    // L'ORDRE des commentaires affichés est celui du document : une carte et son
+    // commentaire se confondent donc par leur rang, et les vérifications portent
+    // sur CELUI qu'on a clos — pas sur « au moins un ».
+    const tous = () => {
+      const out = [];
+      const walk = (ns) => (ns || []).forEach((n) => { if (!n) return; out.push(...(n.notes || [])); walk(n.blocks); });
+      walk(trame.body || []);
+      return out;
+    };
+    // On part d'un commentaire OUVERT : un passage antérieur a pu en laisser un de
+    // clos, et c'est la CLÔTURE qu'on éprouve ici, non la relecture.
+    const notes0 = tous();
+    const i0 = Math.max(0, notes0.findIndex((x) => !ann.noteResolue(x)));
+    const note = notes0[i0];
+    const avant = tous().map((x) => ({
+      resolu: x.resolu, resoluPar: x.resoluPar, resoluLe: x.resoluLe,
+      reponses: (x.reponses || []).map((r) => ({ ...r })),
+    }));
+    const avantRoute = ctx.route();
+    const avantEd = state.editor ? { ...state.editor } : null;
+    const droite = () => dom.querySelector(".editor__col--right");
+    const onglets = () => [...((droite() || dom).querySelectorAll(".fr-tab"))];
+    const cartes = () => [...dom.querySelectorAll(".cmt-group__body .note-card")];
+    const chips = () => [...dom.querySelectorAll(".cmt-filtre .fr-choice")];
+    const chipDe = (motif) => chips().find((b) => motif.test((b.textContent || "").trim()));
+    const nbDe = (motif) => { const c = chipDe(motif); const m = c && /\((\d+)\)/.exec(c.textContent || ""); return m ? Number(m[1]) : -1; };
+    const ouvrirTout = async () => {
+      const c = chipDe(/^Tout \(/);
+      if (c) c.click();
+      await jusqua(() => chips().find((b) => b.classList.contains("is-on") && /^Tout /.test(b.textContent || "")), { essais: 20, pause: 100 });
+    };
+    try {
+      note.resolu = false; note.resoluPar = ""; note.resoluLe = "";
+      navigate("trame/" + trame.id);
+      if (!(await jusqua(() => droite(), { essais: 40, pause: 150 }))) return "l'éditeur de trame ne s'est pas ouvert";
+      const onglet = onglets().find((b) => /^Commentaires/.test((b.textContent || "").trim()));
+      if (!onglet) return "l'inspecteur n'offre pas d'onglet « Commentaires »";
+      onglet.click();
+      if (!(await jusqua(() => cartes().length, { essais: 30, pause: 120 }))) {
+        return "l'onglet « Commentaires » n'affiche aucune carte";
+      }
+      // Le partage ouvert/traité se lit AVANT toute clôture.
+      if (!chipDe(/^Tout \(/)) return "l'onglet « Commentaires » n'annonce pas son partage ouvert/traité";
+      if (cartes().length !== tous().length) {
+        return "l'onglet n'affiche pas tous les commentaires (" + cartes().length + " carte(s) pour " + tous().length + " commentaire(s))";
+      }
+      const ouvertsAvant = nbDe(/^En attente \(/);
+      const closAvant = nbDe(/^Traités \(/);
+
+      const maCarte = () => cartes()[i0];
+      const boutonDe = (carte, motif) => [...((carte || dom).querySelectorAll("button"))]
+        .find((b) => motif.test(b.getAttribute("title") || ""));
+      const marquer = boutonDe(maCarte(), /Marquer.*traité/);
+      if (!marquer) return "une carte de commentaire n'offre pas le geste « Marquer comme traité »";
+      marquer.click();
+      const clos = await jusqua(() => (maCarte() && maCarte().classList.contains("is-done") ? maCarte() : null), { essais: 30, pause: 120 });
+      if (!clos) return "le commentaire marqué traité ne prend pas l'état « traité »";
+      const mention = clos.querySelector(".note-card__done");
+      if (!mention || !/^Traité par /.test((mention.textContent || "").trim())) {
+        return "la carte close ne dit pas qui l'a traitée : « " + ((mention || {}).textContent || "") + " »";
+      }
+      if (nbDe(/^En attente \(/) !== ouvertsAvant - 1 || nbDe(/^Traités \(/) !== closAvant + 1) {
+        return "le partage ouvert/traité ne suit pas la clôture (« En attente » " + nbDe(/^En attente \(/) + ", « Traités » " + nbDe(/^Traités \(/) + ")";
+      }
+      const chipAttente = chipDe(/^En attente \(/);
+      if (!chipAttente) return "le filtre « En attente » manque à l'onglet";
+
+      // Le filtre « En attente » ne montre plus le commentaire clos.
+      chipAttente.click();
+      // (Le filtre peut légitimement ne plus rien montrer : on ne l'exige pas
+      // non plus — mais ce qu'il montre doit être EXACTEMENT les commentaires
+      // ouverts, et aucun des clos.)
+      if (!(await jusqua(() => !cartes().some((c) => c.classList.contains("is-done")) && cartes().length === nbDe(/^En attente \(/), { essais: 30, pause: 120 }))) {
+        return "le filtre « En attente » ne montre pas exactement les commentaires ouverts (" + cartes().length + " carte(s) pour " + nbDe(/^En attente \(/) + " en attente)";
+      }
+      const actif = chips().find((b) => b.classList.contains("is-on"));
+      if (!actif || !/^En attente/.test((actif.textContent || "").trim())) {
+        return "le filtre choisi ne se marque pas comme actif";
+      }
+      // Le filtre « Traités » le retrouve.
+      const chipTraites = chipDe(/^Traités \(/);
+      chipTraites.click();
+      if (!(await jusqua(() => cartes().filter((c) => c.classList.contains("is-done")).length === closAvant + 1, { essais: 30, pause: 120 }))) {
+        return "le filtre « Traités » ne montre pas exactement les commentaires clos";
+      }
+      // Et l'on ROUVRE : un commentaire clos n'est pas un commentaire perdu.
+      await ouvrirTout();
+      const rouvrir = boutonDe(maCarte(), /Rouvrir/);
+      if (!rouvrir) return "un commentaire clos n'offre pas le geste « Rouvrir »";
+      rouvrir.click();
+      if (!(await jusqua(() => maCarte() && !maCarte().classList.contains("is-done"), { essais: 30, pause: 120 }))) {
+        return "un commentaire rouvert reste marqué « traité »";
+      }
+      if (nbDe(/^En attente \(/) !== ouvertsAvant) {
+        return "le commentaire rouvert ne revient pas dans « En attente » (" + nbDe(/^En attente \(/) + " au lieu de " + ouvertsAvant + ")";
+      }
+
+      // ---- le FIL : la discussion autour d'un commentaire
+      const nbFil = () => maCarte().querySelectorAll(".annot__reply").length;
+      const filAvant = nbFil();
+      const repondre = boutonDe(maCarte(), /réponse au fil/);
+      if (!repondre) return "une carte de commentaire n'offre pas le geste « Répondre »";
+      repondre.click();
+      const saisie = await jusqua(() => dom.querySelector(".fr-modal-overlay textarea.fr-textarea"), { essais: 30, pause: 120 });
+      if (!saisie) return "la fenêtre de réponse ne s'est pas ouverte";
+      if (dom.querySelector(".fr-modal-overlay .fr-choices")) return "la fenêtre de réponse propose encore une nature de commentaire";
+      saisie.value = "Réponse d'épreuve : vérifié avec le service.";
+      saisie.dispatchEvent(new dom.defaultView.Event("input", { bubbles: true }));
+      const valider = [...dom.querySelectorAll(".fr-modal-overlay button")].find((b) => (b.textContent || "").trim() === "Répondre");
+      if (!valider) return "la fenêtre de réponse n'a pas de bouton « Répondre »";
+      valider.click();
+      const posee = await jusqua(() => (nbFil() === filAvant + 1 ? [...maCarte().querySelectorAll(".annot__reply")].pop() : null), { essais: 30, pause: 120 });
+      if (!posee) return "la réponse ne s'ajoute pas au fil du commentaire";
+      if (!/Réponse d'épreuve/.test(posee.textContent || "")) {
+        return "le fil ne porte pas la réponse écrite : « " + (posee.textContent || "") + " »";
+      }
+      if (!((posee.querySelector(".annot__reply-who") || {}).textContent || "").trim()) {
+        return "la réponse ne dit pas de quel service elle vient";
+      }
+      // Le fil vit AUSSI dans la page, sous le bloc commenté : c'est là qu'on
+      // lit les commentaires, et une discussion qu'on n'y verrait pas serait
+      // une discussion cachée.
+      if (!dom.querySelector(".annot .annot__reply")) return "la réponse n'apparaît pas dans la bande du document";
+      // Et elle se retire : une réponse est une prise de parole, pas une trace
+      // définitive.
+      const retirer = [...posee.querySelectorAll("button")].find((b) => /Supprimer cette réponse/.test(b.getAttribute("title") || ""));
+      if (!retirer) return "une réponse du fil ne peut pas être retirée";
+      retirer.click();
+      if (!(await jusqua(() => nbFil() === filAvant, { essais: 30, pause: 120 }))) {
+        return "la réponse retirée reste dans le fil";
+      }
+      return "";
+    } finally {
+      // Le parcours n'ajoute ni ne retire rien : le commentaire est rendu à son
+      // état d'origine, et l'inspecteur à son onglet et à son filtre.
+      const maintenant = tous();
+      for (let i = 0; i < maintenant.length && i < avant.length; i++) {
+        maintenant[i].resolu = avant[i].resolu;
+        maintenant[i].resoluPar = avant[i].resoluPar;
+        maintenant[i].resoluLe = avant[i].resoluLe;
+        maintenant[i].reponses = avant[i].reponses.map((r) => ({ ...r }));
+      }
+      try { touch("trames", { rerender: false }); } catch (e) { /* le service peut refuser : rien à faire */ }
+      if (state.editor) {
+        // L'état d'édition n'est rendu que s'il visait DÉJÀ cette trame ; sinon
+        // l'inspecteur retourne à ses valeurs d'ouverture.
+        const memeTrame = avantEd && avantEd.trameId === state.editor.trameId;
+        state.editor.cmtFiltre = memeTrame ? avantEd.cmtFiltre : null;
+        state.editor.tab = memeTrame ? avantEd.tab : "bloc";
+      }
+      redrawView();
+      await ctx.revenir(avantRoute);
+    }
+  },
+});
+
+// ------------ 29. les questions se rangent par groupe, comme le formulaire
+declarer({
+  id: "questions-par-groupe",
+  nom: "L'onglet « Questions » range les questions par groupe, comme le formulaire",
+  pourquoi: "le modèle porte `field.group` et il range le FORMULAIRE du rédacteur ; l'onglet « Questions » de la trame l'ignorait, si bien que l'administrateur voyait une liste plate là où celui qui rédige voyait des sections — deux écrans qui lisent le même rangement, ou l'un des deux ment",
+  async jouer(ctx) {
+    const { state, navigate } = ctx.modules();
+    const dom = ctx.dom();
+    if (!state.ready || !state.user) return "";              // parcours sans objet
+    const { can, redrawView } = await import(RACINE_CODE + "ui/state.js");
+    if (!can("trames.voir")) return "";
+    const groupesDe = (t) => (t.fields || []).map((f) => String(f.group || "").trim());
+    // Une trame dont les questions portent AU MOINS DEUX groupes distincts.
+    const trame = (state.trames || []).find((t) => [...new Set(groupesDe(t))].filter(Boolean).length >= 2);
+    if (!trame) return "";                                   // aucune trame groupée : sans objet
+    const avantRoute = ctx.route();
+    const avantEd = state.editor ? { ...state.editor } : null;
+    try {
+      navigate("trame/" + trame.id);
+      if (!(await jusqua(() => dom.querySelector(".editor__col--right"), { essais: 40, pause: 150 }))) {
+        return "l'éditeur de trame ne s'est pas ouvert";
+      }
+      const onglet = [...dom.querySelectorAll(".editor__col--right .fr-tab")].find((b) => /^Questions/.test((b.textContent || "").trim()));
+      if (!onglet) return "l'inspecteur n'offre pas d'onglet « Questions »";
+      onglet.click();
+      if (!(await jusqua(() => dom.querySelector(".champs-sect__nom"), { essais: 30, pause: 120 }))) {
+        return "l'onglet « Questions » n'affiche aucune section de groupe";
+      }
+      // L'ordre des sections : celui de la PREMIÈRE APPARITION dans le modèle.
+      const ordre = [];
+      for (const g of groupesDe(trame)) {
+        const cle = g || "Sans groupe";
+        if (!ordre.includes(cle)) ordre.push(cle);
+      }
+      const sections = [...dom.querySelectorAll(".champs-sect")];
+      const noms = sections.map((s) => (s.querySelector(".champs-sect__nom") || {}).textContent || "");
+      if (noms.join(" | ") !== ordre.join(" | ")) {
+        return "les sections ne suivent pas les groupes du modèle : « " + noms.join(" | ") + " » au lieu de « " + ordre.join(" | ") + " »";
+      }
+      // Chaque section annonce EXACTEMENT ses questions, et les cartes y sont
+      // contiguës : une question ne se perd pas dans la section d'à côté.
+      let vues = 0;
+      for (const s of sections) {
+        const nom = (s.querySelector(".champs-sect__nom") || {}).textContent || "";
+        const cle = nom === "Sans groupe" ? "" : nom;
+        const attendues = groupesDe(trame).filter((g) => g === cle).length;
+        const badge = Number((((s.querySelector(".fr-badge") || {}).textContent) || "").trim());
+        if (badge !== attendues) return "la section « " + nom + " » annonce " + badge + " question(s) pour " + attendues;
+        let n = 0;
+        const lus = [];
+        for (let el = s.nextElementSibling; el && !el.classList.contains("champs-sect"); el = el.nextElementSibling) {
+          if (el.classList && el.classList.contains("fcard")) {
+            n += 1;
+            lus.push(((el.querySelector(".fcard__nom") || {}).textContent) || "");
+          }
+        }
+        if (n !== attendues) return "la section « " + nom + " » contient " + n + " carte(s) pour " + attendues + " question(s)";
+        // L'ordre À L'INTÉRIEUR d'une section est celui du modèle : la section
+        // range, elle ne réordonne pas.
+        const dansLOrdre = (trame.fields || []).filter((f) => String(f.group || "").trim() === cle).map((f) => f.label || f.id);
+        if (lus.join(" | ") !== dansLOrdre.join(" | ")) {
+          return "la section « " + nom + " » ne suit pas l'ordre du modèle (« " + lus.join(" | ") + " »)";
+        }
+        vues += n;
+      }
+      if (vues !== (trame.fields || []).length) {
+        return "l'onglet ne montre pas toutes les questions (" + vues + " sur " + (trame.fields || []).length + ")";
+      }
+      // Le rangement se RÈGLE depuis la fiche : le menu des groupes propose
+      // ceux du modèle, et de quoi en créer un.
+      const menu = [...dom.querySelectorAll(".fcard select")].find((s) => [...s.options].some((o) => /Aucun groupe/.test(o.textContent || "")));
+      if (!menu) return "une fiche de question n'offre pas le menu « Groupe de questions »";
+      const propses = [...menu.options].map((o) => o.textContent);
+      if (!propses.some((t) => /Nouveau groupe/.test(t))) return "le menu des groupes n'offre pas d'en créer un";
+      for (const g of [...new Set(groupesDe(trame))].filter(Boolean)) {
+        if (!propses.includes(g)) return "le groupe « " + g + " » du modèle n'est pas proposé dans le menu";
+      }
+      return "";
+    } finally {
+      if (state.editor) {
+        const memeTrame = avantEd && avantEd.trameId === state.editor.trameId;
+        state.editor.tab = memeTrame ? avantEd.tab : "bloc";
+      }
+      redrawView();
+      await ctx.revenir(avantRoute);
     }
   },
 });

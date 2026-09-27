@@ -33,6 +33,15 @@ let panneEcriture = null;
 // (`droit_requis`), qui ne dit rien des autres collections.
 let panneCollection = {};
 
+// Le contenu que la base sert en LECTURE pour une collection singleton (le
+// référentiel, les métadonnées) : un objet unique, rangé sous l'id « self ».
+// C'est la voie de base d'une fusion à trois voies.
+let lectureSingleton = {};
+// Un conflit à renvoyer UNE fois sur la première écriture d'une collection : un
+// autre poste a écrit entre notre lecture et notre envoi. Sert à éprouver la
+// reprise (`reprendreConflits` → `appliquerFusion`).
+let conflitUneFois = {};
+
 // Le service sait-il annoncer son mode (`GET /v1/auth/config`) ? Éteint par
 // défaut : c'est l'état d'une page chargée pendant un redémarrage du service —
 // le pilote est alors bâti sur ce que la PAGE annonçait, et rien ne le corrige.
@@ -62,7 +71,11 @@ globalThis.fetch = async (url, opts = {}) => {
     return repondre(200, { utilisateur: { id: "u1", login: "mj" }, mustChange: false, csrf: "jeton-csrf" });
   }
   if (methode === "GET" && String(url).includes("/v1/db/collections/")) {
-    return repondre(200, { collection: collectionDe(url), revision: 1, records: [] });
+    const nom = collectionDe(url);
+    if (nom in lectureSingleton) {
+      return repondre(200, { collection: nom, revision: 1, records: [{ id: "self", rev: 1, ord: 0, payload: lectureSingleton[nom] }] });
+    }
+    return repondre(200, { collection: nom, revision: 1, records: [] });
   }
   if (methode === "POST" && String(url).includes("/sync")) {
     const refus = panneCollection[collectionDe(url)];
@@ -70,6 +83,12 @@ globalThis.fetch = async (url, opts = {}) => {
     if (panneEcriture) return repondre(panneEcriture.status, { erreur: panneEcriture.erreur, code: panneEcriture.code || "panne" });
     if (String(entetes["x-csrf-token"] || "") !== "jeton-csrf") {
       return repondre(403, { erreur: "Jeton anti-CSRF absent ou incorrect : rechargez la page, puis réessayez.", code: "csrf_invalide" });
+    }
+    const nom = collectionDe(url);
+    if (conflitUneFois[nom]) {
+      const conflicts = conflitUneFois[nom];
+      delete conflitUneFois[nom];
+      return repondre(200, { revision: 2, applied: [], conflicts });
     }
     return repondre(200, { revision: 2, applied: [], conflicts: [] });
   }
@@ -82,6 +101,12 @@ async function charger(chemin) {
 }
 
 const presence = [{ id: "u1", userId: "u1", at: "2026-09-22T10:00:00.000Z" }];
+// Une écriture d'une collection de TRAVAIL : c'est elle qui pilote la pastille
+// d'état. `presence` et `journal` sont des collections de FOND : depuis O-6
+// (audit ciblé du 22/09/2026), leur refus ne remonte PAS à l'écran — le battement
+// de cœur les réécrit toutes les 25 secondes, et la pastille serait rouge en
+// permanence pour un refus qui n'empêche pas de travailler.
+const trames = [{ id: "tpl-1", label: "Trame d'épreuve" }];
 
 test("sans mode annoncé, l'écriture part avec le jeton et le service la refuse", async (t) => {
   const db = await charger("../src/lib/db/index.js");
@@ -90,11 +115,11 @@ test("sans mode annoncé, l'écriture part avec le jeton et le service la refuse
   await db.init();
   assert.equal(db.status().state, "unknown", "le pilote vient d'être bâti : rien n'est encore éprouvé");
 
-  assert.equal((await db.write("presence", presence)).ok, false, "l'écriture est refusée (anti-CSRF absent)");
+  assert.equal((await db.write("trames", trames)).ok, false, "l'écriture est refusée (anti-CSRF absent)");
   assert.equal(db.status().state, "error", "et l'état le dit — c'est la pastille rouge");
 
   // La lecture, elle, passe : c'est le « rouge, puis vert » que l'exploitant voit.
-  await db.read("presence");
+  await db.read("trames");
   assert.equal(db.status().state, "ok");
 });
 
@@ -278,10 +303,81 @@ test("une écriture définitivement refusée ne bloque plus les autres collectio
   assert.match(db.status().detail, /administrateur/, "et dit le geste qui la répare");
   assert.match(db.status().detail, /1 autre/, "ce qui a été transmis malgré tout est dit aussi");
 
-  // La cause levée (session d'administrateur), la dernière écriture part.
+  // La cause est levée (les écritures de `users` passeraient), mais le refus
+  // DÉFINITIF est mémorisé (O-3) : le renvoi automatique ne la redemande plus —
+  // il ne sert à rien d'envoyer une requête vouée au refus toutes les trente
+  // secondes.
   panneCollection = {};
-  const suite = await db.flushPending();
+  const saute = await db.flushPending();
+  assert.equal(saute.flushed, 0, "le renvoi automatique saute ce que la base a refusé");
+  assert.equal(saute.left, 1, "l'écriture reste en file : rien n'est perdu");
+  assert.equal(db.pendingInfo().refusees.length, 1, "l'écran peut dire laquelle est refusée");
+  assert.match(db.status().detail, /en attente d'un geste/);
+
+  // Un GESTE explicite (le bouton « Renvoyer maintenant », `force`) la rejoue,
+  // et la dernière écriture part.
+  const suite = await db.flushPending({ force: true });
   assert.equal(suite.flushed, 1);
   assert.equal(db.pendingCount(), 0);
   assert.equal(db.status().state, "ok");
+  assert.equal(db.pendingInfo().refusees.length, 0, "un refus oublié dès que l'écriture est passée");
+});
+
+test("un refus RÉPARABLE (anti-CSRF, session) n'est jamais mémorisé", async (t) => {
+  const db = await charger("../src/lib/db/index.js");
+  const auth = await charger("../src/lib/auth.js");
+  if (!db || !auth) return t.skip("module indisponible hors navigateur");
+
+  // O-3 ne doit pas casser C-6 : `csrf_invalide` et `session_absente` sont les
+  // deux refus que `reparerPilote` sait LEVER. Les mémoriser comme définitifs
+  // bloquerait la réparation qui les répare — et la file ne repartirait jamais.
+  auth.setDeploiementAuth({ mode: "password" });
+  globalThis.document.cookie = "";             // la page ne lit aucun cookie…
+  panneEcriture = { status: 500, erreur: "Écriture impossible : connexion perdue" };
+  panneCollection = {};
+  await db.write("presence", [{ id: "u1", at: "réparable" }]);
+  assert.equal(db.pendingInfo().count, 1);
+
+  globalThis.document.cookie = "scribae_csrf=jeton-csrf";   // …et la session revient
+  panneEcriture = null;
+  const r = await db.flushPending();           // renvoi AUTOMATIQUE, sans `force`
+  assert.equal(r.flushed, 1, "un refus réparable n'est pas sauté par le renvoi automatique");
+  assert.equal(db.pendingCount(), 0);
+});
+
+test("un conflit sur une collection singleton est REPRIS — la fusion, sans exception", async (t) => {
+  const db = await charger("../src/lib/db/index.js");
+  const auth = await charger("../src/lib/auth.js");
+  if (!db || !auth) return t.skip("module indisponible hors navigateur");
+
+  // Le référentiel est un OBJET UNIQUE (rangé sous l'id « self ») : c'est la
+  // collection où la reprise d'un conflit passe par `appliquerFusion`, et non
+  // par la réunion d'une liste. L'import de `SELF` y manquait, et la reprise y
+  // levait `ReferenceError: SELF is not defined` — l'écriture avait pourtant
+  // abouti côté base, mais l'appelant recevait une exception au lieu du
+  // document fusionné, et le miroir local n'était pas mis à jour.
+  auth.setDeploiementAuth({ mode: "password" });
+  globalThis.document.cookie = "scribae_csrf=jeton-csrf";
+  await db.rafraichirPilote();
+
+  // Ce que la base détient au moment où nous lisons : la voie de base.
+  lectureSingleton.config = { entite: "Ville de Valmont", logoJoint: false };
+  await db.read("config");
+
+  // Entre notre lecture et notre envoi, un autre poste a écrit : le service
+  // refuse notre écriture et rend l'enregistrement qu'il détient.
+  conflitUneFois.config = [
+    { id: "self", rev: 1, ord: 0, payload: { entite: "Ville de Valmont", logoJoint: false, piedPage: "Service des actes" } },
+  ];
+
+  const r = await db.write("config", { entite: "Ville de Valmont", logoJoint: true });
+  assert.equal(r.ok, true, "l'écriture aboutit — plus de `ReferenceError: SELF`");
+  assert.deepEqual(r.conflicts, [], "le conflit est repris, il ne reste pas à arbitrer");
+  assert.deepEqual(r.fusionnes, ["self"], "l'enregistrement est signalé comme fusionné");
+  // Les modifications de chacun sont réunies : notre `logoJoint`, leur `piedPage`.
+  assert.equal(r.value.logoJoint, true, "notre modification est conservée");
+  assert.equal(r.value.piedPage, "Service des actes", "la leur aussi");
+  assert.equal(r.value.entite, "Ville de Valmont", "et le champ commun est intact");
+
+  delete lectureSingleton.config;
 });

@@ -200,11 +200,28 @@ Pistes, par ordre d'intérêt, pour une prochaine campagne :
 1. **La vérification de session coûte deux lectures** (la session, puis le compte) à
    chaque requête authentifiée. Sur une base distante, cela pèse 17 ms par appel.
    Un cache court (quelques secondes) par jeton de session le supprimerait — au prix
-   d'un délai de propagation pour la révocation d'une session. À mesurer avant de
-   trancher : la révocation immédiate est une propriété de sécurité, pas un détail.
-2. **Une lecture de collection coûte une dizaine d'ordres.** S'il s'agit d'un
-   balayage ligne par ligne, c'est le prochain gisement de performance — et la
-   campagne `--latence` est faite pour le montrer.
+   d'un délai de propagation pour la révocation d'une session. **Tranché en 1.6.3d :
+   PAS de cache.** La révocation immédiate est une propriété de sécurité (un compte
+   désactivé perd l'accès sur-le-champ, la session suit la vie du compte — voir
+   `compteDeSession`, `src/server/mysql/comptes.mjs`), et l'échanger contre quelques
+   millisecondes serait un mauvais marché. La piste qui reste, elle, ne coûte rien
+   en sécurité : **une seule lecture** au lieu de deux, par une jointure
+   `sb_session ⋈ sb_compte` portée par le magasin. Elle demanderait une méthode au
+   contrat des magasins (les deux rangements, plus la base en mémoire de charge) :
+   à faire quand une campagne aura chiffré ce que les 17 ms pèsent réellement.
+2. ~~Une lecture de collection coûte une dizaine d'ordres.~~ **Tranché : NON
+   (1.6.3d).** La question était « est-ce un balayage ligne par ligne ? ». Le
+   magasin répond non : `lireCollection` (`src/server/mysql/magasin-mysql.mjs`)
+   adresse **un seul** ordre paramétré — `SELECT … FROM sb_record WHERE
+   collection = ? ORDER BY ord ASC, id ASC` — et son coût ne dépend **pas** du
+   nombre d'enregistrements. La révision de collection est, elle aussi, un ordre
+   ponctuel (`SELECT revision FROM sb_collection WHERE name = ?`). Une lecture
+   authentifiée coûte donc **4 ordres** : 2 pour la SESSION (la session, puis le
+   compte), 1 pour les enregistrements, 1 pour la révision. Le gisement n'est pas
+   la lecture, c'est **la session** — et c'est le point 1 ci-dessus. Le constat
+   est **figé par une épreuve** (`magasin-mysql.test.mjs`, « lire une collection,
+   c'est UN ordre SQL ») : cinquante enregistrements se lisent en un ordre, et un
+   ajout de requête par enregistrement ne passerait plus inaperçu.
 3. **Le seuil d'alerte du moteur** (1000 ms au p99) mérite d'être resserré quand le
    service sera au vert partout : les 665 ms de file d'attente des connexions ne
    sont pas visibles avec un seuil d'une seconde.

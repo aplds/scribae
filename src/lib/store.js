@@ -671,7 +671,25 @@ export const saveUsers = (u) => db.write("users", u);
 export const loadSession = () => db.read("session");
 export const saveSession = (s) => db.write("session", s);
 
-export async function bootstrap() {
+// AMORÇAGE ET MIGRATIONS.
+//
+// `administrateur` (O-4 de l'audit ciblé du 22/09/2026) dit si la session
+// ouverte peut écrire les DEUX collections que le service réserve à
+// l'administrateur (`COLLECTIONS_ADMIN` : `config` et `users`). Sur un poste
+// dont le compte ne l'est pas — le cas courant d'un agent qui se connecte à sa
+// propre installation —, les migrations du référentiel et le semis des comptes
+// étaient tentés à chaque démarrage : le service répondait `403 droit_requis`,
+// ce qui allumait la pastille d'erreur et affichait une phrase d'action pour une
+// opération que l'application n'avait PAS à demander. Les lectures, elles,
+// restent permises (le service ne réserve que l'ÉCRITURE) : le référentiel est
+// donc lu normalement, et le prochain administrateur qui se connecte applique
+// les migrations restées en attente. `true` par défaut — c'est le cas du mode
+// local et de la démonstration, où il n'y a ni rôle ni service.
+export async function bootstrap({ administrateur = true } = {}) {
+  // Les écritures réservées à l'administrateur, par une seule porte : quand la
+  // session ne l'est pas, on n'essaie même pas (le refus serait certain).
+  const ecrireConfig = (c) => (administrateur ? saveConfig(c) : Promise.resolve(false));
+  const ecrireUsers = (u) => (administrateur ? saveUsers(u) : Promise.resolve(false));
   let config = await loadConfig();
   let trames = await loadTrames();
   let actes = await loadActes();
@@ -689,7 +707,7 @@ export async function bootstrap() {
   // à niveau du jeu de démonstration peut alors remplacer trames et actes sans
   // risquer d'écraser un travail réel.
   const demoActes = (actes || []).every((a) => String(a.id).startsWith("acte-demo-"));
-  if (!config) { config = demo ? seedConfig() : seedConfigVierge(); await saveConfig(config); }
+  if (!config) { config = demo ? seedConfig() : seedConfigVierge(); await ecrireConfig(config); }
   if (!trames) { trames = demo ? seedTrames() : []; await saveTrames(trames); }
   else if (demo && meta.seedVersion !== SEED_VERSION && demoActes && trames.every((t) => String(t.id).startsWith("tpl-"))) {
     // jeu de démonstration obsolète et aucune donnée utilisateur : on remet à niveau
@@ -704,7 +722,7 @@ export async function bootstrap() {
       const keep = { brand: config.brand, vocab: config.vocab, numbering: config.numbering, experimental: config.experimental, assistant: config.assistant };
       const fresh = seedConfig();
       config = { ...fresh, brand: { ...fresh.brand, ...keep.brand }, vocab: { ...fresh.vocab, ...keep.vocab }, numbering: { ...fresh.numbering, ...keep.numbering }, experimental: { ...fresh.experimental, ...(keep.experimental || {}) }, assistant: { atelier: { ...(keep.assistant?.atelier || {}) }, public: { ...(keep.assistant?.public || {}) } } };
-      await saveConfig(config);
+      await ecrireConfig(config);
     }
   }
   if (!actes) { actes = []; await saveActes(actes); }
@@ -738,7 +756,7 @@ export async function bootstrap() {
   const reglageDeploiement = demoDeploiement();
   if (reglageDeploiement !== null && config.brand?.demo !== reglageDeploiement) {
     config.brand = { ...(config.brand || {}), demo: reglageDeploiement };
-    await saveConfig(config);
+    await ecrireConfig(config);
   }
 
   // Le choix du signataire par la fonction : conversion des trames antérieures
@@ -789,7 +807,7 @@ export async function bootstrap() {
     | migrateDemoServiceRevision(config) | migrateDemoOrganigramme(config)
     | migrateFamilyDescriptions(config) | migrateAssistants(config)
     | migrateRecueilsExternes(config) | migrateMentionsPubliques(config);
-  if (migrated || configTouched) await saveConfig(config);
+  if (migrated || configTouched) await ecrireConfig(config);
 
   // Actes de démonstration : posés (ou remis à niveau) à la version de jeu
   // courante, et uniquement si les trames sont celles de la démonstration et que
@@ -809,7 +827,7 @@ export async function bootstrap() {
       }
       actes = await seedActes(config, trames);
       await saveActes(actes);
-      await saveConfig(config);
+      await ecrireConfig(config);
       // Le jeu de démonstration est reconstruit : on repart aussi d'un journal
       // et d'une présence vides, sinon on lirait des faits qui ne correspondent
       // plus à aucun acte (et des postes « présents » qui n'existent plus).
@@ -834,7 +852,7 @@ export async function bootstrap() {
     // Les comptes fictifs font partie du jeu de démonstration : démonstration
     // éteinte, ou raccourci fermé par le déploiement, on n'en sème aucun.
     users = (demo && !demoAccountsDisabled(config)) ? seedUsers(config) : [];
-    await saveUsers(users);
+    await ecrireUsers(users);
   }
   // Comptes de démonstration créés avant les services : on leur redonne le
   // rattachement de démonstration (services et bureaux).
@@ -844,7 +862,7 @@ export async function bootstrap() {
     // jeu de démonstration s'est enrichi d'un compte depuis (ex. le chef du
     // bureau Urbanisme, ajouté avec les délégations).
     users = seedUsers(config);
-    await saveUsers(users);
+    await ecrireUsers(users);
   }
   // Annuaire branché : les comptes de démonstration sont désactivés (et
   // réactivés lorsqu'on revient aux comptes de l'application). Le calcul ne
@@ -853,13 +871,13 @@ export async function bootstrap() {
   // Avant cela, la qualité de réviseur est posée sur les comptes de
   // démonstration (voir `migrateDemoRevision`).
   const rev = migrateDemoRevision(users);
-  if (rev.changed) { users = rev.users; await saveUsers(users); }
+  if (rev.changed) { users = rev.users; await ecrireUsers(users); }
   const sync = syncDemoAccounts(config, users);
-  if (sync.changed) { users = sync.users; await saveUsers(users); }
+  if (sync.changed) { users = sync.users; await ecrireUsers(users); }
   // Après la synchronisation des comptes : un compte rendu actif par elle doit
   // pouvoir recevoir la qualité dans le même démarrage.
   const sig = migrateDemoSignataires(config, users);
-  if (sig.changed) { users = sig.users; await saveUsers(users); }
+  if (sig.changed) { users = sig.users; await ecrireUsers(users); }
   if (meta.seedVersion !== SEED_VERSION) await db.write("meta", { ...meta, seedVersion: SEED_VERSION });
   // LES RÉGLAGES DU DÉPLOIEMENT (identité, vocabulaire, numérotation, délais,
   // recueil, fonctions) s'appliquent EN DERNIER, et seulement EN MÉMOIRE : le

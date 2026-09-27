@@ -28,6 +28,128 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
+## [1.6.3d] — 2026-09-28 — La chaîne rouge : nommée, et sa première cause réparée
+
+**L'essai de la chaîne sur un envoi réel a eu lieu, et il a dit la vérité.** Le travail qui
+construit l'image Docker **passe** — « ça s'installe » n'est donc plus une parole, c'est un
+résultat rejoué à chaque envoi. Mais les **deux travaux d'épreuves échouent**, et la lecture des
+envois précédents montre que c'était déjà le cas depuis au moins la 1.6.1w : quatre envois sur
+quatre, dans les deux lignées, sans que personne n'ait jamais pu dire *pourquoi*. Le journal
+d'exécution n'est lisible que par un administrateur du dépôt ; une chaîne rouge dont personne ne
+distingue la cause ne rend pas le service qu'une chaîne rend (audit, NC-I-008).
+
+### Ajouté
+
+- **La chaîne dit maintenant CE QUI a échoué** (`scripts/annoncer-echecs.sh`, appelé par les deux
+  travaux d'épreuves) : chaque épreuve rouge devient une **annotation** attachée au commit —
+  visible dans l'onglet « Checks », et interrogeable par l'API publique, donc lisible par
+  quiconque. Le journal complet est en outre résumé dans le récapitulatif du travail. C'est ce qui
+  a permis de laisser NC-I-008 ouverte quatre livraisons durant : le verdict existait, sa cause
+  non.
+- **`workflow_dispatch`** : la chaîne se rejoue à la demande, sans rien livrer — ce qui est la
+  façon de relire un échec qu'on vient de corriger.
+- **Le premier travail installe les dépendances du service** : `npm test` exécute AUSSI les
+  épreuves de `src/server/mysql/`, qui doivent trouver `mysql2` — sans quoi elles échoueraient sur
+  un module manquant plutôt que sur une épreuve, et la cause serait encore illisible.
+
+- **Les parcours du navigateur sont rejoués par la chaîne** (`tests/parcours-navigateur.mjs`,
+  travail `parcours` de `.github/workflows/ci.yml`) : un vrai Chromium, un serveur de fichiers
+  local, les applications montées en édition statique, une session d'administration ouverte, et les
+  **29 parcours** joués d'un bout à l'autre — verdict, **annotation** par parcours en échec, et
+  capture d'écran conservée en artefact. Le travail est **avisant** (`continue-on-error`) : il ne
+  doit pas ajouter de rouge à une chaîne qui l'est déjà par ailleurs. C'est le quatrième livrable que
+  NC-I-002 attendait, et la fiche passe en **Levée**.
+- **Le cran de zoom est un réglage de POSTE** : l'agent qui règle la feuille à 125 % (ou
+  l'organigramme à 80 %) le retrouve **au rechargement suivant** — il se range avec le thème
+  clair/sombre (`src/lib/prefs.js`). « Ajuster », lui, n'est pas un cran : le geste l'**efface**,
+  pour qu'un recadrage ne fige pas la largeur d'un écran sur un autre. Éprouvé par le parcours
+  `zoom-memorise` (le 27e), qui pose un cran, vide la mémoire de session, en ouvre un nouveau — et
+  vérifie qu'il le reprend, puis que « Ajuster » l'oublie.
+- **Un commentaire de trame se CLOS — « traité ».** Une consigne appliquée ne se distinguait pas
+  d'une consigne en attente : relire une trame obligeait à relire **tous** ses commentaires. Le
+  geste est offert dans la bande posée sous le bloc et sur chaque carte de l'onglet
+  « Commentaires » ; il retient **qui** a clos et **quand** (`resolu`, `resoluPar`, `resoluLe`).
+  L'onglet annonce alors son partage — « Tout (n) · En attente (n) · Traités (n) » — et un filtre
+  ne montre plus que ce qui reste ouvert. Un commentaire clos **reste** dans le document, barré et
+  marqué « Traité » : rien ne disparaît. La clôture voyage avec l'acte (export Akoma Ntoso, import,
+  Markdown, annexe des notes), et la rédaction la lit dans ses « Consignes ». Éprouvé par le
+  parcours `commentaire-traite` (le 28e) et par une épreuve d'import de trame.
+- **Un commentaire se DISCUTE — le fil.** Un commentaire était une note isolée : on ne pouvait pas
+  y répondre, alors qu'un point à arbitrer se discute avant d'être tranché. Chaque commentaire
+  porte désormais ses **réponses** — datées, signées du service de leur auteur, dans l'ordre —,
+  lisibles sous le commentaire dans la page comme dans l'onglet « Commentaires », et supprimables
+  une à une. La fenêtre de réponse rappelle le commentaire visé et ne demande pas de nature (une
+  réponse est une prise de parole, pas une consigne). Le fil **voyage** avec l'acte : export
+  Akoma Ntoso, import, Markdown, annexe des notes. La rédaction lit le fil sans y intervenir
+  (répondre depuis la rédaction reste ouvert). Éprouvé par le parcours `commentaire-traite`.
+- **Les questions se rangent par GROUPE, dans l'onglet « Questions ».** Le modèle portait
+  `field.group` depuis toujours — il range le **formulaire du rédacteur** — mais l'onglet de la
+  trame l'ignorait : l'administrateur voyait une liste plate là où celui qui rédige voyait des
+  sections. L'onglet affiche désormais les mêmes sections (dans l'ordre de première apparition),
+  chacune avec son compte ; le groupe se règle **sur la fiche** (un menu qui propose les groupes
+  du modèle, « Aucun groupe », et « Nouveau groupe… »), la fiche pliée le rappelle, et déposer une
+  question sur une autre la range **dans son groupe** en même temps que dans son ordre. Éprouvé par
+  le parcours `questions-par-groupe` (le 29e).
+
+### Modifié
+
+- **Le guide d'utilisation dit les nouveautés** (`src/wiki.js`) : le **fil** des commentaires, la
+  **clôture** « traité » et ses filtres côté administrateur, le rangement des **questions par
+  groupe**, et ce que le rédacteur en voit (le fil, la marque « Traité », le compte des consignes
+  en attente). Un guide qui ignore une fonction livrée la rend invisible — c'est le public visé.
+- **`src/ui/views/signature.js` est découpé** : la **présentation du circuit de signature** — les
+  marches, leurs états, leurs dates et empreintes, et le vocabulaire de publication qui les intitule
+  — vit désormais dans `src/ui/views/signature-circuit.js` (454 lignes, sans cycle d'imports). Le
+  fichier passe de **3 994 à 3 566 lignes**. Aucun changement visible : ce sont les mêmes marches, au
+  même endroit (NC-I-003, découpage commencé).
+- **Le harnais de l'atelier dit la vérité** : il construisait un bundle **par import dynamique** —
+  deux modules chargés par une chaîne calculée étaient deux copies, et ces copies survivaient d'un
+  fichier d'épreuves au suivant —, ce qui rendait rouges, *dans l'atelier seulement*, cinq fichiers
+  qui passent en Node. Un registre partagé et un vidage à chaque fichier rétablissent la règle
+  « un fichier = un processus ». Conséquence à garder : un fichier rouge dans l'atelier est
+  désormais une **régression**, non un artefact du harnais.
+- **L'annotation d'un échec de la chaîne nomme le fichier** (`scripts/annoncer-echecs.sh`) : elle
+  porte le fichier, la ligne rouge et le message d'assertion, sur une seule ligne — c'est ce qui la
+  rend lisible dans l'onglet « Checks ».
+
+### Corrigé
+
+- **Les épreuves qui lisent un fichier ne dépendent plus du dossier courant** — cinq fichiers :
+  `src/server/mysql/variables.test.mjs`, `src/server/mysql/logiciel-engendre.test.mjs`,
+  `src/tests/purs.test.mjs`, `src/tests/original-signe.test.mjs`,
+  `src/tests/conformite-service.test.mjs`. C'est la **première cause** de la chaîne rouge, et elle
+  ne pouvait se voir qu'en exécution : le travail « Service auto-hébergé » part de
+  `src/server/mysql` (son `working-directory`), là où le travail « Syntaxe, style et tests » part
+  de la racine du dépôt. L'épreuve des modèles de `.env` cherchait donc `src/server/env.example`
+  **sous son propre dossier**, ne trouvait que le modèle du service, et déclarait manquantes les
+  cinq variables qui ne vivent que dans celui du dépôt (`DB_ROOT_PASSWORD`, `API_TOKEN`,
+  `API_BASE`, `HTTP_PORT`, `APP_DIR`) — cinq échecs certains, à chaque envoi. Les chemins sont
+  désormais **ancrés à l'adresse du fichier de l'épreuve** (`import.meta.url`), ce qui ne dépend
+  ni du dossier courant, ni de la disposition (dépôt livré ou atelier) ; les chemins relatifs
+  restent essayés ensuite, et un harnais qui ne sait pas résoudre l'adresse d'un module fait
+  **sauter** l'épreuve plutôt que de la faire échouer faussement.
+- **La reprise d'un conflit sur une collection SINGLETON levait une exception** (`src/lib/db/index.js`) :
+  la fusion d'une écriture concurrente sur le référentiel (ou les métadonnées) appelait `SELF` sans
+  l'avoir importé, si bien que l'écriture aboutissait côté base mais que l'appelant recevait
+  `ReferenceError: SELF is not defined` au lieu du document fusionné — et le miroir local n'était pas
+  mis à jour. Le défaut vivait depuis la 1.6.2, dans le chemin « deux postes écrivent le référentiel
+  en même temps », que rien n'éprouvait : une épreuve le couvre désormais (le référentiel partagé,
+  ses modifications réunies champ par champ, sans exception).
+- **Le panneau « Accès à l'atelier » n'était plus silencieux** (`src/ui/views/referentiel.js`) :
+  l'option s'appelle `silencieux`, et l'appel d'après-frappe écrivait `silencieuse` — l'option était
+  donc ignorée, et un service qui ne répond pas journalisait à chaque frappe.
+- **Deux détails relevés par un contrôle de types** : un argument `config` passé à `annexeNodeXml`,
+  qui n'en prend qu'un et lit déjà celui de sa portée (`src/lib/export.js`) ; et `mentionScribae`
+  absent de l'identité de démonstration, alors que le schéma le tient pour requis — l'affichage
+  était juste (l'absence vaut « affichée »), mais le référentiel engendré était incomplet
+  (`src/lib/seed.js`).
+- **Le constat de performance « une lecture de collection coûte une dizaine d'ordres SQL » est
+  réfuté** : la lecture est **un seul** ordre paramétré, de coût indépendant du nombre
+  d'enregistrements, et une lecture authentifiée coûte **quatre** ordres (deux pour la session, un
+  pour les enregistrements, un pour la révision). Une épreuve fige le constat, pour que personne ne
+  « corrige » un balayage ligne à ligne qui n'existe pas (`src/server/mysql/magasin-mysql.test.mjs`,
+  `docs/PERFORMANCE.md` § 6).
+
 ## [1.6.3c] — 2026-09-27 — L'image Docker éprouvée à chaque envoi
 
 **Trois demandes d'un même mouvement : trancher ce qui restait en suspens, traiter les

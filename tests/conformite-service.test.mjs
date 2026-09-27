@@ -28,7 +28,16 @@ async function lireIndex() {
   let readFile = null;
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return null;
-  for (const chemin of CHEMINS_INDEX) {
+  // La première adresse est ANCRÉE à ce fichier (`index.html` vit deux crans
+  // au-dessus de `tests/` : le dépôt livré comme l'atelier la trouvent), les
+  // autres couvrent une exécution lancée depuis un autre dossier.
+  const chemins = [];
+  try {
+    const { fileURLToPath } = await import("node:url");
+    chemins.push(fileURLToPath(new URL("../../index.html", import.meta.url)));
+  } catch (e) { /* node:url indisponible : les chemins relatifs restent */ }
+  chemins.push(...CHEMINS_INDEX);
+  for (const chemin of chemins) {
     try { return await readFile(chemin, "utf8"); } catch (e) { /* on essaie le suivant */ }
   }
   return null;

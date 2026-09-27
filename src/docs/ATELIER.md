@@ -138,18 +138,29 @@ Le **style** est en mode **strict** (comme la CI) : un `var`, un `console.log` d
 
 ### 3.3 Les chiffres attendus dans l'atelier
 
-Le harnais **n'est pas Node** : certaines épreuves ne peuvent pas y être justes, et il vaut mieux
-les connaître que les redécouvrir. À la version **1.6.3c**, la suite complète donne
-**37 fichiers, 421/440**, et les **19 non-verts sont tous connus** :
+Le harnais **n'est pas Node** : certaines épreuves ne peuvent pas y être jouées. Elles ne mentent
+pas pour autant — elles appellent `t.skip` —, et il vaut mieux les connaître que les redécouvrir.
+À la version **1.6.3d**, la suite complète donne **40 fichiers, 448/459**, et les **11 sauts**
+tiennent tous à l'environnement :
 
 | Fichier | Résultat ici | Ce qui manque |
 |---|---|---|
-| `server/mysql/jws.test.mjs` | 0/5 (**5 sautés**) | un vrai Node (l'épreuve se saute elle-même) |
+| `server/mysql/jws.test.mjs` | 0/5 (**5 sautés**) | un vrai `node:crypto` (`generateKeyPairSync`, `createSign`) |
 | `tests/industrialisation.test.mjs` | 0/4 (**4 sautés**) | un **processus** (`spawnSync`) — il n'y en a pas ici |
 | `tests/conformite-service.test.mjs` | 2/3 (**1 sauté**) | une installation réelle à comparer (`SCRIBA_CONFORMITE_URL`) |
-| `tests/pilote-persistance.test.mjs` | 2/8 (6 échecs) | un service réel, et l'isolation de `node --test` entre fichiers |
-| `tests/purs.test.mjs` | 26/28 (1 échec, 1 sauté) | le **réseau** (l'échange OIDC), et des doubles qui se partagent |
-| `tests/amorcage-demo.test.mjs` | 1/2 (1 échec) | l'ordre d'amorçage et l'isolation d'un vrai Node |
+| `tests/purs.test.mjs` | 27/28 (**1 sauté**) | le **réseau** (l'échange OIDC d'un vrai fournisseur) |
+
+**Aucun échec n'est connu, et c'est le fait à retenir.** Jusqu'à la 1.6.3d, cinq fichiers étaient
+rouges *dans l'atelier seulement*, et pour une raison qui n'existait que là : le harnais
+construisait un bundle **par import dynamique**, si bien que deux modules chargés par une chaîne
+calculée (`charger("../src/lib/store.js")` puis `charger("../src/lib/auth.js")`) étaient deux
+copies — un test qui réglait `auth.js` ne se voyait pas dans `store.js`. Et ces modules survivaient
+d'un fichier d'épreuves au suivant, là où `node --test` donne **un processus par fichier**.
+
+`uneEpreuve` répare les deux : elle fait entrer D'AVANCE, dans le bundle du fichier, tous les
+modules que sa source cite en clair (esbuild les inline, donc ils sont partagés), et elle vide le
+registre entre deux fichiers. **Un fichier = un bundle = un processus.** Conséquence à garder en
+tête : un fichier rouge ici n'est plus un artefact du harnais, c'est une **régression**.
 
 **Deux chiffres à surveiller** quand on touche au service : `src/server/mysql/actes.test.mjs`
 (**32/32**) et `src/server/mysql/controle-legalite.test.mjs` (**9/9**). Ce sont eux qui tiennent la
@@ -160,10 +171,11 @@ Et une épreuve qu'on ne touche pas sans y penser : `src/server/mysql/magasin-my
 des résultats d'écriture rendus par la base en mémoire.
 
 > **Le reste doit être vert, et le total ne doit pas baisser.** Si un fichier qui était vert
-> devient rouge, c'est une régression — la vôtre. Ces six-là ne font pas exception : ils sont un
-> **artefact du harnais** (pas de processus, pas de réseau, une isolation de modules qui n'est pas
-> celle de `node --test`), et la CI, elle, exécute la suite avec un vrai Node — c'est elle qui fait
-> foi.
+> devient rouge, c'est une régression — la vôtre. Les quatre fichiers ci-dessus ne font pas
+> exception : leurs sauts sont des faits d'environnement (pas de processus, pas de `node:crypto`
+> complet, pas d'installation réelle à comparer, pas de réseau d'entreprise), et **la CI, elle,
+> exécute la suite avec un vrai Node** — c'est elle qui fait foi, et depuis la 1.6.3d elle rejoue
+> aussi les parcours critiques dans un vrai navigateur (§ 3.5).
 
 ### 3.4 Ce que le harnais ne dit pas
 
@@ -173,6 +185,34 @@ des résultats d'écriture rendus par la base en mémoire.
   rendu, autre outil (il n'y a pas de processus ici).
 - **Il ne voit pas la page.** Une faute de rendu, un écouteur mal détaché, un débordement mobile :
   tout cela se regarde (§ 5, § 6).
+
+### 3.5 Les parcours, rejoués par la CI dans un vrai navigateur
+
+Le harnais ci-dessus ne voit pas la page — et c'est précisément là que deux défauts sont passés en
+production (le recueil qui reprenait la main sur l'atelier, la rubrique Informations qui
+disparaissait) : **verts partout, cassés à l'écran**. La réponse est `tests/parcours.mjs` (les
+parcours critiques, joués sur l'application vivante) — et, depuis la 1.6.3d, son exécution par la
+CI : `tests/parcours-navigateur.mjs` ouvre un Chromium sans interface, sert le dépôt lui-même,
+monte l'application en **édition statique** (celle de GitHub Pages : le service embarqué, l'état
+dans IndexedDB), ouvre une session d'administration, puis rejoue la même suite.
+
+| Où | Comment | Ce que ça coûte |
+|---|---|---|
+| Ici, dans l'atelier | `import("src/tests/parcours.mjs")` puis `lancerParcours(await contexteDeLApercu())` | quelques secondes |
+| En CI | le travail `parcours` (`.github/workflows/ci.yml`) | ~4 min, **avisant** (`continue-on-error`) |
+
+Deux points à savoir si l'on touche à ce travail :
+
+- **Playwright est installé HORS VERROU** (`npm install --no-save --no-package-lock`), et son
+  navigateur avec. Rien n'entre dans le dépôt, `npm ci` reste reproductible, et `package-lock.json`
+  ne bouge pas.
+- Le serveur de fichiers écoute sur **`127.0.0.1`** : c'est un « contexte sûr » pour un navigateur,
+  et sans cela `crypto.subtle` serait absent — tout ce qui calcule une empreinte tomberait.
+
+Le travail est **avisant** tant qu'il n'a pas été vu vert deux fois de suite : un échec s'y affiche
+en annotation, avec une capture d'écran (`parcours-echec.png`, déposée en artefact), sans arrêter
+la livraison. Le jour où il est vu vert, retirer son `continue-on-error` : un avertissement
+permanent ne se lit plus.
 
 ---
 
@@ -219,7 +259,7 @@ const s = await import("./src/ui/state.js");
 await s.login("u-dubois");                                   // ⚠ SESSION ADMINISTRATEUR (voir ci-dessous)
 const p = await import("./src/tests/parcours.mjs");
 const ctx = await p.contexteDeLApercu();
-const r = await p.lancerParcours(ctx);                       // 26 parcours attendus
+const r = await p.lancerParcours(ctx);                       // 29 parcours attendus
 return r.ok + "/" + r.total;
 ```
 
@@ -294,7 +334,7 @@ bougé signale une source désynchronisée.
 **La livraison, elle, se marque ainsi** (détail : `src/CHANGELOG.md`, en-tête) :
 
 1. une entrée **datée** en tête du changelog, avec un numéro — une **note intermédiaire**
-   (`1.6.3c`) suffit entre deux dépôts, et le numéro ne se réutilise jamais ;
+   (`1.6.3d`) suffit entre deux dépôts, et le numéro ne se réutilise jamais ;
 2. `APP_VERSION` (`src/lib/version.js`) **dit la même chose** que le titre de la première entrée
    datée ;
 3. les documents que le changement rend faux (README, SPEC, TODO, registre d'audit) ;
@@ -331,7 +371,7 @@ preuve est un **résultat**, pas une intention.
 - [ ] Si un écran a changé : il a été **regardé**, en **390 px** et en **grand**.
 - [ ] Si le service a changé : il a été **éprouvé vivant** dans l'aperçu (§ 4), et le journal
       `remote.log` ne porte rien d'inattendu.
-- [ ] Si les parcours sont touchés : `lancerParcours` rend **26/26** en session d'administration.
+- [ ] Si les parcours sont touchés : `lancerParcours` rend **29/29** en session d'administration.
 - [ ] Les **documents engendrés** sont régénérés si leur source a bougé.
 - [ ] Toute **variable** nouvelle a sa ligne dans les **deux** `env.example`.
 - [ ] La **trace** est posée : changelog daté + `APP_VERSION` accordé + documents corrigés.
@@ -354,8 +394,10 @@ preuve est un **résultat**, pas une intention.
   `page_eval` (§ 4).
 - **Les dialogues natifs (`confirm`, `alert`, `prompt`) bloquent l'aperçu** : avant de piloter un
   geste qui en ouvre un, le remplacer par une doublure dans la même page.
-- **Un `import()` dynamique isolé** : deux fichiers d'épreuves qui importent le même module par
-  une chaîne calculée obtiennent deux instances — d'où quelques-uns des écarts connus du § 3.3.
+- **Un `import()` dynamique est PARTAGÉ depuis la 1.6.3d.** `uneEpreuve` fait entrer d'avance dans
+  le bundle du fichier tous les modules que sa source cite en clair, et vide son registre entre
+  deux fichiers (§ 3.3). Avant, deux modules chargés par une chaîne calculée étaient deux
+  instances : une épreuve qui réglait l'un ne se voyait pas dans l'autre.
 - **Ne pas construire de correction sur `IntersectionObserver`** ni supposer qu'une animation est
   passée : interroger le DOM (`getBoundingClientRect`, un texte, un attribut) — c'est observable.
 - **Le vocabulaire.** « Atelier » = l'édition en ligne (ici) ; « dépôt » = GitHub ; « service »

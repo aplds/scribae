@@ -2,7 +2,7 @@ import { state, touch, navigate, redrawView, can, signalerRedactionTrame, quiRed
 import { h, clear, button, icon, toast, modal, badge } from "../dom.js";
 import { dateHeureFr } from "../../lib/legalite.js";
 import { cadreZoom } from "../zoom.js";
-import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
+import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, newReponse, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { compile, buildContext } from "../../lib/compile.js";
 import { prochainNumeroLibre } from "../../lib/numbering.js";
 import { renderDocument, applyPaper, MARQUE_STYLE } from "../../lib/render.js";
@@ -14,7 +14,7 @@ import { confirmDialog, promptDialog, sectionHeader, statusBadge, textField, sel
 import { targetLabel, authorLabel } from "../../lib/scope.js";
 import { helpLink } from "../components.js";
 import {
-  countNotes, notesIndex, annotationStrip, noteComposer,
+  countNotes, notesIndex, compteNotes, noteResolue, mentionTraite, annotationStrip, noteComposer, noteThread,
   armSelectionComment, flashBlock,
 } from "../annotations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown } from "../../lib/export.js";
@@ -1173,6 +1173,8 @@ function renderBlock(node, path, ed, redraw, softSave, trame) {
       editable: true,
       onEdit: (nt, i) => openCommentComposer(node, i, ""),
       onDelete: (nt, i) => supprimerCommentaire(node, i, redraw),
+      onToggle: (nt, i) => basculerCommentaire(node, i, redraw),
+      onReply: (nt, i) => repondreCommentaire(node, i, redraw),
       onAdd: () => openCommentComposer(node, -1, ""),
     }));
   }
@@ -1225,11 +1227,71 @@ function supprimerCommentaire(node, index, redraw) {
   redraw();
 }
 
+// RÉPONDRE à un commentaire : le fil. Un point à arbitrer se discute avant
+// d'être tranché, et la discussion doit rester attachée au commentaire qu'elle
+// éclaire — pas dans une messagerie à côté (voir `noteThread`).
+function repondreCommentaire(node, index, redraw) {
+  const nt = node.notes[index];
+  if (!nt) return;
+  noteComposer({
+    mode: "reponse",
+    note: nt,
+    author: authorOf(),
+    date: todayIso(),
+    context: "Sur : " + nodeTitle(node, state.config),
+    onSave: (data) => {
+      nt.reponses = nt.reponses || [];
+      nt.reponses.push(newReponse({ author: authorOf(), date: todayIso(), text: data.text }));
+      touch("trames", { rerender: false });
+      toast("Réponse ajoutée au fil", "success");
+      redraw();
+    },
+  });
+}
+
+function supprimerReponse(node, index, rang, redraw) {
+  const nt = node.notes[index];
+  if (!nt || !nt.reponses) return;
+  nt.reponses.splice(rang, 1);
+  touch("trames", { rerender: false });
+  toast("Réponse supprimée", "info");
+  redraw();
+}
+
+// Un commentaire se CLOS — la consigne est appliquée, le point est tranché — et
+// se rouvre. On garde qui l'a clos et quand, comme on garde l'auteur du
+// commentaire : une trame se relit alors en ne montrant que ce qui reste ouvert.
+function basculerCommentaire(node, index, redraw) {
+  const nt = node.notes[index];
+  if (!nt) return;
+  if (noteResolue(nt)) {
+    nt.resolu = false;
+    nt.resoluPar = "";
+    nt.resoluLe = "";
+    toast("Commentaire rouvert", "info");
+  } else {
+    nt.resolu = true;
+    nt.resoluPar = authorOf();
+    nt.resoluLe = todayIso();
+    toast("Commentaire marqué comme traité", "success");
+  }
+  touch("trames", { rerender: false });
+  redraw();
+}
+
 // L'onglet « Commentaires » : tous ceux de la trame, rangés par bloc, dans
 // l'ordre du document. C'est la vue d'ensemble — et l'endroit où l'on écrit.
 function renderCommentsInspector(root, trame, ed, redraw, softSave, paper) {
-  const groups = notesIndex(trame.body || [], (n, c) => nodeTitle(n, state.config, c));
-  const total = groups.reduce((n, g) => n + g.notes.length, 0);
+  const groupes = notesIndex(trame.body || [], (n, c) => nodeTitle(n, state.config, c));
+  const compte = compteNotes(groupes.flatMap((g) => g.notes));
+  // Le filtre : la question qu'on se pose en relisant une trame est « qu'est-ce
+  // qui reste OUVERT ? ». Par défaut on montre tout (rien ne doit se cacher),
+  // mais deux crans permettent de ne voir que l'un ou l'autre.
+  const filtre = ed.cmtFiltre || "toutes";
+  const garde = (nt) => filtre === "toutes" || (filtre === "traitees" ? noteResolue(nt) : !noteResolue(nt));
+  const vus = groupes
+    .map((g) => ({ ...g, list: g.notes.filter(garde) }))
+    .filter((g) => g.list.length);
   const sel = nodeAt(trame, ed.selPath);
 
   root.appendChild(h("div", { class: "inspector__sec" },
@@ -1243,14 +1305,38 @@ function renderCommentsInspector(root, trame, ed, redraw, softSave, paper) {
       text: "Pour viser un passage précis, sélectionnez-le dans la page : la pastille « Commenter » vous proposera de le citer." }),
   ));
 
-  if (!total) {
+  if (!compte.total) {
     root.appendChild(h("div", { class: "inspector__sec" },
       h("p", { class: "fr-small fr-muted", style: { margin: 0 } },
         "Aucun commentaire pour l'instant. Sélectionnez un article (ou un passage) dans la page, puis cliquez « Commenter » : une consigne juridique, une explication, un point à arbitrer, une veille — ils resteront dans le document au lieu de se perdre.")));
     return;
   }
 
-  for (const g of groups) {
+  // Le partage ouvert / traité, et le filtre qui va avec. Une fois un
+  // commentaire clos, la relecture peut se limiter à ce qui reste à faire.
+  root.appendChild(h("div", { class: "inspector__sec" },
+    h("div", { class: "fr-choices cmt-filtre" },
+      ...[
+        ["toutes", `Tout (${compte.total})`],
+        ["ouvertes", `En attente (${compte.ouvertes})`],
+        ["traitees", `Traités (${compte.resolues})`],
+      ].map(([id, label]) => h("button", {
+        type: "button", class: "fr-choice" + (filtre === id ? " is-on" : ""), text: label,
+        onClick: () => { ed.cmtFiltre = id; redraw(); },
+      })),
+    ),
+  ));
+
+  if (!vus.length) {
+    root.appendChild(h("div", { class: "inspector__sec" },
+      h("p", { class: "fr-small fr-muted", style: { margin: 0 },
+        text: filtre === "ouvertes"
+          ? "Tous les commentaires sont traités : il ne reste rien à relire."
+          : "Aucun commentaire n'a encore été marqué comme traité." })));
+    return;
+  }
+
+  for (const g of vus) {
     const card = h("div", { class: "cmt-group" + (g.path === ed.selPath ? " is-open" : "") });
     card.appendChild(h("div", { class: "cmt-group__head" },
       h("button", {
@@ -1261,11 +1347,12 @@ function renderCommentsInspector(root, trame, ed, redraw, softSave, paper) {
           if (!flashBlock(paper, g.path)) redraw();
         },
       }, icon("eye", 13), h("span", { class: "cmt-group__label", text: g.label })),
-      h("span", { class: "fr-badge fr-badge--info", text: String(g.notes.length) }),
+      h("span", { class: "fr-badge fr-badge--info", text: g.list.length === g.notes.length ? String(g.list.length) : g.list.length + "/" + g.notes.length }),
       button("", { variant: "tertiary", icon: "plus", size: "sm", title: "Ajouter un commentaire à ce bloc", onClick: () => openCommentComposer(g.node, -1, "") }),
     ));
     const body = h("div", { class: "cmt-group__body" });
-    for (let i = 0; i < g.notes.length; i++) body.appendChild(noteEditor(g.notes[i], i, g.node, redraw, softSave));
+    // L'index est celui de `node.notes` — la liste du groupe peut être filtrée.
+    for (const nt of g.list) body.appendChild(noteEditor(nt, g.notes.indexOf(nt), g.node, redraw, softSave));
     card.appendChild(body);
     root.appendChild(card);
   }
@@ -1685,13 +1772,16 @@ function pucesChamps(trame, onPick) {
 }
 
 // Range un champ dans la liste du formulaire (glisser par la poignée).
-function rangerChamp(trame, de, vers, apres, redraw) {
+function rangerChamp(trame, de, vers, apres, redraw, groupe) {
   const l = trame.fields || [];
   if (de < 0 || de >= l.length) return;
   const [f] = l.splice(de, 1);
   let i = vers + (apres ? 1 : 0);
   if (de < i) i -= 1;
   l.splice(Math.max(0, Math.min(i, l.length)), 0, f);
+  // Déposer une question sur une autre la range AUSSI dans son groupe : c'est
+  // le geste naturel, et l'écran qui range par groupe doit y répondre.
+  if (typeof groupe === "string") f.group = groupe;
   touch("trames", { rerender: false });
   redraw();
 }
@@ -1760,6 +1850,7 @@ function visaItemEditor(it, i, node, trame, ed, redraw, softSave, ctxSample) {
 }
 
 function noteEditor(nt, i, node, redraw, softSave) {
+  const resolu = noteResolue(nt);
   const kindSel = choiceField({
     label: "", value: nt.kind,
     options: NOTE_KINDS.map((k) => ({ value: k.id, label: k.label })),
@@ -1779,12 +1870,31 @@ function noteEditor(nt, i, node, redraw, softSave) {
     title: "L'auteur d'un commentaire est le service du compte connecté",
     text: "Auteur : " + (nt.author || "—") + (nt.date ? " · " + nt.date : ""),
   });
-  return h("div", { class: "note-card note-card--" + (nt.kind || "info") },
+  // Le fil du commentaire : ce qui s'est dit autour, et le geste pour y ajouter
+  // sa voix. Les réponses se suppriment une à une (elles sont signées : retirer
+  // la sienne est un droit, celle d'un autre passera par l'administrateur).
+  const nbFil = (nt.reponses || []).length;
+  const fil = h("div", { class: "note-fil" },
+    noteThread(nt.reponses, { editable: true, onDelete: (r, rang) => supprimerReponse(node, i, rang, redraw) }),
+    button("Répondre" + (nbFil ? ` (${nbFil})` : ""), {
+      variant: "tertiary", size: "sm", icon: "bulle", title: "Ajouter une réponse au fil",
+      onClick: () => repondreCommentaire(node, i, redraw),
+    }),
+  );
+  return h("div", { class: "note-card note-card--" + (nt.kind || "info") + (resolu ? " is-done" : "") },
     h("div", { class: "note-card__head" }, kindSel, h("div", { class: "fr-spacer" }),
+      resolu ? h("span", { class: "fr-badge fr-badge--success", title: mentionTraite(nt), text: "Traité" }) : null,
+      button("", {
+        variant: "tertiary", icon: resolu ? "refresh" : "check", size: "sm",
+        title: resolu ? "Rouvrir ce commentaire" : "Marquer ce commentaire comme traité",
+        onClick: () => basculerCommentaire(node, i, redraw),
+      }),
       button("", { variant: "tertiary", icon: "trash", size: "sm", onClick: () => { node.notes.splice(i, 1); touch("trames", { rerender: false }); redraw(); } })),
+    resolu ? h("p", { class: "note-card__done", text: mentionTraite(nt) }) : null,
     nt.quote ? h("p", { class: "note-quote", text: nt.quote }) : null,
     ta,
     h("div", { style: { marginTop: "6px" } }, authorIn),
+    fil,
   );
 }
 
@@ -1816,6 +1926,7 @@ function renderFieldsInspector(root, trame, ed, redraw, softSave) {
   // DOM) parce que chaque réglage redessine l'inspecteur : sans lui, la carte
   // se refermerait au moment même où l'on choisit un type de champ.
   const ouverts = (ed.champsOuverts = ed.champsOuverts || new Set());
+  const champs = trame.fields || [];
 
   root.appendChild(h("div", { class: "inspector__section" },
     sectionHeader("Vos questions", button("Ajouter", { variant: "secondary", size: "sm", icon: "plus", onClick: () => {
@@ -1826,85 +1937,139 @@ function renderFieldsInspector(root, trame, ed, redraw, softSave) {
       redraw();
     } })),
     h("p", { class: "fr-small fr-muted", text: "Chaque question est un champ à remplir : celui qui rédige l'acte y répondra. Elle se place ensuite dans le texte, à l'endroit voulu." }),
-    h("p", { class: "fr-small fr-muted", text: "Cliquez une question pour la régler. Pour en changer l'ordre, attrapez sa poignée ⠿ et faites-la glisser." }),
+    h("p", { class: "fr-small fr-muted", text: "Cliquez une question pour la régler. Pour en changer l'ordre, attrapez sa poignée ⠿ et faites-la glisser — la question prend alors le groupe de celle qu'elle croise." }),
   ));
 
-  if (!(trame.fields || []).length) {
+  if (!champs.length) {
     root.appendChild(h("div", { class: "inspector__section" },
       h("p", { class: "fr-small fr-muted", text: "Aucune question pour l'instant. La première est souvent l'objet de l'acte ; ajoutez-la, puis glissez-la dans le titre." })));
     return;
   }
 
-  (trame.fields || []).forEach((f, i) => {
-    const poignee = glissable(
-      h("span", { class: "blk__grip", title: "Glisser pour changer l'ordre des questions", text: "⠿", "aria-hidden": "true" }),
-      { kind: "rangement", index: i, label: f.label || f.id },
-      { auDoigt: true },
-    );
-    const nom = h("span", { class: "fcard__nom", text: f.label || f.id });
-    const det = h("details", { class: "fcard", open: ouverts.has(f.id) },
-      h("summary", { class: "fcard__tete", title: "Régler cette question" },
-        poignee,
-        nom,
-        f.required ? h("span", { class: "fr-badge fr-badge--info", text: "obligatoire" }) : null,
-        h("span", { class: "fcard__type", text: typeLabel(f.type) }),
-        h("span", { class: "fcard__chev" }, icon("down", 15)),
+  // LES GROUPES. Le modèle porte `field.group`, qui range déjà le FORMULAIRE du
+  // rédacteur : l'onglet des questions les montre donc lui aussi — une seule
+  // règle de rangement, deux écrans qui la lisent. L'ordre des sections est
+  // celui de la première apparition ; les questions sans groupe viennent en tête.
+  const familles = [];
+  const parGroupe = new Map();
+  for (const f of champs) {
+    const g = String(f.group || "").trim();
+    if (!parGroupe.has(g)) { parGroupe.set(g, []); familles.push(g); }
+    parGroupe.get(g).push(f);
+  }
+
+  for (const g of familles) {
+    const lot = parGroupe.get(g);
+    // Un seul ensemble sans nom : pas de titre. Dès qu'il y a des groupes, on les
+    // nomme tous — y compris celui des questions qui n'en ont pas.
+    if (familles.length > 1 || g) {
+      root.appendChild(h("div", { class: "champs-sect" + (g ? "" : " champs-sect--libre") },
+        h("span", { class: "champs-sect__nom", text: g || "Sans groupe" }),
+        h("span", { class: "fr-badge fr-badge--info", text: String(lot.length) }),
+      ));
+    }
+    lot.forEach((f) => root.appendChild(carteQuestion(f, champs, ouverts, trame, ed, redraw, softSave, familles)));
+  }
+}
+
+// La valeur du menu « Groupe » qui n'est pas un groupe : elle ouvre la fenêtre
+// qui en crée un.
+const NOUVEAU_GROUPE = "__nouveau_groupe__";
+
+// Une carte de question : ses réglages, sa mise en forme, sa place dans le
+// document et sa suppression.
+function carteQuestion(f, champs, ouverts, trame, ed, redraw, softSave, familles) {
+  const i = champs.indexOf(f);
+  const poignee = glissable(
+    h("span", { class: "blk__grip", title: "Glisser pour changer l'ordre des questions", text: "⠿", "aria-hidden": "true" }),
+    { kind: "rangement", index: i, label: f.label || f.id },
+    { auDoigt: true },
+  );
+  const nom = h("span", { class: "fcard__nom", text: f.label || f.id });
+  const det = h("details", { class: "fcard", open: ouverts.has(f.id) },
+    h("summary", { class: "fcard__tete", title: "Régler cette question" },
+      poignee,
+      nom,
+      f.required ? h("span", { class: "fr-badge fr-badge--info", text: "obligatoire" }) : null,
+      h("span", { class: "fcard__type", text: typeLabel(f.type) }),
+      h("span", { class: "fcard__chev" }, icon("down", 15)),
+    ),
+    h("div", { class: "fcard__corps" },
+      textField({
+        label: "Nom de la question", value: f.label,
+        help: "Le libellé que lira l'agent. Il sert aussi à repérer le champ dans la réserve, à gauche.",
+        onChange: (v) => { f.label = v; nom.textContent = v || f.id; softSave(); },
+      }),
+      selectField({
+        label: "Groupe de questions",
+        value: f.group || "",
+        placeholder: "— Aucun groupe —",
+        options: [
+          ...familles.filter(Boolean).map((nomGroupe) => ({ value: nomGroupe, label: nomGroupe })),
+          { value: NOUVEAU_GROUPE, label: "Nouveau groupe…" },
+        ],
+        help: "Les questions d'un même groupe se suivent dans le formulaire de rédaction — et ici. Elles se placent quand même une à une dans le texte.",
+        onChange: (v) => changerGroupeDeQuestion(f, v, () => { softSave(); redraw(); }),
+      }),
+      typeCards(f, softSave, redraw),
+      f.type === "signataire"
+        ? selectField({
+          label: "Fonction attendue",
+          value: f.qualite || "",
+          placeholder: "— Au choix de celui qui rédige —",
+          options: fonctionsAttendues(trame),
+          help: "La qualité qui donne compétence pour signer cet acte. Choisissez-la ici pour la fixer dans le modèle : le rédacteur ne fera plus que désigner, parmi les personnes qui la tiennent, celle qui signe. Laissez vide pour le laisser choisir la fonction lui-même.",
+          onChange: (v) => { f.qualite = v; softSave(); redraw(); },
+        })
+        : null,
+      ["choice", "multichoice"].includes(f.type)
+        ? textField({ label: "Valeurs proposées (une par ligne)", value: (f.options || []).join("\n"), rows: 4, help: "Exemple :\nOui\nNon\nSans objet", onChange: (v) => { f.options = v.split("\n").map((s) => s.trim()).filter(Boolean); softSave(); } })
+        : null,
+      // Placer le champ dans le texte : le même geste que depuis la réserve,
+      // mais au contact de la question — c'est là qu'on y pense.
+      h("div", { class: "champ__placer" },
+        h("span", { class: "inspector__label", text: "Placer ce champ dans le document" }),
+        h("div", { class: "fr-row" },
+          puce("champ", f.label || f.id, "{{" + f.id + "}}", "doc",
+            () => armer(ed, redraw, { kind: "champ", token: "{{" + f.id + "}}", label: f.label || f.id })),
+          h("span", { class: "fr-small fr-muted", style: { flex: "1 1 auto" }, text: "Glissez-le dans le texte — ou cliquez-le, puis cliquez à l'endroit voulu." }),
+        ),
       ),
-      h("div", { class: "fcard__corps" },
-        textField({
-          label: "Nom de la question", value: f.label,
-          help: "Le libellé que lira l'agent. Il sert aussi à repérer le champ dans la réserve, à gauche.",
-          onChange: (v) => { f.label = v; nom.textContent = v || f.id; softSave(); },
-        }),
-        typeCards(f, softSave, redraw),
-        f.type === "signataire"
-          ? selectField({
-            label: "Fonction attendue",
-            value: f.qualite || "",
-            placeholder: "— Au choix de celui qui rédige —",
-            options: fonctionsAttendues(trame),
-            help: "La qualité qui donne compétence pour signer cet acte. Choisissez-la ici pour la fixer dans le modèle : le rédacteur ne fera plus que désigner, parmi les personnes qui la tiennent, celle qui signe. Laissez vide pour le laisser choisir la fonction lui-même.",
-            onChange: (v) => { f.qualite = v; softSave(); redraw(); },
-          })
-          : null,
-        ["choice", "multichoice"].includes(f.type)
-          ? textField({ label: "Valeurs proposées (une par ligne)", value: (f.options || []).join("\n"), rows: 4, help: "Exemple :\nOui\nNon\nSans objet", onChange: (v) => { f.options = v.split("\n").map((s) => s.trim()).filter(Boolean); softSave(); } })
-          : null,
-        // Placer le champ dans le texte : le même geste que depuis la réserve,
-        // mais au contact de la question — c'est là qu'on y pense.
-        h("div", { class: "champ__placer" },
-          h("span", { class: "inspector__label", text: "Placer ce champ dans le document" }),
-          h("div", { class: "fr-row" },
-            puce("champ", f.label || f.id, "{{" + f.id + "}}", "doc",
-              () => armer(ed, redraw, { kind: "champ", token: "{{" + f.id + "}}", label: f.label || f.id })),
-            h("span", { class: "fr-small fr-muted", style: { flex: "1 1 auto" }, text: "Glissez-le dans le texte — ou cliquez-le, puis cliquez à l'endroit voulu." }),
-          ),
-        ),
-        // Les réglages techniques ne concernent pas l'agent qui rédige la trame :
-        // ils restent là, mais repliés.
-        h("details", { class: "inspector__plus" },
-          h("summary", { text: "Réglages avancés" }),
-          textField({ label: "Aide affichée sous le champ", value: f.help || "", onChange: (v) => { f.help = v; softSave(); } }),
-          h("label", { class: "fr-check" }, (() => { const c = h("input", { type: "checkbox", checked: f.required }); c.addEventListener("change", () => { f.required = c.checked; softSave(); redraw(); }); return c; })(), "Réponse obligatoire"),
-          textField({ label: "Groupe de questions", value: f.group || "", onChange: (v) => { f.group = v; softSave(); } }),
-          textField({ label: "Identifiant technique (jeton)", value: f.id, onChange: (v) => { f.id = v.replace(/[^\w]/g, "_"); softSave(); } }),
-          textField({ label: "N'afficher que si…", value: f.appliesWhen || "", onChange: (v) => { f.appliesWhen = v; softSave(); } }),
-        ),
-        h("div", { class: "fcard__pied" },
-          f.group ? h("span", { class: "fr-small fr-muted", text: "Groupe : " + f.group }) : null,
-          h("div", { class: "fr-spacer" }),
-          button("Supprimer cette question", { variant: "tertiary", icon: "trash", size: "sm", onClick: () => { trame.fields.splice(i, 1); ouverts.delete(f.id); touch("trames", { rerender: false }); redraw(); } }),
-        ),
+      // Les réglages techniques ne concernent pas l'agent qui rédige la trame :
+      // ils restent là, mais repliés.
+      h("details", { class: "inspector__plus" },
+        h("summary", { text: "Réglages avancés" }),
+        textField({ label: "Aide affichée sous le champ", value: f.help || "", onChange: (v) => { f.help = v; softSave(); } }),
+        h("label", { class: "fr-check" }, (() => { const c = h("input", { type: "checkbox", checked: f.required }); c.addEventListener("change", () => { f.required = c.checked; softSave(); redraw(); }); return c; })(), "Réponse obligatoire"),
+        textField({ label: "Identifiant technique (jeton)", value: f.id, onChange: (v) => { f.id = v.replace(/[^\w]/g, "_"); softSave(); } }),
+        textField({ label: "N'afficher que si…", value: f.appliesWhen || "", onChange: (v) => { f.appliesWhen = v; softSave(); } }),
       ),
-    );
-    det.addEventListener("toggle", () => { if (det.open) ouverts.add(f.id); else ouverts.delete(f.id); });
-    deposable(det, {
-      accepte: (c) => c.kind === "rangement",
-      halo: (el, c, e) => { const m = moitie(el, e); el.classList.toggle("dnd-avant", m === "avant"); el.classList.toggle("dnd-apres", m === "apres"); },
-      onDepot: (c, e) => rangerChamp(trame, c.index, i, moitie(det, e) === "apres", redraw),
-    });
-    root.appendChild(det);
+      h("div", { class: "fcard__pied" },
+        h("div", { class: "fr-spacer" }),
+        button("Supprimer cette question", { variant: "tertiary", icon: "trash", size: "sm", onClick: () => { trame.fields.splice(i, 1); ouverts.delete(f.id); touch("trames", { rerender: false }); redraw(); } }),
+      ),
+    ),
+  );
+  det.addEventListener("toggle", () => { if (det.open) ouverts.add(f.id); else ouverts.delete(f.id); });
+  deposable(det, {
+    accepte: (c) => c.kind === "rangement",
+    halo: (el, c, e) => { const m = moitie(el, e); el.classList.toggle("dnd-avant", m === "avant"); el.classList.toggle("dnd-apres", m === "apres"); },
+    onDepot: (c, e) => rangerChamp(trame, c.index, i, moitie(det, e) === "apres", redraw, String(f.group || "").trim()),
   });
+  return det;
+}
+
+// Le menu « Groupe » : un groupe existant, aucun, ou la fenêtre qui en crée un.
+// Rien d'autre à ranger — le changement se pose puis l'écran se redessine.
+async function changerGroupeDeQuestion(f, valeur, apres) {
+  if (valeur !== NOUVEAU_GROUPE) {
+    f.group = valeur;
+    apres();
+    return;
+  }
+  const nom = await promptDialog("Nouveau groupe de questions", "Nom du groupe (il rangera aussi le formulaire de rédaction) :", "");
+  if (nom != null) f.group = nom;
+  apres();
 }
 
 function renderRulesInspector(root, trame, redraw, softSave, ctx) {

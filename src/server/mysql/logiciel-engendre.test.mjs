@@ -46,12 +46,23 @@ test("le fichier engendré porte son avertissement, et les valeurs des sources",
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return t.skip("lecture de fichier indisponible hors dépôt");
   const lire = async (chemins) => {
-    for (const c of chemins) { try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ } }
+    for (const c of chemins) {
+      if (!c) continue;
+      try { return await readFile(c, "utf8"); } catch (e) { /* essai suivant */ }
+    }
     return null;
   };
-  // Chemins relatifs au dépôt (le dossier courant de `node --test`), avec le
-  // repli « racine = src/ » si l'outillage est déplacé un jour.
+  // D'abord l'adresse ANCREE à ce fichier (le dossier de `node --test` peut être
+  // la racine du dépôt ou ce dossier-là), puis les chemins du dossier courant,
+  // avec le repli « racine = src/ » si l'outillage est déplacé un jour.
+  let ici = null;
+  try {
+    const { fileURLToPath } = await import("node:url");
+    const base = import.meta.url;
+    try { ici = fileURLToPath(new URL("./logiciel-engendre.mjs", base)); } catch (e) { ici = null; }
+  } catch (e) { /* node:url indisponible */ }
   const texte = await lire([
+    ici,
     "src/server/mysql/logiciel-engendre.mjs",
     "server/mysql/logiciel-engendre.mjs",
     "logiciel-engendre.mjs",

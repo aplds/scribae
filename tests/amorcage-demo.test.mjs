@@ -81,3 +81,57 @@ test("démonstration active : le jeu livré est installé", async (t) => {
   assert.ok(users.length > 0, "les comptes de démonstration sont semés");
   assert.ok(actes.length > 0, "les actes de démonstration sont générés");
 });
+
+// ---------------------------------------------------------------------------
+// O-4 (audit ciblé du 22/09/2026) : `config` et `users` sont les deux
+// collections que le service réserve à l'administrateur (`COLLECTIONS_ADMIN`).
+// Un agent dont le compte n'est PAS administrateur ne doit donc pas les voir
+// tenter à chaque démarrage : le service répondrait `403 droit_requis`, la
+// pastille d'erreur s'allumerait, et une phrase d'action s'afficherait pour une
+// opération que l'application n'avait pas à demander.
+//
+// On l'éprouve ici sans doublure de `auth` : la façade de persistance est
+// réglée sur un service externe (`store.db`), et `fetch` est doublé pour
+// ENREGISTRER les écritures. C'est la seule façon de compter les tentatives.
+// ---------------------------------------------------------------------------
+test("O-4 : un compte ordinaire ne tente aucune écriture réservée à l'administrateur", async (t) => {
+  const store = await charger("../src/lib/store.js");
+  if (!store || !store.db) return t.skip("module indisponible hors navigateur");
+  const db = store.db;
+
+  const ecritures = [];
+  const vraiFetch = globalThis.fetch;
+  globalThis.__SCRIBA_SELF_HOSTED__ = true;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    const methode = (opts && opts.method) || "GET";
+    const repondre = (status, corps) => ({ ok: status < 400, status, json: async () => corps });
+    if (methode === "POST" && u.includes("/sync")) {
+      ecritures.push((u.match(/collections\/([A-Za-z]+)\/sync/) || [])[1] || u);
+      return repondre(200, { revision: 1, applied: [], conflicts: [] });
+    }
+    if (u.includes("/v1/db/health")) return repondre(200, { message: "Base joignable." });
+    if (u.includes("/v1/db/collections/")) return repondre(200, { collection: "x", revision: 0, records: [] });
+    return repondre(404, { erreur: "route inconnue", code: "route_inconnue" });
+  };
+  try {
+    await db.init();
+    await db.setSettings({ mode: "external", url: "", token: "" }, { silent: true });
+
+    // Le compte n'est pas administrateur : le référentiel se lit (les lectures
+    // ne sont pas réservées), mais rien de réservé ne s'écrit.
+    ecritures.length = 0;
+    await store.bootstrap({ administrateur: false });
+    assert.equal(ecritures.includes("config"), false, "aucune écriture de `config`");
+    assert.equal(ecritures.includes("users"), false, "aucune écriture de `users`");
+
+    // Témoin : avec le rôle, l'application écrit bel et bien — c'est donc bien
+    // le drapeau, et non un hasard, qui a retenu les écritures ci-dessus.
+    ecritures.length = 0;
+    await store.bootstrap({ administrateur: true });
+    assert.ok(ecritures.includes("config") || ecritures.includes("users"),
+      "un administrateur, lui, écrit le référentiel et les comptes");
+  } finally {
+    globalThis.fetch = vraiFetch;
+  }
+});
