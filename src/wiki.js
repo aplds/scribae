@@ -14,92 +14,100 @@
 // Pour refaire une capture : mettre l'application dans l'état voulu, appeler
 // html2canvas(élément).toDataURL(), téléverser, puis reporter ici l'URL et les
 // repères numérotés (x/y en pourcentage de l'image).
+//
+// L'ÉTAT de l'application fait partie de la capture, et il se note : celui de
+// `trames` (refait en 1.6.3f) est — thème CLAIR, barre de gauche DÉPLIÉE, menu
+// « ⋯ » de la première carte OUVERT (le bouton, lui, apparaît allumé : c'est
+// aussi ce qu'on veut montrer), fenêtre de 1440 × 900. Les repères sont relevés
+// au `getBoundingClientRect` de chaque élément visé, ramenés en pourcentage du
+// cadre (x et y sont le CENTRE de la boîte, voir `gshot__box`).
 // ============================================================================
 
 // Marqueur de mise en forme : **gras** et `code`.
 export const SHOTS = {
   trames: {
-    url: "https://user.uploads.dev/file/fd08159782c59a2c00ff2b8668538def.png",
+    url: "https://user.uploads.dev/file/002ef932eb1778259b7d8b7ad4ae6a76.png",
     caption: "La liste des modèles. C'est le point de départ.",
     marks: [
-      { n: 1, x: 8, y: 15.1, w: 14.4, h: 4.7, label: "Le menu : tout part d'ici" },
-      { n: 2, x: 30.6, y: 54.3, w: 26.3, h: 34.6, label: "Une carte = un modèle d'acte" },
-      { n: 3, x: 32.6, y: 55.4, w: 5.6, h: 4.1, label: "Le bouton « Rédiger » de ce modèle" },
-      { n: 4, x: 23.9, y: 55.4, w: 10.5, h: 4.1, label: "« Ouvrir l'éditeur » : corriger le modèle (administrateurs et éditeurs)" },
+      { n: 1, x: 8, y: 19.1, w: 14.4, h: 4.7, label: "Le menu : tout part d'ici" },
+      { n: 2, x: 30.6, y: 52.5, w: 26.3, h: 31.8, label: "Une carte = un modèle d'acte" },
+      { n: 3, x: 22.4, y: 62.2, w: 7.4, h: 4.3, label: "Le bouton « Rédiger » de ce modèle" },
+      { n: 4, x: 41.4, y: 62.2, w: 2.5, h: 4, label: "Le bouton « ⋯ » : les autres gestes sur ce modèle" },
+      { n: 5, x: 34.4, y: 76.4, w: 16.4, h: 23.6, label: "« Éditer la trame » : corriger le modèle (administrateurs et éditeurs)" },
     ],
   },
   rediger: {
-    url: "https://user.uploads.dev/file/3873dd6c553f5ae3c76cc880d7663b54.png",
-    caption: "L'écran de rédaction : le document est votre feuille de travail, et le panneau de droite suit le bloc que vous désignez.",
+    url: "https://user.uploads.dev/file/4efc7d21969bcfd342f04c4bb62b18e4.png",
+    caption: "L'écran de rédaction : le document est votre feuille de travail, le panneau de droite vous guide champ par champ.",
     marks: [
-      { n: 1, x: 8, y: 14.8, w: 15, h: 2.6, label: "Le menu : tout part d'ici" },
-      { n: 2, x: 37.3, y: 14.1, w: 19.4, h: 2.4, label: "L'entité concernée : la structure au nom de laquelle l'acte est pris" },
-      { n: 3, x: 90.3, y: 14.1, w: 9.2, h: 2.4, label: "« Enregistrer » quand l'acte est prêt — « Exporter… », à gauche, choisit le format" },
-      { n: 4, x: 44.3, y: 58.3, w: 53.6, h: 66.9, label: "Le document : on écrit dedans et on clique les pastilles" },
-      { n: 5, x: 44, y: 72.9, w: 42.9, h: 1.6, label: "Un passage réécrit : fond orangé, mention « hors trame »" },
-      { n: 6, x: 60.3, y: 47, w: 9.7, h: 1.8, label: "La barre d'outils d'un bloc : déplacer, ajouter, retirer, voir ses options" },
-      { n: 7, x: 85.4, y: 25.9, w: 26.4, h: 14.7, label: "La bibliothèque de variables : glissez-en une dans le texte" },
-      { n: 8, x: 85.4, y: 55.9, w: 26.4, h: 44.2, label: "Le panneau du bloc désigné : ses réglages, ses éléments, ses ajouts" },
+      { n: 1, x: 89.2, y: 22.3, w: 18.9, h: 9.8, label: "« ⋯ » : exporter…, changer d'acte" },
+      { n: 2, x: 52, y: 29.8, w: 93.2, h: 10.7, label: "Le parcours : 1 Rédaction, 2 Signature, 3 Publication" },
+      { n: 3, x: 85.4, y: 47.9, w: 26.3, h: 8.6, label: "Les onglets du panneau : compléter, variables, consignes, contrôle & écarts" },
+      { n: 4, x: 31, y: 58.7, w: 9.5, h: 1.9, label: "Les pastilles jaunes : les champs à renseigner, d'un clic" },
+      { n: 5, x: 85.4, y: 73, w: 22.5, h: 18.8, label: "Le panneau : un champ à la fois — ici, le numéro, à réserver" },
     ],
   },
   conformite: {
-    url: "https://user.uploads.dev/file/24a7ce5a8ad2d4b3fadd6f7b4467325a.png",
-    caption: "Le panneau « Contrôle & écarts » : ce que vous avez ajouté ou retiré, ce que la trame exige, et ce que vous avez réécrit.",
+    url: "https://user.uploads.dev/file/2edd62322852fed0c2360de91fa46017.png",
+    caption: "Le panneau « Contrôle & écarts » : ce qui manque, ce qui bloque, et ce que vous avez réécrit.",
     marks: [
-      { n: 1, x: 85.4, y: 36, w: 26.4, h: 4.2, label: "Les onglets du panneau : compléter, consignes, abrogations, contrôle & écarts" },
-      { n: 2, x: 85.4, y: 46.8, w: 24, h: 14.3, label: "Structure du document : ce que vous avez ajouté ou retiré, et de quoi le rétablir" },
-      { n: 3, x: 85.4, y: 55.9, w: 24, h: 1.6, label: "Contrôles de la trame : ce que le modèle exige" },
-      { n: 4, x: 85.4, y: 64.2, w: 24, h: 12.8, label: "Écarts à la trame : ce que vous avez réécrit, et le retour au modèle d'un clic" },
+      { n: 1, x: 85.4, y: 47.9, w: 26.3, h: 8.6, label: "Les onglets du panneau : compléter, variables, consignes, contrôle & écarts" },
+      { n: 2, x: 85.4, y: 67.6, w: 24, h: 23.2, label: "Les contrôles de la trame : ce qui manque, en rouge" },
+      { n: 3, x: 85.4, y: 81.3, w: 24, h: 4.3, label: "Tant qu'un contrôle bloque, l'export reste désactivé" },
+      { n: 4, x: 85.4, y: 87.8, w: 24, h: 6.5, label: "Les références non résolues : les valeurs introuvables" },
+      { n: 5, x: 85.4, y: 94.8, w: 24, h: 2.1, label: "Les écarts à la trame : ce que vous avez réécrit" },
     ],
   },
   export: {
-    url: "https://user.uploads.dev/file/317346bb6d212794411b5b9ca2575bdd.png",
+    url: "https://user.uploads.dev/file/104db4b6840221b608c0e948b8f1bdba.png",
     caption: "La fenêtre d'export. Dans presque tous les cas : « Imprimer / PDF ».",
     marks: [
-      { n: 1, x: 34, y: 39.4, w: 8.9, h: 2.6, label: "Imprimer / PDF : le document à signer et à envoyer" },
-      { n: 2, x: 34, y: 36.1, w: 8.8, h: 2.6, label: "HTML complet : la page web de l'acte (rarement utile)" },
-      { n: 3, x: 41.7, y: 32.7, w: 24.3, h: 2.6, label: "Formats techniques : archives, publication, informaticiens" },
+      { n: 1, x: 42.3, y: 41.9, w: 25.4, h: 4.3, label: "Akoma Ntoso, Schematron : l'archive et le contrôle" },
+      { n: 2, x: 42.9, y: 47.3, w: 26.7, h: 4.3, label: "HTML, JSON-LD, Markdown : le web, la publication, les rédacteurs" },
+      { n: 3, x: 34.2, y: 52.7, w: 9.3, h: 4.3, label: "Imprimer / PDF : le document à signer et à envoyer" },
+      { n: 4, x: 36.4, y: 58.1, w: 13.7, h: 4.3, label: "PDF/A : la version archivable" },
     ],
   },
   actes: {
-    url: "https://user.uploads.dev/file/c671d0f2cd93e7daa97ad81d0c087821.png",
-    caption: "Le registre des actes enregistrés.",
+    url: "https://user.uploads.dev/file/080377a8b2548f9692a590d5f9b897c1.png",
+    caption: "Le registre des actes enregistrés : on y cherche, on y déplie la fiche d'un acte, on y reprend une rédaction.",
     marks: [
-      { n: 1, x: 20.7, y: 18.5, w: 6.4, h: 3.8, label: "Le numéro de l'acte" },
-      { n: 2, x: 34.7, y: 18.5, w: 21.5, h: 3.8, label: "L'objet, en une ligne" },
-      { n: 3, x: 54.8, y: 18.5, w: 4.8, h: 3.8, label: "« conforme » ou « N écart(s) » : ce qui a été réécrit par rapport au modèle" },
-      { n: 4, x: 71.9, y: 18.5, w: 4.9, h: 3.8, label: "L'état : brouillon, prêt, exporté…" },
-      { n: 5, x: 90.2, y: 25.8, w: 16.8, h: 10.6, label: "Reprendre la rédaction · Voir · Modifier · Exporter · Supprimer" },
+      { n: 1, x: 21.2, y: 23.8, w: 29.8, h: 4.3, label: "Retrouver : un numéro, un objet, une trame, un service…" },
+      { n: 2, x: 13.5, y: 53.4, w: 16.2, h: 9.9, label: "Le numéro ; la flèche déplie la fiche de l'acte" },
+      { n: 3, x: 52.9, y: 53.4, w: 62.7, h: 9.9, label: "L'objet, et ses mentions (nature, trame, service, signature…)" },
+      { n: 4, x: 86.9, y: 50.6, w: 3.8, h: 2.4, label: "L'état : brouillon, prêt, signé, publié…" },
+      { n: 5, x: 94.3, y: 53.4, w: 8.6, h: 9.9, label: "« Reprendre » rouvre le document ; « ⋯ » range les autres gestes" },
+      { n: 6, x: 52, y: 65.7, w: 93.2, h: 14.6, label: "La fiche dépliée : nature, trame, parapheur, exécution, publication, écarts" },
     ],
   },
   editor: {
-    url: "https://user.uploads.dev/file/b78b16373dc94d2840469d7342fa5923.png",
+    url: "https://user.uploads.dev/file/701576be82732001865873d1f53e8840.png",
     caption: "L'éditeur de trame : trois colonnes (le plan, la page, l'inspecteur).",
     marks: [
-      { n: 1, x: 24.8, y: 54.8, w: 17.4, h: 90.4, label: "Le plan : les morceaux du document (cliquez pour en sélectionner un)" },
-      { n: 2, x: 54.9, y: 54.8, w: 42.9, h: 90.4, label: "La page : le document lui-même, modifiable en cliquant dedans" },
-      { n: 3, x: 88.2, y: 54.8, w: 23.6, h: 90.4, label: "L'inspecteur : les réglages du morceau sélectionné" },
-      { n: 4, x: 61.9, y: 18.9, w: 1.4, h: 1.1, label: "Un petit « + » insère un morceau à cet endroit" },
+      { n: 1, x: 12.7, y: 59.8, w: 17.4, h: 80.3, label: "Le plan : les morceaux du document (cliquez pour en sélectionner un)" },
+      { n: 2, x: 48.9, y: 59.8, w: 55, h: 80.3, label: "La page : le document lui-même, modifiable en cliquant dedans" },
+      { n: 3, x: 88.2, y: 59.8, w: 23.6, h: 80.3, label: "L'inspecteur : les réglages du morceau sélectionné" },
+      { n: 4, x: 9.5, y: 78.8, w: 9.3, h: 3.1, label: "« Ajouter un bloc » : la réserve, pour insérer un morceau" },
     ],
   },
   signature: {
-    url: "https://user.uploads.dev/file/c76d6bc6b44e979e95d9a7eb006ff2c6.png",
+    url: "https://user.uploads.dev/file/973bb5bd26e801f1a446a88c218295ec.png",
     caption: "Le circuit de signature : à gauche l'acte, à droite les étapes franchies.",
     marks: [
-      { n: 1, x: 36.5, y: 35.3, w: 38.1, h: 4, label: "L'acte à envoyer : cliquez-le pour le sélectionner" },
-      { n: 2, x: 77.7, y: 47.8, w: 39.5, h: 34.3, label: "Les cinq étapes : la coche verte marque ce qui est franchi" },
-      { n: 3, x: 77.7, y: 72.4, w: 41.9, h: 9.5, label: "Les actions : envoyer en signature, ou publier l'acte signé" },
-      { n: 4, x: 84.9, y: 9.6, w: 7.9, h: 3.7, label: "L'état du service de signature" },
+      { n: 1, x: 27.3, y: 59.3, w: 43.8, h: 4.6, label: "L'acte à envoyer : cliquez-le pour le sélectionner" },
+      { n: 2, x: 74.5, y: 50.8, w: 45.9, h: 25.6, label: "Le parcours : rédaction, parapheur, révision, signature, publication" },
+      { n: 3, x: 69.8, y: 71.6, w: 32.3, h: 7.1, label: "Le détail : la coche verte marque ce qui est franchi" },
+      { n: 4, x: 82.8, y: 14.9, w: 11.3, h: 4.3, label: "L'état du service de signature" },
     ],
   },
   publication: {
-    url: "https://user.uploads.dev/file/7499080dfe6b8b8e16f983f091e73ea6.png",
+    url: "https://user.uploads.dev/file/8cd16cd3f8b8f8d379d5051cc7b9b150.png",
     caption: "La consultation d'un acte publié dans l'application : son texte rendu dans la page, et ses métadonnées.",
     marks: [
-      { n: 1, x: 84.5, y: 9.7, w: 14.2, h: 1.3, label: "L'identifiant ELI : la référence permanente de l'acte" },
-      { n: 2, x: 86.8, y: 20.3, w: 23.6, h: 7.2, label: "Publié le… et l'entrée en vigueur : les deux dates de l'opposabilité" },
-      { n: 3, x: 86.8, y: 31, w: 23.6, h: 12.8, label: "Les pièces disponibles, dont l'original signé" },
-      { n: 4, x: 45.7, y: 17.7, w: 56.4, h: 2.2, label: "Texte, métadonnées, versions, original signé" },
+      { n: 1, x: 52, y: 16.3, w: 93.2, h: 2.8, label: "La nature, la version, la signature : ce que le public voit d'abord" },
+      { n: 2, x: 55.7, y: 47.3, w: 14.1, h: 2.3, label: "L'identifiant ELI : la référence permanente de l'acte" },
+      { n: 3, x: 14.7, y: 50.5, w: 7.7, h: 2.3, label: "Publié le… : la date de l'opposabilité" },
+      { n: 4, x: 52, y: 59.3, w: 93.2, h: 4.6, label: "Texte, métadonnées, versions, original signé" },
     ],
   },
 };
@@ -138,7 +146,7 @@ export const GUIDE = {
           { text: "L'application **écrit l'acte** au bon format, avec le bon numéro, puis on l'**exporte** pour le faire signer." },
         ] },
         { t: "note", kind: "ok", title: "En une phrase", text: "Un modèle, un document à compléter, un acte propre à envoyer. Rien de plus." },
-        { t: "note", kind: "warn", title: "Le bandeau « Démonstration » en haut de l'écran", text: "S'il est affiché, cette installation **joue un jeu de démonstration** : les données sont fictives et la signature électronique est simulée. Il apparaît dans l'atelier, sur l'écran de connexion **et sur le recueil public**, pour que personne ne s'y trompe. Le bandeau, comme le jeu fictif lui-même, dépend du **déploiement** : c'est le service (réglage `DEMO` du `.env`) qui l'allume ou l'éteint — une installation partie d'un **référentiel vierge** ne le montre pas." },
+        { t: "note", kind: "warn", title: "Le bandeau « Démonstration » en haut de l'écran", text: "S'il est affiché, cette installation **joue un jeu de démonstration** : les données sont fictives et la signature électronique est simulée. Il apparaît dans l'atelier, sur l'écran de connexion **et sur le recueil public**, pour que personne ne s'y trompe. Le bandeau, comme le jeu fictif lui-même, dépend du **déploiement** : c'est le service (réglage `DEMO` du `.env`) qui l'allume ou l'éteint — une installation partie d'un **référentiel vierge** ne le montre pas. Les **autres messages en tête d'écran** — maintenance programmée, alerte, annonce — viennent, eux, de l'**administration** (Administration › Identité › Bandeaux d'information) : chacun porte son titre, sa couleur et son contenu, et ne s'affiche que quand il est allumé." },
         { t: "p", text: "Ce que l'application fait, et ce qu'elle ne fait pas. Elle **rédige**, **numérote** et **range** l'acte ; elle peut aussi le **faire signer** (signature électronique simple, dans l'application) et **notifier** les parties par courriel — quand un service de courriel est branché sur le déploiement. Elle ne se substitue pas à l'autorité signataire pour autant : seule une personne **compétente** — le **titulaire** désigné par l'acte, c'est-à-dire le dernier étage de sa chaîne de signature, et à condition de porter la **qualité de Signataire** — peut apposer la signature. Ni le premier venu, ni un collègue, ni un administrateur ne signent à sa place ; le nom signé est celui que porte l'acte. Sur l'**installation de démonstration**, la signature est simulée et n'est pas opposable." },
         { t: "p", text: "Et surtout : elle **n'oublie rien**. Chaque acte enregistré est numéroté et rangé dans un registre qu'on peut consulter des années plus tard." },
         { t: "next", chapter: "ouvrir", label: "Ouvrir l'application et s'y retrouver" },
@@ -211,7 +219,7 @@ export const GUIDE = {
           { text: "Insérez une **variable** dans le texte.", detail: "La **bibliothèque de variables** est dans l'onglet **« Variables »** du panneau de droite : les champs du modèle et les informations que l'application connaît déjà (la collectivité, le signataire, la date, le numéro…). **Glissez** la variable dans la phrase, à l'endroit voulu ; ou **cliquez-la**, puis cliquez dans le texte. Le champ de recherche la retrouve par son nom." },
           { text: "Ouvrez l'onglet **Contrôle & écarts** du panneau de droite.", detail: "Vert : tout est bon. Rouge : il manque quelque chose, le message dit quoi. Vous y retrouvez, séparément, les passages que vous avez **réécrits**, les **réglages de bloc** que vous avez changés (un échelon, une numérotation) et ce que vous avez **ajouté ou retiré** — chacun pouvant être remis à l'état du modèle d'un clic." },
           { text: "Cliquez sur **Enregistrer**.", detail: "L'acte entre au registre avec son numéro. Il sera toujours retrouvable, même si vous fermez le navigateur." },
-          { text: "Cliquez sur **Exporter…** et choisissez le format.", detail: "Dans presque tous les cas : « Imprimer / PDF ». Voir le chapitre « Enregistrer, imprimer, envoyer »." },
+          { text: "Cliquez sur **« ⋯ »** (en haut de la page) puis sur **Exporter…**, et choisissez le format.", detail: "Dans presque tous les cas : « Imprimer / PDF ». Voir le chapitre « Enregistrer, imprimer, envoyer »." },
         ] },
         { t: "note", kind: "info", title: "Les trois couleurs des pastilles", text: "Une pastille **bleue** est un champ déjà renseigné. Une pastille **jaune** est un champ encore vide. Une valeur **soulignée d'un pointillé** vient du référentiel (l'entité, le signataire) : elle n'est pas saisie ici." },
         { t: "note", kind: "info", title: "Un texte long se range en parties", text: "Certains actes ne se composent pas seulement d'articles : ils sont rangés en **Livres, Titres, Chapitres, Sections** (ou sous le mot que la collectivité a choisi — « Partie », « Chapitre liminaire »…). Ces divisions viennent du **modèle**, et la numérotation « Livre Ier », « Titre Ier », « Titre II »… se pose toute seule, en suivant l'ordre du texte. Vous les déplacez comme le reste, et vous réécrivez leur intitulé d'un clic." },
@@ -293,7 +301,7 @@ export const GUIDE = {
         { t: "note", kind: "info", title: "Exporter n'est pas la fin du parcours", text: "L'export sert à **imprimer** un acte ou à le **transmettre hors de l'application**. Pour le faire **avancer**, ce n'est pas là qu'il faut cliquer : dans l'atelier, un **parcours** rappelle les étapes — Rédiger → **Soumettre au circuit** → Révision → Signer → Publier —, et le **bouton principal** placé sous le document propose le geste du moment (« Soumettre au circuit », ou « Aller à la signature »). L'export reste là, discret : il ne fait pas signer l'acte." },
         { t: "shot", shot: "export" },
         { t: "steps", items: [
-          { text: "Cliquez sur **Exporter…** en haut à droite de l'écran.", detail: "Si un contrôle bloquant est en échec, les boutons restent grisés : revenez corriger d'abord." },
+          { text: "Cliquez sur **« ⋯ »** en haut à droite de l'écran, puis sur **Exporter…**.", detail: "Si un contrôle bloquant est en échec, les boutons restent grisés : revenez corriger d'abord." },
           { text: "Cliquez sur **Imprimer / PDF**.", detail: "Un nouvel onglet s'ouvre avec le document présenté proprement, **au format A4**, prêt à imprimer." },
           { text: "Dans cet onglet, imprimez ou enregistrez en PDF.", detail: "Bouton Imprimer, puis, dans la fenêtre de votre système, choisissez « Enregistrer au format PDF » comme imprimante et validez. Gardez le format **A4** et la « taille réelle » (100 %) : c'est la présentation attendue par les services." },
           { text: "Récupérez le fichier dans **Téléchargements**.", detail: "Une petite flèche apparaît parfois en bas de la fenêtre du navigateur : cliquez dessus. Sinon, ouvrez « Téléchargements » (Explorateur de fichiers sous Windows, Finder sur Mac)." },
@@ -746,12 +754,12 @@ export const GUIDE = {
           { term: "Abrogé", def: "L'acte n'est plus en vigueur : un autre l'a remplacé." },
         ] },
         { t: "list", items: [
-          "**Reprendre** : rouvre le document pour continuer la rédaction ou corriger (le même écran que « Rédiger un acte »).",
-          "**Voir** : affiche le document final en lecture seule.",
-          "**Colonne « Trame »** : « conforme », ou « N écart(s) » si le texte a été réécrit par rapport au modèle.",
-          "**↓ (exporter)** : refait un export sans rien modifier (par exemple pour renvoyer le PDF).",
-          "**📌 (épingler)** : met l'acte en avant dans la bande **« À la une »** du recueil public (voir le chapitre « Publier l'acte »). Le même bouton l'en retire. Ce bouton n'existe que pour un acte **publiable**, et seulement si vous en avez la permission.",
-          "**🗑 (mettre à la corbeille)** : l'acte part à la **corbeille** (rien n'est perdu : on peut le restaurer, voir le chapitre suivant). Ce bouton n'existe que pour un **brouillon ou un acte prêt** : un acte signé ou publié ne s'efface pas, il s'**abroge** (voir le chapitre « Abroger un acte »).",
+          "**Rechercher** : un numéro, un objet, une trame, un service… Et trois filtres — **Statut**, **Service**, **Année** — pour ne voir que ce qu'on cherche.",
+          "**Reprendre** (ou **Voir**) : rouvre le document pour continuer la rédaction ou corriger — ou l'affiche en lecture seule quand il n'est plus modifiable.",
+          "**La flèche** devant le numéro déplie la **fiche** de l'acte : nature, trame, service, entité, signature, parapheur, exécution, publication, écarts à la trame.",
+          "**« ⋯ » (Autres gestes)** : modifier (rédige l'acte modificatif), signer, formalité d'exécution, exporter, mettre à la une du recueil — ou mettre à la corbeille.",
+          "**📌 (à la une)**, dans « ⋯ » : met l'acte en avant dans la bande **« À la une »** du recueil public (voir le chapitre « Publier l'acte »). Le même geste l'en retire. Il n'existe que pour un acte **publiable**, et seulement si vous en avez la permission.",
+          "**🗑 (mettre à la corbeille)**, dans « ⋯ » : l'acte part à la **corbeille** (rien n'est perdu : on peut le restaurer, voir le chapitre suivant). Il n'existe que pour un **brouillon ou un acte prêt** : un acte signé ou publié ne s'efface pas, il s'**abroge** (voir le chapitre « Abroger un acte »).",
         ] },
         { t: "note", kind: "info", title: "Le registre de démonstration est déjà garni", text: "Sur une installation de démonstration, le registre contient plusieurs actes : des actes **déjà rédigés et signés** (leur signature est vérifiable), deux actes **prêts à signer** et un **brouillon** à compléter. Vous pouvez les ouvrir, les reprendre, les modifier ou les publier — et tout se passe comme si vous les aviez écrits." },
         { t: "note", kind: "warn", title: "Où vivent vos actes", text: "En **mode local** — le rangement par défaut, sans serveur raccordé —, ils sont enregistrés dans **ce navigateur**, sur **ce poste de travail** : ils ne sont donc pas sur un serveur commun. C'est pourquoi on exporte les actes importants — le fichier, lui, peut être copié, envoyé et archivé. Quand l'administrateur a branché l'application sur la **base partagée** de la collectivité, les actes sont au contraire rangés côté serveur et visibles depuis tous les postes." },
@@ -897,7 +905,7 @@ export const GUIDE = {
       blocks: [
         { t: "p", text: "Ce chapitre s'adresse aux collègues — administrateurs **et éditeurs** — qui écrivent et mettent à jour les modèles. Les autres peuvent passer au glossaire." },
         { t: "note", kind: "info", title: "Retrouver un réglage sans ouvrir vingt-trois onglets", text: "L'écran **Administration** range ses réglages par onglet — Identité, Vocabulaire, Publication, Courriel… — et par carte à l'intérieur de chaque onglet. Une **barre de recherche** est posée sous son titre : tapez-y un mot, « chat », « SMTP », « opposabilité »…, et elle affiche les réglages qui y répondent **où qu'ils soient**, avec leur chemin (« Publication › Apparence du site public › Pages d'erreur »). Un clic ouvre l'onglet concerné, fait défiler jusqu'au champ et le fait clignoter. Tant qu'un mot est saisi, l'onglet affiché ne montre plus que les réglages qui y répondent ; la touche **Échap** efface la recherche et rend tout son contenu." },
-        { t: "p", text: "Une trame se fabrique dans l'**éditeur de trame** : depuis la liste, cliquez sur « Ouvrir l'éditeur » sur la carte du modèle. L'écran est divisé en trois colonnes." },
+        { t: "p", text: "Une trame se fabrique dans l'**éditeur de trame** : sur la carte du modèle, cliquez le **petit bouton carré à trois points « ⋯ »** — posé à droite du bouton « Rédiger » — puis choisissez « **Éditer la trame** ». L'écran est divisé en trois colonnes." },
         { t: "shot", shot: "editor" },
         { t: "terms", items: [
           { term: "À gauche : le plan et la réserve", def: "Le plan : la liste des morceaux du document (intitulé, visas, articles, signature…). Cliquez-en un pour le régler à droite, ou attrapez-le pour le déplacer. **Dessous, la réserve** : tout ce qui peut être inséré — vos questions, les renseignements que l'application remplit seule, et les morceaux de document." },
@@ -1062,6 +1070,7 @@ export const GUIDE = {
           { term: "Encadré", def: "Une marque de l'intitulé — comme le soulignement ou le filet. L'intitulé de l'acte et les intitulés d'article peuvent être **encadrés** d'un filet, qui prend le style et la couleur des filets de la charte. La formule d'édiction (« ARRÊTE »), les mentions et le bloc de signature connaissent le même encadré. Chaque encadré se règle **côté par côté** (« Bordures de l'encadré » : haut, droite, bas, gauche) : un seul filet se pose ainsi sous un intitulé, ou l'encadré s'ouvre d'un côté." },
           { term: "Listes", def: "Un acte comporte souvent des listes : à puces pour une énumération libre, **numérotées** pour un « 1° 2° 3° » réglementaire. C'est la trame qui décide, bloc par bloc, du genre de chaque liste (dans l'inspecteur, « Type de liste ») ; la charte dit ensuite à quoi elles ressemblent — la puce d'un côté, la numérotation de l'autre (« 1. », « 1° », « 1) », « a) », « A) », « i. », « I. »)." },
           { term: "Second emblème", def: "L'en-tête peut porter **deux** marques : celle de gauche (l'emblème habituel) et une **seconde, à droite** du filet — la marque de l'État, d'un partenaire, d'une délégation. Chacune a sa hauteur. Laissée vide, la seconde n'existe pas et le document se présente comme avant." },
+          { term: "Position des emblèmes", def: "Deux marques tiennent chacune un bout du filet ; ce qui se règle, c'est donc leur **écart** avec le texte, la **place du texte entre elles** (à gauche, centré, à droite), et leur **alignement vertical** l'une par rapport à l'autre (en haut, centrés, en bas) — deux emblèmes n'ont pas forcément la même hauteur. Quand il n'y a **qu'un** emblème, c'est « Alignement de l'en-tête » qui place l'ensemble. Les deux marques suivent la charte partout : aperçu, PDF, fichier Word, HTML autonome, **PDF/A** (où l'en-tête est repris sur chaque page)." },
           { term: "Graisse de l'autorité", def: "La **formule d'autorité** (« Le maire de… », « La présidente du CCAS de… ») se règle en **graisse** : normale, italique, **grasse**, ou grasse italique. C'est elle qui ouvre le dispositif de l'acte ; la mettre en gras la détache sans la dénaturer. Une feuille enregistrée avant ce réglage conserve exactement son rendu (« Hérité »)." },
           { term: "Aperçu", def: "À droite de l'écran, un acte type rendu par le **même code** que le PDF et l'export Word. Ce que vous voyez est ce qui sortira." },
         ] },
@@ -1069,7 +1078,7 @@ export const GUIDE = {
           { text: "Ouvrez **Feuilles de style** et choisissez une feuille dans la liste de gauche.", detail: "Sur une installation de démonstration, trois feuilles sont livrées : la charte générale, celle du CCAS, celle des actes individuels. « Nouvelle sous-feuille » en crée une ; « Dupliquer » part d'une existante." },
           { text: "Cliquez **Édition directe**, en haut de l'écran.", detail: "Le bouton d'affichage passe de « Réglages » à « Édition directe ». Cliquez alors un élément dans l'aperçu — l'intitulé, un tableau, le bloc de signature — : l'encadré bleu montre ce qui est réglé, et seuls ses réglages apparaissent. La barre de pastilles (« Papier », « En-tête », « Signature »…) permet d'atteindre directement une partie du document." },
           { text: "Pour partir d'une base, appliquez un **Modèle de départ**.", detail: "Dans la vue « Réglages » : « Solennel » pose un cadre double et des numéros d'article dans la marge, « Moderne » un bandeau et une police sans empattement, etc. Deux modèles suivent la **charte graphique de l'État** (bleu France, typographie Marianne, en-tête et filet) : « Charte graphique de l'État » — **réservé à l'État et à ses opérateurs**, la police Marianne et le bloc-marque n'étant pas livrés — et « Marianne-like », la même sobriété sans les éléments réservés, avec vos couleurs et votre identité, utilisable par toute administration. Le nom, le rattachement et le logo de la feuille sont conservés." },
-          { text: "Réglez ensuite ce qui fait l'identité du document.", detail: "Marges de page, police et corps, couleurs, en-tête et pied de page, filets, encadrés, tableaux, bloc de signature, cadre de page. Les polices se choisissent dans une liste, rangée par familles — « Autre » pour une police propre à la collectivité ; l'intitulé de l'acte et les intitulés d'article peuvent être **encadrés**, et l'on choisit alors les **côtés** tracés ; les listes numérotées prennent ici leur numérotation (« 1° 2° 3° »…). Chaque changement se répercute aussitôt dans l'aperçu. Les textes de l'en-tête et du pied acceptent des jetons : {{entity.name}}, {{brand.name}}, {{numero}}, {{objet}}, {{dateSignature}}…" },
+          { text: "Réglez ensuite ce qui fait l'identité du document.", detail: "Marges de page, police et corps, couleurs, en-tête et pied de page, filets, encadrés, tableaux, bloc de signature, cadre de page. Les polices se choisissent dans une liste, rangée par familles — « Autre » pour une police propre à la collectivité ; l'intitulé de l'acte et les intitulés d'article peuvent être **encadrés**, et l'on choisit alors les **côtés** tracés ; les listes numérotées prennent ici leur numérotation (« 1° 2° 3° »…). L'en-tête accepte **deux emblèmes** — un à gauche, un à droite du filet, chacun sa hauteur — et leur position se règle (écart avec le texte, place du texte entre eux, alignement vertical). Chaque changement se répercute aussitôt dans l'aperçu. Les textes de l'en-tête et du pied acceptent des jetons : {{entity.name}}, {{brand.name}}, {{numero}}, {{objet}}, {{dateSignature}}…" },
           { text: "Rattachez une sous-feuille à ses **entités** et à ses **familles** d'actes.", detail: "Dès qu'une entité ou une famille lui est associée, les actes concernés prennent cette charte — sans qu'on touche à leurs trames." },
           { text: "Pour un acte précis, désignez la feuille depuis l'onglet « Trame » de l'éditeur de trame.", detail: "Le champ « Feuille de style » de la trame l'emporte sur tout le reste. Laissez-le sur « Automatique » dans le cas général." },
           { text: "Vérifiez le résultat sur un vrai acte : **Actes → l'acte → Imprimer / PDF** ou **HTML**.", detail: "L'aperçu, le PDF, l'export Word, la page HTML autonome et le **PDF/A** appliquent tous la même charte. La **page du recueil public**, elle, ne l'applique pas (voir la note ci-dessous)." },
@@ -1168,7 +1177,7 @@ export const GUIDE = {
       icon: "check",
       minutes: 4,
       audience: "all",
-      keywords: "problème erreur aide dépannage écran blanc fichier perdu bug import docx odt word libreoffice brouillon mise à disposition modèle introuvable",
+      keywords: "problème erreur aide dépannage écran blanc fichier perdu bug import docx odt word libreoffice brouillon mise à disposition modèle introuvable éditer une trame éditer la trame corriger le modèle menu ⋯ administrateur éditeur",
       blocks: [
         { t: "p", text: "Presque tout se règle en trois gestes : attendre dix secondes, corriger la case signalée, ou recharger la page. Voici les cas les plus fréquents." },
         { t: "faq", items: [
@@ -1179,6 +1188,7 @@ export const GUIDE = {
           { q: "Rien ne s'ouvre quand je clique sur Imprimer / PDF", a: "Votre navigateur a peut-être bloqué la nouvelle fenêtre. Autorisez les fenêtres surgissantes (pop-up) pour ce site, puis réessayez. En dernier recours, utilisez « HTML complet » et imprimez depuis le navigateur." },
           { q: "Je me suis trompé dans un acte déjà enregistré", a: "Ouvrez-le depuis **Actes** → « Ouvrir », corrigez les cases, puis **Enregistrer** de nouveau. Si l'acte a déjà été signé ou publié, ne le modifiez pas : demandez à l'administrateur s'il faut un acte rectificatif." },
           { q: "Je ne trouve pas le modèle que je cherche", a: "Videz le champ de recherche et remettez les filtres sur « Toutes les familles » et « Tous les statuts ». Le modèle n'est peut-être pas encore **mis à disposition** : une trame en brouillon n'apparaît pas dans « Rédiger un acte ». Demandez à l'administrateur de la mettre à disposition." },
+          { q: "Je ne trouve pas l'option pour éditer une trame (corriger le modèle)", a: "Elle n'est pas sur la carte, mais **derrière le petit bouton carré à trois points « ⋯ »**, posé à droite du bouton « Rédiger » : ouvrez ce menu et choisissez « **Éditer la trame** ». Ce geste est réservé aux **administrateurs** et aux **éditeurs** — les autres profils ne voient ni le menu « ⋯ », ni l'entrée. La même entrée existe sur la carte du modèle dans « Rédiger un acte »." },
           { q: "On m'a importé un document Word, mais rien n'apparaît dans « Rédiger un acte »", a: "C'est normal, et c'est voulu. Un document importé (Word ou LibreOffice) devient une trame **en brouillon**, que l'on relit d'abord dans l'éditeur ; elle n'est proposée aux services qu'après le geste **« Mettre à disposition »**. Ouvrez la liste des trames : la carte porte la pastille « Brouillon » et le bouton qui l'ouvre." },
           { q: "L'import d'un document a échoué", a: "Vérifiez qu'il s'agit bien d'un **.docx** ou d'un **.odt** (et non d'un ancien **.doc**, ni d'un fichier enregistré « en texte »). Un document sans texte exploitable — une image seule, un tableau vide — ne peut pas devenir une trame : le message le dit, et rien n'est enregistré." },
           { q: "Je veux travailler depuis un autre ordinateur", a: "Tout dépend du mode de rangement. En **mode partagé** (base de la collectivité), vos trames et vos actes sont visibles depuis n'importe quel poste, avec le même compte. En **mode local** (démonstration), les données ne sont enregistrées que dans le navigateur de votre poste : pour les transférer, exportez — le PDF voyage par courriel, et les administrateurs peuvent exporter/importer l'ensemble depuis **Administration → Données**." },

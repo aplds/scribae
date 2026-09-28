@@ -16,7 +16,7 @@ import { state, can, navigate, majUrlRecherche, majUrlPublique } from "../state.
 import { h, clear, button, icon } from "../dom.js";
 import { estVisiteur } from "../../lib/users.js";
 import { brandLogoUrl } from "../../lib/theme.js";
-import { demoNotice } from "../notice.js";
+import { demoNotice, bandeauxNotice } from "../notice.js";
 import { chatErreurEl } from "../chats-erreur.js";
 import { mentionAffichee, contenuMention } from "../mention.js";
 import { renderMarkdown } from "../markdown.js";
@@ -27,6 +27,7 @@ import { publicationsLocales, publicationLocale, informationsLocales }
   from "../../lib/publications-locales.js";
 import { amorcerRecueil, amorcageEnCours } from "../demo-publications.js";
 import { isLocalMode } from "../../lib/db/index.js";
+import { veille, DELAI_RELECTURE } from "../../lib/relecture.js";
 import { get, post, bodyOf, errorMessage } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { formatDate } from "../../lib/util.js";
@@ -83,6 +84,21 @@ function etat() {
   // redessin.
   st.bulletinsActes = st.bulletinsActes || {};
   if (st.afficherAbroges === undefined) st.afficherAbroges = false;
+  // La veille de chaque lecture : elle porte le souvenir d'un échec, pour ne pas
+  // prendre un service muet pour une réponse vide (src/lib/relecture.js).
+  st.listeVeille = st.listeVeille || veille();
+  st.infosVeille = st.infosVeille || veille();
+  st.bulletinsVeille = st.bulletinsVeille || veille();
+  // COHÉRENCE — un billet PUBLIÉ au poste doit être dans la liste affichée. En
+  // régime local, le recueil lit le service ET fusionne les billets du poste
+  // (voir `fusionnerInformations`) : si un billet publié manque à la liste
+  // gardée, c'est que la lecture s'est faite trop tôt (référentiel pas encore
+  // chargé) ou que le service se taisait — on la refait, au lieu de laisser la
+  // rubrique s'effacer sans raison. C'est la moitié « cohérence » de la règle.
+  if (Array.isArray(st.infos) && isLocalMode()) {
+    const vus = new Set(st.infos.map((i) => String(i && i.id)));
+    if (informationsLocales(state.informations).some((i) => !vus.has(String(i.id)))) st.infos = null;
+  }
   return st;
 }
 
@@ -138,20 +154,45 @@ export const redessinerRecueilPublic = () => rafraichir();
 // enregistrements rendus à la publication sont gardés sur leurs actes (voir
 // src/lib/publications-locales.js), et on les relit ici.
 function charger(st) {
-  if (st.liste || st.chargement) return;
+  if (st.liste || st.chargement || !st.listeVeille.prete) return;
   st.chargement = true;
   get("/v1/publications", { label: "Recueil public", source: "lecture" })
     .then((r) => {
       const duService = r.ok ? (bodyOf(r).publications || []) : [];
+      // Une réponse VIDE est une réponse ; un ÉCHEC n'en est pas une : le repli
+      // local est repris, et la lecture reste à rejouer (voir la veille).
       st.liste = fusionnerPublications(duService);
-      st.erreur = st.liste.length || r.ok ? null : bodyOf(r).erreur || `Registre indisponible (${r.status}).`;
+      if (st.liste.length || r.ok) { st.erreur = null; st.listeVeille.succes(); }
+      else {
+        st.liste = null;
+        st.erreur = bodyOf(r).erreur || `Registre indisponible (${r.status}).`;
+        st.listeVeille.echec();
+        planifierReprise("liste");
+      }
     })
     .catch((e) => {
       const locales = publicationsLocales(registreLocal(), { reserveVue: voitReserve() });
-      st.liste = locales;
+      st.liste = locales.length ? locales : null;
       st.erreur = locales.length ? null : String((e && e.message) || e);
+      if (locales.length) st.listeVeille.succes();
+      else { st.listeVeille.echec(); planifierReprise("liste"); }
     })
     .finally(() => { st.chargement = false; rafraichir(); });
+}
+
+// Une lecture qui a ÉCHOUÉ se rejoue d'elle-même : le visiteur n'a rien à faire
+// pour que l'information revienne — sans quoi il faudrait recharger la page.
+// La reprise passe par le redessin, qui réarme les lectures (voir `rafraichir`) ;
+// le délai de la veille est écoulé quand ce minuteur s'arme, la lecture est donc
+// rejouée. Les trois lectures ont leur minuteur : un service revenu les rétablit
+// toutes, sans se marcher les unes sur les autres.
+const reprises = { liste: null, infos: null, bulletins: null };
+function planifierReprise(quoi) {
+  if (reprises[quoi]) return;
+  reprises[quoi] = setTimeout(() => {
+    reprises[quoi] = null;
+    if (monte) rafraichir();
+  }, DELAI_RELECTURE + 400);
 }
 
 // Ce que le LECTEUR a le droit de voir : un acte à diffusion restreinte n'est
@@ -194,13 +235,21 @@ function fusionnerPublications(duService) {
 let rangInfos = 0;
 
 function chargerInformations(st) {
-  if (st.infos !== null || st.chargementInfos) return;
+  if (st.infos !== null || st.chargementInfos || !st.infosVeille.prete) return;
   st.chargementInfos = true;
   const rang = (rangInfos += 1);
-  const poser = (duService) => { if (rang === rangInfos) st.infos = fusionnerInformations(duService); };
+  // `aboutie` distingue la RÉPONSE (même vide) de l'ÉCHEC : seule une réponse
+  // conclut. Un échec laisse la place vide, mais À RELIRE — c'était le défaut
+  // d'origine : la liste vide d'un service muet était gardée pour toujours, et
+  // la rubrique des informations ne revenait plus jamais.
+  const poser = (duService, aboutie) => {
+    if (rang !== rangInfos) return;
+    if (aboutie) { st.infos = fusionnerInformations(duService); st.infosVeille.succes(); }
+    else { st.infos = null; st.infosVeille.echec(); planifierReprise("infos"); }
+  };
   get("/v1/informations", { label: "Informations publiées", source: "lecture" })
-    .then((r) => poser(r.ok ? (bodyOf(r).informations || []) : []))
-    .catch(() => poser([]))
+    .then((r) => poser(r.ok ? (bodyOf(r).informations || []) : [], r.ok))
+    .catch(() => poser([], false))
     .finally(() => { if (rang === rangInfos) { st.chargementInfos = false; rafraichir(); } });
 }
 
@@ -236,13 +285,18 @@ function fusionnerInformations(duService) {
 //   null       on a demandé, et il n'y a pas de bulletin à montrer ;
 //   objet      l'état public du bulletin.
 function chargerBulletins(st) {
-  if (st.bulletins !== undefined || st.chargementBulletins) return;
+  if (st.bulletins !== undefined || st.chargementBulletins || !st.bulletinsVeille.prete) return;
   st.chargementBulletins = true;
   bs.chargerPublic({ silencieux: true })
     .catch(() => null)
     .finally(() => {
       st.chargementBulletins = false;
-      st.bulletins = bs.etat.publicEtat || null;
+      // Le service a-t-il RÉPONDU ? Un service antérieur qui ne connaît pas la
+      // route répond « 404 » : c'est une réponse, et elle vaut « pas de
+      // bulletin ». Un service muet, lui, n'a rien répondu — on ne conclut pas,
+      // et l'on repassera (voir src/lib/relecture.js).
+      if (bs.etat.repondu) { st.bulletins = bs.etat.publicEtat || null; st.bulletinsVeille.succes(); }
+      else { st.bulletins = undefined; st.bulletinsVeille.echec(); planifierReprise("bulletins"); }
       rafraichir();
     });
 }
@@ -335,12 +389,12 @@ function formulaireAbonnement(etatB) {
       h("h2", { class: "recueil-abon__titre", text: "Recevoir le bulletin" }),
       h("p", { class: "recueil-abon__aide", text: etatB.motifAbonnement || "L'abonnement par courriel n'est pas ouvert sur ce recueil." }));
   }
-  const courriel = h("input", { class: "fr-input", type: "email", required: true, autocomplete: "email", placeholder: "prenom.nom@exemple.fr", "aria-label": "Votre adresse électronique" });
-  const nom = h("input", { class: "fr-input", type: "text", autocomplete: "name", placeholder: "Votre nom (facultatif)", "aria-label": "Votre nom" });
+  const courriel = h("input", { class: "fr-input", type: "email", id: "recueil-abon-courriel", required: true, autocomplete: "email", placeholder: "prenom.nom@exemple.fr", "aria-label": "Votre adresse électronique" });
+  const nom = h("input", { class: "fr-input", type: "text", id: "recueil-abon-nom", autocomplete: "name", placeholder: "Votre nom (facultatif)", "aria-label": "Votre nom" });
   const message = h("p", { class: "recueil-abon__message fr-small", hidden: true });
   const form = h("form", { class: "recueil-abon__form" },
-    h("label", { class: "recueil-abon__label", text: "Votre adresse électronique" }), courriel,
-    h("label", { class: "recueil-abon__label", text: "Votre nom (facultatif)" }), nom,
+    h("label", { class: "recueil-abon__label", for: "recueil-abon-courriel", text: "Votre adresse électronique" }), courriel,
+    h("label", { class: "recueil-abon__label", for: "recueil-abon-nom", text: "Votre nom (facultatif)" }), nom,
     h("div", {}, button("Demander l'abonnement", { variant: "primary", type: "submit" })),
     message);
   form.addEventListener("submit", async (e) => {
@@ -778,10 +832,12 @@ function vue(st, params) {
     // Le recueil est public, mais s'il montre des données de démonstration, il
     // le dit : le bandeau marque l'installation, pas l'acte. Le lien « Réglage »
     // n'apparaît qu'à un administrateur connecté ; un visiteur ne voit que la
-    // mention.
+    // mention. Les messages de l'administration (maintenance…) suivent, pour
+    // les visiteurs comme pour les agents.
     demoNotice(can("referentiel.gerer")
       ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
       : null),
+    ...bandeauxNotice(),
     entete(),
     cle ? acte(st, cle) : accueil(st),
     pied(st));
@@ -875,6 +931,7 @@ function enveloppe(st, main) {
     demoNotice(can("referentiel.gerer")
       ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
       : null),
+    ...bandeauxNotice(),
     entete(),
     main,
     pied(st));
@@ -1035,7 +1092,14 @@ function informationsZone(st) {
   const reglages = reglagesInformations(state.config);
   if (!reglages.actif) return null;
   const liste = informationsOrdonnees(st.infos || []);
-  if (!liste.length) return null;
+  // Une lecture qui n'a pas CONCLU n'est pas une rubrique vide : la rubrique
+  // s'affiche, en disant qu'elle charge. Sans cela, un visiteur arrivé pendant
+  // la lecture ne voyait AUCUNE rubrique Informations — elle « disparaissait »
+  // de son écran le temps que la réponse arrive, et pour de bon quand le
+  // service se taisait. La page « Informations » faisait déjà la distinction
+  // (voir `pageInformations`) ; c'est la même règle, au même endroit.
+  const enLecture = st.infos === null;
+  if (!liste.length && !enLecture) return null;
   const montrees = liste.slice(0, 3);
   const zone = h("section", { class: "recueil-section recueil-infos", hidden: filtreActif(st) },
     h("div", { class: "recueil-section__tete" },
@@ -1043,7 +1107,9 @@ function informationsZone(st) {
         h("h2", { class: "recueil-section__title", text: reglages.titre }),
         h("p", { class: "recueil-section__sous", text: reglages.intro || "Les nouvelles publiées par la collectivité." })),
       h("a", { class: "recueil-lien", href: hrefPage("informations") }, "Toutes les informations")),
-    h("ul", { class: "recueil-infos__liste recueil-infos__liste--accueil" }, ...montrees.map((i) => carteInfo(i))));
+    enLecture
+      ? h("p", { class: "recueil-vide", text: "Chargement des informations…" })
+      : h("ul", { class: "recueil-infos__liste recueil-infos__liste--accueil" }, ...montrees.map((i) => carteInfo(i))));
   sectionInfos = zone;
   return zone;
 }

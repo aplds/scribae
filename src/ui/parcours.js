@@ -32,7 +32,9 @@ export function bandeauParcours(parcours, { compact = false, note = "", nu = fal
       class: "pc-parcours__phase pc-parcours__phase--" + (p.etat || "avenir"),
       title: [p.titre, p.acteur, p.hint].filter(Boolean).join(" — "),
     },
-      i ? h("span", { class: "pc-parcours__sep", text: "›" }) : null,
+      // Le « › » sépare deux phases pour l'œil : il ne dit rien à un lecteur
+      // d'écran, et son contraste est celui d'un ornement (NC-III-013).
+      i ? h("span", { class: "pc-parcours__sep", "aria-hidden": "true", text: "›" }) : null,
       h("span", { class: "pc-parcours__puce" }, h("span", { class: "pc-parcours__num", text: String(i + 1) })),
       h("span", { class: "pc-parcours__label", text: p.label }),
       // Une porte passée sans être franchie se dit : le fil ne doit pas laisser

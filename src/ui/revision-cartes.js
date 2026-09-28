@@ -12,7 +12,7 @@
 // l'appelant (src/lib/conformite.js). Il ne connaît donc ni les trames ni les
 // actes, seulement ce qu'il affiche.
 // ============================================================================
-import { h, button } from "./dom.js";
+import { h, button, field as frField } from "./dom.js";
 import { formatDate } from "../lib/util.js";
 import { NIVEAUX, resumeRapport } from "../lib/conformite.js";
 import { validerRevisionActe, rejeterRevisionActe } from "./revision-actions.js";
@@ -107,8 +107,7 @@ export function carteDecision(a, rapport, { heading = "h2" } = {}) {
   return h("div", { class: "fr-card parapheur-decision" },
     h(heading, { class: "fr-card__title", text: "Décision du réviseur" }),
     h("p", { class: "fr-small fr-muted", text: "Valider envoie l'acte en signature ; rejeter le renvoie en brouillon chez son rédacteur, avec votre motif." }),
-    h("label", { class: "fr-label", text: "Observation / motif de rejet" }),
-    zone,
+    frField("Observation / motif de rejet", zone),
     h("div", { class: "fr-row", style: { marginTop: "10px" } },
       button("Valider et envoyer en signature", { variant: "primary", icon: "check", onClick: () => validerRevisionActe(a, { rapport }) }),
       button("Rejeter", { variant: "danger", icon: "x", onClick: () => rejeterRevisionActe(a, zone.value, { rapport }) }),

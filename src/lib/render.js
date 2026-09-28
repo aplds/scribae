@@ -11,6 +11,19 @@ const el = (tag, cls, text) => {
   return n;
 };
 
+// LE RANG D'UN TITRE, QUAND LE DOCUMENT EST MONTRÉ DANS UN ÉCRAN.
+//
+// Un aperçu à l'écran n'est pas le document : la page qui le porte a déjà son
+// titre de niveau 1 — celui de l'écran (« Rédiger », « Détail de l'acte »…). Le
+// document prévisualisé décale donc toute son échelle d'un rang, et la page
+// garde un seul `h1` (NC-III-014). L'ordre interne du document est conservé :
+// son titre reste au-dessus de ses divisions, qui restent au-dessus de ses
+// articles.
+//
+// L'export et l'impression, eux, rendent le document POUR LUI-MÊME : ils
+// gardent l'échelle d'origine (son intitulé EST le titre du document).
+const rang = (tag, opts) => (opts && opts.apercu ? "h" + Math.min(6, Number(tag[1]) + 1) : tag);
+
 // La marque d'une liste, quand le bloc ne suit pas la feuille de style (voir
 // `LIST_MARKERS` / `LIST_NUMBERINGS`, lib/schema.js). Les valeurs des listes
 // numérotées sont les noms des compteurs déclarés par la feuille (« 1° », « a) »,
@@ -124,8 +137,8 @@ export function renderDocument(doc, config, opts = {}) {
     if (o.sansSignature && node.type === "signature") continue;
     root.appendChild(renderNode(node, config, o));
   }
-  if (opts.showNotes && doc?.notes?.length) root.appendChild(notesAppendix(doc, config));
-  if (tracking && doc?.trail?.length && opts.showTrail !== false) root.appendChild(trailAppendix(doc, config));
+  if (opts.showNotes && doc?.notes?.length) root.appendChild(notesAppendix(doc, config, o));
+  if (tracking && doc?.trail?.length && opts.showTrail !== false) root.appendChild(trailAppendix(doc, config, o));
   // Les documents ANNEXÉS : l'original de l'acte qui les adopte est SUIVI de
   // leur texte, sur une page à eux (voir `annexePart` ci-dessous). Un document
   // annexé qui porterait lui-même des annexes ne les reprend pas (`annexes:
@@ -168,6 +181,7 @@ function annexePart(joint, config, opts = {}, style = null) {
       showPaths: opts.showPaths,
       abrogations: opts.abrogations,
       compact: opts.compact,
+      apercu: opts.apercu,
     }));
   }
   return sec;
@@ -273,7 +287,7 @@ export function renderNode(node, config, opts = {}) {
   let element;
   switch (node.type) {
     case "title":
-      element = el("h1", cls("title"), node.text);
+      element = el(rang("h1", opts), cls("title"), node.text);
       break;
     case "authority":
       element = el("p", cls("authority"), node.text);
@@ -330,7 +344,7 @@ export function renderNode(node, config, opts = {}) {
       const sec = el("section", cls("division") + ` doc-division--n${niveau}`);
       if (node.path && opts.showPaths) sec.dataset.path = node.path;
       if (node.eId) sec.dataset.eid = node.eId;
-      const tag = ["h2", "h3", "h4", "h5"][Math.min(niveau, 4) - 1];
+      const tag = rang(["h2", "h3", "h4", "h5"][Math.min(niveau, 4) - 1], opts);
       const head = el(tag, cls("division-head"));
       head.appendChild(el("span", cls("division-num"), node.numLabel || node.levelLabel || ""));
       if (node.heading) head.appendChild(el("span", cls("division-heading"), (node.numLabel || node.levelLabel ? " – " : "") + node.heading));
@@ -348,7 +362,7 @@ export function renderNode(node, config, opts = {}) {
       // `annexePart`). Un renvoi n'est porté que si l'annexe a une adresse de
       // recueil à elle — le cas d'un document publié avant cette règle.
       const box = el("section", cls("annexes"));
-      box.appendChild(el("h2", cls("annexes-title"), annexesVocab(config).sectionTitle));
+      box.appendChild(el(rang("h2", opts), cls("annexes-title"), annexesVocab(config).sectionTitle));
       const ul = el("ul", cls("annexes-list"));
       for (const it of node.items || []) {
         const li = el("li", cls("annexes-item"));
@@ -374,7 +388,7 @@ export function renderNode(node, config, opts = {}) {
       const sec = el("section", cls("article"));
       if (node.path && opts.showPaths) sec.dataset.path = node.path;
       if (node.eId) sec.dataset.eid = node.eId;
-      const head = el("h2", cls("article-head"));
+      const head = el(rang("h2", opts), cls("article-head"));
       head.appendChild(el("span", cls("article-num"), node.numLabel));
       if (node.heading) head.appendChild(el("span", cls("article-heading"), " – " + node.heading));
       sec.appendChild(head);
@@ -488,9 +502,9 @@ export function renderNode(node, config, opts = {}) {
   return decorate(node, element, opts);
 }
 
-function notesAppendix(doc, config) {
+function notesAppendix(doc, config, opts = {}) {
   const box = el("section", "doc-notes");
-  box.appendChild(el("h3", "doc-notes__title", "Notes de préparation (non publiées)"));
+  box.appendChild(el(rang("h3", opts), "doc-notes__title", "Notes de préparation (non publiées)"));
   const ul = el("ul", "doc-notes__list");
   for (const n of doc.notes || []) {
     const li = el("li", "doc-notes__item");
@@ -513,10 +527,10 @@ function notesAppendix(doc, config) {
 
 // Tableau des modifications : c'est la « trace » exigée pour la version
 // consolidée. Une entrée par acte modificatif, dans l'ordre chronologique.
-function trailAppendix(doc, config) {
+function trailAppendix(doc, config, opts = {}) {
   const v = config?.vocab?.amendment || {};
   const box = el("section", "doc-trail");
-  box.appendChild(el("h3", "doc-trail__title", doc.trailTitle || v.trailTitle || "Tableau des modifications"));
+  box.appendChild(el(rang("h3", opts), "doc-trail__title", doc.trailTitle || v.trailTitle || "Tableau des modifications"));
   for (const entry of doc.trail || []) {
     const head = el("p", "doc-trail__entry");
     head.textContent = `${entry.designation || "Acte"} n° ${entry.numero || "—"} du ${formatDate(entry.date, "date-long")}`;

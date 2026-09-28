@@ -198,7 +198,9 @@ export function renderDocs(root, params) {
       tocCol.hidden = true;
       grid.classList.add("docs-grid--sanstoc");
     }
-    view.appendChild(h("article", { class: "md" }, renderMarkdown(text)));
+    // Le document a ses propres titres : ils se rangent SOUS celui de l'écran,
+    // un cran plus bas (NC-III-014) — balise ET classe, donc l'apparence suit.
+    view.appendChild(h("article", { class: "md" }, renderMarkdown(text, { decalage: 1 })));
   }).catch((err) => {
     clear(view);
     clear(tocCol);
@@ -243,7 +245,7 @@ function printCurrent(doc) {
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function printableHtml(doc, text) {
-  const rendered = h("article", { class: "md" }, renderMarkdown(text));
+  const rendered = h("article", { class: "md" }, renderMarkdown(text, { decalage: 1 }));
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>${escapeHtml(doc.title)}</title>
 <style>

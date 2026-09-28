@@ -771,6 +771,12 @@ export const emptyConfig = () => ({
   // d'une feuille, `emptyStyle()`. Vide, l'application retombe sur l'identité
   // de la marque (comportement historique).
   styles: [],
+  // Bandeaux d'information (voir src/lib/bandeaux.js) : les messages que
+  // l'administration affiche en tête de l'application et sur le recueil public
+  // — maintenance programmée, alerte, annonce. Chacun porte son titre, sa
+  // couleur et son contenu, et ne s'affiche que quand il est allumé : on les
+  // PRÉPARE à l'avance, on les allume le moment venu. Vide : aucun bandeau.
+  bandeaux: [],
   actTypes: [
     { id: "decision", label: "Décision", aknElement: "act" },
     { id: "reglement", label: "Règlement intérieur", aknElement: "act" },

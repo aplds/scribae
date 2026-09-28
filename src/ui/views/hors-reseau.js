@@ -16,7 +16,7 @@ import { state, navigate, logout } from "../state.js";
 import { h, icon, button } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
-import { demoNotice } from "../notice.js";
+import { demoNotice, bandeauxNotice } from "../notice.js";
 import { chatErreurEl } from "../chats-erreur.js";
 import { acces } from "../../lib/atelier-acces.js";
 
@@ -77,6 +77,7 @@ export function renderHorsReseau(root) {
 
   root.appendChild(h("div", { class: "connexion sans-acces" },
     demoNotice(),
+    ...bandeauxNotice(),
     h("div", { class: "connexion__theme" }, themeButton()),
     h("div", { class: "connexion__stage" }, card),
   ));

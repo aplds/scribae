@@ -86,14 +86,24 @@ if (location.hostname === "demo.scribae.eu") {
 
 const SERVICE = "Service de signature et de publication";
 const SERVICE_VERSION = "1.0.0";
-// Version du format d'état. La 2 porte une longueur sur **32 bits** : la 1 la
+// Version du format d'état. La 2 portait une longueur sur **32 bits** : la 1 la
 // rangeait dans une seule unité UTF-16, donc elle débordait silencieusement dès
 // que l'état JSON dépassait 65 535 caractères — saveDb écrivait une longueur
-// fausse, loadDb relisait un document tronqué et repartait de zéro. Un état à
-// l'ancien format est simplement recommencé (cas décrit par le commentaire de
-// `loadDb`).
-const STATE_VERSION = 2;
-const MAX_CHARS = 8000000;   // capacité maximale du document JSON stocké
+// fausse, loadDb relisait un document tronqué et repartait de zéro.
+//
+// La 3 écrit l'état en DOUBLE TAMPON (deux copies, un index actif), pour la
+// raison qui suit. La couche de persistance de l'environnement peut prélever un
+// instantané de `state` À TOUT MOMENT, y compris au milieu d'une écriture : avec
+// une seule copie, un instantané pris là portait la longueur neuve et un mélange
+// d'anciens et de nouveaux caractères — un document illisible, et l'état ainsi
+// PERDU (c'est l'« état qui ne survit pas toujours » de l'aperçu). Une copie
+// reste donc toujours intacte : on écrit l'autre, puis on bascule l'index d'un
+// seul mot. Le prix est que la place se partage entre les deux copies : le
+// plafond d'un document est celui d'UNE copie (`MAX_COPIE`, calculé sur la
+// taille réelle de `state`). Un état à l'ancien format est simplement
+// recommencé (cas décrit par le commentaire de `loadDb`).
+const STATE_VERSION = 3;
+const MAX_CHARS = 8000000;   // plafond d'UNE copie du document JSON stocké
 const MAX_DOC = 400000;      // taille maximale d'un document accepté par l'API
 // Taille maximale d'une PIÈCE (son contenu, en base64). Les fichiers joints —
 // l'original signé d'une reprise, la version signée d'un acte du circuit
@@ -122,31 +132,57 @@ const ROLES = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire
 
 // ------------------------------------------------------------------- stockage
 // En-tête (unités UTF-16) : [0] version, [1] poids faible de la longueur,
-// [2] poids fort, [3] réservé. La suite est le JSON, `HEADER` unités plus loin.
+// [2] poids fort, [3] index de la copie ACTIVE. La suite porte DEUX copies du
+// document, à des places fixes (voir `SLOT`) : chacune commence par sa propre
+// longueur (deux unités), puis son JSON. La longueur de L'EN-TÊTE décrit la
+// RÉGION UTILISÉE (les deux copies), pour que l'hôte qui enregistre l'état
+// (`etatUtilise`, src/pages/host.js) recopie bien tout ce qu'il faut — le
+// lecteur, lui, ne s'y fie pas : chaque copie porte sa longueur.
 const U16_OFFSET = state.byteOffset + (state.byteOffset % 2);
 const U16 = new Uint16Array(state.buffer, U16_OFFSET, Math.floor((state.length - (U16_OFFSET - state.byteOffset)) / 2));
 const HEADER = 4;
+// Ce que chaque copie peut tenir : la moitié de la place, moins son en-tête.
+const SLOT = Math.max(2, Math.floor((U16.length - HEADER) / 2));
+const MAX_COPIE = Math.max(0, Math.min(MAX_CHARS, SLOT - 2));
+const debCopie = (i) => HEADER + (i ? SLOT : 0);
+// LA VERSION EST POSÉE UNE FOIS, À L'AMORÇAGE — et jamais réécrite. C'est ce qui
+// permet à une écriture de ne toucher QUE la copie inactive et l'index : un
+// instantané de `state` pris n'importe quand porte donc toujours une version
+// stable, et la copie qu'elle désigne est toujours complète. Un état à l'ancien
+// format (ou vierge) est simplement recommencé : sa version réécrite, sa
+// première copie relue ne passe pas le contrôle d'en-tête, et `loadDb` rend un
+// état vide.
+U16[0] = STATE_VERSION;
 
 function dbVide() {
   return { v: STATE_VERSION, seq: 0, actes: {}, signatures: {}, publies: {}, idem: {}, collections: {}, cles: {}, journal: [], pieces: {} };
 }
 
+// `loadDb` marque ici si la relecture a ABOUTI. C'est ce qui dit, à l'amorçage,
+// s'il faut repartir d'un en-tête vierge — premier démarrage, format ancien, ou
+// état abîmé : dans les trois cas, aucune copie n'est lisible, et garder une
+// longueur ou un index qui ne désignent rien ferait relire à `saveDb` des
+// octets laissés par un format précédent.
+let copieValide = false;
+
 function loadDb() {
   if (U16[0] !== STATE_VERSION) return dbVide();
-  const n = longueur();   // 32 bits, en unités UTF-16
-  if (!n || n > MAX_CHARS || n > U16.length - HEADER) return dbVide();
+  // La copie ACTIVE est la seule qu'on lise : l'autre peut être à demi écrite.
+  const actif = U16[3] === 1 ? 1 : 0;
+  const deb = debCopie(actif);
+  const n = U16[deb] + U16[deb + 1] * 65536;   // 32 bits, en unités UTF-16
+  if (!n || n > MAX_COPIE || deb + 2 + n > U16.length) return dbVide();
   // Contrôle d'en-tête, AVANT toute lecture de masse : un document d'état
-  // commence toujours par « {"v" » et finit toujours par « } ». Un état à demi
-  // écrit (un instantané pris au milieu de `saveDb`, voir plus bas) porte une
-  // longueur qui ne correspond à rien ; le reconnaître ici coûte deux unités,
-  // là où le relire coûterait de construire une chaîne de plusieurs mégaoctets
-  // — de quoi dépasser le budget de calcul d'un gestionnaire.
-  if (U16[HEADER] !== 0x7b || U16[HEADER + 1] !== 0x22 || U16[HEADER + n - 1] !== 0x7d) return dbVide();
+  // commence toujours par « {"v" » et finit toujours par « } ». Un état abîmé
+  // porte une longueur qui ne correspond à rien ; le reconnaître ici coûte deux
+  // unités, là où le relire coûterait de construire une chaîne de plusieurs
+  // mégaoctets — de quoi dépasser le budget de calcul d'un gestionnaire.
+  if (U16[deb + 2] !== 0x7b || U16[deb + 3] !== 0x22 || U16[deb + 2 + n - 1] !== 0x7d) return dbVide();
   let s = "";
   const CH = 8192;
   for (let i = 0; i < n; i += CH) {
     const end = Math.min(n, i + CH);
-    s += String.fromCharCode.apply(null, U16.subarray(HEADER + i, HEADER + end));
+    s += String.fromCharCode.apply(null, U16.subarray(deb + 2 + i, deb + 2 + end));
   }
   try {
     const db = JSON.parse(s);
@@ -158,6 +194,7 @@ function loadDb() {
     db.cles = db.cles || {};
     db.journal = db.journal || [];
     db.pieces = db.pieces || {};
+    copieValide = true;
     return db;
   } catch (e) {
     console.log("État illisible, réinitialisation :", String(e));
@@ -165,7 +202,9 @@ function loadDb() {
   }
 }
 
-// La longueur occupe deux unités : elle doit tenir sur 32 bits, pas 16.
+// La longueur de l'en-tête décrit la RÉGION UTILISÉE (les deux copies), en
+// unités, à partir de HEADER. Elle occupe deux unités : elle doit tenir sur
+// 32 bits, pas 16.
 const longueur = () => U16[1] + U16[2] * 65536;
 function setLongueur(n) {
   U16[1] = n % 65536;
@@ -199,27 +238,50 @@ function asciiSeul(s) {
 
 function saveDb(db) {
   const s = asciiSeul(JSON.stringify(db));
-  if (s.length > MAX_CHARS || s.length > U16.length - HEADER) {
-    console.log("État plein : écriture refusée (" + s.length + " unités)");
+  if (s.length > MAX_COPIE) {
+    console.log("État plein : écriture refusée (" + s.length + " unités, plafond d'une copie " + MAX_COPIE + ")");
     return false;
   }
-  // Écriture EN DEUX TEMPS. La couche de persistance de l'environnement peut
+  // ÉCRITURE EN DOUBLE TAMPON. La couche de persistance de l'environnement peut
   // prélever un instantané de `state` à tout moment — y compris au milieu de
-  // cette boucle. Un instantané pris là porterait la longueur NOUVELLE et un
-  // mélange d'anciens et de nouveaux caractères : un document illisible, qu'on
-  // ne pouvait jusqu'ici reconnaître qu'après l'avoir relu en entier. La
-  // version est donc effacée AVANT la première écriture et rétablie EN DERNIER
-  // geste : un instantané pris au milieu se reconnaît à sa version, sans rien
-  // relire (voir `loadDb`). Le lecteur suivant repart alors d'un état vide, au
-  // lieu de payer la relecture d'un document tronqué.
-  U16[0] = 0;
-  setLongueur(s.length);
-  for (let i = 0; i < s.length; i++) U16[HEADER + i] = s.charCodeAt(i);
-  U16[0] = STATE_VERSION;
+  // cette fonction. On écrit donc la copie INACTIVE (celle que le lecteur ne
+  // regarde pas), puis on ne touche qu'UN SEUL mot pour basculer : l'index actif.
+  // Un instantané pris avant la bascule voit l'ancienne copie, intacte ; pris
+  // après, la neuve, complète. Aucun mélange d'ancien et de neuf n'est possible,
+  // là où une copie unique se corrompait — et l'état était alors perdu.
+  const actif = U16[3] === 1 ? 1 : 0;
+  const cible = actif ? 0 : 1;
+  const deb = debCopie(cible);
+  U16[deb] = s.length % 65536;
+  U16[deb + 1] = (s.length - U16[deb]) / 65536;
+  for (let i = 0; i < s.length; i++) U16[deb + 2 + i] = s.charCodeAt(i);
+  U16[3] = cible;
+  // SI LA COPIE NEUVE EST EN HAUT, ON LA REDESCEND EN BAS (`copyWithin`, aucune
+  // réallocation) : la région que l'hôte a à recopier reste ainsi celle d'un
+  // petit document, au lieu d'atteindre la moitié du tampon. L'index reste braqué
+  // sur la copie COMPLÈTE pendant la descente : un instantané pris là rend donc
+  // encore, à coup sûr, la version neuve.
+  if (cible === 1) {
+    U16.copyWithin(HEADER, debCopie(1), debCopie(1) + 2 + s.length);
+    U16[3] = 0;
+  }
+  // La longueur de l'en-tête est la FIN de la copie ACTIVE, à partir de HEADER :
+  // c'est exactement ce que l'hôte doit recopier pour qu'une relecture trouve
+  // une copie entière (`etatUtilise`, src/pages/host.js), et rien de plus.
+  setLongueur((U16[3] ? SLOT : 0) + 2 + s.length);
   return true;
 }
 
 const db = loadDb();
+// Aucune copie lisible (premier démarrage, ancien format, état abîmé) : l'en-tête
+// est remis à zéro AVANT la première écriture, en-têtes de copie compris, pour
+// qu'aucune longueur héritée d'un format précédent ne soit prise pour une copie.
+if (!copieValide) {
+  U16[1] = 0;
+  U16[2] = 0;
+  U16[3] = 0;
+  for (const i of [0, 1]) { U16[debCopie(i)] = 0; U16[debCopie(i) + 1] = 0; }
+}
 
 function nextId(prefix, table) {
   let n = (db.seq || 0) + 1;
@@ -917,14 +979,14 @@ function hSante() {
   return ok(200, {
     statut: "ok", service: SERVICE, version: SERVICE_VERSION, maintenant: nowIso(),
     objets: { actes: Object.keys(db.actes).length, signatures: Object.keys(db.signatures).length, publications: Object.keys(db.publies).length },
-    // Capacité utile de la mémoire durable, en unités UTF-16 (l'en-tête déduit).
-    // Sert à savoir de combien de place on dispose encore.
-    capacite: U16.length - HEADER,
-    // Place RÉELLEMENT occupée par l'état, en unités UTF-16 (en-tête compris) :
-    // c'est ce que l'écriture de l'état a à recopier à chaque geste, et donc ce
-    // qui commande le coût d'un gestionnaire. Un état qui grossit sans fin finit
-    // par coûter plus que le budget d'une requête : cette mesure est là pour le
-    // voir venir (voir `saveDb`, et MAX_CHARS).
+    // Capacité utile d'une COPIE du document, en unités UTF-16 (l'état est écrit
+    // en double tampon : la place se partage entre les deux — voir `saveDb`).
+    capacite: MAX_COPIE,
+    // Place RÉELLEMENT occupée par l'état, en unités UTF-16 (en-tête et les deux
+    // copies compris) : c'est ce que l'écriture de l'état a à recopier à chaque
+    // geste, et donc ce qui commande le coût d'un gestionnaire. Un état qui
+    // grossit sans fin finit par coûter plus que le budget d'une requête : cette
+    // mesure est là pour le voir venir (voir `saveDb`, et MAX_CHARS).
     utilise: (U16[0] === STATE_VERSION ? longueur() : 0) + HEADER,
   });
 }

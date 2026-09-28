@@ -54,13 +54,17 @@ export function renderTrames(root) {
   }
 
   // filtres
+  // Les trois filtres n'ont pas d'étiquette VISIBLE (la barre est serrée) : ils
+  // portent donc leur nom en `aria-label`, sans quoi un lecteur d'écran annonce
+  // trois listes sans objet (NC-III-009).
   const filters = h("div", { class: "fr-row", style: { gap: "10px" } },
     h("input", {
       class: "fr-input", style: { maxWidth: "260px" }, placeholder: "Rechercher…", value: ui.q,
+      "aria-label": "Rechercher une trame",
       on: { input: (e) => { ui.q = e.target.value; redraw(); } },
     }),
     (() => {
-      const s = h("select", { class: "fr-select", style: { maxWidth: "260px" }, on: { change: (e) => { ui.family = e.target.value; redraw(); } } });
+      const s = h("select", { class: "fr-select", style: { maxWidth: "260px" }, "aria-label": "Famille de la trame", on: { change: (e) => { ui.family = e.target.value; redraw(); } } });
       s.appendChild(h("option", { value: "", text: "Toutes les familles" }));
       for (const f of config.families || []) {
         const o = h("option", { value: f.id, text: f.label });
@@ -70,7 +74,7 @@ export function renderTrames(root) {
       return s;
     })(),
     (() => {
-      const s = h("select", { class: "fr-select", style: { maxWidth: "180px" }, on: { change: (e) => { ui.status = e.target.value; redraw(); } } });
+      const s = h("select", { class: "fr-select", style: { maxWidth: "180px" }, "aria-label": "Statut de la trame", on: { change: (e) => { ui.status = e.target.value; redraw(); } } });
       for (const [v, l] of [["", "Tous les statuts"], ["draft", "Brouillon"], ["published", "Mise à disposition"], ["archived", "Archivée"]]) {
         const o = h("option", { value: v, text: l });
         if (v === ui.status) o.selected = true;
@@ -175,7 +179,11 @@ function trameCard(t, redraw) {
     h("div", { class: "fr-row", style: { justifyContent: "space-between", rowGap: "6px", marginTop: "10px" } },
       button("Rédiger", { variant: "primary", icon: "note", onClick: () => { resetDraft(); navigate("rediger/" + t.id); } }),
       gerer ? menuButton([
-        { label: "Ouvrir l'éditeur", icon: "doc", onClick: () => navigate("trame/" + t.id) },
+        // « Éditer la trame » : le même geste porte le même mot partout — carte du
+        // modèle, carte du choix de rédaction, tableau du circuit de signature,
+        // et le guide qui l'enseigne. Un agent qui cherche « éditer une trame »
+        // doit retrouver ce qu'il cherche, pas un synonyme.
+        { label: "Éditer la trame", icon: "doc", onClick: () => navigate("trame/" + t.id) },
         { label: dispo.label, icon: dispo.icon, title: dispo.title, onClick: () => dispo.onClick({ redraw }) },
         { separator: true },
         { label: "Dupliquer", icon: "copy", onClick: () => duplicate(t, redraw) },

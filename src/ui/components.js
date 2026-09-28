@@ -6,6 +6,7 @@ import { FONT_CHOICES, FONT_VALUES } from "../lib/styles.js";
 import { formatDate } from "../lib/util.js";
 import { estAbroge, abrogeParDe, avecArticle } from "../lib/abrogations.js";
 import { mentionAnnexePartDeLaMere, mentionAnnexesRestantes } from "../lib/abrogation-annexes.js";
+import { acteStatutLabel, acteStatutColor } from "../lib/statuts-acte.js";
 
 // Lien discret vers le chapitre du guide correspondant à l'écran courant.
 export function helpLink(chapterId, label = "Aide sur cette page") {
@@ -231,8 +232,7 @@ export function promptDialog(title, label, value = "") {
     let input;
     const m = modal({
       title,
-      body: h("div", {},
-        h("label", { class: "fr-label", text: label }),
+      body: frField(label,
         (input = h("input", { class: "fr-input", value, on: { keydown: (e) => { if (e.key === "Enter") { done(input.value.trim()); m.close(); } } } })),
       ),
       actions: (close) => [
@@ -293,6 +293,10 @@ export function mentions(items) {
 // zone de contenu, et on peut le faire tenir dans la fenêtre — vers le bas s'il
 // y a la place, vers le haut sinon. Il se ferme au clic ailleurs, à `Échap`, et
 // au premier défilement (un menu détaché de son bouton ne veut plus rien dire).
+// LE BOUTON, LUI, DOIT SE VOIR : c'est la seule porte vers les gestes rangés, et
+// un geste qu'on ne trouve pas n'existe pas. Il est donc dessiné en bouton —
+// cadre et fond, 36 px de côté, dessin de 20 px — et non laissé nu (voir
+// css/app-base.css, `.app-menubtn`, et dom.js pour le poids des trois points).
 export function menuButton(items, { label = "", title = "Autres actions", icon: ic = "dots", variant = "tertiary", size = "" } = {}) {
   const gestes = (items || []).filter(Boolean);
   if (!gestes.length) return null;
@@ -301,7 +305,7 @@ export function menuButton(items, { label = "", title = "Autres actions", icon: 
   const btn = h("button", {
     class: `fr-btn fr-btn--${variant}${size ? " fr-btn--" + size : ""}`,
     type: "button", title, "aria-haspopup": "menu", "aria-expanded": "false",
-  }, icon(ic, 16), label ? h("span", { text: label }) : null);
+  }, icon(ic, 20), label ? h("span", { text: label }) : null);
 
   const detacher = () => {
     document.removeEventListener("click", ailleurs, true);
@@ -348,26 +352,28 @@ export function menuButton(items, { label = "", title = "Autres actions", icon: 
   return wrap;
 }
 
-// Statuts d'un acte : libellés et couleurs définis une seule fois (registre des
-// actes, choix de l'acte à rédiger…).
-export const ACTE_STATUTS = {
-  brouillon: { label: "Brouillon", color: "warning" },
-  pret: { label: "Prêt", color: "info" },
-  exporte: { label: "Exporté", color: "success" },
-  en_signature: { label: "En signature", color: "warning" },
-  signee: { label: "Signé", color: "success" },
-  publie: { label: "Publié", color: "success" },
-  en_attente: { label: "En attente de publication", color: "info" },
-  abroge: { label: "Abrogé", color: "error" },
-};
-
-export const acteStatutLabel = (s) => ACTE_STATUTS[s]?.label || s || "Brouillon";
-export const acteStatutColor = (s) => ACTE_STATUTS[s]?.color || "warning";
+// Statuts d'un acte : libellés et couleurs définis UNE SEULE FOIS, dans
+// `lib/statuts-acte.js` (ni DOM ni état, donc lisible par le chrono comme par
+// les écrans), et simplement repris ici pour les vues (NC-III-011).
+export { ACTE_STATUTS, acteStatut, isDraftable } from "../lib/statuts-acte.js";
+export { acteStatutLabel, acteStatutColor };
 export const acteStatutBadge = (s) => h("span", { class: "fr-badge fr-badge--" + acteStatutColor(s), text: acteStatutLabel(s) });
 
-// Un acte encore modifiable dans l'éditeur de rédaction : un acte signé ou
-// publié ne se réécrit pas, il se modifie (acte modificatif + version consolidée).
-export const isDraftable = (s) => !["signee", "publie", "en_attente", "abroge"].includes(s || "brouillon");
+// L'OBJET D'UN ACTE DANS UNE LISTE. La ligne ne montre qu'une ligne — l'objet
+// est coupé aux points de suspension — mais rien ne doit être perdu : le texte
+// entier suit en `title`. C'est déjà ce que fait le chrono de numérotation
+// (`td.chrono-objet`) ; la marque est posée ici une fois pour les quatre écrans
+// qui listent des actes (parapheur, révision, signature, exécution) —
+// NC-III-010.
+export const objetDeListe = (objet) => {
+  const t = objet || "—";
+  return h("span", { class: "sig-item__obj", title: t, text: t });
+};
+
+// Une étiquette de liste ou de palette, coupée à la largeur de sa colonne (le
+// plan du document, la réserve de l'éditeur de trame) : le texte entier suit en
+// `title`. Même règle que l'objet d'une liste — NC-III-010.
+export const etiquetteCourte = (classe, texte) => h("span", { class: classe, title: texte, text: texte });
 
 // ------------------------------------------------ abrogations subies
 // La marque d'une abrogation subie par un acte : « abrogé » dès qu'elle a pris

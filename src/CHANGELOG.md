@@ -28,6 +28,617 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
+## [1.6.3p] — 2026-09-30 — Les bandeaux d'information de l'administration
+
+Demande : « la fonctionnalité de Bandeau peut être réutilisée par les administrateurs pour
+afficher d'autres messages, avec un titre, une couleur et un contenu customisé et enregistrable
+(par ex. préparer des bandeaux pour les maintenances programmées, etc.). Dans le même sens, en
+prod, si demo n'est pas true les options relatives au bandeau démo ne doivent pas être dispo ».
+
+**Ajouté**
+
+- **Les bandeaux d'information** (`Administration › Identité › Bandeaux d'information`) : des
+  messages enregistrés dans le référentiel — un **titre**, une **couleur** (bleu, orange, rouge,
+  vert), un **contenu** — affichés en tête de l'application, sur le recueil public et à l'écran
+  de connexion. On les **prépare à l'avance** (maintenance du mois prochain) puis on les
+  **allume** le moment venu : seul un bandeau allumé, qui dit quelque chose, s'affiche.
+  L'ordre de la liste est l'ordre d'affichage, et toute retouche se voit **en direct**, sans
+  recharger. Une seule implémentation (`lib/bandeaux.js`, `bandeauxNotice()` dans
+  `ui/notice.js`) : le bandeau de démonstration garde sa règle à lui, tout le reste passe par ici.
+- `tests/bandeaux.test.mjs` — **trois épreuves** : la sélection (allumés, non vides, dans l'ordre),
+  le câblage (la carte d'identité masque la démo éteinte et règle les bandeaux), le rendu et ses
+  quatre couleurs.
+
+**Modifié**
+
+- **Démonstration éteinte (`DEMO=false`), options démo masquées** : la carte « Mention de
+  démonstration » ne propose plus son choix *Afficher / Masquer* ni son texte libre — une
+  installation en service n'a ni jeu fictif ni mention fictive à régler. Elle dit seulement où
+  passer les messages du service (les bandeaux d'information).
+
+**Épreuves** : 251 fichiers sans faute de syntaxe ni de style, **476/486** (0 échec, **10 sauts**
+d'environnement). Les dents de l'épreuve neuve ont été éprouvées dans un harnais frais : le
+filtre `actif` retiré, elle vire au rouge en nommant le défaut. Vérifié en direct : ajout d'un
+bandeau depuis l'écran (les quatre champs), affichage en tête derrière le bandeau de
+démonstration (pastille, texte, couleur d'urgence), extinction qui le retire, aperçu laissé sans
+brouillon. Non vérifié : le masquage des options démo sur une installation réelle (`DEMO=false`
+demande un service, absent ici) — tenu par l'épreuve de câblage. Restent ouverts (voir
+`src/TODO.md`) : le découpage des gros modules d'écran (NC-I-003), la signature qualifiée
+(NC-IV-001) et les validations tierces.
+
+
+## [1.6.3o] — 2026-09-30 — La recherche du recueil prend toute la largeur
+
+Demande : « sur le recueil public, la barre de recherche devrait être centrée ou full width » —
+l'entrée du recueil public est le premier geste du visiteur, et sa barre restait bridée à
+640 px, collée à gauche sous un titre pleine largeur.
+
+**Corrigé**
+
+- **La recherche de l'entrée du recueil suit désormais son conteneur**, du mobile au grand
+  écran : la règle est unique (`.recueil-hero .recueil-recherche`, `css/app-recueil.css`) et ne
+  porte plus aucun plafond de largeur. Mesuré sur les nœuds réels, mêmes feuilles : conteneur
+  de 1 000 px, barre de 1 000 px.
+
+**Ajouté**
+
+- `tests/recueil-recherche.test.mjs` — **une épreuve** : la règle de la recherche de l'entrée ne
+  porte ni `max-width` en longueur, ni `width` figée.
+
+**Épreuves** : 249 fichiers sans faute de syntaxe ni de style, **473/483** (0 échec, **10 sauts**
+d'environnement). Les dents de l'épreuve neuve ont été éprouvées dans un harnais frais (le
+harnais relit les fichiers une fois par session : rejouer l'épreuve cassée dans la même session
+la voyait encore verte) : le plafond reposé, elle vire au rouge. Non vérifié : le chargement
+de la page publique **bloque l'aperçu d'édition** ici (boucle d'amorçage et émulateur de service
+mis en quarantaine) — la pose est donc mesurée, pas photographiée. Restent ouverts (voir
+`src/TODO.md`) : le découpage des gros modules d'écran (NC-I-003), la signature qualifiée
+(NC-IV-001) et les validations tierces.
+
+
+## [1.6.3n] — 2026-09-30 — Le guide montre l'application d'aujourd'hui
+
+Demande : « OK, attaque tout ça » (suite de la 1.6.3m) — les **illustrations périmées du
+guide** : six annoncées, sept refaites en pratique, le registre s'étant ajouté au lot entre-temps.
+
+**Corrigé**
+
+- **Les illustrations du guide dataient d'une interface qui n'existe plus.** Registre à huit
+  colonnes, rédaction en thème sombre, gestes déplacés derrière « ⋯ » : les sept captures
+  périmées — registre, rédaction, contrôle & écarts, export, éditeur de trame, signature,
+  publication — sont refaites sur l'interface actuelle (thème **clair**, fenêtre **1440 × 900**,
+  pastille « Yann DUBOIS / Administrateur »), et chaque repère est **remesuré sur le DOM** au
+  moment de la capture, jamais estimé. Deux textes suivaient l'ancienne interface : le chapitre
+  « Retrouver un acte déjà écrit » (colonnes, gestes, fiche dépliée) et les deux mentions du
+  bouton « Exporter… » (le geste vit désormais derrière « ⋯ », voir la capture de la rédaction,
+  menu ouvert). La capture se fait au rendu réel (`snapshot.js`) : `html2canvas` **déplie** les
+  zones défilantes (une page de 4 931 px pour un registre de 25 lignes) et rend mal l'éditeur ;
+  une modale se capture sur `document.body`, et les bandeaux propres à l'atelier de développement
+  (bannière statique, avis de l'hébergeur) se masquent pour la pose — ils n'existent pas chez
+  l'utilisateur.
+- **Le registre restait vide en accès direct.** `state.ui` n'existait pas sur l'état initial,
+  alors que des écrans le déréférencent directement (`state.ui.registre`, `views/actes.js` ;
+  `state.ui.refTab`, `views/referentiel.js`) : « Cannot read properties of undefined », et la
+  coquille n'affichait **rien** — zéro ligne au registre, y compris par lien direct. Le seau
+  existe désormais dès le départ (`ui: {}`).
+- **La fiche d'un acte affichait sa mise à jour en horodatage brut** (« mis à jour le
+  2026-09-27T19:31:42Z » au milieu de dates en toutes lettres) : `formatDate` (`lib/util.js`)
+  ne lisait que le format strict `AAAA-MM-JJ`, et `updatedAt` porte l'heure. La règle est unique
+  et vit dans `formatDate` : toute valeur qui **commence** par une date calendaire se met en
+  forme (l'heure est ignorée) ; une date impossible (`2026-13-40`) est rendue telle quelle
+  plutôt qu'avec un mois « undefined ».
+
+**Ajouté**
+
+- `tests/etat-interface.test.mjs` — **une épreuve** : le seau `state.ui` existe dès le départ
+  et est un objet.
+- `tests/format-date.test.mjs` — **deux épreuves** : l'horodatage complet se lit comme sa date
+  calendaire (tous styles) ; dates simples, chaînes et dates impossibles ne changent pas.
+
+**Épreuves** : 248 fichiers sans faute de syntaxe ni de style, **472/482** (0 échec, **10 sauts**
+d'environnement). Les dents des trois épreuves neuves ont été éprouvées : le seau retiré de
+l'état, son épreuve vire au rouge ; l'expression restreinte au format strict, l'horodatage
+ressort brut et la sienne échoue. Les illustrations ont été **revues dans le guide rendu** :
+registre, rédaction, contrôle & écarts et éditeur de trame, repères alignés sur leurs éléments ;
+les trois autres (export, signature, publication) portent des repères mesurés sur leur pose.
+Restent ouverts (voir `src/TODO.md`) : le découpage des gros modules d'écran (NC-I-003), la
+signature qualifiée (NC-IV-001) et les validations tierces.
+
+
+## [1.6.3m] — 2026-09-30 — La démonstration montre ses deux emblèmes, et rattrape ses publications
+
+Demande : « OK, attaque tout ça » (suite de la 1.6.3l) — l'autre moitié de la liste : la **charte
+livrée qui ne montre qu'un emblème**, et les **publications de démonstration qui ne rattrapent pas
+leur retard** quand le jeu change.
+
+**Corrigé**
+
+- **Une publication de démonstration ne rattrapait jamais son retard.** Le recueil public ne montre
+  que ce qui a été **réellement publié** chez le service : les actes de démonstration y sont déposés
+  une fois, au premier démarrage (voir `src/ui/demo-publications.js`). Or l'amorçage s'en tenait à
+  « **une publication existe** » — une publication ne s'écrase pas, le service la range sous une clé
+  qui porte son **expression de date** —, si bien qu'un jeu MODIFIÉ (une livraison) laissait en ligne
+  le texte PÉRIMÉ, et pour toujours. Désormais les publications de démonstration portent la **version
+  du jeu** dans leur expression (`-s53`), et l'amorçage compare ce que le service **détient** : une
+  publication dont la clé ne porte pas le suffixe du jeu courant est supplantée par une **version
+  NOUVELLE** (même identifiant ELI, expression distincte) — l'ancienne reste à l'historique, c'est le
+  modèle de versionnement, non un écrasement. Un jeu inchangé, lui, n'est **ni redéposé ni republié**
+  (l'amorçage reste idempotent). La **clé d'idempotence** porte l'expression elle aussi : le service
+  dédoublonne sur cette clé **avant** de regarder l'expression, et un appel rejoué pour une version
+  neuve avec l'ancienne clé rendrait l'ancienne — la version neuve ne verrait jamais le jour. La
+  **publication informative d'un règlement** suit la même règle : elle était clée sur une date fixe,
+  un règlement corrigé serait resté périmé au recueil.
+- **La charte livrée ne portait qu'un emblème.** La feuille de démonstration `sty-ccas` donne
+  maintenant un **second emblème** à son en-tête (`logoRightUrl` : l'écu de la commune à droite,
+  l'emblème du CCAS à gauche, texte centré). Une feuille de démonstration **livrée** qui ne portait
+  que l'emblème de gauche le reçoit par une migration **étroite et additive** — un emblème choisi par
+  l'administrateur, ou un référentiel réel, n'est jamais touché.
+
+**Ajouté**
+
+- `src/lib/publication-version.js` — les règles de version d'une publication en **un seul endroit**
+  (le suffixe du jeu, l'expression de date, la clé d'idempotence, le test « la publication
+  détenue est-elle celle de ce jeu ? »), partagées par le client qui publie
+  (`src/ui/views/signature.js`) et par l'amorçage qui décide de republier
+  (`src/ui/demo-publications.js`).
+- `tests/version-publication.test.mjs` — **six épreuves** : les règles sur leurs bornes ; et, contre
+  le service de démonstration chargé en mémoire, qu'une expression nouvelle crée une **version
+  nouvelle**, que la même expression rend la **même** (idempotence), et que le recueil rend la plus
+  récente **en tête** — propriété dont l'amorçage dépend. Une épreuve dit aussi, à l'envers, le piège
+  qu'une clé **sans** l'expression tend : c'est là que sont ses dents.
+- Une épreuve dans `tests/amorcage-demo.test.mjs` : la feuille livrée `sty-ccas` porte bien **deux**
+  emblèmes, une feuille de démonstration **antérieure** reçoit le second au démarrage, et un emblème
+  choisi par l'administrateur **n'est pas touché**.
+
+**Épreuves** : 246 fichiers sans faute de syntaxe ni de style, **469/479** (0 échec, **10 sauts**
+d'environnement). Les dents des deux épreuves neuves ont été éprouvées : la règle de la clé retirée,
+**trois** épreuves virent au rouge ; l'appel à la migration retiré de la chaîne, la sienne le fait
+aussi. La démonstration
+a été rejouée **vivante** sur le service embarqué de l'édition statique (`__SCRIBA_FORCE_STATIC__`),
+service **vidé** au préalable : **19 publications, 19 portant `-s53`** (17 actes et 2 règlements
+informatifs) ; un second amorçage n'en crée **aucune** de plus (19 inchangées, aucun numéro en
+double) ; une expression distincte crée bien une **seconde version**, la plus récente en tête, et le
+retrait la défait — l'acte revenant à sa version `-s53`. Restent ouverts (voir `src/TODO.md`) :
+les six illustrations du guide, le découpage des gros modules d'écran (NC-I-003) et la signature
+qualifiée (NC-IV-001).
+
+
+## [1.6.3l] — 2026-09-30 — L'état de l'aperçu ne se perd plus, et un service muet n'est plus accusé
+
+Demande : « OK, attaque tout ça » (suite de la 1.6.3k) — les deux autres défauts de la liste :
+**l'état du service de l'aperçu qui « ne survit pas toujours »**, et le **parcours du dépôt de
+pièce**, capricieux.
+
+**Corrigé**
+
+- **L'état durable du service de l'aperçu pouvait se perdre en pleine écriture.** Le service tient
+  son document JSON dans `state`, et la couche de persistance de l'hôte peut en **prélever un
+  instantané à tout moment** — y compris au milieu d'une écriture. Avec une **seule** copie, cet
+  instantané portait la **longueur neuve** et un mélange d'anciens et de nouveaux caractères : un
+  document illisible, que `loadDb` repartait de zéro — c'est l'« état qui ne survit pas toujours ».
+  L'état s'écrit maintenant en **double tampon** : deux copies à places fixes, la longueur de
+  chacune écrite **avec elle**, et l'index de la copie active basculé d'**un seul mot** une fois
+  l'écriture achevée. Un instantané pris avant la bascule voit l'ancienne copie, **intacte** ; pris
+  après, la neuve, **complète** : aucun mélange n'est possible. La **version du format** est posée
+  une fois, à l'amorçage, et jamais réécrite — un instantané porte donc toujours une version
+  stable ; quand la copie neuve est celle du haut, elle est **redescendue** (`copyWithin`) pour que
+  la région que l'hôte recopie reste celle d'un petit document. Le format passe en **version 3** :
+  un état à l'ancien format est simplement recommencé (l'aperçu n'est pas conservatoire, NC-II-012).
+- **Le parcours du dépôt de pièce lisait un booléen là où il fallait un STATUT.** `supprimerPiece`
+  rend `false` pour un refus d'**état** comme pour un vrai défaut : conclure « ne se retire pas »
+  accusait le dépôt d'un refus qui n'était pas le sien. Le parcours lit désormais le **statut** de
+  l'appel `DELETE` : un refus d'installation (4xx) est **sans objet**, un 5xx, une absence de
+  réponse ou un service injoignable restent un échec, et il se dit avec son statut.
+- **Un service MUET était accusé d'être un service infracteur.** Quand le service de l'aperçu ne
+  répond **rien** (statut 0 : canal fermé, service suspendu — l'aperçu le met en quarantaine sous
+  une salve trop dense, NC-II-012), le jeu de conformité rendait `0 hors de 4xx` : un écart de
+  contrat imaginaire, imputé au dépôt. Un statut 0 **n'est pas une réponse** : le contrat n'est
+  alors pas enfreint, il n'est pas **éprouvable**. `verifier` tient ces appels **hors des échecs** et
+  les compte à part (`injoignable`) ; le parcours du contrat, celui du dépôt de pièce et celui des
+  informations du recueil se déclarent alors **sans objet**, au lieu d'échouer. Un service qui répond
+  **mal** (5xx, mauvais statut) reste, lui, un échec — c'est tout l'objet de la suite.
+
+**Ajouté**
+
+- `tests/persistance-double-tampon.test.mjs` — **six épreuves** qui tiennent le format : les deux
+  déclarations (`STATE_VERSION` dans `index.html`, `VERSION_ETAT`/`STATE_UNITS` dans
+  `src/pages/host.js`) restent d'accord ; un aller-retour conserve le document **et** laisse la
+  région plus petite qu'une copie ; **un instantané pris au milieu d'une écriture ne perd jamais
+  l'état** (trois instants simulés) ; une copie à demi écrite est **refusée**, non mal relue ; un
+  état d'ancien format est recommencé ; un document trop gros est refusé sans toucher l'ancien.
+- Deux épreuves dans `tests/conformite-service.test.mjs` : un service **muet** ne produit aucun
+  écart de conformité mais se déclare injoignable ; un service qui **répond mal** reste non
+  conforme, fût-il à moitié injoignable. Leurs dents sont éprouvées : le défaut rétabli, les deux
+  échouent en le disant.
+- Le relevé des parcours porte désormais **`service.joignable`**, et l'épreuve de la CI **échoue**
+  si le service ne répond pas : l'édition statique l'héberge dans la page, un « tout vert » servi par
+  un service muet serait un théâtre.
+
+**Épreuves** : 244 fichiers sans faute de syntaxe ni de style, **462/472** (0 échec, **10 sauts**
+d'environnement). Les parcours critiques, rejoués **dans l'aperçu** : **32/32**, y compris quand le
+service s'est tu (39 appels sans réponse sur 79, relevé `service.joignable: false`) — là où la
+veille ils rendaient **29/32**, les trois échecs étant imputés au dépôt. Le dépôt de pièce par le
+service a aussi été éprouvé **vivant** : dépôt → `201`, relecture → `200` avec le contenu déposé,
+retrait, puis `404`.
+
+
+## [1.6.3k] — 2026-09-30 — La chaîne cesse de mentir : deux chemins faux, un harnais trop sévère
+
+Demande : « OK, attaque tout ça » — autrement dit : corriger ce que la réponse à « quels bugs
+reste-t-il ? » avait listé, en commençant par la **chaîne d'intégration restée rouge** (NC-I-008).
+
+**Ce que les annotations ont dit.** La 1.6.3d avait appris à la chaîne à **nommer** ses épreuves
+rouges (`scripts/annoncer-echecs.sh`) ; les annotations du dépôt (`api.github.com/…/check-runs`) les
+rendent lisibles sans le journal. Relevé sur l'envoi `670b2c86` (1.6.3d) : le travail « Syntaxe,
+style et tests » échoue sur **`not ok 190 — la vérification refuse un mauvais mot de passe, un scellé
+illisible, un dérivé incohérent`** ; le travail « Service auto-hébergé » échoue sur **`exit code 127`**
+(introuvable), **sans une seule annotation** ; le travail « Parcours critiques » échoue sur
+**`Failed to fetch dynamically imported module: …/src/tests/parcours.mjs`**. Trois défauts, dont deux
+n'avaient jamais été vus : voici les trois.
+
+**Corrigé**
+
+- **Le scellé « illisible » ne l'était pas pour Node.** Le décodeur base64 de Node (`Buffer.from(x,
+  "base64")`) est **tolérant** : il ignore les caractères hors alphabet et ne lève jamais. Un scellé
+  corrompu se décodait donc en quelques octets, et `lireScelle` (qui ne prévoyait que l'exception)
+  le rendait lisible. Il exige désormais que les deux parts se **ré-encodent à l'identique** (le seul
+  format que `scellerMotDePasse` écrit) : c'est ce que l'épreuve demandait depuis toujours, et ce
+  qu'elle ne pouvait pas obtenir.
+- **Le harnais de l'atelier était plus SÉVÈRE que Node** — le pire des écarts, puisque l'atelier
+  cachait la CI au lieu de l'annoncer : sa doublure de `Buffer.from(x, "base64")` passait par
+  `atob`, qui **lève** sur un caractère hors alphabet. Un harnais plus dur que la plateforme rend
+  VERTE une épreuve que la chaîne voit ROUGE. Le décodeur de la doublure décode maintenant **comme
+  Node** (retrait des caractères hors alphabet, lecture des groupes de six bits).
+- **L'entrée du harnais gardait l'adresse de son module-bloc.** Le remplacement d'`import.meta.url`
+  ne s'appliquait qu'aux modules **importés** : l'entrée recevait `blob:…`, qui n'est pas une adresse
+  hiérarchique, si bien que `new URL("..", import.meta.url)` **levait** dans toute épreuve qui ancre
+  un chemin à son propre fichier. `tests/industrialisation.test.mjs` se **sautait** donc entièrement
+  dans l'atelier — y compris ses trois épreuves qui ne lisent que des fichiers. L'entrée est
+  désormais réécrite comme ses imports : **3 de ses 6 épreuves s'y jouent vraiment** (les 3 autres
+  demandent un processus, et restent des sauts d'environnement).
+- **La chaîne citait le guetteur d'échecs par un chemin faux.** Le travail « Service auto-hébergé »
+  s'exécute depuis `src/server/mysql` ; il appelait `bash ../../scripts/annoncer-echecs.sh`, or
+  `../..` y désigne `src/`, pas la racine — le chemin ne tombe juste que **dans l'atelier**, où
+  `src/scripts/` existe. En CI il répondait `127` (script introuvable), et l'épreuve rouge du service
+  n'était donc **jamais annotée** — le travail échouait sans dire pourquoi, cinq envois durant. Le
+  chemin est maintenant **ancré à la racine du dépôt** (`$GITHUB_WORKSPACE/scripts/…`).
+- **L'épreuve de navigateur importait un chemin de l'atelier.** Le script injecté chargeait
+  `/src/tests/parcours.mjs` : juste dans l'atelier, mais **404 dans le dépôt**, où `tests/` est
+  remonté à la racine (`/tests/parcours.mjs`). Le navigateur levait « Failed to fetch dynamically
+  imported module », et le travail `parcours` échouait **sans jamais jouer un seul parcours**. Il
+  cherche maintenant la suite dans les **deux dispositions** (le module `parcours.mjs` sait déjà,
+  lui, trouver le code des deux — c'est le même piège que NC-I-009).
+
+**Ajouté**
+
+- Deux épreuves dans `tests/industrialisation.test.mjs` — la fiche qui éprouve l'outillage **sur la
+  disposition livrée** —, toutes deux **lisibles sans processus** et donc jouées **aussi dans
+  l'atelier** : le guetteur d'échecs doit être cité par un chemin **ancré à la racine**, et l'épreuve
+  de navigateur doit citer **les deux dispositions** de la suite. Leurs dents ont été éprouvées : en
+  rétablissant l'un puis l'autre défaut, chacune **échoue en le disant**.
+
+**Épreuves** : 243 fichiers sans faute de syntaxe ni de style, **454/464** (0 échec, **10 sauts**
+d'environnement — trois fichiers en gagnent un de moins, `industrialisation.test.mjs` passant de
+« tout sauté » à « 3/6 »), et les deux épreuves nouvelles **prouvées par leur échec** sous le défaut.
+
+**Ce que ces trois défauts disent, et qui vaut au-delà d'eux.** Une épreuve rouge dans la CI et verte
+dans l'atelier (le scellé) et une épreuve **sautée** dans l'atelier mais jouée en CI (l'outillage) se
+ressemblent : dans les deux cas, l'atelier **mentait sur ce que la chaîne sait**, et personne ne
+pouvait le voir. La règle « un saut n'est pas un échec » reste juste — mais elle oblige à **regarder
+ses sauts de près**, et à corriger le harnais quand un saut tient à lui, non à l'environnement. La
+règle de traçabilité des tests qui en découle est écrite dans `src/docs/ATELIER.md` § 3.3. Reste
+ouvert, nommé : le **second** envoi de la chaîne doit être **vu vert** (les annotations de la
+plateforme ne rejouent pas une correction avant qu'elle soit déposée).
+
+
+## [1.6.3j] — 2026-09-29 — Les deux emblèmes de l'en-tête, et leur place
+
+Demande : « Assure-toi que les feuilles de style des actes supportent bien les logos en en-tête de
+la première page (un à gauche / un à droite) avec positionnement réglable. »
+
+La **vérification** a été faite sur les quatre supports où une charte s'applique — l'aperçu, le
+HTML autonome, le fichier Word et le PDF/A —, et elle a trouvé ce qu'un réglage non éprouvé laisse
+toujours derrière lui : **l'écran montrait les deux emblèmes, le document ne les portait pas tous**.
+Trois défauts, tous de la même famille que ceux de la note précédente — ce qui doit se voir ne se
+voit pas —, et trois réglages qui manquaient pour « positionner ».
+
+**Le PDF/A perdait le second emblème.** C'est le fichier **archivé**, celui qui fait foi : la
+marque de droite (État, partenaire, délégation) y était **absente**, alors que l'aperçu la montrait.
+`creerPdfA` n'embarquait qu'une image ; elle embarque maintenant les deux et les pose comme le CSS
+les pose — celle de gauche au bord gauche, celle de droite au bord droit du filet, chacune à sa
+hauteur. La page 1 d'un PDF/A de contrôle a été **rendue en image et regardée** : les deux marques y
+sont, la ligne de recueil entre elles.
+
+**La hauteur réservée à l'en-tête, dans le PDF, était la SOMME de ses morceaux.** L'emblème et le
+texte sont pourtant posés **côte à côte** (c'est une rangée) : le moteur réservait 46 + 10 + 20 + 14
+points là où il n'en fallait que la hauteur du plus grand, si bien que le **filet de l'en-tête
+tombait environ un centimètre sous les emblèmes**, et que le texte commençait trop bas. La hauteur
+est désormais celle du **contenu le plus haut**, plus le rembourrage, le filet et la marge du CSS —
+les mêmes valeurs que l'aperçu, au pixel.
+
+**Le fichier Word empilait les marques.** Word ne connaît ni `flex` ni `gap` : les deux emblèmes y
+suivaient le flux, tous deux à gauche, le second prenant la hauteur du premier. Ils sont maintenant
+posés en **flottants** — celui de gauche d'un côté, celui de droite de l'autre, le texte entre eux —
+et chaque emblème garde la hauteur que la feuille lui donne.
+
+**Le positionnement se règle** (c'est la seconde moitié de la demande) :
+
+- **l'écart** entre un emblème et le texte (`logoGap`, 14 px par défaut) ;
+- **la place du texte entre les deux emblèmes** (`logoTextAlign` : à gauche, centré, à droite) —
+  c'est le seul réglage qui pouvait encore les positionner, puisque les emblèmes tiennent chacun un
+  bout du filet ; **« centré » par défaut**, c'est-à-dire exactement ce que les chartes à deux
+  emblèmes montraient déjà ;
+- **l'alignement vertical des emblèmes** (`logoVAlign` : en haut, centrés, en bas) — les deux marques
+  n'ont pas forcément la même hauteur, et un petit emblème à côté d'un grand se cale où l'on veut.
+
+`logoAlign` (« Alignement de l'en-tête ») garde son sens : il place l'**ensemble** quand l'en-tête
+n'a **qu'un** emblème (ou pas du tout). Sa notice le dit désormais, au lieu de laisser croire qu'il
+agit aussi entre deux marques — ce qui était faux.
+
+**Un emblème ne se perd plus par mégarde.** « Réglages remis aux valeurs par défaut » conservait le
+logo de gauche mais **effaçait celui de droite** : les deux sont maintenant conservés, comme le nom
+et le rattachement de la feuille.
+
+**La régression est tenue** : un trente-deuxième parcours (« L'en-tête porte ses deux emblèmes — un
+à gauche, un à droite — et leur position se règle ») rend un vrai document sur un vrai papier, dans
+un hôte hors écran, et **mesure** : deux emblèmes, chacun à son bord, leurs hauteurs, l'écart qui
+déplace le texte, la place du texte entre eux, l'alignement vertical qui descend le plus petit, et
+le retour à un seul emblème quand on en retire un. Ses **dents ont été éprouvées** : en supprimant
+le rendu du second emblème, il échoue et le dit (« la feuille demande deux emblèmes : 1 rendu(s) »).
+
+**Non vérifié** : le fichier Word a été relu, mais pas ouvert dans Word (aucun poste Windows ici) ;
+l'export PDF/A n'est pas validé `veraPDF` (voir `TODO.md`).
+
+
+## [1.6.3i] — 2026-09-29 — Ce qui doit se voir ne se cache plus
+
+L'**audit visuel complet** de cette note a repris les **trente-trois écrans** de l'application en
+images, et les a regardés à leur **résolution réelle** : chaque écran découpé en bandes, puis
+confronté à la mesure — géométrie, débordement, conteneurs qui rognent leur contenu. La leçon vaut
+d'être écrite : une capture réduite fait dire n'importe quoi à l'œil, et c'est la **mesure** qui
+tranche ; les « chevauchements » qu'elle croyait voir étaient des éléments **en ligne** qui passent
+à la ligne, et les « textes coupés », des **ellipses** volontaires dont le texte entier est dans
+l'infobulle. Deux vrais défauts, en revanche, et tous deux de la même famille : **ce qui doit se
+voir ne se voyait pas**.
+
+**Le bandeau de démonstration était ÉCRASÉ.** La coquille de l'atelier est bornée à la hauteur de
+la fenêtre, et le bandeau de tête y est un enfant de flex **compressible** : dès que sa phrase
+passait sur deux lignes, il était ramené à ses 32 px de `min-height` et sa seconde ligne
+— « Ne pas produire d'actes réels avec cette installation » — était **coupée**, sur **tous** les
+écrans de l'atelier, sans que rien ne le signale. Mesuré : contenu 40 px dans une boîte de 32 px.
+
+**La rubrique « Informations » de l'accueil n'existait pas pendant la lecture.** Tant que la
+réponse du service n'était pas arrivée — ou qu'elle échouait, la reprise étant alors à ~6 s —, la
+rubrique était **absente** de l'accueil : le visiteur la voyait **disparaître** puis **surgir**.
+La page « Informations » faisait déjà la distinction entre « pas encore lu » et « rien à lire » ;
+l'accueil, lui, ne la faisait pas.
+
+### Ajouté
+
+- **Un parcours** — « Aucun écran ne rogne son contenu sans le dire (bandeau, cellule, panneau) » :
+  il traverse huit écrans de l'atelier et l'accueil du recueil, et refuse tout conteneur qui
+  **cache** du contenu sans l'annoncer (l'ellipse avec infobulle, ou un clamp explicite, restent
+  licites — c'est le cas des cellules d'objet du chrono et des files de signature). Ses **dents ont
+  été éprouvées** : le défaut rétabli à la main, le parcours échoue en le nommant (« le bandeau
+  (32 px) rogne son texte de 9 px, vu sur « trames » »). La suite compte **trente et un parcours**.
+
+### Corrigé
+
+- **Le bandeau de tête (démonstration, référentiel vierge) prend sa hauteur.** `flex: none` sur
+  `.app-demo` et `.app-vierge` (`src/css/app-base.css`) : la coquille cède la place par sa **zone
+  de contenu**, qui défile, au lieu d'écraser le bandeau. La seconde ligne se lit en entier, à
+  toutes les largeurs.
+- **La rubrique « Informations » de l'accueil est là dès le premier rendu**, et dit
+  « Chargement des informations… » tant que la lecture n'a pas conclu ; elle se remplit ensuite
+  d'elle-même. Une rubrique conclue **vide** reste, elle, absente — c'est ce qui distingue
+  « on ne sait pas encore » de « il n'y a rien ».
+
+### Modifié
+
+- **Le parcours des informations du recueil** gagne un pas : la rubrique doit être **présente**
+  pendant la lecture, et pas seulement après.
+
+## [1.6.3h] — 2026-09-29 — Une lecture qui échoue cesse d'être une lecture vide
+
+Le **contrôle en flux de travail** de cette note cherchait une chose précise, et l'a trouvée :
+une **information qui disparaît sans le dire**. C'est le défaut le plus coûteux d'un recueil
+public — le visiteur ne sait pas qu'il manque quelque chose —, et, la lecture « aboutie »
+restant gardée en mémoire, rien ne la faisait revenir avant un rechargement de la page.
+
+**Une lecture qui ÉCHOUE était prise pour une lecture qui rend VIDE.** L'application lit presque
+partout un service : le registre public, les billets du recueil, le bulletin, les publications de
+l'atelier, les décisions publiées que vise une délégation. Une réponse **vide** est une réponse
+— « il n'y a rien » ; un **échec** (service injoignable, canal fermé, délai dépassé, service en
+cours de réamorçage) n'en est pas une. Écrite comme telle, la lecture enregistrait une liste vide
+en guise de vérité, et ne rejouait plus rien.
+
+**Le cas observé, reproduit.** Sur l'aperçu de démonstration, la page « Informations » du recueil
+public affichait « **Aucune information publiée pour l'instant** » alors que **trois billets
+étaient publiés au poste**, et son adresse (`?page=informations`) restait vide jusqu'au
+rechargement de la page. Le même défaut se lisait ailleurs : l'écran **Publications** de l'atelier
+disait « Aucune publication pour l'instant » sur un registre seulement injoignable ; la liste des
+**décisions publiées** du formulaire de délégation restait vide ; le **bulletin** du recueil
+pouvait se croire éteint.
+
+### Ajouté
+
+- **`src/lib/relecture.js` — la règle, une seule fois.** Une lecture se souvient de son dernier
+  échec, refuse de conclure tant qu'il est récent (6 secondes : de quoi ne pas marteler un service
+  en panne, assez court pour qu'une reconnexion se voie), et laisse la prochaine occasion la
+  rejouer ; un succès — **même vide** — efface le souvenir. Le module est **pur** (ni DOM, ni
+  réseau) et porte son épreuve (`src/tests/relecture.test.mjs`, 3 épreuves).
+- **Un parcours** — « Les informations du recueil ne s'effacent pas, et se réparent » : il invalide
+  la lecture puis la relit, et vérifie qu'une liste vide gardée à tort se **répare** au redessin
+  suivant (la suite compte désormais **trente parcours**).
+
+### Corrigé
+
+- **La rubrique « Informations » du recueil ne s'efface plus.** Une lecture en échec ne conclut
+  plus : la lecture reste à rejouer, et une reprise automatique la relance (~6 s) sans que le
+  visiteur ait à recharger la page.
+- **Le recueil se répare de lui-même.** En régime local, si un billet **publié au poste** manque à
+  la liste affichée — lecture faite avant que le référentiel ne soit chargé —, la liste est
+  relue : la rubrique revient au redessin suivant. C'est la moitié « cohérence » de la règle.
+- **Le bulletin ne se croit plus éteint sur un service muet.** `chargerPublic`
+  (`src/lib/bulletins-service.js`) dit désormais s'il a **répondu** (`etat.repondu`) : un refus
+  (404 d'un service antérieur) vaut « pas de bulletin », un silence vaut « à relire ».
+- **L'écran Publications de l'atelier** ne présente plus l'échec comme un vide : il dit le registre
+  indisponible, et le relit de lui-même (le bouton « Actualiser » force toujours la relecture).
+- **Les décisions publiées d'une délégation** ne disparaissent plus du formulaire : un échec laisse
+  la lecture à rejouer au lieu de graver une liste vide.
+- **La résolution des liens ELI dans un acte publié** ne reste plus sans liste après un échec.
+
+### Modifié
+
+- **« Invalider » et « oublier » sont un seul geste** (`oublierInformationsRecueil`,
+  `oublierBulletinsRecueil`) : il efface aussi le souvenir d'un échec de lecture — sans quoi une
+  relecture demandée attendrait la fin du délai. L'écran Informations de l'atelier passe par lui,
+  au lieu d'écrire l'état à la main.
+
+## [1.6.3g] — 2026-09-28 — L'audit visuel : les neuf fiches sont levées
+
+La **campagne visuelle** du 2026-09-28 avait ouvert **neuf fiches** d'interface
+(`src/audit/rapports/AUDIT-VISUEL-SCRIBAE-2026-09-28.md`, fiches NC-III-009 à NC-III-017) et un
+**arbitrage de doctrine** (C10). Elles sont **toutes levées**, chacune avec sa mesure.
+
+### Corrigé
+
+- **Le thème sombre est mesuré, et deux textes y repassent au-dessus du seuil.** Le rapport le dit
+  lui-même : les 28 écrans n'avaient pas été remesurés en sombre. Le relevé de clôture l'a fait, sur
+  les **27 routes** : deux textes **blancs sur un fond de marque clair** y tombaient — la puce de la
+  porte « en cours » du fil de parcours (**3,0:1**) et le point de l'étape ouverte du circuit de
+  signature (**3,0:1**) ; le point de l'étape *franchie* tombait, lui, à **1,7:1** sur le vert clair
+  du mode sombre. Les trois prennent l'**encre sombre** que le mode sombre réserve déjà aux fonds de
+  marque (`src/css/app-sombre.css`) : 6,2:1 et 10,9:1. Relevé de clôture en sombre : **0** texte
+  sous le seuil, 13 px minimum, 0 débordement.
+- **Les étiquettes de formulaire nomment enfin les champs** (NC-III-009, majeure). Le helper unique
+  `field()` (`src/ui/dom.js`) pose un identifiant sur le contrôle quand l'appelant n'en donne pas,
+  et le `for` de l'étiquette suit : **plus aucun champ sans nom** sur les **27 routes mesurées**
+  (55 l'étaient, dont 40 aux Feuilles de style). L'identifiant engendré est **dérivé de
+  l'étiquette** — « Nom » → `champ-nom` — et non d'un compteur qui ne redescend jamais : le curseur
+  est retrouvé, après un redessin, par le chemin du champ **et sa signature**, qui comprend son
+  `id` ; un identifiant neuf à chaque rendu aurait fait perdre le focus à la première lettre (le
+  parcours « une fiche garde le curseur pendant la saisie » l'a d'ailleurs attrapé, et le corrige).
+  Pour les contrôles **composites** (choix de police,
+  côtés de marge, couleur, choix du signataire), le nom passe par `aria-labelledby` sur le
+  sous-contrôle, et un `role="group"` nomme les groupes de boutons. Le clic sur l'étiquette place
+  désormais le curseur dans le champ. Les **pages de la campagne** (`action`, `réserves`) et les
+  contrôles bâtis à la main — fiche de commentaire, champ de date des reprises, adresse du
+  destinataire, observation du parapheur et de la révision, motif de retrait, réglages de l'accès
+  par réseau, éditeur de variable de la rédaction — passent tous par le même helper : **une règle,
+  une seule mise en œuvre**.
+- **Ce qui est coupé se lit au survol** (NC-III-010). L'objet d'un acte tronqué
+  (`sig-item__obj` du parapheur, de la révision, de la signature et de l'exécution) et les
+  étiquettes de l'éditeur de trame (`outline__label`, `puce__label`) portent leur texte entier en
+  `title` : **aucune coupure sans recours** sur les 27 routes. Deux helpers partagés
+  (`objetDeListe()`, `etiquetteCourte()`) remplacent les copies.
+- **Les pastilles d'alerte disent ce qu'elles veulent dire** (NC-III-012). Les lettres « i » et
+  « ! » (20 et 14 mesurées sur l'écran d'exécution) sont remplacées par les **icônes du jeu**
+  (`info`, `warn`), et la raison de l'alerte passe en `title` **et** en `aria-label` : une icône
+  muette n'est pas une icône qui informe.
+- **Trois familles de contrastes repassent au-dessus du seuil** (NC-III-013) : le thème d'une carte
+  du recueil public (3,21:1 → au-dessus de 4,5:1), le drapeau d'annotation de l'éditeur (3,28:1) et
+  les séparateurs « › » du fil de parcours — ces derniers étaient du texte au sens des règles :
+  ils sont maintenant `aria-hidden`. Relevé final : **0 texte sous le seuil** sur les 27 routes.
+- **Un seul `h1` par écran** (NC-III-014) : le titre du **document** affiché dans le papier ou dans
+  une fenêtre descend d'un cran (`rang()`, `apercu: true`), et l'éditeur de trame gagne le sien.
+  L'écran Documentation passe l'option `decalage` à `renderMarkdown` : le document s'y range sous
+  le titre de l'écran, **balise et classe** — le titre du document n'est donc plus dessiné à la
+  taille d'un titre de page. Relevé : **1 `h1`** sur les 27 routes (il y en avait 2 sur trois
+  écrans, et 0 dans l'éditeur).
+- **Les cibles repassent au-dessus de 24 px** (NC-III-015) : l'aide d'écran, le dépliant
+  « Réglages », le dépliage d'une ligne de registre, les commandes du document
+  (`insert-bar`, `blk__note`), les puces d'annotation, les liens du sommaire, et — trouvés par la
+  mesure de ce lot — la **barre de zoom** et le bouton « Ajouter une pièce », qui faisaient 23,5 px.
+  Le repère de marge du commentaire garde sa pastille de 16 px mais gagne une **zone cliquable de
+  24 × 24** : c'est la recommandation même de l'audit.
+- **Les repères d'édition repassent au plancher de 13 px** (NC-III-016) : les infobulles de champ
+  variable de la rédaction (10,56 px) et les pastilles de variable (11,4 px) ne sont pas le
+  document — ils l'expliquent. Le corps de l'acte, lui, garde sa typographie. Plancher mesuré :
+  **13 px partout**.
+- **Le sommaire de la Documentation mène de nouveau au bon titre.** La chronique des versions
+  répète ses rubriques (« Corrigé », « Modifié »…) : l'ancre d'un titre étant tirée de son texte,
+  ces titres portaient le **même identifiant**, un document invalide — et un sommaire qui renvoyait
+  au premier. Les ancres sont désormais **numérotées** (le premier garde la sienne, les suivants
+  prennent un rang), et le sommaire compte de la même façon : `src/ui/markdown.js`.
+- **Les boutons de ligne de « Modifier un acte » redeviennent secondaires** (arbitrage C10) : le
+  même geste portait un bouton **plein** sur cet écran et un bouton **discret** dans le registre.
+  C'est le registre qui dit la doctrine — un écran garde **une** action principale (choisir un
+  fichier), les lignes portent des actions secondaires. L'écran passe de **72** boutons principaux
+  à **3**.
+
+### Ajouté
+
+- **L'aide à la demande sur les quatre écrans qui ne l'avaient pas** (NC-III-017) : `modifier`,
+  l'éditeur de trame, la rédaction et le détail d'un acte. Le texte n'est pas supprimé — il est
+  déplacé là où on le cherche, comme partout ailleurs ; l'encadré « Ce que produit une
+  modification » de `modifier` rejoint son bouton « ? ». Relevé : **24 routes d'atelier sur 24**
+  portent l'aide à la demande (la doctrine en annonçait 23).
+
+### Modifié
+
+- **Une seule table des états d'acte** (NC-III-011) : `src/lib/statuts-acte.js` — ni DOM, ni état
+  d'application — est désormais la source unique ; le chrono, l'écran des modifications et l'écran
+  de signature la **lisent** au lieu de la recopier (cinq tables n'en font plus qu'une, les
+  synonymes de la recherche restant à part, à leur place). Les deux arbitrages sont tranchés et
+  écrits : l'état `pret` s'affiche « **Prêt** » — le mot de la majorité des écrans et du glossaire,
+  celui qui tient dans une colonne (l'étape de validation garde, elle, son verdict « Prêt à
+  signer », qui est une autre notion) — et l'état `exporte` garde la couleur `success`.
+
+## [1.6.3f] — 2026-09-28 — Le bouton « ⋯ » se voit
+
+**« Peut-être augmenter la taille des points / changer le design car c'est très peu visible. »** Le
+constat porte juste : le menu **« ⋯ »** est la seule porte vers les gestes rangés d'une carte, et il
+ne se voyait pas. Ce n'était qu'un dessin **nu** — trois points tracés au poids du socle (1,6) sur
+un dessin de 16 px, soit des points de **1 px** de diamètre — posé au bout d'une ligne, à droite d'un
+bouton principal plein. À l'écran, cela ne se lisait pas comme un bouton : cela ressemblait à de la
+ponctuation. Un geste introuvable est un geste qui n'existe pas.
+
+### Modifié
+
+- **Le menu « ⋯ » est dessiné en bouton.** Un cadre, un fond, **36 px de côté** (la hauteur du bouton
+  « Rédiger » posé en face) et un dessin de **20 px** dont les trois points portent **leur propre
+  poids de trait** (3,6 au lieu de 1,6) : ils se voient, enfin. Le bouton reste **neutre** au repos —
+  l'encre ordinaire, pas la couleur de marque, car il n'y a qu'un geste principal par carte — et
+  **s'allume** au survol comme tant que son menu est ouvert (le panneau s'ouvre en `fixed`, parfois
+  loin de son bouton : l'allumage est le seul lien visible entre les deux). Une seule mise en œuvre
+  (`menuButton`, `src/ui/components.js`) : les **sept** écrans qui l'emploient changent ensemble.
+- **Le guide suit.** L'illustration de la liste des modèles est refaite — elle montrait les points
+  nus —, et les deux passages qui enseignent le geste (le chapitre « Préparer et faire évoluer une
+  trame » et l'entrée de dépannage) décrivent désormais le **petit bouton carré à trois points** :
+  c'est ce que l'agent doit reconnaître à l'écran.
+
+## [1.6.3e] — 2026-09-28 — Éditer une trame : le geste se retrouve
+
+**« Je ne trouve plus l'option pour éditer une trame, c'est normal ? »** Le geste n'avait pas
+disparu : il avait changé de place **et** de nom. La revue d'interface (1.6.2) met **un seul geste
+en avant** sur chaque carte — « Rédiger » — et range les autres dans le menu **« ⋯ »** (P2). Là,
+l'entrée s'appelait « Ouvrir l'éditeur », quand le **même** geste s'appelle « Éditer la trame » sur
+la carte du choix de rédaction et dans le tableau du circuit de signature : le mot qu'un agent
+cherche n'était donc écrit **nulle part**. Et le guide enseignait encore de cliquer un bouton
+**visible** sur la carte du modèle — son illustration montrait l'écran d'**avant** la revue.
+
+### Corrigé
+
+- **Un seul nom pour ce geste : « Éditer la trame ».** L'entrée du menu « ⋯ » de la liste des
+  modèles portait « Ouvrir l'éditeur » ; elle porte désormais le mot des deux autres écrans, et
+  celui qu'on cherche. Le parcours `une-pastille-par-carte` (le 16e) ouvre ce menu pour de vrai,
+  lit l'entrée et vérifie qu'elle mène à l'éditeur : le geste ne doit pas seulement exister, il doit
+  se **retrouver**.
+
+### Modifié
+
+- **Le guide dit où se trouve le geste**, aux deux endroits où on le cherche : dans le chapitre
+  « Préparer et faire évoluer une trame » (« sur la carte du modèle, cliquez le bouton **« ⋯ »** —
+  posé à droite du bouton « Rédiger » — puis choisissez « Éditer la trame » »), et dans le
+  **dépannage**, à la question même : « Je ne trouve pas l'option pour éditer une trame (corriger le
+  modèle) » — avec le rappel que le geste est réservé aux administrateurs et aux éditeurs.
+- **L'illustration de la liste des modèles est refaite.** Elle montrait l'écran d'avant la revue
+  d'interface — le bouton « Ouvrir l'éditeur » en clair sur la carte, l'en-tête et le menu d'avant.
+  La nouvelle capture montre la carte telle qu'elle est aujourd'hui, le menu « ⋯ » ouvert sur sa
+  première entrée, et ses cinq repères suivent (le « ⋯ » et l'entrée « Éditer la trame » ont chacun
+  le leur).
+
+
 ## [1.6.3d] — 2026-09-28 — La chaîne rouge : nommée, et sa première cause réparée
 
 **L'essai de la chaîne sur un envoi réel a eu lieu, et il a dit la vérité.** Le travail qui

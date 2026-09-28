@@ -17,7 +17,7 @@ import { state, logout, navigate } from "../state.js";
 import { h, icon, button } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { themeButton } from "../theme.js";
-import { demoNotice } from "../notice.js";
+import { demoNotice, bandeauxNotice } from "../notice.js";
 import { chatErreurEl } from "../chats-erreur.js";
 import { fullName, initialsOf, sourceOf, ROLES, VISITEUR } from "../../lib/users.js";
 
@@ -79,6 +79,7 @@ export function renderSansAcces(root) {
 
   root.appendChild(h("div", { class: "connexion sans-acces" },
     demoNotice(),
+    ...bandeauxNotice(),
     h("div", { class: "connexion__theme" }, themeButton()),
     h("div", { class: "connexion__stage" }, card),
   ));

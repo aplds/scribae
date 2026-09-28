@@ -245,7 +245,7 @@ la **version**, la **licence** et l'adresse de sa documentation :
 |  |    // \\    |    ___) | | (__   | |    | | | |_) | | (_| | |  __/   |
 |  |   //   \\   |   |____/   \___|  |_|    |_| |_.__/   \__,_|  \___|   |
 |  |  //     \\  |                                                       |
-|  |             |   v1.6.3d — GPLv3 — doc.scribae.eu                    |
+|  |             |   v1.6.3g — GPLv3 — doc.scribae.eu                    |
 |  |_____________|                                                       |
 +------------------------------------------------------------------------+
 ```
@@ -316,8 +316,11 @@ L'application répond sur `http://<serveur>:${HTTP_PORT}` (par défaut `http://l
    aucun jeton n'est nécessaire — laissez le champ vide) ;
 3. *Envoyer les données à la base* pour y installer le référentiel de départ (la base est
    vide au premier démarrage) ;
-4. **Administration › Identité › Mention de démonstration** : masquez le bandeau orange quand
-   l'installation devient une installation de service.
+4. **Couper la démonstration** (`DEMO=false` dans le `.env`, puis recréer le service) : la
+   carte **Administration › Identité › Mention de démonstration** masque alors d'elle-même ses
+   options, et le bandeau orange ne s'affiche plus. Les messages du service (maintenance
+   programmée…) se préparent, eux, dans **Administration › Identité › Bandeaux
+   d'information**.
 
 Chaque poste se connecte à la **même** base : les données (référentiel, trames, actes,
 comptes) sont partagées, et deux postes qui modifient des objets *différents* ne se gênent

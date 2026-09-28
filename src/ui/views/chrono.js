@@ -13,7 +13,7 @@
 // et journalisés.
 // ============================================================================
 import { state, redrawView, navigate, can, touch, journaliser } from "../state.js";
-import { h, button, toast, modal, select, textInput } from "../dom.js";
+import { h, button, toast, modal, select, textInput, field as frField } from "../dom.js";
 import { selectField, textField, confirmDialog, emptyState, helpLink, pageTitle } from "../components.js";
 import { download, formatDate } from "../../lib/util.js";
 import { blobCsv, blobXlsx } from "../../lib/xlsx.js";
@@ -123,8 +123,8 @@ export function renderChrono(root) {
   const reinit = () => { state.ui.chronoFiltres = { ...FILTRES_VIDES }; state.ui.chronoAffiches = CHRONO_PAGE; redrawView(); };
   const plusDeFiltres = ui.chronoPlus === true;
 
-  const champ = (label, control) => h("div", { class: "liste-barre__champ" },
-    h("label", { class: "fr-label", text: label }), control);
+  // Une étiquette qui NOMME son champ (NC-III-009) : le helper partagé.
+  const champ = (label, control) => h("div", { class: "liste-barre__champ" }, frField(label, control));
   const barre = h("div", { class: "liste-barre chrono-barre no-print" },
     champ("Recherche", textInput(f.q, (v) => poser({ q: v }), { placeholder: "Numéro, objet, trame, rédacteur…" })),
     champ("État", select([{ value: "", label: "Tous les états" }, ...optionsEtats], f.statut, (v) => poser({ statut: v }))),

@@ -12,7 +12,7 @@
 // circuit (`acte.validation`), journaliser le fait, et redessiner l'écran.
 // ============================================================================
 import { state, touch, journaliser, redrawView } from "./state.js";
-import { h, button, toast } from "./dom.js";
+import { h, button, toast, field as frField } from "./dom.js";
 import { promptDialog } from "./components.js";
 import {
   demarrerValidation, redemarrerValidation, appliquerDecision, etapeActive,
@@ -118,8 +118,7 @@ export function carteDecision(a, etape, { heading = "h2" } = {}) {
     h(heading, { class: "fr-card__title", text: "Votre décision" }),
     h("p", { class: "fr-small fr-muted", text: nature.label + " — " + etape.label + (etape.help ? " : " + etape.help : "") }),
     h("p", { class: "fr-small fr-muted", text: nature.hint }),
-    h("label", { class: "fr-label", text: "Observation" }),
-    zone,
+    frField("Observation", zone),
     h("div", { class: "fr-row", style: { marginTop: "10px" } },
       button(actionDe(etape.kind), {
         variant: "primary", icon: "check",

@@ -12,7 +12,7 @@
 // service de publication, comme le ferait n'importe quel site.
 // ============================================================================
 import { state, navigate, redrawView, can, currentUser, touch, journaliser } from "../state.js";
-import { h, button, toast, modal, icon } from "../dom.js";
+import { h, button, toast, modal, icon, field as frField } from "../dom.js";
 import { emptyState, helpLink, pageTitle } from "../components.js";
 import { get, post, apiStatus, errorMessage, beginFlow, bodyOf } from "../../lib/remote.js";
 import { verifySignedPackage } from "../../lib/signature.js";
@@ -21,6 +21,11 @@ import { printHtml } from "../../lib/export.js";
 import { lienRecueil } from "../../lib/recueil.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { corpsDeLActe, setListePublications, blocPieces, blocSignature, blocVersions, blocDonneesPubliques } from "./acte-publie.js";
+import { veille, DELAI_RELECTURE } from "../../lib/relecture.js";
+
+// Le minuteur de reprise d'une lecture qui a échoué (voir plus bas). Il n'y en a
+// qu'un : le registre est le seul écran d'ici à lire le service à son montage.
+let repriseRegistre = null;
 
 export function renderPublications(root, params) {
   if (params && params.id) { renderConsultation(root, params); return; }
@@ -31,6 +36,7 @@ export function renderPublications(root, params) {
 
 function renderRegistre(root) {
   const st = (state.pubRegistre = state.pubRegistre || { chargement: false });
+  st.veille = st.veille || veille();
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
       pageTitle("Publications" , "Recueil des actes publiés : versions en ligne, identifiants ELI, dates d'opposabilité et originaux signés." ),
@@ -39,7 +45,7 @@ function renderRegistre(root) {
       helpLink("publication", "Comment faire ?"),
       button("Recueil public", { variant: "secondary", icon: "globe", onClick: () => navigate("recueil") }),
       button("Signature & publication", { variant: "secondary", icon: "lock", onClick: () => navigate("signature") }),
-      button("Actualiser", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => { st.chargement = false; st.liste = null; redrawView(); } }),
+      button("Actualiser", { variant: "tertiary", size: "sm", icon: "refresh", onClick: () => { st.chargement = false; st.liste = null; st.veille = veille(); redrawView(); } }),
     ),
   ));
 
@@ -64,11 +70,23 @@ function renderRegistre(root) {
     ),
   ));
 
-  if (!st.liste && !st.chargement) {
+  if (!st.liste && !st.chargement && st.veille.prete) {
     st.chargement = true;
     get("/v1/publications", { label: "Registre des publications", source: "lecture" })
-      .then((r) => { st.liste = r.ok ? bodyOf(r).publications || [] : []; st.erreur = r.ok ? null : bodyOf(r).erreur; })
-      .catch((e) => { st.erreur = String(e.message || e); st.liste = []; })
+      .then((r) => {
+        // Une réponse VIDE est une réponse ; un ÉCHEC n'en est pas une. Le lire
+        // comme un vide ferait dire « aucune publication » alors que le registre
+        // est seulement injoignable — et la liste resterait vide pour toujours
+        // (voir src/lib/relecture.js).
+        if (r.ok) { st.liste = bodyOf(r).publications || []; st.erreur = null; st.veille.succes(); }
+        else {
+          st.liste = null;
+          st.erreur = bodyOf(r).erreur || `Registre indisponible (${r.status}).`;
+          st.veille.echec();
+          planifierRepriseRegistre();
+        }
+      })
+      .catch((e) => { st.liste = null; st.erreur = String(e.message || e); st.veille.echec(); planifierRepriseRegistre(); })
       .finally(() => { st.chargement = false; redrawView(); });
   }
 
@@ -110,6 +128,17 @@ function renderRegistre(root) {
   table.appendChild(tb);
   root.appendChild(h("div", { class: "fr-table-wrap" }, table));
   root.appendChild(h("p", { class: "fr-small fr-muted", text: `${st.liste.length} publication(s). Seul l'original signé fait foi ; la version en ligne est diffusée à titre informatif.` }));
+}
+
+// Une lecture qui a échoué se rejoue d'elle-même : l'agent n'a pas à quitter
+// l'écran, ni à cliquer « Actualiser », pour que le registre revienne. Le
+// minuteur ne relance rien si l'écran a changé — le redessin suffit.
+function planifierRepriseRegistre() {
+  if (repriseRegistre) return;
+  repriseRegistre = setTimeout(() => {
+    repriseRegistre = null;
+    if ((state.route && state.route.view) === "publications") redrawView();
+  }, DELAI_RELECTURE + 400);
 }
 
 async function resoudre(saisie, root) {
@@ -290,10 +319,9 @@ function ouvrirRetrait(p, st) {
     title: `Retirer du recueil — ${p.numero || p.cle}`,
     body: h("div", { class: "fr-stack" },
       avertissementRetrait(),
-      h("div", { class: "fr-field" },
-        h("label", { class: "fr-label", text: "Motif technique du retrait (obligatoire)" }),
-        h("p", { class: "fr-hint", text: "Décrivez la raison technique. Ce motif sera conservé sur l'acte et inscrit au journal d'audit." }),
-        ta),
+      frField("Motif technique du retrait (obligatoire)", ta, {
+        help: "Décrivez la raison technique. Ce motif sera conservé sur l'acte et inscrit au journal d'audit.",
+      }),
       h("label", { class: "fr-check" }, cb, "Je comprends qu'un acte administratif publié ne doit jamais être retiré, et que seul un motif technique justifie ce retrait."),
     ),
     actions: (close) => [

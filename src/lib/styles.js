@@ -224,7 +224,22 @@ export function emptyStyle(patch = {}) {
     logoHeight: "42",
     logoRightUrl: "",
     logoRightHeight: "",   // vide = même hauteur que le logo de gauche
+    // Où se place l'en-tête : quand UN SEUL emblème le coiffe (ou quand il n'y a
+    // que le texte), c'est l'ensemble qui se range à gauche, au centre ou à
+    // droite. Quand DEUX emblèmes l'encadrent, ils tiennent chacun un bout du
+    // filet — l'ensemble n'est donc plus à ranger, et c'est le TEXTE qui se
+    // place entre eux : cela se règle par `logoTextAlign`, ci-dessous.
     logoAlign: "left",
+    // Le TEXTE entre les deux emblèmes (sans effet quand il n'y en a qu'un :
+    // c'est `logoAlign` qui parle alors). Défaut « centré », qui est la
+    // présentation qu'avaient déjà les chartes à deux emblèmes.
+    logoTextAlign: "center",
+    // Le positionnement des emblèmes : l'écart qui les sépare du texte
+    // (`logoGap`, en pixels) et leur alignement vertical dans la hauteur de
+    // l'en-tête (`logoVAlign` — les deux marques n'ont pas forcément la même
+    // hauteur, et un grand emblème se cale volontiers en haut ou en bas).
+    logoGap: "14",
+    logoVAlign: "center", // top | center | bottom
     headerText: "",
     headerRule: true,
     headerSize: "0.86", // em
@@ -368,6 +383,51 @@ export const paperPadding = (style) => paperMarginCss(style);
 
 // --------------------------------------------------------------- jeu de démonstration
 
+// Emblèmes de la DÉMONSTRATION. Ils vivent ici, avec les feuilles de style — et
+// non dans `seed.js` : une charte livrée peut ainsi porter un SECOND emblème
+// (`logoRightUrl`), et le jeu de démonstration reprend l'écu de la commune d'ici.
+//
+// Emblème de la commune fictive (SVG embarqué sous forme de data URL). Il est
+// volontairement embarqué plutôt que lu dans `src/assets/` : les bibliothèques
+// de capture d'écran (guide imprimable, vignettes) ne savent pas résoudre un
+// chemin relatif dans leur copie du document, alors qu'une data URL est
+// auto-suffisante.
+//
+// Le dessin : l'écu français, en trois plans — un ciel clair, un soleil d'or à
+// huit rais, et la Loire qui baigne deux monts. Le champ est découpé par le
+// tracé même de l'écu (`clipPath`) : les monts et l'eau s'arrêtent net sur le
+// galon, sans bavure. Deux détails de mise au point, appris en regardant le
+// rendu : les rais du soleil sont courts et proches du disque (un rai long le
+// fait paraître décentré, et son extrémité vient mordre le chef) ; et les cimes
+// enneigées comme les bandes d'eau portent un liseré de LEUR PROPRE couleur,
+// car deux aplats voisins qui partagent un bord laissent, à l'anticrénelage,
+// un filet clair que le liseré recouvre.
+export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="Ville de Valmont-sur-Loire">
+  <defs>
+    <clipPath id="vsl-ecu"><path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z"/></clipPath>
+    <linearGradient id="vsl-ciel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7fbff"/><stop offset="1" stop-color="#cbdff6"/>
+    </linearGradient>
+    <linearGradient id="vsl-eau" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b91d3"/><stop offset="1" stop-color="#1b5c92"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="url(#vsl-ciel)"/>
+  <g clip-path="url(#vsl-ecu)">
+    <g stroke="#f0bd35" stroke-width="2.4" stroke-linecap="round" fill="none">
+      <path d="M32 8.9L32 6.3M32 23.9L32 26.5M24.6 16.4L22 16.4M39.4 16.4L42 16.4M26.7 11.1L24.9 9.3M37.3 21.7L39.1 23.5M37.3 11.1L39.1 9.3M26.7 21.7L24.9 23.5"/>
+    </g>
+    <circle cx="32" cy="16.4" r="6.5" fill="#f0bd35"/>
+    <path d="M5 51 21.5 23.5 38 51Z" fill="#1e7a45"/>
+    <path d="M21.5 24.2 15.9 33.6 18.6 31.9 21.5 34.4 24.4 31.9 27.1 33.6Z" fill="#f4f9ff" stroke="#f4f9ff" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M28.5 51 43.5 27.5 58 51Z" fill="#16613a"/>
+    <path d="M43.5 28.2 38.1 37.3 40.7 35.6 43.5 38 46.3 35.6 48.9 37.3Z" fill="#dbe7f5" stroke="#dbe7f5" stroke-width="0.8" stroke-linejoin="round"/>
+    <path d="M4 48.4C11 44.9 17.5 50.4 25 47.6c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v26H4Z" fill="url(#vsl-eau)" stroke="url(#vsl-eau)" stroke-width="0.7"/>
+    <path d="M4 58.2C11 54.7 17.5 60.2 25 57.4c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v20H4Z" fill="#1a4f82" stroke="#1a4f82" stroke-width="0.7"/>
+  </g>
+  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="none" stroke="#12335c" stroke-width="3.4" stroke-linejoin="round"/>
+</svg>`;
+
 // Emblème du CCAS (SVG embarqué, comme celui de la commune) : il illustre la
 // charte propre à une entité — un logo différent sur les mêmes actes.
 export const LOGO_CCAS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Emblème du centre communal d'action sociale">
@@ -419,8 +479,15 @@ export function seedStyles() {
       authorityItalic: true,
       visasLabelStyle: "bold",
       showHeader: true,
+      // DEUX emblèmes, pour que le réglage se VOIE sans avoir à le poser : le
+      // CCAS à gauche (son emblème propre), la commune à droite (l'écu du jeu de
+      // démonstration) — c'est le cas réel d'une charte d'établissement rattaché,
+      // qui porte sa marque et celle de sa tutelle.
       logoUrl: svgDataUrl(LOGO_CCAS_SVG),
       logoHeight: "46",
+      logoRightUrl: svgDataUrl(LOGO_SVG),
+      logoTextAlign: "center",
+      logoVAlign: "center",
       logoAlign: "left",
       headerText: "{{entity.name}} — recueil des actes administratifs",
       headerRule: true,
@@ -857,19 +924,27 @@ export function styleCss(style, config, { scope = "" } = {}) {
 
   // -- en-tête (logo + texte) et pied de page
   const headerRule = s.headerRule && s.ruleStyle !== "none";
+  // Le positionnement des emblèmes est RÉGLABLE : leur écart avec le texte
+  // (`logoGap`) et leur alignement vertical (`logoVAlign`). Les deux marques
+  // n'ont pas forcément la même hauteur : alignées par le haut, par le bas, ou
+  // centrées l'une sur l'autre.
+  const logoVAlign = s.logoVAlign === "top" ? "flex-start" : s.logoVAlign === "bottom" ? "flex-end" : "center";
   rule2(A(".doc-sheet-header"),
-    `display:flex;gap:14px;align-items:center;justify-content:flex-start;`
+    `display:flex;gap:${pxv(s.logoGap, "14px")};align-items:${logoVAlign};justify-content:flex-start;`
     + `margin:0 0 ${headerRule ? "14px" : "10px"};`
     + (headerRule ? `border-bottom:${W} ${border} ${rule};padding-bottom:10px` : ""));
   rule2(A(".doc-sheet-header") + '[data-align="center"]', "justify-content:center;text-align:center");
   rule2(A(".doc-sheet-header") + '[data-align="right"]', "justify-content:flex-end;text-align:right");
   rule2(A(".doc-sheet-logo"), `height:${pxv(s.logoHeight, "42px")};width:auto;max-width:45%;flex:none`);
-  // Deux logos : la marque de gauche, le texte au centre, la marque de droite
-  // à l'autre bout du filet. L'emplacement de droite prend la hauteur réglée
-  // pour lui, ou celle du logo de gauche.
+  // Deux logos : la marque de gauche, le texte au centre, la marque de droite à
+  // l'autre bout du filet. L'emplacement de droite prend la hauteur réglée pour
+  // lui, ou celle du logo de gauche. Le texte occupe l'espace libre entre les
+  // deux, et c'est `logoTextAlign` qui le place (à gauche, centré, à droite) :
+  // le positionnement des deux emblèmes se règle donc, comme celui du texte
+  // qu'ils encadrent.
   rule2(A(".doc-sheet-logo--right"), `height:${pxv(s.logoRightHeight || s.logoHeight, "42px")}`);
+  rule2(A(".doc-sheet-header--duo .doc-sheet-headtext"), `flex:1 1 auto;text-align:${s.logoTextAlign === "left" ? "left" : s.logoTextAlign === "right" ? "right" : "center"}`);
   rule2(A(".doc-sheet-header--duo .doc-sheet-logo--right"), "margin-left:auto");
-  rule2(A(".doc-sheet-header--duo .doc-sheet-headtext"), "flex:1 1 auto;text-align:center");
   rule2(A(".doc-sheet-headtext"),
     `margin:0;font-family:${headingFont};font-size:${emv(s.headerSize, "0.86em")};color:${muted}`
     + (s.headerItalic ? ";font-style:italic" : "")

@@ -77,6 +77,21 @@ declarer({
   },
 });
 
+// Un service qui ne RÉPOND RIEN n'est pas un service qui répond mal. L'aperçu de
+// l'éditeur suspend le sien sous une salve trop dense (NC-II-012), et un service
+// éteint ne répond rien non plus : dans les deux cas le contrat n'est pas jugé.
+// Les parcours qui en dépendent entièrement (le contrat du service, le dépôt
+// d'une pièce) le déclarent « sans objet » plutôt que d'accuser le dépôt — c'est
+// le même raisonnement que le refus 4xx d'une installation non provisionnée.
+async function serviceVivant(ctx) {
+  try {
+    const r = await ctx.appelerService("GET", "/v1/health");
+    return !!(r && r.status === 200);
+  } catch (e) {
+    return false;
+  }
+}
+
 // ------------------------------------------------------------ 2. le recueil public
 declarer({
   id: "recueil-public",
@@ -707,7 +722,7 @@ declarer({
 declarer({
   id: "une-pastille-par-carte",
   nom: "Une carte porte une pastille, une ligne de mentions et un seul geste principal",
-  pourquoi: "la revue a relevé jusqu'à sept pastilles et six boutons sur une carte de trame : plus rien n'y ressortait. La règle est « une pastille de statut », « le reste en mentions grises », « le geste courant seul, les autres derrière le menu ⋯ » (P3, P2)",
+  pourquoi: "la revue a relevé jusqu'à sept pastilles et six boutons sur une carte de trame : plus rien n'y ressortait. La règle est « une pastille de statut », « le reste en mentions grises », « le geste courant seul, les autres derrière le menu ⋯ » (P3, P2) — et, depuis 1.6.3e, « ce que le ⋯ range doit se retrouver » : le parcours ouvre le menu d'une carte et vérifie que l'entrée qui ouvre l'éditeur de trame porte le mot des autres écrans (« Éditer la trame ») et mène à l'éditeur",
   async jouer(ctx) {
     const { state, navigate } = ctx.modules();
     const dom = ctx.dom();
@@ -728,6 +743,19 @@ declarer({
         if (primaires !== 1) return "une carte porte " + primaires + " bouton(s) principal(aux) au lieu d'un";
         if (!carte.querySelector(".app-menubtn")) return "une carte n'a pas de menu « ⋯ » pour ses autres gestes";
       }
+      // LE GESTE RANGÉ DERRIÈRE LE « ⋯ » DOIT SE RETROUVER (1.6.3e). L'entrée qui
+      // ouvre l'éditeur de trame s'appelait « Ouvrir l'éditeur » ici, et « Éditer
+      // la trame » sur les deux autres écrans : le mot qu'un agent cherche n'était
+      // écrit nulle part. On ouvre donc le menu pour de vrai, on lit l'entrée, et
+      // on vérifie qu'elle mène bien à l'éditeur.
+      const tete = cartes[0];
+      tete.querySelector(".app-menubtn button").click();
+      const entree = await jusqua(() => [...tete.querySelectorAll(".app-menu__item")]
+        .find((b) => b.textContent.trim() === "Éditer la trame"), { essais: 10, pause: 60 });
+      if (!entree) return "le menu « ⋯ » d'une carte de trame n'offre pas « Éditer la trame »";
+      entree.click();
+      const ouvert = await jusqua(() => (state.route.view === "trame" ? state.route : null), { essais: 20, pause: 100 });
+      if (!ouvert) return "« Éditer la trame » n'ouvre pas l'éditeur (vue : " + state.route.view + ")";
       return "";
     } finally {
       await ctx.revenir(avant);
@@ -1171,7 +1199,13 @@ declarer({
       //    est alors sans objet, comme celui d'un acte publié quand il n'y en a
       //    aucun.
       if (!piece) {
-        if (envoi.status >= 400 && envoi.status < 500) return "";
+        // 4xx : refus d'installation — service non provisionné, ou poste sans la
+        //      clé d'écriture. 0 : le service n'a pas répondu du tout — canal
+        //      fermé, service suspendu (l'aperçu met le sien en quarantaine sous
+        //      une salve trop dense : NC-II-012). Ni l'un ni l'autre n'est un
+        //      défaut du DÉPÔT : le parcours est sans objet, comme celui d'un
+        //      acte publié quand il n'y en a aucun.
+        if (envoi.status === 0 || (envoi.status >= 400 && envoi.status < 500)) return "";
         return "le dépôt par le service a échoué (" + (envoi.status || "sans réponse") + ") : " + refus;
       }
       if (!piece.pieceId) return "le service n'a pas rendu d'identifiant pour la pièce déposée";
@@ -1183,8 +1217,25 @@ declarer({
       const b64attendu = btoa(String.fromCharCode.apply(null, octets));
       if (lu.body && lu.body.base64 && lu.body.base64 !== b64attendu) return "la pièce relue n'a pas le contenu déposé";
 
-      // 4. Le retrait laisse le service propre.
-      if (!(await supprimerPiece(piece.pieceId, { token: jeton }))) return "la pièce déposée ne se retire pas";
+      // 4. Le retrait laisse le service propre. On regarde l'APPEL, jamais le
+      //    seul booléen : `supprimerPiece` rend `false` pour un refus d'ÉTAT
+      //    comme pour un vrai défaut, et conclure « ne se retire pas » ne disait
+      //    pas lequel — c'est ce qui rendait ce parcours illisible quand le
+      //    service éphémère de l'aperçu (NC-II-012) avait remis son état à zéro
+      //    entre le dépôt et le retrait. On lit donc le STATUT de l'appel : un
+      //    refus d'installation (4xx) est sans objet, comme au point 2 ; un 5xx,
+      //    une absence de réponse ou un service injoignable restent un échec, et
+      //    il se dit avec son statut.
+      const avantRetrait = remote.log.length;
+      const retire = await supprimerPiece(piece.pieceId, { token: jeton });
+      if (!retire) {
+        const appelRetrait = remote.log.slice(avantRetrait).find((e) => e.method === "DELETE" && String(e.path).startsWith("/v1/pieces/"));
+        const statut = appelRetrait ? appelRetrait.status : 0;
+        // Même règle qu'au point 2 : un refus d'installation (4xx) ou un service
+        // muet (0 — aucune réponse) est un état de l'environnement, sans objet.
+        if (!appelRetrait || statut === 0 || (statut >= 400 && statut < 500)) return "";
+        return "la pièce déposée ne se retire pas (statut " + (statut || "sans réponse") + ")";
+      }
       const apres = await ctx.appelerService("GET", "/v1/pieces/" + piece.pieceId);
       if (!apres || apres.status !== 404) return "la pièce retirée répond encore (statut " + (apres && apres.status) + ")";
       return "";
@@ -1657,6 +1708,244 @@ declarer({
   },
 });
 
+// ------------------------------------ les informations ne s'effacent pas (1.6.3h)
+// Deux défauts de la même famille, et tous deux vus à l'écran : la rubrique
+// « Informations » du recueil public a déjà disparu définitivement (le dépôt de
+// démonstration invalidait une liste que rien ne relisait, 1.6.1d) ; et une
+// lecture qui ÉCHOUE reste, partout ailleurs, confondue avec une lecture qui
+// rend VIDE — la liste vide est alors gardée, et rien ne la relit (voir
+// src/lib/relecture.js). Ce parcours tient les deux : la relecture après
+// invalidation, et la RÉPARATION d'une liste vide gardée à tort alors que des
+// billets sont publiés au poste.
+declarer({
+  id: "recueil-informations",
+  nom: "Les informations du recueil ne s'effacent pas, et se réparent",
+  pourquoi: "l'information disparue sans le dire est le défaut le plus coûteux d'un recueil public : le visiteur ne sait pas qu'il manque quelque chose, et rien ne la fait revenir",
+  async jouer(ctx) {
+    const st = ctx.etat();
+    const avant = ctx.route();
+    try {
+      // La relecture des informations passe par le SERVICE : s'il ne répond rien
+      // (suspendu, éteint), la rubrique restera vide sans que le dépôt y soit
+      // pour quoi que ce soit — le parcours est sans objet (voir NC-II-012).
+      if (!(await serviceVivant(ctx))) return "";
+      const db = await import(RACINE_CODE + "lib/db/index.js");
+      await ctx.allerRecueil();
+      const locaux = (st.informations || []).filter((i) => i && i.publie === true);
+      const fixer = (valeur) => {
+        if (!st.recueil) st.recueil = {};
+        st.recueil.infos = valeur;
+        ctx.modules().navigate("recueil");
+      };
+      const revenus = () => jusqua(() => (Array.isArray(st.recueil.infos) && st.recueil.infos.length ? st.recueil.infos : null), { essais: 40, pause: 200 });
+
+      // 1. Invalidée, la lecture doit être REPRISE par le redessin — et la
+      //    rubrique ne doit pas DISPARAÎTRE en attendant : elle s'affiche, en
+      //    disant qu'elle charge. Sans cela, le visiteur arrivé pendant la
+      //    lecture ne voyait aucune rubrique, puis la voyait surgir (1.6.3i).
+      fixer(null);
+      const pendant = await jusqua(() => ctx.dom().querySelector(".recueil-section.recueil-infos"), { essais: 6, pause: 80 });
+      if (!pendant) return "pendant la lecture, la rubrique des informations est absente de l'accueil : le visiteur la voit disparaître";
+      if (!(await revenus())) return "après invalidation, le recueil n'a pas relu ses informations : la rubrique reste vide";
+      // 2. Gardée VIDE à tort (lecture faite trop tôt, ou service muet pris pour
+      //    une réponse), elle doit SE RÉPARER toute seule au redessin suivant.
+      if (db.isLocalMode() && locaux.length) {
+        fixer([]);
+        if (!(await revenus())) return "une liste vide gardée en mémoire ne se répare pas : les informations publiées au poste restent invisibles";
+        // L'état revient AVANT que la page ne soit redessinée : la rubrique
+        // s'affiche au rendu suivant, on l'attend donc elle aussi.
+        const rubrique = await jusqua(() => ctx.dom().querySelector(".recueil-section.recueil-infos"), { essais: 30, pause: 200 });
+        if (!rubrique) return "les informations sont revenues dans l'état, mais la rubrique n'est pas rendue sur l'accueil";
+      }
+      return "";
+    } finally {
+      await ctx.revenir(avant);
+    }
+  },
+});
+
+// --------------------------- 31. un écran ne cache pas ce qu'il affiche (1.6.3i)
+declarer({
+  id: "ecran-sans-contenu-cache",
+  nom: "Aucun écran ne rogne son contenu sans le dire (bandeau, cellule, panneau)",
+  pourquoi: "l'audit visuel a trouvé un bandeau de démonstration ÉCRASÉ par la coquille bornée à la fenêtre : sa seconde ligne (« Ne pas produire d'actes réels avec cette installation ») était coupée, et rien à l'écran ne le disait. Un conteneur qui rogne son contenu sans ellipse ni infobulle perd une information en silence — c'est le défaut que l'audit cherche désormais de lui-même, sur les écrans de l'atelier comme au recueil",
+  async jouer(ctx) {
+    const { state, navigate } = ctx.modules();
+    const dom = ctx.dom();
+    if (!state.ready || !state.user) return "";              // parcours sans objet
+    const avant = ctx.route();
+
+    // Rogner est acceptable quand c'est ANNONCÉ : une ellipse avec l'infobulle qui
+    // porte le texte entier (les cellules d'objet du chrono, les lignes de la file
+    // de signature), ou un clamp explicite. Sans cela, l'information est perdue.
+    const annonceLaCoupe = (el) => {
+      const cs = getComputedStyle(el);
+      const clamp = cs.webkitLineClamp || cs.getPropertyValue("-webkit-line-clamp");
+      if (clamp && clamp !== "none") return true;
+      if (cs.textOverflow !== "ellipsis") return false;
+      let n = el;
+      while (n && n !== dom.body) {
+        if (n.getAttribute && n.getAttribute("title")) return true;
+        n = n.parentElement;
+      }
+      return false;
+    };
+    const rogneurs = (zone) => {
+      const trouves = [];
+      for (const el of [zone, ...zone.querySelectorAll("*")]) {
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        if (cs.overflowY === "hidden" && el.scrollHeight - el.clientHeight > 2 && !annonceLaCoupe(el)) {
+          trouves.push((el.className || el.tagName) + " rogne " + (el.scrollHeight - el.clientHeight) + " px en hauteur");
+        } else if (cs.overflowX === "hidden" && el.scrollWidth - el.clientWidth > 2 && !annonceLaCoupe(el)) {
+          trouves.push((el.className || el.tagName) + " rogne " + (el.scrollWidth - el.clientWidth) + " px en largeur");
+        }
+      }
+      return trouves;
+    };
+
+    const ecrans = ["trames", "actes", "parapheur", "signature", "execution", "informations", "chrono", "referentiel"];
+    try {
+      for (const vue of ecrans) {
+        navigate(vue);
+        if (!(await jusqua(() => dom.querySelector(".app-main .page-head__title"), { essais: 30, pause: 120 }))) continue;
+        // Le bandeau de tête : la coquille est bornée à la fenêtre, et c'est lui
+        // qu'un flex-shrink pouvait écraser sous sa propre hauteur de contenu.
+        const bandeau = dom.querySelector(".app-demo, .app-vierge");
+        if (bandeau && bandeau.scrollHeight > bandeau.clientHeight + 1) {
+          return "le bandeau (" + Math.round(bandeau.getBoundingClientRect().height) + " px) rogne son texte de " + (bandeau.scrollHeight - bandeau.clientHeight) + " px, vu sur « " + vue + " »";
+        }
+        const zone = dom.querySelector(".app-main");
+        const t = zone ? rogneurs(zone) : [];
+        if (t.length) return "« " + vue + " » : " + t.slice(0, 2).join(" ; ");
+      }
+      // Le recueil public a, lui aussi, une colonne de contenu : elle ne rogne rien.
+      navigate("recueil");
+      if (await jusqua(() => dom.querySelector(".recueil-main"), { essais: 30, pause: 150 })) {
+        const t = rogneurs(dom.querySelector(".recueil-main"));
+        if (t.length) return "recueil public : " + t.slice(0, 2).join(" ; ");
+      }
+      return "";
+    } finally {
+      await ctx.revenir(avant);
+    }
+  },
+});
+
+// --------------------- 32. les deux emblèmes de l'en-tête d'un acte (1.6.3j)
+declarer({
+  id: "emblemes-entete",
+  nom: "L'en-tête porte ses deux emblèmes — un à gauche, un à droite — et leur position se règle",
+  pourquoi: "une feuille de style accepte un second emblème à droite du filet depuis la 1.4.0, mais rien ne l'éprouvait : ni la place des deux marques, ni les réglages qui les positionnent (écart, alignement vertical, place du texte entre elles). Une charte qui annonce deux emblèmes et n'en montre qu'un — ou les montre empilés — ne se voit qu'au rendu réel",
+  async jouer(ctx) {
+    const st = await import(RACINE_CODE + "lib/styles.js");
+    const rd = await import(RACINE_CODE + "lib/render.js");
+    const etat = ctx.etat();
+    if (!etat || !etat.ready || !etat.config) return "";   // parcours sans objet
+    const config = etat.config;
+    const marqueGauche = st.svgDataUrl(st.LOGO_CCAS_SVG);
+    const marqueDroite = st.svgDataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 60"><rect width="90" height="60" fill="#000091"/><text x="45" y="38" fill="#fff" font-size="20" text-anchor="middle">ETAT</text></svg>');
+    const dom = ctx.dom();
+
+    // On rend un vrai document sur un vrai papier, dans un hôte HORS ÉCRAN : le
+    // rendu est celui de l'application (mêmes modules, même CSS), et rien n'est
+    // touché — ni le référentiel, ni l'écran, ni la route.
+    const hote = dom.createElement("div");
+    hote.style.cssText = "position:fixed;left:-12000px;top:0;width:794px";
+    const feuilleCss = dom.createElement("style");
+    dom.head.appendChild(feuilleCss);
+    dom.body.appendChild(hote);
+
+    // Les mesures sont prises en coordonnées de MISE EN PAGE (`offsetLeft`…),
+    // insensibles aux transformations d'échelle : un aperçu réduit pour tenir
+    // dans le volet ne fausse donc pas les distances.
+    async function poser(patch) {
+      const style = st.emptyStyle(Object.assign({
+        id: "sty-parcours-emblemes", showHeader: true,
+        logoUrl: marqueGauche, logoHeight: "42",
+        logoRightUrl: marqueDroite, logoRightHeight: "60",
+        headerText: "Mairie de Valmont-sur-Loire — recueil des actes administratifs",
+        headerRule: true,
+      }, patch));
+      feuilleCss.textContent = st.styleCss(style, config, { scope: '[data-sheet="' + style.id + '"]' });
+      hote.innerHTML = "";
+      const papier = dom.createElement("div");
+      papier.className = "paper";
+      papier.style.cssText = "position:relative;width:794px";
+      hote.appendChild(papier);
+      const doc = st.sampleDocument(config, style);
+      rd.applyPaper(papier, doc, config, { style });
+      papier.appendChild(rd.renderDocument(doc, config, { style, apercu: true }));
+      const tete = papier.querySelector(".doc-sheet-header");
+      if (!tete) return null;
+      for (let i = 0; i < 40; i++) {
+        const im = [...tete.querySelectorAll("img")];
+        if (im.length && im.every((x) => x.complete && x.naturalWidth > 0)) break;
+        await attendre(60);
+      }
+      const texte = tete.querySelector(".doc-sheet-headtext");
+      const images = [...tete.querySelectorAll("img")];
+      return {
+        tete,
+        images: images.map((im) => ({ gauche: im.offsetLeft - tete.offsetLeft, largeur: im.offsetWidth, hauteur: im.offsetHeight, haut: im.offsetTop - tete.offsetTop, aDroite: im.classList.contains("doc-sheet-logo--right") })),
+        texte: texte ? { gauche: texte.offsetLeft - tete.offsetLeft, align: getComputedStyle(texte).textAlign } : null,
+        largeur: tete.offsetWidth,
+        // La hauteur du CONTENU de l'en-tête (hors rembourrage et filet) : c'est
+        // elle qui commande l'alignement vertical des emblèmes.
+        contenu: tete.offsetHeight - parseFloat(getComputedStyle(tete).paddingBottom || 0) - parseFloat(getComputedStyle(tete).borderBottomWidth || 0),
+      };
+    }
+
+    try {
+      // 1. DEUX emblèmes : un à chaque bout du filet, le texte entre eux.
+      const duo = await poser({});
+      if (!duo) return "aucun en-tête rendu";
+      if (duo.images.length !== 2) return "la feuille demande deux emblèmes : " + duo.images.length + " rendu(s)";
+      const [gauche, droite] = duo.images;
+      if (gauche.gauche !== 0) return "l'emblème de gauche n'est pas au bord gauche de l'en-tête (" + gauche.gauche + " px)";
+      const bordDroit = duo.largeur - (droite.gauche + droite.largeur);
+      if (Math.abs(bordDroit) > 1) return "l'emblème de droite n'est pas au bord droit de l'en-tête (" + bordDroit + " px du bord)";
+      if (gauche.hauteur !== 42 || droite.hauteur !== 60) return "les hauteurs d'emblème ne suivent pas la feuille (42/60 attendus, " + gauche.hauteur + "/" + droite.hauteur + " rendus)";
+      if (!duo.texte || duo.texte.align !== "center") return "le texte de l'en-tête n'est pas centré entre les deux emblèmes";
+
+      // 2. L'ÉCART se règle : il déplace le texte d'autant.
+      const ecarte = await poser({ logoGap: "40" });
+      if (!ecarte || !ecarte.texte) return "aucun texte d'en-tête à mesurer";
+      const gain = ecarte.texte.gauche - duo.texte.gauche;
+      if (Math.abs(gain - 26) > 1) return "l'écart des emblèmes ne se règle pas : +" + gain + " px pour 26 attendus";
+
+      // 3. La PLACE DU TEXTE entre les deux emblèmes se règle.
+      const aGauche = await poser({ logoTextAlign: "left" });
+      const aDroite = await poser({ logoTextAlign: "right" });
+      if (!aGauche?.texte || aGauche.texte.align !== "left") return "le texte ne se place pas à gauche entre les emblèmes";
+      if (!aDroite?.texte || aDroite.texte.align !== "right") return "le texte ne se place pas à droite entre les emblèmes";
+
+      // 4. L'ALIGNEMENT VERTICAL des emblèmes se règle : le plus petit descend.
+      const bas = await poser({ logoHeight: "20", logoRightHeight: "60", logoVAlign: "bottom" });
+      if (!bas || bas.images.length !== 2) return "en-tête incomplet pour l'alignement vertical";
+      // L'emblème de 20 px se cale sur le BAS du plus grand (60 px) : il part
+      // donc de « hauteur du contenu − 20 ».
+      const hautAttendu = bas.contenu - 20;
+      if (Math.abs(bas.images[0].haut - hautAttendu) > 1) {
+        return "l'alignement vertical des emblèmes ne se règle pas : le petit emblème part à " + bas.images[0].haut + " px au lieu de " + hautAttendu;
+      }
+      // Centré (le défaut), le même petit emblème part plus haut.
+      const centre = await poser({ logoHeight: "20", logoRightHeight: "60" });
+      if (!centre || !(centre.images[0].haut < bas.images[0].haut)) return "« centré » et « en bas » donnent le même alignement vertical";
+
+      // 5. UN SEUL emblème : l'ensemble se range (l'ancien réglage garde son sens).
+      const seul = await poser({ logoRightUrl: "", logoAlign: "center" });
+      if (!seul || seul.images.length !== 1) return "un seul emblème demandé : " + (seul ? seul.images.length : 0) + " rendu(s)";
+      const marge = seul.images[0].gauche;
+      if (marge < 20) return "l'emblème de gauche, demandé centré, reste collé au bord (" + marge + " px)";
+      return "";
+    } finally {
+      hote.remove();
+      feuilleCss.remove();
+    }
+  },
+});
+
 // --------------------------------------------------------------------------- run
 //
 // Le contexte (`ctx`) est fourni par l'appelant : c'est lui qui sait manœuvrer
@@ -1668,14 +1957,22 @@ export async function lancerParcours(ctx, { seulement = null } = {}) {
   // la foulée d'un chargement tomberait sur son premier souffle (état pas encore
   // là, donc erreur du service) et accuserait le contrat à tort. On attend qu'il
   // réponde, une fois, avant de juger quoi que ce soit.
+  //
+  // Ce premier contact est AUSSI le seul endroit où l'on sache si le service est
+  // là : il est rapporté (`service.joignable`) pour qu'une suite jouée contre un
+  // service MUET (l'aperçu le met en quarantaine sous une salve trop dense,
+  // NC-II-012) ne se lise pas comme une suite entièrement verte — les parcours
+  // qui dépendent du service s'y déclarent « sans objet ».
+  let service = { joignable: false, detail: "aucun service dans cet environnement" };
   if (ctx.appelerService) {
+    service.detail = "le service n'a pas répondu";
     for (let i = 0; i < 40; i++) {
       let pret = false;
       try {
         const r = await ctx.appelerService("GET", "/v1/health");
         pret = r && r.status === 200;
       } catch (e) { /* pas encore ouvert */ }
-      if (pret) break;
+      if (pret) { service = { joignable: true, detail: "" }; break; }
       await attendre(250);
     }
   }
@@ -1691,7 +1988,7 @@ export async function lancerParcours(ctx, { seulement = null } = {}) {
     resultats.push({ id: p.id, nom: p.nom, ok: !raison, raison });
   }
   const echecs = resultats.filter((r) => !r.ok);
-  return { total: resultats.length, ok: resultats.length - echecs.length, echecs, resultats };
+  return { total: resultats.length, ok: resultats.length - echecs.length, echecs, resultats, service };
 }
 
 // Le contexte de l'APERÇU (et de toute page de l'application) : les modules de

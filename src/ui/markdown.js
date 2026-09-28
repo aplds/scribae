@@ -61,10 +61,29 @@ const cells = (line) => {
 const isSeparator = (line) => /^\|?[\s:|-]+\|[\s:|-]*$/.test(line) && line.includes("-");
 
 // ------------------------------------------------------------------- blocs
-export function renderMarkdown(text) {
+// `decalage` décale d'un cran les titres du document (1 → les `#` se rendent en
+// `h2`) : un document AFFICHÉ DANS un écran se range sous le titre de l'écran,
+// et la classe suit le niveau (`md-h2`), donc l'apparence aussi — décaler la
+// seule balise laisserait le titre du document à la taille d'un titre de page.
+export function renderMarkdown(text, opts = {}) {
   const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
   const frag = document.createDocumentFragment();
+  const decalage = Math.max(0, Number(opts.decalage) || 0);
   let i = 0;
+
+  // Les ancres d'un même document doivent être UNIQUES : la chronique des
+  // versions répète ses rubriques (« Corrigé », « Modifié »…), et deux titres
+  // portant la même ancre donneraient des identifiants dupliqués — un document
+  // invalide, et un sommaire qui mène au mauvais titre. Le premier garde
+  // l'ancre, les suivants prennent un rang ; `outlineOf` compte exactement de
+  // la même façon, sinon le sommaire viserait à côté.
+  const ancres = new Map();
+  const ancre = (texte) => {
+    const base = slug(texte);
+    const n = (ancres.get(base) || 0) + 1;
+    ancres.set(base, n);
+    return n === 1 ? base : base + "-" + n;
+  };
 
   // Une ligne « qui continue » (alinéa d'un paragraphe ou d'un point de liste)
   // n'est pas un nouveau bloc : on la recolle à ce qui précède.
@@ -146,8 +165,8 @@ export function renderMarkdown(text) {
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
-      const level = Math.min(4, heading[1].length);
-      frag.appendChild(h("h" + level, { class: "md-h md-h" + level, id: slug(heading[2]) }, inline(heading[2].replace(/\*\*/g, ""))));
+      const level = Math.min(4, heading[1].length + decalage);
+      frag.appendChild(h("h" + level, { class: "md-h md-h" + level, id: ancre(heading[2]) }, inline(heading[2].replace(/\*\*/g, ""))));
       i++;
       continue;
     }
@@ -185,12 +204,23 @@ export function slug(text) {
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 }
 
-// Sommaire du document : les titres de niveau 2 et 3, dans l'ordre.
+// Sommaire du document : les titres de niveau 2 et 3, dans l'ordre. Les ancres
+// sont numérotées comme au rendu (`renderMarkdown`), tous niveaux confondus :
+// le sommaire mène donc toujours au titre qu'il nomme.
 export function outlineOf(text) {
   const out = [];
+  const ancres = new Map();
+  const ancre = (t) => {
+    const base = slug(t);
+    const n = (ancres.get(base) || 0) + 1;
+    ancres.set(base, n);
+    return n === 1 ? base : base + "-" + n;
+  };
   for (const line of String(text || "").split("\n")) {
-    const m = /^(#{2,3})\s+(.*)$/.exec(line);
-    if (m) out.push({ level: m[1].length, title: m[2].replace(/\*\*/g, ""), id: slug(m[2]) });
+    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const id = ancre(m[2]);
+    if (m[1].length >= 2 && m[1].length <= 3) out.push({ level: m[1].length, title: m[2].replace(/\*\*/g, ""), id });
   }
   return out;
 }

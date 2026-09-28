@@ -93,8 +93,8 @@ une pastille de statut en tête, les autres informations en ligne de mentions.*
 de présentation de deux à cinq lignes, puis un encadré « À quoi sert cet écran »,
 puis les alertes. Ces textes sont justes et bien écrits — mais ils occupent le
 premier écran, et personne ne les lit deux fois. L'aide doit venir **au moment du
-doute**, pas à l'ouverture. → *Livré (P4) : les vingt-trois écrans rangent leur
-explication derrière un bouton « ? ».*
+doute**, pas à l'ouverture. → *Livré (P4), étendu en 1.6.3g : les vingt-quatre
+écrans de l'atelier rangent leur explication derrière un bouton « ? ».*
 
 **C6 — Les écrans n'en finissent pas.** 11 990 px pour un registre de 400 actes,
 39 719 px pour le chrono, 93 192 px pour la documentation : un seul défilement,
@@ -189,6 +189,16 @@ l'espace de rédaction, un seul geste primaire (« Enregistrer »). Deux écarts
 assumés : le reste du logiciel n'a pas été repris carte par carte, et « à droite
 du titre » n'est vérifié qu'au-delà de 900 px.
 
+**Corrigé en 1.6.3f — le « ⋯ » se voit.** Ranger un geste derrière un menu n'a de
+sens que si **le menu se trouve**. Le bouton n'était qu'un dessin nu — trois
+points tracés au poids du socle sur un dessin de 16 px, soit des points d'un
+pixel — au bout d'une ligne, à droite d'un bouton principal plein : de la
+ponctuation. Il est désormais **dessiné en bouton** (cadre, fond, **36 px** de
+côté — la hauteur du bouton principal en face —, dessin de 20 px et points
+épaissis), **neutre** au repos (l'encre, pas la couleur de marque : il n'y a
+qu'un geste principal par carte) et **allumé** au survol comme tant que son menu
+est ouvert. La règle vaut pour `menuButton`, donc pour les sept écrans d'un coup.
+
 ### P3 — Une pastille par objet, et trois seulement *(livré)*
 Une pastille de **statut** (Rédaction, Parapheur, Signé, Publié, Archivé), en
 français, une seule. La nature, la famille, le service, les compteurs de champs
@@ -212,8 +222,11 @@ pédagogiques longs deviennent des notes dépliables. Le guide reste à un clic
 **Livré.** `aideEcran()` et `pageTitle()` (`src/ui/components.js`) rangent
 l'explication derrière un bouton « ? » à droite du titre — une ligne, pas un
 paragraphe — et `notePlier()` rend dépliables les encadrés pédagogiques longs.
-Les **vingt-trois** écrans de l'atelier ont été convertis, et l'encadré « Comment
-écrire dans le document » de la rédaction est devenu une note pliable. Les
+Les **vingt-quatre** écrans de l'atelier portent l'aide à la demande : les
+**quatre** derniers — `modifier`, l'éditeur de trame, la rédaction, le détail
+d'un acte — l'ont reçue en 1.6.3g, et le relevé de la campagne visuelle le
+vérifie (NC-III-017). L'encadré
+« Comment écrire dans le document » de la rédaction est devenu une note pliable. Les
 sous-titres de **données** (le nom de la trame, l'identité du document ouverts)
 restent affichés, eux : ils disent ce qu'on regarde, non comment s'en servir.
 

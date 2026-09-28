@@ -12,10 +12,11 @@
 // document avant d'accepter la signature.
 // ============================================================================
 import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, parapheurActif, controleLegaliteActif, controleLegaliteParApi, controleLegaliteDeclaratif, peutDeclarerTransmission, revisionPour, revisionRequisePour, visibleActes, trameById, reviseursDe, modeSignatureDe, circuitSignatureDe, peutCertifier, estCircuitExterne, isAdmin } from "../state.js";
-import { h, clear, button, toast, modal, icon, badge } from "../dom.js";
-import { textField, selectField, emptyState, helpLink, pageTitle } from "../components.js";
+import { h, clear, button, toast, modal, icon, badge, field as frField } from "../dom.js";
+import { textField, selectField, emptyState, helpLink, objetDeListe, pageTitle } from "../components.js";
 import { docOfActe } from "./modifier.js";
 import { natureOfActe, appellationAnnexe, estReglement } from "../../lib/annexes.js";
+import { acteStatutLabel, acteStatutColor } from "../../lib/statuts-acte.js";
 import { parcoursDeActe } from "../../lib/parcours.js";
 import { bandeauParcours } from "../parcours.js";
 import { licenceReutilisation, recueilsExternes, mentionsPubliques } from "../../lib/recueil.js";
@@ -42,6 +43,7 @@ import {
 import { niveauDepuisCircuit } from "../../lib/qualification-signature.js";
 import { enregistrerFormalite, formalites, transmissionRequisePour } from "../../lib/execution.js";
 import { CONTROLE_LEGALITE, verifierCertificatTransmission } from "../../lib/legalite.js";
+import { cleIdempotencePublication } from "../../lib/publication-version.js";
 import { get, post, connect, apiStatus, errorMessage, beginFlow, onStatus, recordExternal } from "../../lib/remote.js";
 import { deposerPiece, verifierTaille, limiteLisible } from "../../lib/fichiers.js";
 import { renderApiTab } from "./api-console.js";
@@ -64,29 +66,21 @@ import { statusBadgeEl, defaultCircuitActe, stepEl, etapesCircuit, etapesExterne
 const reserveDe = (acte) => trameById(acte && acte.trameId)?.reserve === true;
 const mentionReserve = "Publication réservée aux agents connectés : le recueil public ne la montre qu'aux porteurs d'une session.";
 
-const STATUTS = {
-  brouillon: ["Brouillon", "warning"],
-  pret: ["Prêt à signer", "info"],
-  exporte: ["Exporté", "info"],
-  en_signature: ["En signature", "warning"],
-  signee: ["Signé", "success"],
-  publie: ["Publié", "success"],
-  en_attente: ["En attente de publication", "info"],
-  abroge: ["Abrogé", "error"],
-};
-
-export const statutLabel = (s) => (STATUTS[s] || [, s || "Brouillon"])[0];
-export const statutColor = (s) => (STATUTS[s] || ["", "warning"])[1];
+// Les états d'un acte ne sont plus recopiés ici : ils sont LUS dans la table
+// unique (`lib/statuts-acte.js`), comme sur les autres écrans (NC-III-011). Le
+// mot de l'état `pret` est donc le même partout — « Prêt ».
+export const statutLabel = (s) => acteStatutLabel(s);
+export const statutColor = (s) => acteStatutColor(s);
 
 // L'étiquette d'état d'un acte dans la LISTE de l'écran. Elle suit le statut —
-// sauf pour une ANNEXE : elle ne se signe pas, et lui laisser « Prêt à signer »
+// sauf pour une ANNEXE : elle ne se signe pas, et lui laisser l'état d'un acte
 // ferait croire qu'un geste l'attend, alors que c'est l'acte qui l'adopte qui
 // porte la signature (voir src/lib/annexes.js). On le dit dès la liste, sans
 // attendre que l'annexe soit ouverte.
 export const etatListeActe = (acte, trames) =>
   natureOfActe(acte, trames) === "annexe"
     ? ["Annexe — ne se signe pas", "info"]
-    : (STATUTS[acte?.statut] || STATUTS.brouillon);
+    : [acteStatutLabel(acte?.statut), acteStatutColor(acte?.statut)];
 
 // Les messages de la publication se taisent pendant l'amorçage du recueil de
 // démonstration (voir src/ui/demo-publications.js) : l'agent n'a pas à voir
@@ -426,7 +420,7 @@ function renderCircuit(root, ctx) {
       onClick: () => { ui.acteId = a.id; paint(); },
     },
       h("span", { class: "sig-item__num fr-mono", text: a.numero || "sans n°" }),
-      h("span", { class: "sig-item__obj", text: a.objet || d?.meta?.objet || "—" }),
+      objetDeListe(a.objet || d?.meta?.objet),
       h("span", { class: "fr-badge fr-badge--" + color, text: label }),
     ));
   }
@@ -1098,7 +1092,7 @@ function fenetreSignatureSimple(acte, doc, ctx) {
   const paper = h("div", { class: "paper" });
   paper.style.fontFamily = config.brand.documentFont || "";
   applyPaper(paper, doc, config);
-  paper.appendChild(renderDocument(doc, config, {}));
+  paper.appendChild(renderDocument(doc, config, { apercu: true }));
   paperBox.appendChild(paper);
 
   const caseVerifie = h("input", { type: "checkbox" });
@@ -1292,7 +1286,7 @@ function fenetreSignatureInterne(acte, doc, ctx) {
   const paper = h("div", { class: "paper" });
   paper.style.fontFamily = config.brand.documentFont || "";
   applyPaper(paper, doc, config);
-  paper.appendChild(renderDocument(doc, config, {}));
+  paper.appendChild(renderDocument(doc, config, { apercu: true }));
   paperBox.appendChild(paper);
 
   const caseVerifie = h("input", { type: "checkbox" });
@@ -1759,9 +1753,7 @@ function ajouterVersionSignee(acte, doc, ctx) {
     wide: true,
     body: h("div", { class: "fr-stack" },
       h("p", { class: "fr-small", text: "Déposez le document signé hors de l'application, au format PDF (signature manuscrite scannée, ou PDF produit par l'outil tiers). Il devient la pièce de référence de l'acte, et c'est lui qui sera montré comme l'original dans le recueil public. Taille maximale : " + limiteLisible() + "." }),
-      h("div", { class: "fr-field" },
-        h("label", { class: "fr-label", text: "Version signée (PDF)" }),
-        fichierInput),
+      frField("Version signée (PDF)", fichierInput),
       info,
       acte.externe && acte.externe.certificationRequise
         ? h("p", { class: "fr-small fr-muted", text: "Un réviseur est compétent pour cet acte : sa conformité avec la version numérique devra être certifiée avant la publication." })
@@ -1911,7 +1903,7 @@ export function certifierConformite(acte, doc, ctx) {
         h("iframe", { class: "sig-doc-frame", src: sg.url, title: "Version signée" })),
       h("p", { class: "fr-label", text: "Points de contrôle" }),
       coches,
-      h("div", { class: "fr-field" }, h("label", { class: "fr-label", text: "Observation" }), remarque)),
+      frField("Observation", remarque)),
     actions: (close) => [
       button("Renoncer", { variant: "secondary", onClick: close }),
       boutonRefuser,
@@ -2337,7 +2329,7 @@ async function ouvrirOutil(acte, doc, ctx, autoOpen) {
   const paper = h("div", { class: "paper" });
   paper.style.fontFamily = config.brand.documentFont || "";
   applyPaper(paper, doc, config);
-  paper.appendChild(renderDocument(doc, config, {}));
+  paper.appendChild(renderDocument(doc, config, { apercu: true }));
   paperBox.appendChild(paper);
 
   const box = h("div", { class: "sig-tool" },
@@ -2979,12 +2971,20 @@ async function publier(acte, doc, form, paint) {
     ...(acte.epingle ? { epingle: true } : {}),
     ...theme,
   };
+  // L'EXPRESSION DE DATE (facultative) : c'est elle qui distingue deux VERSIONS
+  // d'une même publication. Le service en tire la clé (voir `hPublier`,
+  // `clePublication`) : deux expressions différentes donnent deux versions, la
+  // même expression rend la publication existante. L'amorçage de démonstration
+  // s'en sert pour qu'un jeu de données MODIFIÉ publie une version nouvelle au
+  // lieu de laisser en ligne le texte périmé ; une publication manuelle n'en
+  // pose pas, et garde donc le comportement d'avant.
+  if (form.dateExpression) payload.dateExpression = form.dateExpression;
   if (originalExterne) payload.originalExterne = originalExterne;
   // La part interne de l'original : le service la range au registre, et ne la
   // sert jamais par une route publique. Les courriels envoyés au titre de l'acte
   // y sont joints — c'est la trace de qui a été prévenu, et quand.
   if (originalInterne) payload.originalInterne = originalInterne;
-  const opts = { token, flow, label: "Publication de l'acte signé", idempotencyKey: `${eliU}@${record.dateDocument}-${kind}` };
+  const opts = { token, flow, label: "Publication de l'acte signé", idempotencyKey: cleIdempotencePublication(eliU, record.dateDocument, kind, form.dateExpression) };
   try {
     let res = await post(`/v1/actes/${acte.api.acteId}/publication`, payload, opts);
     // Le service ne connaît pas (ou plus) cet acte — redémarrage du service, ou
@@ -3041,7 +3041,7 @@ async function publier(acte, doc, form, paint) {
     // Les RÈGLEMENTS annexés à l'acte : leur texte en vigueur part au recueil
     // dans la foulée, à titre informatif (voir `publierReglements`). Un acte qui
     // n'adopte qu'un tableau (une grille tarifaire) n'en déclenche aucun.
-    await publierReglements(acte, doc, { token, flow, datePublication: form.datePublication, recueil: form.recueil, reserve });
+    await publierReglements(acte, doc, { token, flow, datePublication: form.datePublication, recueil: form.recueil, reserve, dateExpression: form.dateExpression });
 
     // Une modification n'est complète que lorsque le texte consolidé est publié :
     // c'est lui qui devient la version en vigueur de l'acte d'origine.
@@ -3102,8 +3102,15 @@ function consolidationNotice(acte, form, paint) {
 //
 // Elle se déclenche à la publication de l'acte qui adopte le règlement — donc
 // aussi à l'amorçage de démonstration, qui passe par `publier`.
-async function publierReglements(acte, doc, { token, flow, datePublication, recueil, reserve }) {
+async function publierReglements(acte, doc, { token, flow, datePublication, recueil, reserve, dateExpression }) {
   const config = state.config;
+  // L'EXPRESSION DE DATE de la version (facultative). C'est elle qui distingue
+  // deux VERSIONS d'un même règlement : l'amorçage de démonstration y inscrit la
+  // version du JEU (voir src/ui/demo-publications.js), si bien qu'un jeu MODIFIÉ
+  // publie une version nouvelle — l'ancienne reste à l'historique — au lieu de
+  // laisser en ligne la rédaction périmée. Une publication manuelle n'en pose
+  // pas : l'expression est alors la date de publication, comme avant.
+  const expression = dateExpression || datePublication;
   const joints = annexesJointes(doc?.meta?.annexes, { actes: state.actes, trames: state.trames, config, acteId: acte.id });
   const reglements = joints.filter((j) => estReglement(j.trame) && j.doc);
   if (!reglements.length || !acte.api?.acteId) return;
@@ -3152,6 +3159,10 @@ async function publierReglements(acte, doc, { token, flow, datePublication, recu
       dateDocument: record.dateDocument, datePublication,
       dateOpposabilite: "", opposabiliteRule: "", recueil: record.recueil, auteur: record.auteur,
       kind: "informative", html, akn, jsonld, md, texte,
+      // L'expression de la version (voir `expression` ci-dessus) : deux jeux
+      // différents donnent deux versions, la même expression rend la publication
+      // existante — c'est l'idempotence du service.
+      dateExpression: expression,
       // Le service n'attend ni signature ni original : cette publication est le
       // texte du règlement, à titre informatif — pas un acte opposable.
       informative: true, adoption,
@@ -3166,7 +3177,7 @@ async function publierReglements(acte, doc, { token, flow, datePublication, recu
     try {
       const res = await post(`/v1/actes/${acte.api.acteId}/publication`, payload, {
         token, flow, label: "Publication informative du règlement",
-        idempotencyKey: `${eli}@${datePublication}-informative`,
+        idempotencyKey: cleIdempotencePublication(eli, datePublication, "informative", dateExpression),
       });
       if (!res.ok) { dire("Règlement — publication informative : " + errorMessage(res), "warning"); continue; }
       // Le registre local garde l'identifiant du règlement (il le réutilisera à

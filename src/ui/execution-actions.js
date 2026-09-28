@@ -13,7 +13,7 @@
 // d'introduction — celle qui ferme le délai de recours contentieux.
 // ============================================================================
 import { state, touch, journaliser, redrawView, actePubliable, trameById, modeControleLegalite, peutDeclarerTransmission } from "./state.js";
-import { h, button, toast, modal } from "./dom.js";
+import { h, button, toast, modal, field as frField } from "./dom.js";
 import { textField, selectField } from "./components.js";
 import {
   enregistrerFormalite, effacerFormalite, enregistrerRecours, effacerRecours, recoursDe,
@@ -60,9 +60,7 @@ export function ouvrirFormulaireFormalite(a, f, { paint = redrawView } = {}) {
     ? h("div", { class: "fr-card fr-card--soft" },
       h("p", { class: "fr-small fr-muted", style: { margin: "0 0 6px" }, text: "Notifier aussi par courriel. Le message part par le serveur SMTP du déploiement ; s'il n'est pas configuré, l'envoi est constaté « non envoyé » au journal de l'acte." }),
       h("label", { class: "fr-check" }, caseMail, "Envoyer l'acte à l'intéressé par courriel"),
-      h("div", { class: "fr-field" },
-        h("label", { class: "fr-label", text: "Adresse du destinataire" }),
-        courrielInput))
+      frField("Adresse du destinataire", courrielInput))
     : null;
   const modes = f.id === "transmission" ? TRANSMISSION_MODES : f.id === "notification" ? NOTIFICATION_MODES : PUBLICATION_MODES;
   // Les constantes portent `id` et `label` ; un `<select>` attend `value` et

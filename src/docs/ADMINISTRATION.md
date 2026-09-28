@@ -2126,7 +2126,9 @@ la migration consiste donc à déplacer les données, pas à les convertir.
    Envoyer les données à la base** ;
 4. **Régler chaque poste** sur le mode « Serveur externe » avec l'adresse du service et le
    jeton (ou, en auto-hébergement, l'adresse vide et le jeton injecté) ;
-5. **Couper la démonstration** : décocher *Administration › Identité › Mention de démonstration*,
+5. **Couper la démonstration** : `DEMO=false` dans le `.env` du service (puis recréer le
+   service) — la carte *Administration › Identité › Mention de démonstration* masque alors
+   d'elle-même ses options, et aucun bandeau « Démonstration » ne s'affiche ;
    et retirer la dépendance à l'environnement d'édition — l'application auto-hébergée ne
    charge plus `main.pjs` ni l'`index.html` d'origine (sa coquille est `src/server/web/index.html`).
 

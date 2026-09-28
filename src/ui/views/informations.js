@@ -17,7 +17,7 @@
 // Rien ici n'est un acte : pas de numéro, pas de circuit, pas de signature, pas
 // d'ELI. C'est ce qui rend la rubrique simple — et c'est ce qui la rend utile.
 // ============================================================================
-import { state, touch, redrawView, can, navigate } from "../state.js";
+import { state, touch, redrawView, can, navigate, oublierInformationsRecueil } from "../state.js";
 import { h, button, toast, icon } from "../dom.js";
 import { textField, confirmDialog, emptyState, pageTitle } from "../components.js";
 import { renderMarkdown } from "../markdown.js";
@@ -38,8 +38,12 @@ const idNeuf = () => "info-" + Date.now().toString(36) + Math.random().toString(
 // vient de publier n'apparaîtrait pas au public avant un rechargement de la
 // page, alors que le propos de l'écran est justement de le rendre visible.
 // (Le brouillon, lui, reste écarté : le recueil ne montre que le publié.)
+//
+// On passe par le geste de l'état (`oublierInformationsRecueil`) et non par une
+// écriture directe : c'est lui qui efface aussi le souvenir d'un échec de
+// lecture, sans quoi la relecture attendrait la fin du délai (src/lib/relecture.js).
 function invaliderRecueil() {
-  if (state.recueil) state.recueil.infos = null;
+  if (state.recueil) oublierInformationsRecueil();
 }
 
 export function renderInformations(root) {

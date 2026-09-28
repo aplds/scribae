@@ -281,14 +281,30 @@ class Feuille {
   // Le bas utile : la marge, moins le pied de page s'il y en a un.
   get bas() { return PAGE.hauteur - this.plan.marges.bas - this.hauteurPied(); }
 
-  // La hauteur de l'en-tête et du pied : la somme de ce que la charte y a mis.
-  // La taille du texte est celle du STYLE (`textes.enTete` / `textes.pied`) —
-  // le plan d'en-tête ne porte, lui, que le contenu.
-  hauteurEntete() {
+  // La hauteur du CONTENU de l'en-tête : les emblèmes et le texte sont posés
+  // CÔTE À CÔTE — c'est le plus grand qui commande, jamais leur somme (c'est ce
+  // que fait le CSS, où l'en-tête est une rangée `flex`).
+  hauteurEnteteContenu() {
     const e = this.plan.entete;
     if (!e) return 0;
     const t = this.textes.enTete;
-    return (e.logo ? e.logo.hauteur + 10 : 0) + (e.texte ? t.taille * 1.4 : 0) + (e.filet ? 14 : 0);
+    return Math.max(
+      e.logo ? e.logo.hauteur : 0,
+      e.logoDroit ? e.logoDroit.hauteur : 0,
+      e.texte ? t.taille * 1.4 : 0,
+    );
+  }
+
+  // La hauteur de l'en-tête et du pied de page : la somme de ce que la charte y
+  // a mis. L'en-tête occupe, sous la marge du haut, la hauteur de son contenu,
+  // puis ce que le CSS ajoute autour — les 10 px de `padding-bottom`, le filet,
+  // et les 14 px de marge qui le séparent du titre. La taille du texte est
+  // celle du STYLE (`textes.enTete`) — le plan d'en-tête ne porte, lui, que le
+  // contenu.
+  hauteurEntete() {
+    const e = this.plan.entete;
+    if (!e) return 0;
+    return this.hauteurEnteteContenu() + 10 * PX_PT + (e.filet ? PX_PT : 0) + 14 * PX_PT;
   }
 
   hauteurPied() {
@@ -344,13 +360,31 @@ class Feuille {
   dessinerEntete() {
     const e = this.plan.entete;
     if (!e || !this.page) return;
-    const y = this.plan.marges.haut;
-    let x = this.gauche;
+    const haut = this.plan.marges.haut;
+    const contenu = this.hauteurEnteteContenu();
+    // L'alignement vertical des emblèmes (`logoVAlign`) : hauts, centrés, ou
+    // bas — c'est ce que le CSS fait d'`align-items`.
+    const yEmbleme = (im) => (e.valign === "bottom" ? haut + contenu - im.hauteur
+      : e.valign === "top" ? haut : haut + (contenu - im.hauteur) / 2);
+    // L'espace laissé au texte : du bord de la marge gauche au bord de la marge
+    // droite, moins ce que les emblèmes y prennent — celui de gauche d'abord,
+    // celui de droite ensuite (il est collé au bord droit du filet).
+    let g = this.gauche;
+    let d = this.droite;
     if (e.logo && e.logo.image) {
       this.page.drawImage(e.logo.image, {
-        x, y: PAGE.hauteur - (y + e.logo.hauteur), width: e.logo.largeur, height: e.logo.hauteur,
+        x: g, y: PAGE.hauteur - (yEmbleme(e.logo) + e.logo.hauteur),
+        width: e.logo.largeur, height: e.logo.hauteur,
       });
-      x += e.logo.largeur + 12;
+      g += e.logo.largeur + e.ecart;
+    }
+    if (e.logoDroit && e.logoDroit.image) {
+      const x = d - e.logoDroit.largeur;
+      this.page.drawImage(e.logoDroit.image, {
+        x, y: PAGE.hauteur - (yEmbleme(e.logoDroit) + e.logoDroit.hauteur),
+        width: e.logoDroit.largeur, height: e.logoDroit.hauteur,
+      });
+      d = x - e.ecart;
     }
     if (e.texte) {
       const style = this.textes.enTete;
@@ -358,15 +392,21 @@ class Feuille {
       const police = this.police(style);
       const lh = style.taille * 1.4;
       const la = police.widthOfTextAtSize(texte, style.taille);
-      const dispo = this.droite - x;
-      const posX = e.align === "center" ? x + (dispo - la) / 2 : e.align === "right" ? x + dispo - la : x;
+      // Le texte se place DANS l'espace libre entre les deux emblèmes.
+      const dispo = Math.max(0, d - g);
+      const posX = e.align === "center" ? g + (dispo - la) / 2 : e.align === "right" ? d - la : g;
+      const yT = e.valign === "bottom" ? haut + contenu - lh
+        : e.valign === "top" ? haut : haut + (contenu - lh) / 2;
       this.page.drawText(texte, {
-        x: Math.max(x, Math.min(posX, this.droite - la)), y: this.baseline(y, lh, style.taille),
+        x: Math.max(g, Math.min(posX, d - la)), y: this.baseline(yT, lh, style.taille),
         size: style.taille, font: police, color: rvb(style.couleur),
       });
     }
     if (e.filet) {
-      const yl = this.plan.marges.haut + this.hauteurEntete() - 8;
+      // Le filet se pose SOUS l'en-tête — à la marge du bas de son contenu, plus
+      // le « rembourrage » du CSS (`padding-bottom`), soit le même endroit que
+      // dans l'aperçu.
+      const yl = haut + contenu + 10 * PX_PT;
       this.ligne(this.gauche, yl, this.droite, yl, { epaisseur: nombre(this.plan.s.ruleWidth, 1) * PX_PT, couleur: this.plan.filet });
     }
   }
@@ -1334,18 +1374,31 @@ export async function creerPdfA({ doc, config, style, part = 2 } = {}) {
 
   // L'en-tête et le pied de page de la charte : leur texte accepte les jetons
   // ({{entity.name}}, {{numero}}… — voir `renderSheetText`, lib/render.js), et
-  // leur logo est embarqué au passage.
+  // leurs emblèmes sont embarqués au passage — LES DEUX, celui de gauche comme
+  // celui de droite (`logoRightUrl`) : le PDF/A est l'original archivé, il ne
+  // peut pas être le seul export à perdre une marque.
   const s = plan.s;
   if (s.showHeader) {
     const logoUrl = String(s.logoUrl || "").trim();
     const hauteur = nombre(s.logoHeight, 42) * PX_PT;
     const image = logoUrl ? await poserLogo(pdf, logoUrl, hauteur) : null;
+    const logoDroitUrl = String(s.logoRightUrl || "").trim();
+    const hauteurDroite = nombre(s.logoRightHeight || s.logoHeight, 42) * PX_PT;
+    const imageDroite = logoDroitUrl ? await poserLogo(pdf, logoDroitUrl, hauteurDroite) : null;
     plan.entete = {
       texte: renderSheetText(String(s.headerText || "").trim(), doc, config, s) || String(s.headerText || "").trim(),
       filet: s.headerRule !== false && s.ruleStyle !== "none",
-      align: s.logoAlign === "center" ? "center" : s.logoAlign === "right" ? "right" : "left",
+      // Deux emblèmes : ils tiennent chacun un bout du filet, et c'est le TEXTE
+      // qui se place entre eux (`logoTextAlign`). Un seul : l'ensemble se range
+      // du côté demandé (`logoAlign`). Même règle que le CSS (`styleCss`).
+      align: imageDroite
+        ? (s.logoTextAlign === "left" ? "left" : s.logoTextAlign === "right" ? "right" : "center")
+        : (s.logoAlign === "center" ? "center" : s.logoAlign === "right" ? "right" : "left"),
+      valign: s.logoVAlign === "top" ? "top" : s.logoVAlign === "bottom" ? "bottom" : "center",
+      ecart: nombre(s.logoGap, 14) * PX_PT,
       capitales: !!s.headerCase,
       logo: image ? { image, hauteur, largeur: hauteur * (image.width / image.height) } : null,
+      logoDroit: imageDroite ? { image: imageDroite, hauteur: hauteurDroite, largeur: hauteurDroite * (imageDroite.width / imageDroite.height) } : null,
     };
   }
   if (s.showFooter && String(s.footerText || "").trim()) {

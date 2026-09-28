@@ -16,7 +16,7 @@
 // la liste s'ouvre alors sur elle, sans que le rédacteur soit écarté — il peut
 // toujours en changer, rien n'est bloqué.
 // ============================================================================
-import { h, clear } from "./dom.js";
+import { h, clear, field as frField } from "./dom.js";
 import { state } from "./state.js";
 import { personName } from "../lib/render.js";
 import { genreDe, qualitePersonne } from "../lib/delegations.js";
@@ -112,9 +112,8 @@ export function signerPicker({
       selFonction.appendChild(g);
     }
     if (courante) selFonction.title = libelleFonction(config, courante, { genre });
-    corps.appendChild(h("div", { class: "fr-field signer__bloc" },
-      h("label", { class: "fr-label", text: "Fonction" }),
-      selFonction));
+    corps.appendChild(h("div", { class: "signer__bloc" },
+      frField("Fonction", selFonction)));
 
     // ------------------------------------------------------------ signataire
     const selPersonne = select("signer__personne", (v) => {
@@ -135,9 +134,8 @@ export function signerPicker({
         if (orpheline) selPersonne.appendChild(option(orpheline.id, personName(orpheline) + " (hors fonction)", true));
       }
     }
-    corps.appendChild(h("div", { class: "fr-field signer__bloc" },
-      h("label", { class: "fr-label", text: courante && courante.kind === "delegation" ? "Qui signe sous cette délégation" : "Qui signe" }),
-      selPersonne));
+    corps.appendChild(h("div", { class: "signer__bloc" },
+      frField(courante && courante.kind === "delegation" ? "Qui signe sous cette délégation" : "Qui signe", selPersonne)));
 
     const infos = [];
     if (courante) {

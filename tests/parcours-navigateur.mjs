@@ -150,7 +150,11 @@ const INJECTION = [
   "    for (let i = 0; i < 160 && !m.state.user; i += 1) await pause(250);",
   "    if (!m.state.user) throw new Error('aucune session ouverte apres login : les parcours seraient tous « sans objet »');",
   "    for (let i = 0; i < 160 && !document.querySelector('.app-header'); i += 1) await pause(250);",
-  "    const p = await import('/src/tests/parcours.mjs');",
+  "    let p = null; let dernier = null;",
+  "    for (const chemin of ['/src/tests/parcours.mjs', '/tests/parcours.mjs']) {",
+  "      try { p = await import(chemin); break; } catch (e) { dernier = e; }",
+  "    }",
+  "    if (!p) throw new Error('la suite de parcours est introuvable — ' + String((dernier && dernier.message) || dernier));",
   "    const ctx = await p.contexteDeLApercu();",
   "    const releve = await p.lancerParcours(ctx);",
   "    poser({",
@@ -200,10 +204,19 @@ try {
     const { session, releve: r } = releve;
     console.log("Scribae — parcours critiques dans Chromium (édition statique).");
     console.log("Session : " + (session.login || session.id) + " [" + (session.roles || []).join(", ") + "]");
+    // Le service a-t-il répondu ? C'est ce qui dit si la suite a JUGÉ. L'édition
+    // statique héberge le service dans la page (src/pages/host.js) : il doit
+    // répondre. S'il s'est tu, les parcours qui en dépendent se déclarent « sans
+    // objet » (NC-II-012) et un relevé « tout vert » ne vaudrait rien — on le dit,
+    // et l'épreuve échoue plutôt que de faire passer un théâtre.
+    if (r.service && r.service.joignable === false) {
+      console.log("::error file=tests/parcours.mjs::" + echapper("le service n'a pas répondu (" + (r.service.detail || "sans détail") + ") : les parcours qui en dépendent n'ont rien pu juger"));
+    }
     for (const p of r.resultats) {
       console.log((p.ok ? "  ok    " : "  ÉCHEC ") + p.id + " — " + p.nom + (p.ok ? "" : "\n          " + p.raison));
     }
-    console.log("\n" + r.total + " parcours : " + r.ok + " réussi(s), " + r.echecs.length + " en échec.");
+    console.log("\n" + r.total + " parcours : " + r.ok + " réussi(s), " + r.echecs.length + " en échec."
+      + (r.service ? " Service : " + (r.service.joignable ? "joignable" : "MUET") + "." : ""));
     for (const e of r.echecs) {
       console.log("::error file=tests/parcours.mjs,title=" + echapper("parcours " + e.id) + "::" + echapper(e.nom + " — " + e.raison));
     }
@@ -211,7 +224,7 @@ try {
       console.log("\nCe que la page a signalé pendant l'épreuve :");
       for (const b of bruits.slice(0, 40)) console.log("  " + b);
     }
-    if (!r.echecs.length) verdict = 0;
+    if (!r.echecs.length && (!r.service || r.service.joignable !== false)) verdict = 0;
   }
 } catch (e) {
   console.log("::error file=tests/parcours-navigateur.mjs::" + echapper("épreuve interrompue — " + ((e && e.message) || e)));

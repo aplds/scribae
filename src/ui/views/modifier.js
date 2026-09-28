@@ -15,8 +15,9 @@
 // disparaître : l'acte d'origine reste accessible dans l'historique des versions.
 // ============================================================================
 import { state, touch, navigate, redrawView, can, actePubliable, journaliser, circuitDe, etapeAParachever, trameById, parapheurActif, revisionPour, peutTrancher, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne, controleLegaliteActif, peutDeclarerTransmission } from "../state.js";
-import { h, clear, button, toast, modal, fitPaper, icon } from "../dom.js";
-import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, abrogationBadge, abrogationPhrase, annexesRestantesPhrase } from "../components.js";
+import { h, clear, button, toast, modal, fitPaper, icon, field as frField } from "../dom.js";
+import { textField, selectField, emptyState, helpLink, confirmDialog, promptDialog, pageTitle, abrogationBadge, abrogationPhrase, annexesRestantesPhrase } from "../components.js";
+import { acteStatutLabel } from "../../lib/statuts-acte.js";
 import { openActe } from "./rediger.js";
 import { fullName } from "../../lib/users.js";
 import {
@@ -269,8 +270,15 @@ export function renderModifier(root, params) {
 function renderChooser(root) {
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Modifier un acte" }),
-      h("p", { class: "page-head__sub", text: "Choisissez l'acte à modifier, ou importez le fichier XML de l'acte publié. Vous l'éditerez directement dans le document ; la modification produit un acte modificatif et la version consolidée de l'acte d'origine." }),
+      // L'aide à la demande porte maintenant ce que l'écran expliquait en clair
+      // et en permanence — le paragraphe d'introduction ET la carte « Ce que
+      // produit une modification ». Le texte n'est pas perdu, il est déplacé là
+      // où on le cherche (P4, NC-III-017).
+      pageTitle("Modifier un acte",
+        "Choisissez l'acte à modifier, ou importez le fichier XML de l'acte publié. Vous l'éditerez directement dans le document ; la modification produit un acte modificatif et la version consolidée de l'acte d'origine."
+        + " 1. L'acte modificatif est un acte à part entière, dont chaque article modifie un article de l'acte d'origine (remplacement, abrogation, insertion)."
+        + " 2. La version consolidée est l'acte d'origine à jour : elle est présentée dans sa rédaction en vigueur, chaque article modifié portant la mention de l'acte qui l'a modifié. L'affichage du suivi des modifications (ajouts, suppressions et tableau récapitulatif) est une option, décochée par défaut."
+        + " L'acte modificatif est ensuite signé puis publié ; à sa publication, la version consolidée est publiée sous le même identifiant ELI que l'acte d'origine et devient la version en vigueur. L'acte d'origine reste accessible dans l'historique."),
     ),
     h("div", { class: "page-head__actions" }, helpLink("modifier", "Comment faire ?")),
   ));
@@ -305,13 +313,19 @@ function renderChooser(root) {
         h("td", {}, h("span", { class: "fr-badge fr-badge--" + n.color, text: n.label })),
         h("td", { class: "fr-small", text: statusText(a) }, abrogationBadge(a)),
         h("td", {}, h("div", { class: "fr-row" },
+          // Le geste d'une LIGNE est secondaire, comme au registre des actes, qui
+          // ouvre le même atelier avec le même poids (`fr-btn--secondary`) : sur
+          // 69 lignes, 69 boutons principaux ne désignaient plus rien — la
+          // doctrine P2 demande une action principale par écran, et non par
+          // ligne (arbitrage C10 de l'audit visuel). Le seul bouton principal de
+          // l'écran reste « Choisir un fichier… ».
           (actePubliable(a) || natureOfActe(a, state.trames) === "annexe")
             ? button(natureOfActe(a, state.trames) === "annexe" ? "Modifier l'annexe" : "Modifier", {
-              variant: "primary", size: "sm",
+              variant: "secondary", size: "sm",
               onClick: () => { if (startSession(a)) navigate("modifier/" + a.id); },
             })
             // Acte non publiable : pas d'acte modificatif, correction directe.
-            : button("Corriger", { variant: "primary", size: "sm", icon: "note", title: "Acte individuel non publiable : correction directe", onClick: () => openActe(a) }),
+            : button("Corriger", { variant: "secondary", size: "sm", icon: "note", title: "Acte individuel non publiable : correction directe", onClick: () => openActe(a) }),
           doc ? button("Ouvrir", { variant: "tertiary", size: "sm", onClick: () => navigate("acte/" + a.id) }) : null,
         )),
       ));
@@ -321,21 +335,12 @@ function renderChooser(root) {
   }
   root.appendChild(card);
 
-  root.appendChild(h("div", { class: "fr-card fr-card--soft" },
-    h("h2", { class: "fr-card__title", text: "Ce que produit une modification" }),
-    h("p", { class: "fr-small", text: "1. L'acte modificatif : un acte à part entière, dont chaque article modifie un article de l'acte d'origine (remplacement, abrogation, insertion)." }),
-    h("p", { class: "fr-small", text: "2. La version consolidée : l'acte d'origine à jour. Elle est présentée dans sa rédaction en vigueur, chaque article modifié portant la mention de l'acte qui l'a modifié ; l'affichage du suivi des modifications (ajouts, suppressions et tableau récapitulatif) est une option, décochée par défaut." }),
-    h("p", { class: "fr-small fr-muted", text: "L'acte modificatif est ensuite signé puis publié ; à sa publication, la version consolidée est publiée sous le même identifiant ELI que l'acte d'origine et devient la version en vigueur. L'acte d'origine reste accessible dans l'historique." }),
-  ));
 }
 
 function statusText(a) {
-  const map = {
-    brouillon: "Brouillon", pret: "Prêt", en_signature: "En signature", signee: "Signé",
-    publie: "Publié", abroge: "Abrogé", en_attente: "En attente de publication",
-  };
   const kind = a.kind === "consolide" ? "Version consolidée — " : "";
-  return kind + (map[a.statut] || a.statut || "Brouillon");
+  // Le libellé vient de la table unique des états (NC-III-011).
+  return kind + acteStatutLabel(a.statut);
 }
 
 async function importFile() {
@@ -376,7 +381,11 @@ function renderWorkspace(root) {
   // ------------------------------------------------------------------ entête
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: "Modifier " + base.label }),
+      // L'aide à la demande, comme sur les autres écrans (P4, NC-III-017) ; la
+      // ligne de contexte, elle, reste affichée : ce sont les références de
+      // l'acte, pas une explication.
+      pageTitle("Modifier " + base.label,
+        "L'acte d'origine s'édite ici, article par article. Ce que vous changez devient l'acte modificatif — un acte neuf, qui sera signé et publié pour lui-même. La version consolidée de l'acte d'origine en découle : elle est publiée sous le même identifiant ELI et devient la version en vigueur, l'acte d'origine restant accessible dans l'historique."),
       // Une annexe n'est pas « un acte d'origine » comme un autre : on le dit
       // pour ce qu'elle est (voir src/lib/annexes.js).
       h("p", { class: "page-head__sub", text: `${base.doc.meta?.nature === "annexe" ? "Annexe" : natureOf({ kind: base.kind }).label} · ${base.doc.meta?.objet || ""}${base.published ? " · publié" : ""}` }),
@@ -740,7 +749,7 @@ function renderWorkspace(root) {
     const p = h("div", { class: "paper" });
     p.style.fontFamily = config.brand.documentFont || "";
     applyPaper(p, doc, config);
-    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && tracking }));
+    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && tracking, apercu: true }));
     box.appendChild(p);
     previewCard.appendChild(box);
     previewCard.appendChild(h("div", { class: "fr-row", style: { marginTop: "8px" } },
@@ -760,7 +769,7 @@ function renderWorkspace(root) {
     const p = h("div", { class: "paper" });
     p.style.fontFamily = config.brand.documentFont || "";
     applyPaper(p, doc, config);
-    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && mod.ui.showChanges === true }));
+    p.appendChild(renderDocument(doc, config, { showChanges: tab === "consolide" && mod.ui.showChanges === true, apercu: true }));
     box.appendChild(p);
     modal({
       title: tab === "consolide" ? "Version consolidée" : "Acte modificatif",
@@ -832,9 +841,7 @@ function renderWorkspace(root) {
 
     const meta = h("div", { class: "fr-stack" });
     const numeroInput = h("input", { class: "fr-input", value: mod.meta.numero, on: { input: (e) => { mod.meta.numero = e.target.value; } } });
-    meta.appendChild(h("div", { class: "fr-field" },
-      h("label", { class: "fr-label" }, "Numéro de l'acte modificatif", h("span", { class: "fr-required", text: " *" })),
-      h("div", { class: "fr-row" }, h("div", { style: { flex: "1 1 auto" } }, numeroInput),
+    meta.appendChild(frField("Numéro de l'acte modificatif", h("div", { class: "fr-row" }, h("div", { style: { flex: "1 1 auto" } }, numeroInput),
         button("Réserver", { variant: "tertiary", size: "sm", icon: "check", title: "Prendre le prochain numéro de la séquence", onClick: async (ev) => {
           const entity = config.entities.find((e) => e.id === mod.meta.entityId) || config.entities[0];
           const b = ev.currentTarget;
@@ -866,7 +873,7 @@ function renderWorkspace(root) {
           }
           b.disabled = false;
           b.querySelector(".spinner")?.remove();
-        } }))));
+        } })), { required: true }));
 
     meta.appendChild(h("div", { class: "fr-grid fr-grid--2" },
       textField({ label: "Nature de l'acte", value: mod.meta.designation, help: "« Décision », « Arrêté »…", onChange: (v) => { mod.meta.designation = v; } }),
@@ -884,9 +891,7 @@ function renderWorkspace(root) {
     // FONCTION d'abord (voir src/ui/signer-picker.js), jamais dans un annuaire
     // de noms.
     const trameBase = state.trames.find((t) => t.id === mod.base?.trameId) || null;
-    meta.appendChild(h("div", { class: "fr-field" },
-      h("label", { class: "fr-label", text: "Signataire" }),
-      signerPicker({
+    meta.appendChild(frField("Signataire", signerPicker({
         config, showQualite: true,
         scope: {
           entityId: mod.meta.entityId || "", familyId: trameBase?.familyId || "",
@@ -1058,10 +1063,12 @@ export function renderActeDetail(root, params) {
     h("div", { class: "page-head__text" },
       // Une ANNEXE n'a pas de numéro à montrer : son titre dit ce qu'elle est,
       // et sa ligne de contexte renvoie à la décision qui l'adopte (voir
-      // src/lib/annexes.js).
-      h("h1", { class: "page-head__title", text: natureOfActe(a, state.trames) === "annexe"
+      // src/lib/annexes.js). L'aide à la demande est celle des autres écrans
+      // (P4, NC-III-017).
+      pageTitle(natureOfActe(a, state.trames) === "annexe"
         ? (doc.meta?.designation || "Annexe")
-        : `${doc.meta?.designation || "Acte"} n° ${a.numero || doc.meta?.numero || "—"}` }),
+        : `${doc.meta?.designation || "Acte"} n° ${a.numero || doc.meta?.numero || "—"}`,
+        "Le texte de l'acte tel qu'il a été signé et publié, avec ses métadonnées, ses formats et son original signé. C'est d'ici qu'on le modifie (acte modificatif et version consolidée), qu'on le publie ou qu'on le retire — et qu'on vérifie ce que le public voit du recueil."),
       h("p", { class: "page-head__sub", text: (natureOfActe(a, state.trames) === "annexe"
         ? [appellationAnnexe(a, state.config), a.objet || doc.meta?.objet]
         : [n.label, a.objet || doc.meta?.objet, doc.meta?.eli]).filter(Boolean).join(" · ") }),
@@ -1266,7 +1273,7 @@ export function renderActeDetail(root, params) {
   const paper = h("div", { class: "paper" });
   paper.style.fontFamily = config.brand.documentFont || "";
   applyPaper(paper, doc, config);
-  paper.appendChild(renderDocument(doc, config, {}));
+  paper.appendChild(renderDocument(doc, config, { apercu: true }));
   box.appendChild(paper);
   root.appendChild(box);
   requestAnimationFrame(() => fitPaper(box, paper));

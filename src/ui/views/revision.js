@@ -18,7 +18,7 @@
 // ============================================================================
 import { state, navigate, redrawView, can, trameById, fileRevision, fileCertification, peutTrancher, peutCertifier, actePubliable, estCircuitExterne, versionSigneeDeActe, certificationDeActeExterne } from "../state.js";
 import { h, button } from "../dom.js";
-import { emptyState, helpLink, mentions, menuButton, pageTitle } from "../components.js";
+import { emptyState, helpLink, mentions, menuButton, objetDeListe, pageTitle } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { etatRevision } from "../../lib/revision.js";
 import { rapportConformite } from "../../lib/conformite.js";
@@ -109,7 +109,7 @@ export function renderRevision(root) {
       onClick: () => { ui.acteId = a.id; paint(); },
     },
       h("span", { class: "sig-item__num fr-mono", text: a.numero || "sans n°" }),
-      h("span", { class: "sig-item__obj", text: a.objet || docOfActe(a)?.meta?.objet || "—" }),
+      objetDeListe(a.objet || docOfActe(a)?.meta?.objet),
       h("span", { class: "fr-badge fr-badge--" + badge[0], text: badge[1] }),
       (externe ? peutCertifier(a) : peutTrancher(a)) ? h("span", { class: "fr-badge fr-badge--brand", text: "à moi" }) : null,
     ));

@@ -174,6 +174,14 @@ export const APPELS = [
 
 // Le contrôle d'une réponse contre ce que l'appel attend. Rend "" si tout va
 // bien, ou la raison du refus — en français, pour être lisible au journal.
+//
+// UN STATUT 0 N'EST PAS UNE RÉPONSE. Il dit que le service n'a pas parlé du tout
+// — canal fermé, service suspendu : l'aperçu de l'éditeur met le sien en
+// quarantaine sous une salve trop dense (NC-II-012), et un service éteint ne
+// répond rien non plus. Le contrat n'est alors pas ENFREINT, il n'est pas JUGÉ :
+// `controler` ne voit pas ces réponses-là, `verifier` les compte à part
+// (`injoignable`) et les tient hors des échecs. C'est à l'appelant de conclure
+// « sans objet » — et non d'accuser le dépôt pour un hôte qui s'est tu.
 function controler(appel, reponse) {
   if (!reponse) return "aucune réponse";
   const { status, body } = reponse;
@@ -181,7 +189,7 @@ function controler(appel, reponse) {
   const a = appel.attend || {};
   if (a.statut !== undefined && status !== a.statut) return `statut ${status} au lieu de ${a.statut}`;
   if (a.classe) {
-    const famille = status === 0 ? "0" : String(Math.floor(status / 100)) + "xx";
+    const famille = String(Math.floor(status / 100)) + "xx";
     if (!a.classe.includes(famille)) return `statut ${status} hors de ${a.classe.join("/")}`;
   }
   if (a.sansCode && body && body.code === a.sansCode) return `la route n'existe pas côté service (${a.sansCode})`;
@@ -210,12 +218,19 @@ export async function verifier(appeler, { nom = "service" } = {}) {
     } catch (e) {
       plantage = String((e && e.message) || e);
     }
-    const raison = plantage ? `appel impossible : ${plantage}` : controler(appel, reponse);
-    const ligne = { id: appel.id, statut: reponse ? reponse.status : null, code: reponse && reponse.body && reponse.body.code, raison };
+    // Le service n'a pas répondu (statut 0) : rien à juger, et ce n'est pas un
+    // écart de contrat — voir l'en-tête de `controler`. On le tient hors des
+    // échecs et on le compte, pour que l'appelant puisse dire « sans objet ».
+    const injoignable = !plantage && !!reponse && reponse.status === 0;
+    const raison = injoignable ? "" : (plantage ? `appel impossible : ${plantage}` : controler(appel, reponse));
+    const ligne = { id: appel.id, statut: reponse ? reponse.status : null, code: reponse && reponse.body && reponse.body.code, raison, injoignable };
     resultats.push(ligne);
     if (raison) echecs.push({ ...ligne, pourquoi: appel.pourquoi });
   }
-  return { nom, total: APPELS.length, ok: APPELS.length - echecs.length, echecs, resultats };
+  return {
+    nom, total: APPELS.length, ok: APPELS.length - echecs.length, echecs, resultats,
+    injoignable: resultats.filter((r) => r.injoignable).length,
+  };
 }
 
 // Ce que deux installations doivent avoir EN COMMUN : le statut de chaque appel

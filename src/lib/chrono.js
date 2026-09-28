@@ -20,20 +20,15 @@ import { numberingSettings, sequenceCourante, seqDeNumero, anneeDeNumero, entite
 import { estAbroge } from "./abrogations.js";
 import { natureOfActe } from "./annexes.js";
 import { formatDate } from "./util.js";
+import { ACTE_STATUTS } from "./statuts-acte.js";
 
-// Les états d'une ligne du chrono. Les sept premiers sont ceux d'un acte
-// (voir ACTE_STATUTS) ; les trois derniers sont propres au chrono : un numéro
+// Les états d'une ligne du chrono. Ceux d'un ACTE sont LUS dans la table
+// unique (`lib/statuts-acte.js`) — le chrono ne les recopie plus, il les
+// range dans sa famille ; les trois derniers lui sont propres : un numéro
 // annulé, un rang libre, et un numéro attribué par un service externe (dont
 // l'application ne connaît pas le rang).
 export const ETATS_CHRONO = {
-  brouillon: { label: "Brouillon", color: "warning", famille: "acte" },
-  pret: { label: "Prêt", color: "info", famille: "acte" },
-  exporte: { label: "Exporté", color: "success", famille: "acte" },
-  en_signature: { label: "En signature", color: "warning", famille: "acte" },
-  signee: { label: "Signé", color: "success", famille: "acte" },
-  publie: { label: "Publié", color: "success", famille: "acte" },
-  en_attente: { label: "En attente de publication", color: "info", famille: "acte" },
-  abroge: { label: "Abrogé", color: "error", famille: "acte" },
+  ...Object.fromEntries(Object.entries(ACTE_STATUTS).map(([id, e]) => [id, { ...e, famille: "acte" }])),
   annule: { label: "Numéro annulé", color: "error", famille: "annule" },
   libre: { label: "Rang libre", color: "info", famille: "libre" },
   externe: { label: "Attribué par un service", color: "info", famille: "acte" },

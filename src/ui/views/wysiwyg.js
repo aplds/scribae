@@ -191,9 +191,9 @@ function onEscape(e) { if (e.key === "Escape") closeTokenEditor(); }
 function openTokenEditor(widget, part, rx, addr) {
   closeTokenEditor();
   const field = fieldRefOf(rx.trame, part.expr);
-  const pop = h("div", { class: "rw-pop", role: "dialog" });
+  const pop = h("div", { class: "rw-pop", role: "dialog", "aria-labelledby": "rw-pop-titre" });
   const head = h("div", { class: "rw-pop__head" },
-    h("span", { class: "rw-pop__title", text: field ? field.label : "Valeur du référentiel" }),
+    h("span", { class: "rw-pop__title", id: "rw-pop-titre", text: field ? field.label : "Valeur du référentiel" }),
     h("span", { class: "fr-small fr-muted", text: "{{" + part.expr + "}}" }),
   );
   const body = h("div", { class: "rw-pop__body" });
@@ -209,11 +209,18 @@ function openTokenEditor(widget, part, rx, addr) {
       entityId: rx.values.__entityId || "", familyId: rx.trame.familyId || "",
       actTypeId: rx.trame.actTypeId || "", date: rx.values.dateSignature || "",
     };
-    body.appendChild(controlFor(field, rx.values[field.id], apply, {
+    const bloc = controlFor(field, rx.values[field.id], apply, {
       config: rx.config, scope,
       fonctionKey: rx.values[champFonction(field.id)] || "",
       onFonction: (cle) => { rx.values[champFonction(field.id)] = cle; rx.paintSoon(); rx.paintPanelSoon(); },
-    }));
+    });
+    // Un contrôle que `controlFor` n'a pas su nommer (liste composite, choix de
+    // signataire) prend au moins le titre de la fenêtre : mieux vaut un nom
+    // générique qu'un champ muet (NC-III-009).
+    for (const c of bloc.querySelectorAll("input,select,textarea")) {
+      if (!c.getAttribute("aria-label") && !c.getAttribute("aria-labelledby") && !c.closest("label")) c.setAttribute("aria-labelledby", "rw-pop-titre");
+    }
+    body.appendChild(bloc);
     if (!field.required) {
       foot.appendChild(button("Effacer", { variant: "tertiary", size: "sm", onClick: () => { apply(""); } }));
     }
@@ -453,7 +460,10 @@ export function buildRedactionDoc(rx) {
     const art = bloc(node, "body");
     switch (node.type) {
       case "title":
-        art.appendChild(region(node.path, node.text, { tag: "h1", cls: "doc-title" }));
+        // Le titre du document est un `h2` DANS l'écran : la page a déjà son
+        // titre de niveau 1, celui de l'écran de rédaction (NC-III-014).
+        // L'apparence ne change pas — c'est la classe `doc-title` qui la porte.
+        art.appendChild(region(node.path, node.text, { tag: "h2", cls: "doc-title" }));
         break;
       case "authority":
         art.appendChild(region(node.path, node.text, { tag: "p", cls: "doc-authority" }));

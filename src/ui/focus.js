@@ -15,6 +15,8 @@
 // redessin, et rien n'y est repris.
 // ============================================================================
 
+import { remiseAZeroDesIdentifiants } from "./dom.js";
+
 // Le chemin d'un nœud (élément ou nœud de texte) depuis <body> : une suite
 // d'indices dans `childNodes`. Deux rendus successifs du même écran donnent le
 // même chemin ; un autre écran, non.
@@ -130,6 +132,10 @@ export function restaurerCurseur(snap) {
 // dit à quel écran appartient le rendu : si elle change, c'est une navigation,
 // et rien n'est repris — le nouvel écran commence proprement, en haut de page.
 export function avecCurseur(fn, cle) {
+  // Chaque rendu repart les identifiants ENGENDRÉS (`src/ui/dom.js`) : un
+  // identifiant stable d'un redessin à l'autre est ce qui permet de retrouver
+  // le champ ci-dessous (voir `signatureDe`).
+  remiseAZeroDesIdentifiants();
   const snap = capturerCurseur();
   const avant = typeof cle === "function" ? cle() : "";
   try {

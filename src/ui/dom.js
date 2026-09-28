@@ -91,8 +91,10 @@ const ICONS = {
   // (voir ui/pdfa.js).
   archive: "M3 4h18v4H3zM5 8v12h14V8M10 12h4",
   // Trois points verticaux : le menu « ⋯ » qui range les gestes secondaires
-  // d'une carte ou d'une ligne (voir components.js, `menuButton`).
-  dots: "M12 5h.01M12 12h.01M12 19h.01",
+  // d'une carte ou d'une ligne (voir components.js, `menuButton`). Ce dessin-là
+  // porte son propre poids de trait (`w`, plus gras que le socle) : à la finesse
+  // du socle, trois points isolés ne sont plus des points, mais un pointillé.
+  dots: { d: "M12 5h.01M12 12h.01M12 19h.01", w: 3.6 },
   // Cloche : les notifications de l'en-tête (voir ui/collab.js).
   cloche: "M6 9a6 6 0 0112 0c0 5 2 6 2 6H4s2-1 2-6zM9.7 19a2.4 2.4 0 004.6 0",
   // Panneau de droite : un cadre séparé par un trait vertical, côté droit —
@@ -102,14 +104,18 @@ const ICONS = {
 };
 
 export function icon(name, size = 16) {
-  const d = ICONS[name] || ICONS.info;
+  // Un dessin est soit un simple chemin (tracé au poids du socle), soit un
+  // objet `{ d, w }` quand il a besoin de son propre poids de trait — trois
+  // points isolés, par exemple, demandent plus gras qu'un cadre (voir `dots`).
+  const dessin = ICONS[name] || ICONS.info;
+  const d = typeof dessin === "string" ? dessin : dessin.d;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", size);
   svg.setAttribute("height", size);
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.6");
+  svg.setAttribute("stroke-width", String(typeof dessin === "string" ? 1.6 : (dessin.w || 1.6)));
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
@@ -177,13 +183,79 @@ export function modal({ title, body, actions, wide = false, onClose }) {
   return { close, el: box };
 }
 
+// L'ÉTIQUETTE NOMME SON CHAMP. Le helper est le seul endroit où une étiquette
+// est posée : c'est donc ici, une fois, que le lien se fait (NC-III-009). Trois
+// cas, dans l'ordre :
+//
+//   • le contrôle est étiquetable (`input`, `select`, `textarea`) — cas courant —
+//     il reçoit un identifiant (celui de l'appelant, sinon un identifiant
+//     engendré) et l'étiquette le vise par `for` ;
+//   • le contrôle est COMPOSITE — un conteneur qui empile plusieurs commandes
+//     derrière une même étiquette (choix de police, côtés d'un encadré, couleur) —
+//     un `<label for>` ne peut viser qu'un seul contrôle : l'étiquette porte donc
+//     l'identifiant, et chaque commande interne la vise par `aria-labelledby` ;
+//   • le conteneur ne porte que des boutons (choix multiples) : il devient un
+//     groupe nommé par l'étiquette.
+//
+// Le texte d'aide est lié de la même façon (`aria-describedby`).
+const CONTROLES = "input,select,textarea";
+const estControle = (n) => !!n && n.nodeType === 1 && CONTROLES.includes(n.tagName.toLowerCase());
+
+// Les identifiants ENGENDRÉS (quand l'appelant n'en donne pas) sont dérivés de
+// l'étiquette — « Nom » → `champ-nom` — et non d'un compteur qui ne redescend
+// jamais. La raison est précise : le curseur est retrouvé après un redessin par
+// le CHEMIN du champ **et sa signature**, qui comprend son `id`
+// (voir `src/ui/focus.js`). Un identifiant neuf à chaque rendu ferait échouer
+// cette vérification, et la saisie perdrait le curseur à la première lettre.
+// Deux champs du même nom se départagent par un suffixe, et le rendu repart à
+// zéro (`remiseAZeroDesIdentifiants`, appelé au début de chaque rendu) : le même
+// écran redessiné redonne donc toujours les mêmes identifiants.
+let identifiantsEngendres = new Set();
+export function remiseAZeroDesIdentifiants() { identifiantsEngendres = new Set(); }
+const enLigne = (s) => String(s || "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+function identifiantEngendre(label) {
+  const texte = typeof label === "string" ? label : (label && label.textContent) || "";
+  const base = "champ-" + (enLigne(texte) || "sans-etiquette");
+  let ident = base, n = 1;
+  while (identifiantsEngendres.has(ident) || document.getElementById(ident)) ident = base + "-" + (++n);
+  identifiantsEngendres.add(ident);
+  return ident;
+}
+
 export function field(label, control, opts = {}) {
   const { help, error, required, id } = opts;
   const wrap = h("div", { class: "fr-field" + (error ? " fr-field--error" : "") });
-  if (label) wrap.appendChild(h("label", { class: "fr-label", for: id }, label, required ? h("span", { class: "fr-required", text: " *" }) : null));
-  if (help) wrap.appendChild(h("p", { class: "fr-hint", text: help }));
+  const ident = id || identifiantEngendre(label);
+  const labelId = ident + "-label";
+  const direct = estControle(control);
+  if (label && direct && !control.id) control.id = ident;
+  if (label) wrap.appendChild(h("label", {
+    class: "fr-label", id: labelId, for: direct ? control.id : null,
+  }, label, required ? h("span", { class: "fr-required", text: " *" }) : null));
+  const aideId = help ? ident + "-aide" : null;
+  if (help) wrap.appendChild(h("p", { class: "fr-hint", id: aideId, text: help }));
   wrap.appendChild(control);
-  if (error) wrap.appendChild(h("p", { class: "fr-error-text", text: error }));
+  const errId = error ? ident + "-erreur" : null;
+  if (error) wrap.appendChild(h("p", { class: "fr-error-text", id: errId, text: error }));
+  if (label && !direct) {
+    const cibles = [...control.querySelectorAll(CONTROLES)];
+    for (const c of cibles) {
+      const aSonPropreIntitule = c.id && [...control.querySelectorAll("label[for]")].some((l) => l.getAttribute("for") === c.id);
+      if (!c.getAttribute("aria-label") && !c.getAttribute("aria-labelledby") && !c.closest("label") && !aSonPropreIntitule) {
+        c.setAttribute("aria-labelledby", labelId);
+      }
+    }
+    if (!cibles.length && control.tagName === "DIV") {
+      control.setAttribute("role", "group");
+      control.setAttribute("aria-labelledby", labelId);
+    }
+  }
+  for (const c of (direct ? [control] : [...control.querySelectorAll(CONTROLES)])) {
+    if (aideId && !c.getAttribute("aria-describedby")) c.setAttribute("aria-describedby", aideId);
+    if (errId && !c.getAttribute("aria-describedby")) c.setAttribute("aria-describedby", errId);
+  }
   return wrap;
 }
 

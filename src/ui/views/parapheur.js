@@ -16,7 +16,7 @@ import {
   state, navigate, redrawView, can, circuitDe, parapheur as fileParapheur, trameById, etapeAParachever,
 } from "../state.js";
 import { h, button } from "../dom.js";
-import { emptyState, helpLink, pageTitle } from "../components.js";
+import { emptyState, helpLink, objetDeListe, pageTitle } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 import {
@@ -102,7 +102,7 @@ export function renderParapheur(root, params) {
       onClick: () => { ui.acteId = a.id; paint(); },
     },
       h("span", { class: "sig-item__num fr-mono", text: a.numero || "sans n°" }),
-      h("span", { class: "sig-item__obj", text: a.objet || docOfActe(a)?.meta?.objet || "—" }),
+      objetDeListe(a.objet || docOfActe(a)?.meta?.objet),
       h("span", { class: "fr-badge fr-badge--" + (validationAJour(a) ? (etat.color || "info") : "warning"), text: validationAJour(a) ? (etat.label || "—") : "caduque" }),
       mine ? h("span", { class: "fr-badge fr-badge--brand", text: "à moi" }) : null,
     ));

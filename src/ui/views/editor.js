@@ -1,5 +1,5 @@
 import { state, touch, navigate, redrawView, can, signalerRedactionTrame, quiRedigeTrame, modificationDistante, fluxActif } from "../state.js";
-import { h, clear, button, icon, toast, modal, badge } from "../dom.js";
+import { h, clear, button, icon, toast, modal, badge, field as frField } from "../dom.js";
 import { dateHeureFr } from "../../lib/legalite.js";
 import { cadreZoom } from "../zoom.js";
 import { NODE_TYPES, NODE_MAP, FIELD_TYPES, NOTE_KINDS, RULE_LEVELS, NUM_STYLES, ACTE_NATURES, newNode, newField, newRule, newNote, newReponse, tramePublishable, ladderOf, niveauDe, natureDe, natureDocs, natureJuridiqueDe, paramsBloc, appliquerFormule, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
@@ -10,7 +10,7 @@ import { stylesOf } from "../../lib/styles.js";
 import { checkExpr, safeEval } from "../../lib/expr.js";
 import { download, debounce, slug } from "../../lib/util.js";
 import { glissable, deposable, moitie, rangeDans, insererAuRange } from "../dnd.js";
-import { confirmDialog, promptDialog, sectionHeader, statusBadge, textField, selectField, choiceField, orgFields } from "../components.js";
+import { aideEcran, confirmDialog, etiquetteCourte, promptDialog, sectionHeader, statusBadge, textField, selectField, choiceField, orgFields } from "../components.js";
 import { targetLabel, authorLabel } from "../../lib/scope.js";
 import { helpLink } from "../components.js";
 import {
@@ -248,10 +248,9 @@ function typeCards(f, softSave, redraw) {
       on ? h("span", { class: "typecard__ok", text: "✓", "aria-label": "choisi" }) : null,
     ));
   }
-  return h("div", { class: "fr-field" },
-    h("label", { class: "fr-label", text: "Ce que l'agent doit saisir" }),
-    h("p", { class: "fr-hint", text: "Cliquez la carte qui correspond. Elle décide de la façon dont la question se posera à celui qui rédige l'acte." }),
-    grid);
+  return frField("Ce que l'agent doit saisir", grid, {
+    help: "Cliquez la carte qui correspond. Elle décide de la façon dont la question se posera à celui qui rédige l'acte.",
+  });
 }
 
 // Les icônes du schéma (t, v, c…) n'existent pas dans le jeu d'icônes : on
@@ -289,7 +288,7 @@ function puce(kind, label, token, icone, onClick) {
   return glissable(
     h("button", { class: "puce", type: "button", title: label, on: { click: (e) => { e.preventDefault(); e.stopPropagation(); onClick?.(); } } },
       h("span", { class: "fr-icon" }, icon(icone || "doc", 13)),
-      h("span", { class: "puce__label", text: label })),
+      etiquetteCourte("puce__label", label)),
     { kind, token, label },
   );
 }
@@ -408,7 +407,7 @@ function paletteEl(trame, ed, redraw) {
         () => armer(ed, redraw, { kind: "champ", token: "{{" + f.id + "}}", label: f.label || f.id }))),
       h("button", { class: "puce puce--neuf", type: "button", title: "Créer un champ", on: { click: () => nouveauChamp(trame, ed, redraw) } },
         h("span", { class: "fr-icon" }, icon("plus", 13)),
-        h("span", { class: "puce__label", text: "Créer un champ" })),
+        etiquetteCourte("puce__label", "Créer un champ")),
     ]);
 
   groupe("Rempli automatiquement", "La collectivité, le signataire, la date : l'application les connaît déjà.",
@@ -419,7 +418,7 @@ function paletteEl(trame, ed, redraw) {
     NODE_TYPES.map((t) => glissable(
       h("button", { class: "puce", type: "button", title: t.hint, on: { click: () => ajouterBlocApresSelection(trame, ed, redraw, t.id) } },
         h("span", { class: "fr-icon" }, icon(NODE_ICON[t.id] || "doc", 13)),
-        h("span", { class: "puce__label", text: t.label })),
+        etiquetteCourte("puce__label", t.label)),
       { kind: "bloc", type: t.id, label: t.label },
     )));
 
@@ -502,9 +501,14 @@ export function renderEditor(root, params) {
     button("", { variant: "tertiary", icon: "x", title: "Retour", onClick: () => navigate("trames") }),
     h("div", { style: { flex: "1 1 auto", minWidth: "0" } },
       h("div", { class: "fr-row", style: { gap: "8px" } },
-        h("strong", { text: trame.name }),
+        // Le nom de la trame est le TITRE de l'écran : c'est le seul `h1` de
+        // cette page (NC-III-014) — les titres visibles de l'éditeur, eux, sont
+        // ceux du document en cours d'édition.
+        h("h1", { class: "editor__titre", text: trame.name }),
         statusBadge(trame.status),
         h("span", { class: "fr-badge", text: "v" + trame.version }),
+        // L'aide à la demande, comme sur les autres écrans de l'atelier (P4).
+        aideEcran("Cet écran compose le MODÈLE d'un acte. À gauche, le plan du document ; au centre, la feuille — le texte s'y écrit directement ; à droite, l'inspecteur, qui règle le bloc sélectionné. Sous le plan, la réserve contient les champs et les blocs à glisser dans le document. « Rédiger » ouvrira ensuite ce modèle dans l'éditeur de rédaction, avec les valeurs d'un acte réel."),
       ),
       // Les compteurs sont cliquables : « N commentaires » ouvre la liste, pour
       // qu'un commentaire ne reste jamais invisible faute de savoir où regarder.
@@ -567,7 +571,7 @@ export function renderEditor(root, params) {
       class: "outline__item" + (sub ? " outline__sub" : "") + (ed.selPath === path ? " is-active" : ""),
       on: { click: () => { ed.selPath = path; if (ed.tab !== "bloc") ed.tab = "bloc"; redraw(); } },
     }, h("span", { class: "fr-icon", style: sub ? { opacity: .5 } : null }, icon(NODE_ICON[node.type] || "doc", sub ? 12 : 14)),
-       h("span", { class: "outline__label", text: label }));
+       etiquetteCourte("outline__label", label));
     glissable(item, { kind: "deplacement", path, label });
     deposable(item, {
       accepte: (c) => c.kind === "deplacement" || c.kind === "bloc",
@@ -629,7 +633,7 @@ export function renderEditor(root, params) {
     applyPaper(paper, doc, state.config);
     // `showNotes` : l'aperçu compilé porte, à la fin, les commentaires de
     // préparation — jamais publiés, mais jamais perdus non plus.
-    paper.appendChild(renderDocument(doc, state.config, { showNotes: true }));
+    paper.appendChild(renderDocument(doc, state.config, { showNotes: true, apercu: true }));
     if (doc.issues.length) {
       paper.appendChild(h("div", { style: { marginTop: "18px" } },
         h("p", { class: "fr-small fr-muted", text: "Contrôles sur ces valeurs de démonstration :" }),
@@ -1455,8 +1459,8 @@ function tableGridEditor(node, redraw, softSave, rafraichir) {
   const grille = h("div", { class: "tbl-edit" });
   grille.style.gridTemplateColumns = `auto repeat(${Math.max(1, N)}, minmax(0, 1fr)) auto`;
 
-  const champ = (valeur, onChange) => h("input", {
-    class: "fr-input tbl-edit__case", value: valeur ?? "",
+  const champ = (valeur, onChange, nom) => h("input", {
+    class: "fr-input tbl-edit__case", value: valeur ?? "", "aria-label": nom,
     on: { input: (e) => onChange(e.target.value) },
   });
 
@@ -1464,7 +1468,7 @@ function tableGridEditor(node, redraw, softSave, rafraichir) {
   grille.appendChild(h("span", { class: "tbl-edit__coin", text: "Colonnes" }));
   colonnes.forEach((c, j) => {
     grille.appendChild(h("div", { class: "tbl-edit__entete" },
-      champ(c, (v) => { colonnes[j] = v; ecrire(); }),
+      champ(c, (v) => { colonnes[j] = v; ecrire(); }, "Intitulé de la colonne " + (j + 1)),
       h("span", { class: "tbl-edit__outils" },
         outil("left", "Déplacer cette colonne vers la gauche", j > 0, () => {
           bouger(colonnes, j, -1);
@@ -1492,7 +1496,7 @@ function tableGridEditor(node, redraw, softSave, rafraichir) {
     while (r.length < N) r.push("");
     grille.appendChild(h("span", { class: "tbl-edit__num", text: String(ri + 1) }));
     for (let ci = 0; ci < N; ci++) {
-      grille.appendChild(champ(r[ci], (v) => { while (r.length <= ci) r.push(""); r[ci] = v; ecrire(); }));
+      grille.appendChild(champ(r[ci], (v) => { while (r.length <= ci) r.push(""); r[ci] = v; ecrire(); }, `Ligne ${ri + 1}, colonne ${ci + 1}`));
     }
     grille.appendChild(h("span", { class: "tbl-edit__outils" },
       outil("up", "Monter cette ligne", ri > 0, () => { bouger(lignes, ri, -1); structure(); }),
@@ -1530,7 +1534,7 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
     ta.addEventListener("input", () => { node.text = ta.value; softSave(); refreshPaper(trame, ed, redraw, softSave, ctxSample); });
     ta.addEventListener("blur", blurGuard(redraw));
     root.appendChild(sec([
-      h("span", { class: "inspector__label", text: "Texte" }),
+      etiquetteInsp("Texte", ta),
       ta,
       h("p", { class: "palette__aide", text: "Pour insérer un champ : cliquez-le ci-dessous (il s'ajoute au curseur) — ou glissez-le dans le document." }),
       h("div", { class: "palette__puces" }, ...pucesChamps(trame, (tok) => { insertToken(ta, tok); node.text = ta.value; softSave(); })),
@@ -1744,9 +1748,10 @@ function renderBlockInspector(root, trame, ed, redraw, softSave, ctxSample) {
   }
 
   // condition d'affichage
+  const condBloc = condInput(node, softSave, redraw);
   root.appendChild(sec([
-    h("span", { class: "inspector__label", text: "Condition d'affichage (facultatif)" }),
-    condInput(node, softSave, redraw),
+    etiquetteInsp("Condition d'affichage (facultatif)", condBloc.querySelector("input")),
+    condBloc,
     h("p", { class: "fr-small fr-muted", text: "Exemples : contains(perimetres, 'immobilier') · dateEffet == '' · entity.code == 'IAM'" }),
   ]));
 
@@ -1786,8 +1791,23 @@ function rangerChamp(trame, de, vers, apres, redraw, groupe) {
   redraw();
 }
 
-function condInput(holder, softSave, redraw) {
-  const input = h("input", { class: "fr-input fr-mono", value: holder.when || "", placeholder: "ex. exists(dateFin)" });
+// Une étiquette de l'inspecteur est un `span`, pas un `<label>` : un lecteur
+// d'écran ne devine pas qu'un `span` voisin s'adresse au champ. `etiquetteInsp`
+// lui donne un identifiant et lie le ou les contrôles qu'elle introduit
+// (`aria-labelledby`) — c'est la même règle qu'à `src/ui/dom.js`, posée ici
+// parce que tous les champs de l'inspecteur ne passent pas par `frField`
+// (NC-III-009).
+let inspSeq = 0;
+function etiquetteInsp(texte, ...controles) {
+  const id = "insp-lbl-" + (++inspSeq);
+  for (const c of controles) {
+    if (c && !c.getAttribute("aria-label") && !c.getAttribute("aria-labelledby")) c.setAttribute("aria-labelledby", id);
+  }
+  return h("span", { class: "inspector__label", id, text: texte });
+}
+
+function condInput(holder, softSave, redraw, label = "Condition d'affichage (facultatif)") {
+  const input = h("input", { class: "fr-input fr-mono", value: holder.when || "", placeholder: "ex. exists(dateFin)", "aria-label": label });
   const status = h("span", { class: "fr-small fr-muted", text: "" });
   const update = () => {
     const v = input.value.trim();

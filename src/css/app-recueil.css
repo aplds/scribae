@@ -31,10 +31,10 @@
      de personnalisation — Administration › Publication › Apparence. */
   --recueil-largeur: 1180px;
 }
-/* Le bandeau de démonstration marque aussi le recueil public : il s'aligne sur
+/* Les bandeaux de tête marquent aussi le recueil public : ils s'alignent sur
    l'en-tête du site (même retrait latéral). */
-.recueil > .app-demo { padding-left: 20px; padding-right: 20px; }
-.recueil--acte > .app-demo { padding-left: clamp(20px, 3.5vw, 64px); padding-right: clamp(20px, 3.5vw, 64px); }
+.recueil > .app-demo, .recueil > .app-bandeau { padding-left: 20px; padding-right: 20px; }
+.recueil--acte > .app-demo, .recueil--acte > .app-bandeau { padding-left: clamp(20px, 3.5vw, 64px); padding-right: clamp(20px, 3.5vw, 64px); }
 
 /* L'en-tête reste sous les yeux : sur un recueil long, on remonte d'un clic au
    recueil, au sommaire ou à la connexion sans remonter la page. Le fond est
@@ -87,7 +87,7 @@
 .recueil-hero__title { margin: 0; font-size: clamp(1.7rem, 1.1rem + 2vw, 2.35rem); line-height: 1.18; letter-spacing: -.01em; }
 .recueil-hero__lead { margin: 11px 0 0; max-width: 66ch; color: var(--ink-2); }
 .recueil-hero__stats { margin: 13px 0 0; font-size: var(--t-sm); color: var(--ink-muted); }
-.recueil-hero .recueil-recherche { margin-top: 17px; max-width: 640px; }
+.recueil-hero .recueil-recherche { margin-top: 17px; max-width: none; }
 
 .recueil-recherche--hero { padding: 1px 13px; }
 .recueil-recherche--hero .recueil-input { padding: 12px 0; font-size: var(--t-lg); }
@@ -131,7 +131,9 @@
 .recueil-carte:hover { box-shadow: 0 8px 20px rgb(0 0 0 / .10); transform: translateY(-2px); }
 .recueil-carte__lien { display: flex; flex-direction: column; gap: 5px; padding: 14px 15px; min-height: 152px; text-decoration: none; color: inherit; }
 .recueil-carte__lien:hover { background: var(--bg-alt); }
-.recueil-carte__theme { font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: hsl(var(--h, 220) 52% 36%); }
+/* Le thème d'une carte est du texte courant : il tient le seuil de 4,5:1 sur
+   le fond de la carte, quel que soit le hue de la rubrique (NC-III-013). */
+.recueil-carte__theme { font-size: var(--t-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: hsl(var(--h, 220) 62% 27%); }
 .recueil-carte__theme.is-sans { color: var(--ink-muted); }
 .recueil-carte__objet { font-size: var(--t-lg); font-weight: 600; line-height: 1.35; }
 .recueil-carte__lien:hover .recueil-carte__objet { color: var(--brand); }
@@ -193,7 +195,9 @@
 .recueil-recherche__x { border: 0; background: none; font-size: var(--t-xl); line-height: 1; color: var(--ink-muted); cursor: pointer; padding: 0 2px; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
 .recueil-select { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); color: var(--ink); font: inherit; font-size: var(--t-sm); padding: 8px 10px; max-width: 230px; }
 
-.recueil-lien { border: 0; background: none; color: var(--brand); font: inherit; font-size: var(--t-sm); cursor: pointer; text-decoration: underline; padding: 0; }
+/* Une cible de 24 px de haut (WCAG 2.2 AA, 2.5.8) : le rembourrage vertical la
+   porte à 27, et la marge négative rend à la ligne l'espace qu'il prend. */
+.recueil-lien { border: 0; background: none; color: var(--brand); font: inherit; font-size: var(--t-sm); cursor: pointer; text-decoration: underline; padding: 4px 0; margin: -4px 0; }
 
 .recueil-resultats { scroll-margin-top: 14px; }
 .recueil-filtres { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -346,7 +350,7 @@
 .recueil-pied__ligne { margin: 0 0 3px; font-size: var(--t-sm); color: var(--ink-2); }
 .recueil-pied__note { margin: 0; font-size: var(--t-xs); color: var(--ink-muted); }
 .recueil-pied__ouvert { margin: 6px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
-.recueil-pied__sep { color: var(--border-strong); }
+.recueil-pied__sep { color: var(--ink-muted); }
 
 /* --- Les mentions du pied de page ----------------------------------------
    Les mentions légales et les mentions d'accessibilité de l'espace public
@@ -392,6 +396,8 @@
 .recueil-ailleurs__lien {
   display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
   font-weight: 600; color: var(--brand); text-decoration: none; line-height: 1.35;
+  /* Cible de 24 px de haut au moins (WCAG 2.2 AA, 2.5.8). */
+  padding: 3px 0; margin: -3px 0;
 }
 .recueil-ailleurs__lien:hover { text-decoration: underline; }
 .recueil-ailleurs__lien svg { flex: 0 0 auto; opacity: .75; }
@@ -537,7 +543,9 @@
    src/ui/mention.js) : « Propulsé par Scribae — GPLv3 ». Elle se règle dans
    Administration › Identité, et vaut « affichée » par défaut. */
 .recueil-pied__propulse { margin: 10px 0 0; font-size: var(--t-xs); color: var(--ink-muted); }
-.mention-editeur__lien { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+/* Lien du pied de page : la cible fait 24 px de haut, sans déplacer la ligne
+   (le rembourrage est repris en marge négative) — WCAG 2.2 AA, 2.5.8. */
+.mention-editeur__lien { display: inline-block; color: inherit; text-decoration: underline; text-underline-offset: 2px; padding: 5px 0; margin: -5px 0; }
 .mention-editeur__lien:hover { color: var(--brand); }
 
 /* --- le recueil ouvert : les représentations lisibles par machine ---------

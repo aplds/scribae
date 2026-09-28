@@ -25,6 +25,7 @@ import { h, clear, button, toast, modal, field as frField } from "../dom.js";
 import { textField, selectField, choiceField, confirmDialog, sectionHeader, helpLink, emptyState, pageTitle } from "../components.js";
 import { formatDate, todayIso } from "../../lib/util.js";
 import { get } from "../../lib/remote.js";
+import { veille } from "../../lib/relecture.js";
 import {
   newDelegation, arbreDelegations, entiteDeDelegation, qualiteDeDelegation,
   qualitePersonne, genreDe, avecArticle, lignesQualites, decisionsDeSignature, libelleDecision,
@@ -112,14 +113,22 @@ const SOURCES_DECISION = [
 let PUBLIEES = null;            // null = pas encore chargées
 let publieesEnCours = false;
 const abonnesPubliees = new Set();
+// La veille de cette lecture : un service muet ne doit pas se confondre avec
+// « aucune décision publiée » — sans quoi l'on ne pourrait plus désigner une
+// décision par un acte du recueil, et rien ne reviendrait (voir
+// src/lib/relecture.js).
+const veillePubliees = veille();
 
 function chargerPubliees(onCharge) {
   if (onCharge) abonnesPubliees.add(onCharge);
-  if (PUBLIEES || publieesEnCours) return;
+  if (PUBLIEES || publieesEnCours || !veillePubliees.prete) return;
   publieesEnCours = true;
   get("/v1/publications", { label: "Décisions publiées au recueil", source: "lecture" })
-    .then((r) => { PUBLIEES = r.ok ? (r.body.publications || []) : []; })
-    .catch(() => { PUBLIEES = []; })
+    .then((r) => {
+      if (r.ok) { PUBLIEES = r.body.publications || []; veillePubliees.succes(); }
+      else { PUBLIEES = null; veillePubliees.echec(); }
+    })
+    .catch(() => { PUBLIEES = null; veillePubliees.echec(); })
     .finally(() => {
       publieesEnCours = false;
       const fns = [...abonnesPubliees];

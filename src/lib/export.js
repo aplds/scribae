@@ -901,8 +901,12 @@ export function exportWordDoc(doc, config, trame) {
   const style = styleForDoc(config, doc);
   const docFont = style.fontFamily || config.brand.documentFont || "serif";
   // Word ne connaît ni `flex` ni `gap` : la signature est remise en deux
-  // colonnes flottantes. Les fonds des versions consolidées (texte ajouté /
+  // colonnes flottantes, et l'en-tête à deux emblèmes se pose de la même façon
+  // (voir plus bas). Les fonds des versions consolidées (texte ajouté /
   // supprimé) sont réaffirmés, Word les interprétant avec ses propres règles.
+  const hGauche = parseFloat(style.logoHeight) || 42;
+  const hDroite = parseFloat(style.logoRightHeight) || hGauche;
+  const teteAlign = style.logoRightUrl ? (style.logoTextAlign || "center") : (style.logoAlign || "left");
   const wordLayout = `
 body{margin:0;color:#111;font-family:${docFont};font-size:11pt;line-height:1.5}
 .doc-signature{display:block;margin-top:1.6em}
@@ -918,8 +922,15 @@ body{margin:0;color:#111;font-family:${docFont};font-size:11pt;line-height:1.5}
 .doc-annexe-part__head{border-top:solid #8993A5 .75pt;padding-top:6px;margin:0 0 .8em}
 .doc-annexe-part__label{font-size:.72em;text-transform:uppercase;letter-spacing:.08em;color:#555;margin:0}
 .doc-annexe-part__title{font-weight:700;margin:.1em 0 0}
-.doc-sheet-header{border:0;padding-bottom:6px}
-.doc-sheet-header img{height:${style.logoHeight || "42"}px}
+/* L'en-tête d'une charte : Word ne connaît ni flex ni gap, les deux emblèmes
+   sont donc posés en flottants — celui de gauche d'un côté, celui de droite de
+   l'autre — et le texte de recueil se place entre eux (même parti pris que pour
+   le bloc de signature ci-dessus). Chaque emblème garde la hauteur que la
+   feuille lui donne. */
+.doc-sheet-header{display:block;height:${Math.max(hGauche, hDroite) + 14}px;border:0;padding-bottom:6px}
+.doc-sheet-header .doc-sheet-logo{float:left;height:${hGauche}px}
+.doc-sheet-header .doc-sheet-logo--right{float:right;margin-left:0;height:${hDroite}px}
+.doc-sheet-headtext{text-align:${teteAlign}}
 `;
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head><meta charset="utf-8">

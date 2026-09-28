@@ -28,7 +28,7 @@ import {
   state, touch, navigate, redrawView, can, journaliser, entityById,
 } from "../state.js";
 import { inScope } from "../../lib/scope.js";
-import { h, clear, button, toast, fitPaper } from "../dom.js";
+import { h, clear, button, toast, fitPaper, field as frField } from "../dom.js";
 import { textField, selectField, choiceField, emptyState, helpLink, confirmDialog, acteStatutBadge, pageTitle } from "../components.js";
 import { uid, formatDate } from "../../lib/util.js";
 import {
@@ -239,7 +239,7 @@ function editeur(r) {
     clear(paper);
     const doc = docReprise(r, { config, entity: entityById(r.entityId) || (config.entities || [])[0] || null, eliHttp: "" });
     const style = applyPaper(paper, doc, config, { style: styleForDoc(config, doc) });
-    paper.appendChild(renderDocument(doc, config, { showNotes: false, showTrail: false, annexes: false, style }));
+    paper.appendChild(renderDocument(doc, config, { showNotes: false, showTrail: false, annexes: false, style, apercu: true }));
     requestAnimationFrame(() => fitPaper(paperBox, paper));
     const valide = validerReprise(r, { maintenant: new Date() });
     clear(mentionBox);
@@ -270,10 +270,10 @@ function entiteSelect(r, maj) {
 // et la borne est ici la règle elle-même (la date doit être antérieure au jour).
 function champDate({ label, value, onChange, max, required, help }) {
   const input = h("input", { class: "fr-input", type: "date", value: value || "", max: max || "", on: { input: (e) => onChange(e.target.value) } });
-  const wrap = h("div", {}, input);
-  return h("div", { class: "fr-field" },
-    h("label", { class: "fr-label", text: label + (required ? " *" : "") }), wrap,
-    help ? h("p", { class: "fr-hint-text", text: help + (max ? ` (au plus tard le ${formatDate(max)}).` : "") }) : null);
+  return frField(label, input, {
+    required,
+    help: help ? help + (max ? ` (au plus tard le ${formatDate(max)}).` : "") : null,
+  });
 }
 
 // ------------------------------------------------------------------ l'original

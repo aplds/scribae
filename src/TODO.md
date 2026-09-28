@@ -3,6 +3,327 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Version 1.6.3p — les bandeaux d'information de l'administration (livré)
+
+Demande : bandeaux réutilisables par les administrateurs (titre, couleur, contenu customisé et
+enregistrable — ex. maintenances programmées), et options du bandeau démo masquées quand demo
+n'est pas true en prod. Le détail est au `CHANGELOG.md`.
+
+- [x] **Les bandeaux d'information** (`config.bandeaux`, `lib/bandeaux.js`, `bandeauxNotice()`) :
+      titre, couleur (4), contenu, préparés puis allumés, affichés en tête de l'atelier, sur le
+      recueil public et à la connexion, retouche en direct, épreuve à dents prouvées.
+- [x] **Démonstration éteinte, options démo masquées** : la carte d'identité ne propose plus le
+      choix ni le texte du bandeau « Démonstration ».
+
+**Ce qui reste ouvert** (inchangé) :
+
+Demande : « sur le recueil public, la barre de recherche devrait être centrée ou full width ».
+Le détail est au `CHANGELOG.md`.
+
+- [x] **La recherche de l'entrée du recueil suit son conteneur** : plus de plafond à 640 px
+      (`css/app-recueil.css`, une seule règle), mesuré à 1 000 px sur 1 000, épreuve de
+      non-régression à dents prouvées.
+
+**Ce qui reste ouvert** (inchangé) :
+
+- [ ] **Voir la CI VERTE** sur un envoi — les annotations ne rejouent pas une correction avant
+      qu'elle soit déposée. NC-I-008 reste ouverte jusque-là.
+- [ ] **NC-I-003** — découper les gros modules de vue : `src/ui/views/signature.js` est encore à
+      ~3 571 lignes.
+- [ ] **NC-IV-001** — la signature **qualifiée** : au mieux, un banc (un faux prestataire éprouvant
+      `createPrestataire`, `src/server/mysql/signature.mjs`) ; la valeur probante demanderait un
+      tiers certificateur.
+- [ ] **Les vérifications d'un tiers** : `veraPDF` (PDF/A), l'ouverture du fichier **Word**, un
+      **annuaire OIDC** réel, un **SMTP** réel, la télétransmission `@ctes`, le **flux temps réel
+      entre deux machines**, les **navigateurs croisés**. Chacune demande un environnement absent
+      ici : à documenter comme telle, faute de pouvoir l'éprouver.
+
+## Version 1.6.3n — le guide montre l'application d'aujourd'hui (livré)
+
+Demande : « OK, attaque tout ça » (suite de la 1.6.3m) — les **illustrations périmées du
+guide**. Le détail est au `CHANGELOG.md`.
+
+- [x] **Les sept illustrations périmées du guide** (`actes`, `rediger`, `conformite`, `export`,
+      `editor`, `signature`, `publication`) sont refaites depuis les écrans réels (thème clair,
+      1440 × 900), repères remesurés sur le DOM, textes des chapitres « Retrouver » et « Export »
+      alignés sur l'interface actuelle.
+- [x] **Le registre vide en accès direct** : le seau `state.ui` existe dès le départ (défaut trouvé
+      en posant la capture du registre).
+- [x] **L'horodatage brut dans la fiche d'un acte** : `formatDate` met en forme toute valeur qui
+      commence par une date calendaire (défaut trouvé en relisant la capture du registre).
+
+**Ce qui reste ouvert** (inchangé) :
+
+- [ ] **Voir la CI VERTE** sur un envoi — les annotations ne rejouent pas une correction avant
+      qu'elle soit déposée. NC-I-008 reste ouverte jusque-là.
+- [ ] **NC-I-003** — découper les gros modules de vue : `src/ui/views/signature.js` est encore à
+      ~3 571 lignes.
+- [ ] **NC-IV-001** — la signature **qualifiée** : au mieux, un banc (un faux prestataire éprouvant
+      `createPrestataire`, `src/server/mysql/signature.mjs`) ; la valeur probante demanderait un
+      tiers certificateur.
+- [ ] **Les vérifications d'un tiers** : `veraPDF` (PDF/A), l'ouverture du fichier **Word**, un
+      **annuaire OIDC** réel, un **SMTP** réel, la télétransmission `@ctes`, le **flux temps réel
+      entre deux machines**, les **navigateurs croisés**. Chacune demande un environnement absent
+      ici : à documenter comme telle, faute de pouvoir l'éprouver.
+
+## Version 1.6.3m — la démonstration montre ses deux emblèmes, et rattrape ses publications (livré)
+
+Demande : « OK, attaque tout ça » (suite de la 1.6.3l) — l'autre moitié de la liste : la **charte
+livrée qui ne montre qu'un emblème**, et les **publications de démonstration qui ne rattrapent pas
+leur retard** quand le jeu change. Le détail est au `CHANGELOG.md`.
+
+- [x] **Une charte de démonstration porte un second emblème** : la feuille `sty-ccas` reçoit l'écu de
+      la commune à droite (`logoRightUrl`), l'emblème du CCAS restant à gauche. Une feuille livrée qui
+      n'avait que l'emblème de gauche le reçoit par une migration étroite (l'emblème d'un
+      administrateur n'est jamais touché).
+- [x] **Les publications de démonstration rattrapent leur retard** : elles portent la version du jeu
+      dans leur **expression de date** (`-s53`), et l'amorçage republie une **version nouvelle** quand
+      ce que le service détient ne la porte pas — actes **et** publications informatives de règlement.
+      La clé d'idempotence porte l'expression (sans quoi un appel rejoué rendrait l'ancienne version).
+      Un jeu inchangé n'est ni redéposé ni republié.
+
+**Ce qui reste ouvert** (inchangé) :
+
+- [ ] **Voir la CI VERTE** sur un envoi — les annotations ne rejouent pas une correction avant
+      qu'elle soit déposée. NC-I-008 reste ouverte jusque-là.
+- [ ] **NC-I-003** — découper les gros modules de vue : `src/ui/views/signature.js` est encore à
+      ~3 571 lignes.
+- [ ] **NC-IV-001** — la signature **qualifiée** : au mieux, un banc (un faux prestataire éprouvant
+      `createPrestataire`, `src/server/mysql/signature.mjs`) ; la valeur probante demanderait un
+      tiers certificateur.
+- [ ] **Les vérifications d'un tiers** : `veraPDF` (PDF/A), l'ouverture du fichier **Word**, un
+      **annuaire OIDC** réel, un **SMTP** réel, la télétransmission `@ctes`, le **flux temps réel
+      entre deux machines**, les **navigateurs croisés**. Chacune demande un environnement absent
+      ici : à documenter comme telle, faute de pouvoir l'éprouver.
+- [ ] **Les six illustrations du guide** (`rediger`, `conformite`, `export`, `actes`, `editor`,
+      `signature`, `publication`) sont périmées : à reprendre depuis les écrans réels.
+- [x] **Les illustrations du guide** — livrées en 1.6.3n (sept captures refaites, repères
+      remesurés).
+
+## Version 1.6.3l — l'état de l'aperçu survit, et un service muet n'est plus accusé (livré)
+
+Demande : « OK, attaque tout ça » — corriger ce que la réponse à « quels bugs reste-t-il ? » avait
+listé, en commençant par la **chaîne d'intégration restée rouge** (NC-I-008).
+
+**La chaîne rouge, nommée par ses annotations** (livré, 1.6.3k — le détail est au `CHANGELOG.md`) :
+
+- [x] Le scellé « illisible » ne l'était pas pour Node (`lireScelle` exige la ré-encodage identique).
+- [x] Le harnais de l'atelier était plus sévère que Node (`Buffer.from(x, "base64")` tolérant).
+- [x] L'entrée du harnais gardait l'adresse de son module-bloc (`import.meta.url` réécrit).
+- [x] La chaîne citait le guetteur d'échecs par un chemin faux (`$GITHUB_WORKSPACE`).
+- [x] L'épreuve de navigateur importait un chemin de l'atelier (les deux dispositions).
+
+**L'état de l'aperçu, et le parcours du dépôt de pièce** (livré, 1.6.3l) :
+
+- [x] **L'état durable du service s'écrit en double tampon** — voir la fiche « L'état du service de
+      l'environnement d'édition ne survit pas toujours », plus bas, désormais cochée.
+- [x] **Le parcours du dépôt de pièce lit le STATUT** de l'appel au lieu du booléen.
+- [x] **Un service muet n'est plus accusé** : un statut 0 (aucune réponse) ne produit aucun écart de
+      conformité, et les parcours qui en dépendent se déclarent « sans objet » ; le relevé porte
+      `service.joignable`, et l'épreuve de la CI échoue si le service ne répond pas.
+
+**Ce qui reste ouvert** :
+
+- [ ] **Voir la CI VERTE** sur un envoi — les annotations ne rejouent pas une correction avant
+      qu'elle soit déposée. NC-I-008 reste ouverte jusque-là.
+- [ ] **NC-I-003** — découper les gros modules de vue : `src/ui/views/signature.js` est encore à
+      ~3 571 lignes.
+- [ ] **NC-IV-001** — la signature **qualifiée** : au mieux, un banc (un faux prestataire éprouvant
+      `createPrestataire`, `src/server/mysql/signature.mjs`) ; la valeur probante demanderait un
+      tiers certificateur.
+- [ ] **Les vérifications d'un tiers** : `veraPDF` (PDF/A), l'ouverture du fichier **Word**, un
+      **annuaire OIDC** réel, un **SMTP** réel, la télétransmission `@ctes`, le **flux temps réel
+      entre deux machines**, les **navigateurs croisés**. Chacune demande un environnement absent
+      ici : à documenter comme telle, faute de pouvoir l'éprouver.
+- [ ] **Les six illustrations du guide** (`rediger`, `conformite`, `export`, `actes`, `editor`,
+      `signature`, `publication`) sont périmées : à reprendre depuis les écrans réels.
+- [x] **Une charte de démonstration devrait porter un second emblème** (`logoRightUrl`) — livré en
+      1.6.3m.
+- [x] **Les publications de démonstration déjà déposées ne « rattrapent » pas** quand le jeu
+      évolue — livré en 1.6.3m (une `dateExpression` qui porte la version du jeu).
+
+## Version 1.6.3j — les deux emblèmes de l'en-tête, et leur place (livré)
+
+Demande : « Assure-toi que les feuilles de style des actes supportent bien les logos en en-tête de la
+première page (un à gauche / un à droite) avec positionnement réglable. »
+
+**La vérification** a porté sur les quatre supports d'une charte — l'aperçu, le HTML autonome, le
+fichier Word, le PDF/A. Elle a été faite par la **mesure** (le vrai rendu, dans un hôte hors écran) et
+par l'**image** (la page 1 du PDF/A engendré, rendue en PNG et regardée). Elle a trouvé trois défauts
+et trois réglages manquants :
+
+- [x] **Le PDF/A perdait le second emblème** — le fichier archivé, celui qui fait foi, ne portait que
+      la marque de gauche, là où l'aperçu en montrait deux. `creerPdfA` embarque et pose maintenant
+      les deux (bords gauche et droit du filet, chacune à sa hauteur).
+- [x] **La hauteur réservée à l'en-tête, dans le PDF, était la somme de ses morceaux** (emblème +
+      texte) alors qu'ils sont posés **côte à côte** : le filet de l'en-tête tombait environ un
+      centimètre sous les emblèmes. Elle est maintenant celle du contenu le plus haut, plus le
+      rembourrage, le filet et la marge du CSS.
+- [x] **Le fichier Word empilait les deux marques** (toutes deux à gauche, la seconde prenant la
+      hauteur de la première). Elles sont posées en flottants, chacune à son bord, à sa hauteur.
+- [x] **Le positionnement se règle** : écart emblème-texte (`logoGap`), place du texte **entre** les
+      deux emblèmes (`logoTextAlign`, « centré » par défaut — le rendu qu'avaient déjà les chartes à
+      deux emblèmes), alignement vertical des emblèmes (`logoVAlign`). `logoAlign` garde son sens :
+      il place l'ensemble quand l'en-tête n'a **qu'un** emblème, et sa notice le dit désormais.
+- [x] **Un emblème ne se perd plus par mégarde** : « Réglages remis aux valeurs par défaut »
+      conservait le logo de gauche et **effaçait celui de droite**.
+- [x] **La régression est tenue** : un trente-deuxième parcours (« L'en-tête porte ses deux
+      emblèmes… ») rend un vrai document dans un hôte hors écran et mesure tout cela ; ses dents ont
+      été éprouvées en retirant le rendu du second emblème (il échoue alors en le disant).
+
+**Ce qui reste ouvert** (et n'a pas changé avec cette note) :
+
+- [ ] Les vérifications qui demandent un tiers : **PDF/A** (`veraPDF`), **annuaire OIDC**, **SMTP**
+      du bulletin, et la **CI** (toujours rouge — NC-I-008) ; le fichier **Word** a été engendré et
+      relu (balises et CSS), mais pas ouvert dans Word.
+- [ ] **La démonstration ne montre pas les deux emblèmes** : aucune des trois chartes livrées
+      n'emploie `logoRightUrl`. Le réglage s'essaie dans « Feuilles de style » (champ « URL ou image
+      du logo (droite) »). À décider : donner à une charte de démonstration un second emblème, pour
+      que la fonction se voie sans avoir à la régler.
+
+## Version 1.6.3i — audit visuel complet : deux informations cachées (livré)
+
+Demande : « OK, refait un audit visuel complet et vérifie le reste ».
+
+**L'audit visuel** a repris **trente-trois écrans** en images (les vingt-sept vues de l'atelier, la
+connexion, l'éditeur de trame, l'espace de rédaction, et les cinq adresses du recueil public), et
+les a **mesurés** autant que regardés : découpage en bandes à résolution native pour l'œil,
+géométrie et débordement pour la mesure. Il a trouvé deux défauts, tous deux « une information qui
+devait se voir ne se voyait pas » :
+
+- [x] **Le bandeau de démonstration était écrasé** : sa seconde ligne (« Ne pas produire d'actes
+      réels avec cette installation ») était coupée sur **tous** les écrans de l'atelier (contenu
+      40 px dans une boîte de 32 px — la coquille bornée à la fenêtre comprimait le bandeau).
+      Corrigé par `flex: none` sur `.app-demo` et `.app-vierge` (`src/css/app-base.css`).
+- [x] **La rubrique « Informations » de l'accueil du recueil n'existait pas pendant la lecture** —
+      absente tant que la réponse n'était pas là, et pour de bon quand le service se taisait. Elle
+      s'affiche désormais dès le premier rendu, en annonçant « Chargement des informations… ».
+- [x] **La régression est tenue** : un trente-et-unième parcours (« Aucun écran ne rogne son
+      contenu sans le dire ») et un pas de plus au parcours des informations du recueil. Les dents
+      du nouveau parcours ont été éprouvées en rétablissant le défaut à la main.
+
+**Ce que l'audit a écarté** (mesuré, et non pas supposé) : aucun débordement horizontal sur les
+**vingt-sept** vues, ni à 874 px ni à 390 px ; aucun chevauchement réel (les « chevauchements »
+signalés par l'œil étaient des éléments en ligne passant à la ligne) ; les seules troncatures sont
+des **ellipses** volontaires (cellules d'objet du chrono, files de signature) dont le texte entier
+est dans l'infobulle. Thème sombre et mobile examinés en plus.
+
+**Ce qui reste ouvert** (voir « Non vérifié » ci-dessous) :
+
+- [ ] **La chaîne parapheur → révision → signature → publication menée de bout en bout sur un état
+      stable.** L'audit l'a conduite *presque* jusqu'au bout : soumission au circuit (2 étapes
+      validées), soumission à la révision, validation du réviseur (« Valider et envoyer en
+      signature ») — tout est vérifié à l'écran et dans l'état. Le **dépôt en signature** s'arrête
+      sur le refus du service de démonstration (« Ce service n'est pas encore provisionné… ») : le
+      service de l'aperçu **remet son état à zéro** pendant que la page vit, et l'application ne
+      reprovisionne qu'à l'**amorçage** (au chargement). Après rechargement, tout repart.
+      À décider : reprovisionner à la volée quand une **écriture** est refusée pour ce motif, ou
+      l'assumer (le service éphémère de l'aperçu est l'écran NC-II-012, accepté).
+- [ ] Les vérifications qui demandent un tiers : **PDF/A** (`veraPDF`), **annuaire OIDC**,
+      **SMTP** du bulletin, et la **CI** (toujours rouge — NC-I-008).
+
+## Version 1.6.3h — une lecture en échec n'est plus une lecture vide (livré)
+
+Demande : « Repasse tout au crible à nouveau, toutes les fonctionnalités doivent être vérifiées en
+workflow, ainsi que le recueil public et la cohérence (assure toi que les infos soient toujours
+visibles, dans mon expérience elles disparaissent parfois) ».
+
+**Le contrôle en flux de travail** a repris l'application vivante : les **trente parcours** rejoués
+d'un bout à l'autre, les **dix-huit adresses du recueil public** (accueil, fiche d'acte, ELI,
+représentations markdown/JSON, informations, bulletins, mentions, réutilisation, accessibilité,
+billet, flux RSS), et les écrans de l'atelier confrontés à leurs **données** (comptes annoncés
+contre registre, thèmes, etc.). Il a trouvé le défaut que la demande soupçonnait — une
+**information qui disparaît** — et l'a reproduit.
+
+- [x] **La cause, une seule fois** : `src/lib/relecture.js` (une lecture qui échoue refuse de
+      conclure, se souvient de son échec, et laisse la prochaine occasion la rejouer ; un succès,
+      même vide, conclut). Appliquée là où l'application lit le service : les trois lectures du
+      recueil public (actes, informations, bulletin), le registre des publications de l'atelier,
+      les décisions publiées des délégations, la résolution des liens ELI.
+- [x] **La cohérence en plus** : le recueil relit ses informations quand un billet **publié au
+      poste** manque à la liste affichée — la rubrique se répare au redessin suivant.
+- [x] **La régression est tenue** : `src/tests/relecture.test.mjs` (3 épreuves) et le parcours
+      « Les informations du recueil ne s'effacent pas, et se réparent » (le trentième).
+- [x] **Le jeu d'épreuves** : **243 fichiers** sans faute de syntaxe, **451/462** épreuves
+      (0 échec, **11 sauts** d'environnement), **30/30 parcours** verts, et les **18 adresses du
+      recueil** relevées sans écran vide ni erreur.
+
+## Version 1.6.3g — les corrections de l'audit visuel (livré)
+
+Demande : « fait un nouvel audit visuel des interfaces, vérifie que tout soit cohérent, et que le
+fonctionnement interne de l'appli corresponde à ses interfaces. Garde en tête que tout doit rester
+simple, clair et accessible. » puis « OK, corrige l'ensemble ».
+
+**L'audit** (campagne visuelle du 2026-09-28, version 1.6.3f) a ouvert **neuf fiches** —
+NC-III-009 à NC-III-017 au registre, rapport `src/audit/rapports/AUDIT-VISUEL-SCRIBAE-2026-09-28.md`
+— et un **arbitrage de doctrine** (C10). **Les neuf sont levées**, chacune avec sa mesure, et C10
+est tranché. Le détail des changements visibles est au `CHANGELOG.md` ; ce qui suit dit où chacun
+se tient dans le code.
+
+- [x] **Le lot court** : NC-III-009 (les 55 champs sans nom accessible — `field()`,
+      `src/ui/dom.js`, pose l'`id` sur le contrôle et le `for` sur l'étiquette ; les composites
+      passent par `aria-labelledby`, les groupes par `role="group"`), NC-III-013 (contrastes :
+      thème de carte du recueil, drapeau d'annotation, séparateurs de parcours passés en
+      `aria-hidden`), NC-III-010 (`objetDeListe()` et `etiquetteCourte()`,
+      `src/ui/components.js`), NC-III-012 (icônes `info`/`warn` et raison de l'alerte en `title`).
+- [x] **Le lot de fond** : NC-III-011 (source unique `src/lib/statuts-acte.js` — le chrono, les
+      modifications et la signature la lisent ; mot arbitré « **Prêt** », `exporte` en `success`),
+      NC-III-014 (`rang()` et `apercu: true`, `src/lib/render.js` ; l'option `decalage` de
+      `renderMarkdown`, `src/ui/markdown.js`), NC-III-016 (plancher de 13 px pour `rw-tok__hint` et `chip`).
+- [x] **Le lot de doctrine** : NC-III-015 (cibles à 24 px — huit familles de l'audit, plus la barre
+      de zoom et « Ajouter une pièce », mesurées à 23,5 px ; le repère de marge garde sa pastille
+      de 16 px avec une zone cliquable de 24 × 24), NC-III-017 (l'aide à la demande sur `modifier`,
+      l'éditeur, la rédaction et le détail d'un acte), et l'arbitrage **C10** (les boutons de ligne
+      de « Modifier un acte » repassent en secondaires, comme au registre : 72 boutons principaux
+      sur l'écran → 3).
+- [x] **La mesure qui ferme le lot** : relevé sur **27 routes** (1 440 × 900, compte administrateur)
+      — `0` champ sans nom, `0` coupure sans `title`, `1` `h1` par écran, `0` texte sous le seuil
+      de contraste, `0` identifiant dupliqué, plancher de 13 px, `0` débordement — et **autant en
+      thème sombre**, remesuré sur les 27 routes (le rapport disait ne pas l'avoir fait) ; **241
+      fichiers** sans faute de syntaxe, **448/459** épreuves (0 échec, 11 sauts d'environnement),
+      **29 parcours** verts. Les
+      conclusions sont dans les fiches du registre, chacune avec sa preuve mesurée.
+
+
+## Version 1.6.3f — le bouton « ⋯ » se voit (livré)
+
+Demande : « peut être augmenter la taille des points / changer le design car c'est très peu visible »
+
+- [x] **Le bouton des gestes rangés est redessiné.** Il était nu : trois points de 1 px tracés au
+      poids du socle, sur un dessin de 16 px, sans cadre — de la ponctuation, au bout d'une ligne et
+      juste à droite d'un bouton principal plein. Il porte maintenant un cadre et un fond, fait
+      **36 px de côté** (la hauteur de « Rédiger » en face), son dessin passe à **20 px** et ses
+      trois points ont leur **propre poids de trait** (3,6) : `src/ui/dom.js` sait désormais donner à
+      un dessin son poids (`{ d, w }`), et `src/css/app-base.css` dessine le bouton. Neutre au
+      repos, **allumé** au survol et menu ouvert. Une seule mise en œuvre pour les sept écrans.
+- [x] **L'illustration de la liste des modèles est refaite** (repères recalculés au
+      `getBoundingClientRect`, repère 4 élargi à la nouvelle largeur du bouton) et les deux passages
+      du guide qui enseignent le geste décrivent le **petit bouton carré à trois points**.
+
+Aucun chantier nouveau ouvert. Le point resté ouvert en 1.6.3e — **les six autres illustrations du
+guide**, qui datent d'avant la revue d'interface — le reste (voir ci-dessous).
+
+## Version 1.6.3e — éditer une trame : le geste se retrouve (livré)
+
+Demande : « Je ne trouve plus l'option pour éditer un trame, c'est normal ? »
+
+- [x] **Le geste se retrouve, sous le mot qu'on cherche.** L'entrée du menu « ⋯ » de la carte d'un
+      modèle portait « Ouvrir l'éditeur » là où les deux autres écrans disent « Éditer la trame » :
+      elle porte le même mot partout. Le parcours `une-pastille-par-carte` (le 16e) ouvre le menu,
+      lit l'entrée et vérifie qu'elle ouvre l'éditeur.
+- [x] **Le guide est remis d'aplomb** : le chapitre « Préparer et faire évoluer une trame » nomme le
+      menu « ⋯ », une **entrée de dépannage** répond à la question même (« Je ne trouve pas l'option
+      pour éditer une trame »), et l'illustration de la liste des modèles est refaite — elle datait
+      d'avant la revue d'interface (bouton visible sur la carte, en-tête et menu d'avant, et des
+      repères posés sur un écran qui n'existe plus).
+
+Reste ouvert, et dit comme tel :
+
+- [ ] **Les six autres illustrations du guide datent d'avant la revue d'interface (1.6.2).** Seule
+      celle de la liste des modèles a été refaite ici. `rediger`, `conformite`, `export`, `actes`,
+      `editor`, `signature` et `publication` montrent encore l'en-tête, le menu et les cartes
+      d'avant P1 à P8 : à reprendre une par une, en recalculant les repères de chacune.
+
 ## Version 1.6.3d — la chaîne rouge, nommée et sa première cause réparée (livré)
 
 Demande : « Ok, le 1, j'ai fait, donc occupe-toi des 3 et 4 » — autrement dit : la livraison est
@@ -31,24 +352,31 @@ faite de votre côté (dépôt à jour, doublons retirés), traite la **qualité
 
 Reste ouvert, et dit comme tel :
 
-- [ ] **La seconde cause de la chaîne rouge** — celle du travail « Syntaxe, style et tests », qui
-      part de la racine du dépôt. Les annotations du prochain envoi la nommeront ; NC-I-008 reste
-      **ouverte** jusque-là. (Éliminé par recoupement en 1.6.3d : `variables.test.mjs` passe depuis la
-      racine, `industrialisation.test.mjs` a bien son groupe de capture et ses deux assertions nginx
-      passent, aucun import des 61 fichiers du travail racine ne se résout mal, aucune API Node ≥ 21
-      n'est employée, `purs.test.mjs` saute `DOMParser` en Node. Le journal de la chaîne n'est lisible
-      que par un administrateur du dépôt (403) : c'est l'annotation du prochain envoi qui la nommera.)
+- [x] **La seconde cause de la chaîne rouge — nommée et corrigée (1.6.3k).** Le travail « Syntaxe,
+      style et tests » échouait sur `not ok 190 — la vérification refuse un mauvais mot de passe, un
+      scellé illisible, un dérivé incohérent` : le décodeur base64 de Node est **tolérant** (il
+      ignore les caractères hors alphabet et ne lève jamais), si bien qu'un scellé corrompu se
+      décodait en quelques octets et que `lireScelle` le rendait lisible. Il exige maintenant que
+      les deux parts se **ré-encodent à l'identique**. Le **harnais de l'atelier** cachait ce défaut
+      (sa doublure d'`atob` levait, là où Node ne lève pas) : il décode désormais comme Node — un
+      harnais plus dur que la plateforme rend verte une épreuve que la chaîne voit rouge. Les trois
+      défauts de la chaîne (ce scellé, le chemin du guetteur d'échecs, le chemin de la suite de
+      parcours) et leurs réparations sont au `CHANGELOG.md` (1.6.3k). Reste à **voir la CI verte**
+      sur un envoi : NC-I-008 reste ouverte jusque-là.
 - [x] **Rejouer les parcours du navigateur en intégration continue** (Playwright) — FAIT en 1.6.3d.
       `src/tests/parcours-navigateur.mjs` rejoue les 29 parcours dans un vrai Chromium : serveur de
       fichiers local, applications montées en édition statique, session d'administration ouverte,
       verdict + annotations `::error::` + capture d'écran en artefact. Travail `parcours` ajouté à
       `src/github/ci.yml` (avisant : `continue-on-error`). Vérifié dans l'aperçu : **29/29** sur un
       profil vierge. NC-I-002 peut être levée.
-- [ ] **`piece-depot` est instable sous l'émulateur de l'éditeur** — observé une fois en 1.6.3d
-      (échec sur « la pièce déposée ne se retire pas », `tests/parcours.mjs` étape 4), puis passé
-      deux fois de suite en reprise. C'est vraisemblablement le budget de calcul du service de
-      démonstration, non le geste ; si cela se reproduit, faire dire au parcours le **statut** du
-      refus au lieu de conclure « ne se retire pas ».
+- [x] **`piece-depot` est instable sous l'émulateur de l'éditeur — traité (1.6.3l).** La cause
+      était le **statut**, comme la fiche le pressentait : `supprimerPiece` rend `false` pour un
+      refus d'**état** (service suspendu, non provisionné) comme pour un vrai défaut, et le parcours
+      en concluait « ne se retire pas ». Il lit maintenant le **statut** de l'appel `DELETE` : un
+      refus d'installation (4xx) ou un service **muet** (0 — aucune réponse) est **sans objet** ; un
+      5xx reste un échec, et il se dit avec son statut. Le jeu de conformité tient la même règle
+      (statut 0 = service injoignable, jamais un écart de contrat), et la suite rend **32/32** dans
+      l'aperçu, y compris quand le service s'est tu.
 
 ### Version 1.6.3d — la qualité et le backlog (point 3 et point 4)
 
@@ -1490,32 +1818,25 @@ seulement si les trames et les actes sont ceux de la démonstration (trames `tpl
       (`src/ui/views/signature.js`, `diffusionRecueil`), et le service les rend dans `/recueil`
       (bloc « Vous ne trouvez pas ce que vous recherchez ? », pied de page), `/recueil.json`
       (`renvois`, `mentions`) et `llms.txt`. Couvert par `actes.test.mjs`.
-- [ ] **L'état du service de l'environnement d'édition ne survit pas toujours.** Corrigé côté
-      **format** : le document durable du service (`index.html`, `loadDb`/`saveDb`) n'est plus
-      relu corrompu — l'écriture efface la version AVANT de recopier et la rétablit en dernier
-      (un instantané pris au milieu se reconnaît à sa version, sans relecture), la lecture
-      contrôle l'en-tête avant toute lecture de masse, et l'échappement ASCII se fait par
-      plages (l'ancienne expression régulière coûtait, à elle seule, une part du budget de
-      calcul d'une requête). `GET /v1/health` publie désormais `utilise` (place occupée) à côté
-      de `capacite`, pour voir venir un état trop gros.
-      **Reste à creuser** : dans l'aperçu, l'amorçage du recueil s'interrompt encore parfois en
-      route — le service émulé semble prélever un instantané de `state` sans égard pour le
-      gestionnaire en cours, et il est tenu à un **budget de calcul soutenu** (≈ 250 ms par
-      seconde). Deux mesures atténuent déjà le second point : la pause entre deux actes de
-      l'amorçage (`PAUSE_AMORCAGE`) et le choix de **dix-sept actes publiés** plutôt que tous.
-      Une troisième, mesurée, couvre le premier : la **reprise** de l'amorçage (voir ci-dessus)
-      rattrape l'appel perdu quand la page était occupée — l'attente de vingt secondes de
-      `ready()` (src/lib/remote.js) expire alors que le canal s'ouvre normalement, et la reprise
-      suivante aboutit.
-      La **condition de déclenchement** de l'amorçage a en outre été resserrée (`1.3.1c`) : il ne
-      s'exécute plus seulement si *tous* les actes sont ceux de la fiction — un acte écrit à la
-      main laissait le recueil vide pour toute la session —, mais publie CHAQUE acte `acte-demo-…`.
-      Reste vrai : une mémoire durable vidée (1011) oblige à **reprovisionner** le service avant
-      que le moindre dépôt n'aboutisse.
-      Piste pour le premier : écrire l'état en **double tampon** (deux copies dans `state`, un
-      index actif dans l'en-tête) — un instantané pris au milieu ne trouverait alors que la
-      copie précédente, complète. À faire dans `index.html` **et** `src/pages/host.js`
-      (`etatUtilise()` lit le même en-tête), avec les tests d'aller-retour correspondants.
+- [x] **L'état du service de l'environnement d'édition ne survit pas toujours — livré (1.6.3l).**
+      Le document durable du service (`index.html`) s'écrit désormais en **double tampon** — c'était
+      la piste écrite ici : deux copies à places fixes, la longueur de chacune écrite **avec elle**,
+      et l'index de la copie active basculé d'**un seul mot** une fois l'écriture achevée. Un
+      instantané prélevé par l'hôte au milieu d'une écriture ne trouve donc que la copie
+      **précédente**, complète : plus de longueur neuve sur des octets anciens. La version du format
+      (3) est posée une fois à l'amorçage et jamais réécrite ; quand la copie neuve est celle du
+      haut, elle est **redescendue** (`copyWithin`) pour que la région que l'hôte recopie reste
+      petite. `loadDb` contrôle l'en-tête (« `{"v"` … `}` ») avant toute lecture de masse, et
+      `GET /v1/health` publie `utilise` (place occupée, en-tête et copies compris) à côté de
+      `capacite` (plafond d'**une** copie). C'est tenu par `tests/persistance-double-tampon.test.mjs`
+      (six épreuves, dents éprouvées) et par l'accord vérifié des deux déclarations
+      (`STATE_VERSION` dans `index.html`, `VERSION_ETAT`/`STATE_UNITS` dans `src/pages/host.js`,
+      dont `etatUtilise()` lit le même en-tête). Le format antérieur est simplement recommencé.
+      Ce qui reste vrai, et n'est pas un défaut du format : l'aperçu **n'est pas conservatoire**
+      (NC-II-012) — il peut se mettre en quarantaine sous une salve trop dense, et une mémoire
+      durable vidée (1011) oblige à reprovisionner le service avant le moindre dépôt. Les mesures
+      d'atténuation déjà là (pause entre deux actes, dix-sept actes publiés, reprise de l'amorçage)
+      restent utiles.
       Le service enregistré (service « natif » de la plateforme) et l'auto-hébergement
       (MariaDB, `sb_etat`) ne sont pas concernés.
 - [x] **Retirer une publication du recueil** (dépublier) — **livré des deux côtés**. L'écran

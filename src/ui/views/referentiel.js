@@ -1,5 +1,5 @@
 import { state, touch, applyBrand, redrawView, navigate, setUsers, resetDemoUsers, can, applyAuthMode, journalPour, oublierBulletinsRecueil } from "../state.js";
-import { h, clear, button, toast, icon, modal } from "../dom.js";
+import { h, clear, button, toast, icon, modal, field as frField } from "../dom.js";
 import { download, pickFile, uid, todayIso, copyText } from "../../lib/util.js";
 import { normaliser } from "../../lib/search.js";
 import * as cles from "../../lib/cles-service.js";
@@ -36,7 +36,8 @@ import {
 import { EVENEMENTS, courrielSettings, etatService as etatCourriel, envoyerTest, evenementDe } from "../../lib/courriel.js";
 import { MODES_CONTROLE_LEGALITE, modeControleLegalite } from "../../lib/legalite.js";
 import { ASSISTANTS, assistantSettings, assistantIdentite, reglerAssistant, reinitialiserAssistant, moteurDe, repondre, nouvelIdPrompt } from "../../lib/assistant.js";
-import { DEMO_TEXT } from "../notice.js";
+import { DEMO_TEXT, rafraichirBandeaux } from "../notice.js";
+import { newBandeau, COULEURS_BANDEAU } from "../../lib/bandeaux.js";
 import { demoActif, demoRegleParLeDeploiement } from "../../lib/demo.js";
 import { avertissementSite } from "../../lib/sites.js";
 import { optionsDeployees, poseParLeDeploiement } from "../../lib/deploiement-config.js";
@@ -374,30 +375,38 @@ export function renderReferentiel(root) {
       ),
       textField({ label: "Adresse électronique", value: c.brand.supportEmail || "", onChange: (v) => { c.brand.supportEmail = v; save(); } }),
     ));
+    // LA MENTION DE DÉMONSTRATION. Elle ne se règle ici que si la démonstration
+    // est ALLUMÉE : éteinte (`DEMO=false` en production), l'installation n'a ni
+    // jeu fictif ni bandeau « Démonstration » — ses options n'ont donc rien à
+    // faire à l'écran. Les messages du service (maintenance, alerte…) vivent,
+    // eux, dans les bandeaux d'information ci-dessous, en toute circonstance.
     body.appendChild(card("Mention de démonstration",
       "Le mode de démonstration — « cette installation montre un jeu fictif » — est décidé par le DÉPLOIEMENT (`DEMO` dans le `.env` du service ; voir src/lib/demo.js). Éteint, l'outil est une page vierge : aucune donnée fictive, aucune mention de collectivité fictive, nulle part. Tant qu'il est allumé, un bandeau en tête de l'application — et sur le recueil public — rappelle que l'installation n'est pas en production : données fictives, signature électronique simulée.",
-      demoRegleParLeDeploiement()
-        ? h("p", { class: "fr-small fr-muted", text: demoActif(c)
-            ? "Démonstration ACTIVE sur cette installation (réglage du déploiement) : le jeu fictif et les comptes de démonstration sont installés."
-            : "Démonstration DÉSACTIVÉE sur cette installation (réglage du déploiement) : l'outil part d'une page vierge. Pour revenir en arrière, changez DEMO dans le .env du service." })
-        : choiceField({
-            label: "Afficher le bandeau « Démonstration »",
-            value: c.brand.demo !== false,
-            options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
-            help: "Réglage du référentiel (il suit les données exportées et importées) : il ne s'applique que quand le déploiement ne dit rien — aperçu en ligne, page statique. Il ne décide pas du jeu fictif, qui vient du déploiement (`DEMO`).",
-            onChange: (v) => { c.brand.demo = v; touch("config"); },
-          }),
-      textField({
-        label: "Texte du bandeau", value: c.brand.demoText || "", rows: 2,
-        placeholder: DEMO_TEXT,
-        help: "Laissez vide pour revenir au texte d'origine. Utile pour dire « recette », « bac à sable »…",
-        onChange: (v) => {
-          c.brand.demoText = v; save();
-          const live = document.querySelector(".app-demo__text");
-          if (live) live.textContent = v.trim() || DEMO_TEXT;
-        },
-      }),
+      ...(demoActif(c)
+        ? [
+            demoRegleParLeDeploiement()
+              ? h("p", { class: "fr-small fr-muted", text: "Démonstration ACTIVE sur cette installation (réglage du déploiement) : le jeu fictif et les comptes de démonstration sont installés." })
+              : choiceField({
+                  label: "Afficher le bandeau « Démonstration »",
+                  value: c.brand.demo !== false,
+                  options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
+                  help: "Réglage du référentiel (il suit les données exportées et importées) : il ne s'applique que quand le déploiement ne dit rien — aperçu en ligne, page statique. Il ne décide pas du jeu fictif, qui vient du déploiement (`DEMO`).",
+                  onChange: (v) => { c.brand.demo = v; touch("config"); },
+                }),
+            textField({
+              label: "Texte du bandeau", value: c.brand.demoText || "", rows: 2,
+              placeholder: DEMO_TEXT,
+              help: "Laissez vide pour revenir au texte d'origine. Utile pour dire « recette », « bac à sable »…",
+              onChange: (v) => {
+                c.brand.demoText = v; save();
+                const live = document.querySelector(".app-demo__text");
+                if (live) live.textContent = v.trim() || DEMO_TEXT;
+              },
+            }),
+          ]
+        : [h("p", { class: "fr-small fr-muted", text: "Démonstration ÉTEINTE sur cette installation : aucun bandeau « Démonstration » ne s'affiche, et ses réglages sont donc masqués. Pour annoncer une maintenance ou passer un message, utilisez les bandeaux d'information ci-dessous." })]),
     ));
+    body.appendChild(bandeauxBloc(save, redraw));
     // LA MENTION DE L'ÉDITEUR DU LOGICIEL. Elle vit dans les trois pieds de page —
     // recueil public, atelier, écran de connexion (voir src/ui/mention.js). Le
     // réglage est ici, avec la marque, parce que c'est une affaire d'identité :
@@ -2592,10 +2601,9 @@ function apparencePubliqueBloc(save, redraw) {
 
   const bloc = card("Apparence du site public",
     "La feuille de style de la collectivité s'ajoute à celle du recueil : ses couleurs, sa police, la largeur de son contenu. Elle ne s'applique QU'AU site public — l'atelier garde l'apparence du logiciel.",
-    h("div", { class: "fr-field" },
-      h("label", { class: "fr-label", text: "Feuille de style (CSS)" }),
-      h("p", { class: "fr-hint", text: `Écrivez du CSS ordinaire. La portée utile est « ${PORTEE_CSS} », le conteneur du site public : les variables ci-dessous s'y posent, et tout élément de la page peut s'y viser.` }),
-      zone),
+    frField("Feuille de style (CSS)", zone, {
+      help: `Écrivez du CSS ordinaire. La portée utile est « ${PORTEE_CSS} », le conteneur du site public : les variables ci-dessous s'y posent, et tout élément de la page peut s'y viser.`,
+    }),
     h("div", { class: "fr-row" },
       button("Exemple : une couleur et une largeur", { variant: "tertiary", size: "sm", icon: "palette", onClick: () => { zone.value = EXEMPLE_CSS; p.css = EXEMPLE_CSS; save(); } }),
       button("Vider", { variant: "tertiary", size: "sm", icon: "trash", onClick: () => { zone.value = ""; p.css = ""; save(); } }),
@@ -2780,23 +2788,20 @@ function accesAtelierBloc(save, redraw) {
       ? h("p", { class: "fr-hint" }, h("strong", { text: "Liste imposée par le déploiement. " }),
       "La variable SCRIBA_ATELIER_IPS est posée dans le fichier .env du service : elle l'emporte sur tout ce qui s'écrit ici, et doit être modifiée dans ce fichier (voir src/server/env.example).")
       : null,
-    h("div", { class: "fr-field" },
-      h("label", { class: "fr-label", text: "Adresses autorisées (une par ligne, ou séparées par des virgules)" }),
-      h("p", { class: "fr-hint", text: "Une adresse (10.0.0.24), un préfixe (192.168.0.0/16), un champ (10.0.0.0-10.0.0.255), une plage abrégée (10.0.0.*). Un « # » ouvre un commentaire. Une entrée incomprise est signalée plus bas — jamais ignorée en silence. Laissez vide pour ouvrir l'atelier à toutes les adresses." }),
-      imposee ? null : zone),
+    frField("Adresses autorisées (une par ligne, ou séparées par des virgules)", h("div", {}, imposee ? null : zone), {
+      help: "Une adresse (10.0.0.24), un préfixe (192.168.0.0/16), un champ (10.0.0.0-10.0.0.255), une plage abrégée (10.0.0.*). Un « # » ouvre un commentaire. Une entrée incomprise est signalée plus bas — jamais ignorée en silence. Laissez vide pour ouvrir l'atelier à toutes les adresses.",
+    }),
     imposee ? h("p", { class: "fr-small fr-mono", style: { margin: "0" }, text: (optionsDeployees().variables[CLE_IPS] || "") || "(vide)" }) : null,
     h("p", { class: "fr-small", style: { margin: "10px 0 6px" } },
       h("strong", { text: "Attention : " }),
       "une liste qui ne couvre pas votre propre adresse vous ferme la porte de l'atelier. Vérifiez votre adresse ci-dessous, et éprouvez la vôtre avant d'enregistrer."),
-    h("div", { class: "fr-field" },
-      h("label", { class: "fr-label", text: "Message affiché à une adresse refusée" }),
-      h("p", { class: "fr-hint", text: "Le texte que voit la personne qui arrive d'un réseau non autorisé — il doit lui dire que le recueil public, lui, reste ouvert." }),
-      messageImpose ? null : champMessage),
+    frField("Message affiché à une adresse refusée", h("div", {}, messageImpose ? null : champMessage), {
+      help: "Le texte que voit la personne qui arrive d'un réseau non autorisé — il doit lui dire que le recueil public, lui, reste ouvert.",
+    }),
     messageImpose ? h("p", { class: "fr-small fr-mono", style: { margin: "0" }, text: (optionsDeployees().variables[CLE_MESSAGE] || "") || MESSAGE_DEFAUT }) : null,
-    h("div", { class: "fr-field" },
-      h("label", { class: "fr-label", text: "Essayer une adresse" }),
-      h("p", { class: "fr-hint", text: "La réponse est calculée par le service, avec la liste enregistrée. Rien n'est décidé par le navigateur." }),
-      h("div", { class: "fr-row" }, champEssai, button("Essayer", { variant: "secondary", size: "sm", icon: "search", onClick: tester }))),
+    frField("Essayer une adresse", h("div", { class: "fr-row" }, champEssai, button("Essayer", { variant: "secondary", size: "sm", icon: "search", onClick: tester })), {
+      help: "La réponse est calculée par le service, avec la liste enregistrée. Rien n'est décidé par le navigateur.",
+    }),
     resultat,
     etatBox);
   return bloc;
@@ -2918,6 +2923,74 @@ function mentionsPubliquesBloc(save, redraw) {
     onChange: (v) => { lic.mention = v; save(); },
   }));
   wrap.appendChild(boxLicence);
+  return wrap;
+}
+
+// -------------------------------------------- bandeaux d'information
+// Les messages de l'administration (voir src/lib/bandeaux.js) : un titre, une
+// couleur, un contenu — enregistrés dans le référentiel, affichés en tête de
+// l'application, sur le recueil public et à l'écran de connexion. On les
+// PRÉPARE à l'avance (maintenance du mois prochain, annonce à paraître) puis on
+// les allume le moment venu : seul un bandeau allumé, qui dit quelque chose,
+// s'affiche. L'ordre de la liste est l'ordre d'affichage.
+function bandeauxBloc(save, redraw) {
+  const c = state.config;
+  const items = (c.bandeaux = c.bandeaux || []);
+
+  const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
+  wrap.appendChild(h("div", { class: "fr-row" },
+    h("h2", { class: "fr-card__title", style: { flex: "1 1 auto", margin: 0 }, text: "Bandeaux d'information" }),
+    button("Ajouter un bandeau", { variant: "secondary", size: "sm", icon: "plus", onClick: () => { items.push(newBandeau()); save(); redraw(); rafraichirBandeaux(); } }),
+  ));
+  wrap.appendChild(h("p", { class: "fr-card__sub", text: "Les messages du service, en tête de l'application, sur le recueil public et à l'écran de connexion : maintenance programmée, alerte, annonce. Préparez-les à l'avance, allumez-les le moment venu." }));
+
+  const listEl = h("div", { class: "fr-stack" });
+  wrap.appendChild(listEl);
+
+  const paint = () => { save(); redraw(); rafraichirBandeaux(); };
+
+  function renderRows() {
+    clear(listEl);
+    if (!items.length) {
+      listEl.appendChild(h("p", { class: "fr-small fr-muted", text: "Aucun bandeau : rien ne s'affiche en tête de l'application. Le bouton ci-dessus en prépare un — titre, couleur, contenu — qu'on allume quand il doit paraître." }));
+      return;
+    }
+    items.forEach((b, i) => {
+      const box = h("div", { class: "fr-card", style: { background: "var(--bg-alt)" } });
+      box.appendChild(h("div", { class: "fr-row" },
+        h("strong", { class: "fr-small", text: String(b.titre || b.texte || ("#" + (i + 1))).slice(0, 80) }),
+        h("div", { class: "fr-spacer" }),
+        button("", { variant: "tertiary", icon: "up", size: "sm", title: "Monter", onClick: () => { if (i > 0) { const [x] = items.splice(i, 1); items.splice(i - 1, 0, x); paint(); } } }),
+        button("", { variant: "tertiary", icon: "down", size: "sm", title: "Descendre", onClick: () => { if (i < items.length - 1) { const [x] = items.splice(i, 1); items.splice(i + 1, 0, x); paint(); } } }),
+        button("", { variant: "tertiary", icon: "trash", size: "sm", title: "Supprimer", onClick: async () => {
+          const ok = await confirmDialog("Supprimer ce bandeau", "Il ne s'affichera plus en tête de l'application ni sur le recueil public.", { confirmLabel: "Supprimer", danger: true });
+          if (ok) { items.splice(i, 1); paint(); }
+        } }),
+      ));
+      box.appendChild(choiceField({
+        label: "Affichage", value: b.actif !== false,
+        options: [{ value: true, label: "Afficher" }, { value: false, label: "Masquer" }],
+        help: "« Masquer » garde le bandeau en préparation : il reste enregistré, et ne s'affiche pas.",
+        onChange: (v) => { b.actif = v; paint(); },
+      }));
+      box.appendChild(textField({
+        label: "Titre", value: b.titre || "", placeholder: "Maintenance programmée",
+        onChange: (v) => { b.titre = v; paint(); },
+      }));
+      box.appendChild(selectField({
+        label: "Couleur", value: b.couleur || "info",
+        options: COULEURS_BANDEAU.map((t) => ({ value: t.id, label: t.label })),
+        onChange: (v) => { b.couleur = v; paint(); },
+      }));
+      box.appendChild(textField({
+        label: "Contenu", value: b.texte || "", rows: 2,
+        placeholder: "Le service sera interrompu samedi de 8 h à 12 h.",
+        onChange: (v) => { b.texte = v; paint(); },
+      }));
+      listEl.appendChild(box);
+    });
+  }
+  renderRows();
   return wrap;
 }
 
@@ -3333,7 +3406,7 @@ function journalPanel() {
   wrap.appendChild(h("p", { class: "fr-card__sub", text: `Les faits de l'installation, du plus récent au plus ancien : soumissions au parapheur, décisions, signatures, publications, constatations de formalités, mises à la corbeille. Chaque entrée porte son auteur et son horodatage. ${entries.length} entrée(s) conservée(s).` }));
 
   const q = h("input", { class: "fr-input", type: "search", placeholder: "Filtrer (numéro, objet, auteur, action…)" });
-  wrap.appendChild(h("div", { class: "fr-field" }, h("label", { class: "fr-label", text: "Rechercher" }), q));
+  wrap.appendChild(frField("Rechercher", q));
   const liste = h("div", { class: "journal-liste" });
   wrap.appendChild(liste);
 

@@ -16,7 +16,7 @@ import { authConfig, isTestProvider, accesLocal, sessionDeService } from "../lib
 import { themeButton, themeChooser } from "./theme.js";
 import * as db from "../lib/db/index.js";
 import { COLLECTIONS } from "../lib/db/contract.js";
-import { demoNotice, viergeNotice, staticNotice } from "./notice.js";
+import { demoNotice, viergeNotice, staticNotice, bandeauxNotice } from "./notice.js";
 import { renderConnexion } from "./views/connexion.js";
 import { ouvrirChangementMotDePasse } from "./mot-de-passe.js";
 import { renderSansAcces } from "./views/sans-acces.js";
@@ -360,9 +360,12 @@ function shell() {
 
   // Bandeau de démonstration : en tête, au-dessus de l'en-tête. Il n'apparaît
   // que si le DÉPLOIEMENT a allumé la démonstration (voir src/lib/demo.js).
+  // Les messages de l'administration (maintenance, alerte…) suivent juste
+  // dessous, allumés ou non — voir `bandeauxNotice`, src/ui/notice.js.
   const notice = demoNotice(can("referentiel.gerer")
     ? button("Réglage", { variant: "tertiary", size: "sm", onClick: () => navigate("referentiel") })
     : null) || staticNotice();
+  const bandeaux = bandeauxNotice();
 
   // Invitation du premier pas : démonstration éteinte et référentiel vierge.
   // Elle occupe la place du bandeau de démonstration — jamais les deux à la fois.
@@ -474,7 +477,7 @@ function shell() {
   const pied = mentionAffichee()
     ? h("footer", { class: "app-pied" }, h("p", { class: "app-pied__mention" }, ...contenuMention()))
     : null;
-  const app = h("div", { class: "app" }, notice, vierge, header, body, pied);
+  const app = h("div", { class: "app" }, notice, bandeaux, vierge, header, body, pied);
   appEl = app;
   return app;
 }

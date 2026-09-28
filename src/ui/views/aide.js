@@ -211,7 +211,7 @@ function renderHome(root) {
 
   // recherche
   const results = h("div");
-  const input = h("input", { class: "fr-input guide__search", type: "search", placeholder: "Chercher un mot : exporter, numéro, mot de passe…" });
+  const input = h("input", { class: "fr-input guide__search", type: "search", id: "guide-recherche", placeholder: "Chercher un mot : exporter, numéro, mot de passe…" });
   const paint = () => {
     const found = searchGuide(input.value);
     if (!input.value.trim()) { results.hidden = true; clear(results); return; }
@@ -222,7 +222,7 @@ function renderHome(root) {
   };
   input.addEventListener("input", paint);
   results.hidden = true;
-  box.appendChild(h("div", { class: "guide__searchbox" }, h("label", { class: "fr-label", text: "Chercher dans le guide" }), input, results));
+  box.appendChild(h("div", { class: "guide__searchbox" }, h("label", { class: "fr-label", for: "guide-recherche", text: "Chercher dans le guide" }), input, results));
 
   // parcours guidés
   box.appendChild(h("div", { class: "guide__paths" }, ...GUIDE.pathways.map((p) =>

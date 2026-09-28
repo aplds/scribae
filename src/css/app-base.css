@@ -199,6 +199,12 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
    src/lib/demo.js) — le réglage du référentiel ne joue que sans déploiement. */
 .app-demo {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  /* `flex: none` : la coquille est bornée à la fenêtre, et `min-height` REMPLACE
+     la hauteur minimale automatique du contenu. Sans cette ligne, un bandeau qui
+     passe sur deux lignes était écrasé à 32 px et sa seconde ligne (« Ne pas
+     produire d'actes réels… ») se retrouvait coupée. Il prend sa hauteur, et
+     c'est la zone de contenu — qui défile — qui cède la place. */
+  flex: none;
   padding: 5px 20px; min-height: 32px;
   background: var(--warning-bg); color: var(--warning);
   border-bottom: 1px solid rgba(179, 64, 0, .22);
@@ -214,7 +220,7 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
 .app-demo .fr-btn { flex: none; }
 .app-demo .fr-btn.fr-btn--tertiary {
   color: var(--warning); text-decoration: underline;
-  padding: 2px 8px; min-height: 22px; font-size: var(--t-xs);
+  padding: 2px 8px; min-height: 24px; font-size: var(--t-xs);
 }
 .app-demo .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(179, 64, 0, .12); }
 
@@ -223,6 +229,7 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
    vides (voir src/ui/notice.js). */
 .app-vierge {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  flex: none;
   padding: 5px 20px; min-height: 32px;
   background: var(--info-bg); color: var(--info);
   border-bottom: 1px solid rgba(0, 99, 203, .22);
@@ -241,6 +248,33 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
   padding: 2px 8px; min-height: 22px; font-size: var(--t-xs);
 }
 .app-vierge .fr-btn.fr-btn--tertiary:hover:not(:disabled) { background: rgba(0, 99, 203, .12); }
+
+/* Bandeaux d'information de l'administration (voir src/lib/bandeaux.js) : la
+   MÊME ossature que les deux bandeaux ci-dessus — pastille, texte, en tête —,
+   en quatre couleurs d'usage. Ils suivent le bandeau de démonstration quand il
+   est là (maintenance annoncée pendant une démonstration), et le remplacent
+   comme premier bandeau quand il n'y est pas. */
+.app-bandeau {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  flex: none;
+  padding: 5px 20px; min-height: 32px;
+  font-size: var(--t-xs); line-height: 1.35; text-align: left;
+  border-bottom: 1px solid;
+}
+.app-bandeau__tag {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  color: #fff; border-radius: 2px;
+  padding: 2px 8px; font-size: var(--t-xs); font-weight: 700;
+}
+.app-bandeau__text { flex: 1 1 220px; }
+.app-bandeau--info { background: var(--info-bg); color: var(--info); border-bottom-color: rgba(0, 99, 203, .22); }
+.app-bandeau--info .app-bandeau__tag { background: var(--info); }
+.app-bandeau--avertissement { background: var(--warning-bg); color: var(--warning); border-bottom-color: rgba(179, 64, 0, .22); }
+.app-bandeau--avertissement .app-bandeau__tag { background: var(--warning); }
+.app-bandeau--urgence { background: var(--error-bg); color: var(--error); border-bottom-color: rgba(185, 28, 28, .25); }
+.app-bandeau--urgence .app-bandeau__tag { background: var(--error); }
+.app-bandeau--succes { background: var(--success-bg); color: var(--success); border-bottom-color: rgba(0, 128, 0, .25); }
+.app-bandeau--succes .app-bandeau__tag { background: var(--success); }
 
 /* L'EN-TÊTE TIENT SUR UNE LIGNE (demande d'usage). « Scribae » à gauche, la
    structure et les outils au centre, le compte tout à droite : il ne se replie
@@ -392,11 +426,14 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
    Repliée, la barre ne peut pas montrer d'intitulé : le groupe n'y est plus
    qu'un chevron — assez pour l'ouvrir, rien de plus.
    ========================================================================== */
+/* La cible fait au moins 24 px de haut (WCAG 2.2 AA, 2.5.8) : le rembourrage
+   vertical la porte à 28, et les marges sont réduites d'autant pour que le
+   rythme de la barre ne change pas. */
 .app-nav__group--ouvrable {
   display: flex; align-items: center; gap: 6px;
   border: 0; background: none; cursor: pointer; font: inherit; text-align: left;
   font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .06em;
-  color: var(--ink-muted); margin: 14px 8px 6px; padding: 0;
+  color: var(--ink-muted); margin: 10px 8px 2px; padding: 4px 0;
 }
 .app-nav__group--ouvrable:hover { color: var(--ink); }
 .app-nav__group--ouvrable .fr-icon { color: inherit; }
@@ -437,7 +474,10 @@ code, kbd, pre { font-family: var(--font-mono); font-size: max(var(--t-xs), .875
 .aide-ecran, .note-pliable { font-family: var(--font-ui); list-style: none; }
 .aide-ecran { margin-left: auto; }
 .aide-ecran[open] { flex-basis: 100%; margin-left: 0; }
-.aide-ecran > summary, .note-pliable > summary { list-style: none; cursor: pointer; }
+/* La cible « À quoi sert cet écran ? » fait au moins 24 px de haut : le
+   rembourrage transparent la porte à 27, les marges négatives le rendent
+   invisible à la mise en page (WCAG 2.2 AA, 2.5.8). */
+.aide-ecran > summary, .note-pliable > summary { list-style: none; cursor: pointer; padding: 3px 4px; margin: -3px -4px; }
 .aide-ecran > summary::-webkit-details-marker, .note-pliable > summary::-webkit-details-marker { display: none; }
 .aide-ecran__titre, .note-pliable__titre { color: var(--brand); font-size: var(--t-sm); }
 .note-pliable { margin-top: 6px; }
@@ -514,8 +554,26 @@ input[type="search"].fr-input { box-sizing: border-box; }
 /* LE MENU « ⋯ » (revue d'interface, P2). Une action principale par écran, une
    par carte ; les autres se rangent ici. Le panneau est posé en `fixed` : il
    échappe au défilement de la zone de contenu, et le code choisit de l'ouvrir
-   vers le bas ou vers le haut selon la place (voir components.js). */
+   vers le bas ou vers le haut selon la place (voir components.js).
+
+   LE BOUTON SE LIT COMME UN BOUTON. C'est la seule porte vers les gestes
+   rangés : nu, au bout d'une ligne et à droite d'un bouton principal plein, il
+   ne se voyait pas — trois points gris sur le fond d'une carte passent pour de
+   la ponctuation. Il porte donc un cadre et un fond, et fait 36 px de côté,
+   comme la hauteur de « Rédiger » en face de lui. Il reste neutre (`--ink-2`)
+   tant qu'on ne le touche pas : la couleur de marque dit « geste principal »,
+   et il n'y en a qu'un par carte. */
 .app-menubtn { display: inline-flex; }
+.app-menubtn > .fr-btn {
+  min-width: 36px; min-height: 36px; padding: 0;
+  border-color: var(--border); background: var(--bg-alt); color: var(--ink-2);
+}
+/* Survol et menu ouvert : le bouton s'allume — c'est le seul retour que reçoit
+   un panneau détaché de son bouton (il s'ouvre en `fixed`, parfois loin). */
+.app-menubtn > .fr-btn:hover:not(:disabled),
+.app-menubtn > .fr-btn[aria-expanded="true"] {
+  background: var(--brand-soft); border-color: var(--brand); color: var(--brand);
+}
 .app-menu {
   position: fixed; z-index: 95;
   min-width: 220px; max-width: min(340px, 92vw);
@@ -709,7 +767,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .registre__numero { white-space: nowrap; }
 .registre__deplie {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; margin-right: 6px; padding: 0;
+  width: 24px; height: 24px; margin-right: 6px; padding: 0;
   border: 0; background: none; border-radius: 3px; cursor: pointer; color: var(--ink-muted);
   vertical-align: middle;
 }
@@ -812,6 +870,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 .zoom__btn, .zoom__pct {
   border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2);
   border-radius: 999px; padding: 2px 8px; font-size: var(--t-xs); line-height: 1.5;
+  min-height: 24px; box-sizing: border-box;
 }
 .zoom__btn { font-size: var(--t-lg); min-width: 26px; }
 .zoom__btn:hover, .zoom__pct:hover { background: var(--bg-alt); color: var(--brand); }
@@ -841,7 +900,7 @@ input[type="search"].fr-input { box-sizing: border-box; }
 /* Le bouton « commenter ce bloc » de la barre d'outils, et le repère de marge
    des blocs commentés (voir ui/annotations.js). Le repère, lui, ne s'efface
    jamais : c'est lui qui rend un commentaire impossible à manquer. */
-.blk__note { display: inline-flex; align-items: center; gap: 3px; min-height: 22px; padding: 2px 4px;
+.blk__note { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 24px; min-width: 24px; padding: 2px 4px;
   border: 0; border-radius: var(--radius); background: none; color: var(--ink-2); cursor: pointer; }
 .blk__note:hover { color: var(--brand); background: var(--brand-soft); }
 .blk__note.is-on { color: var(--info); }
@@ -853,12 +912,23 @@ input[type="search"].fr-input { box-sizing: border-box; }
   border: 0; border-radius: 999px; background: var(--info); color: #fff; cursor: pointer;
   font-family: var(--font-ui); font-size: var(--t-xs); font-weight: 700; line-height: 16px;
 }
+/* La spécificité est doublée, comme sur `.fr-btn` : un reset de la plateforme
+   (`button:not([disabled]) { color: inherit }`) écrase toute règle à une seule
+   classe. Le « 1 » du compteur reprenait donc la couleur du texte, et tombait à
+   3,28:1 sur le fond bleu (NC-III-013). */
+.blk__annot-flag.blk__annot-flag { color: #fff; }
+/* La cible du repère de marge fait 24 px de côté (WCAG 2.2 AA, 2.5.8) : la
+   pastille garde sa taille, mais une zone cliquable transparente l'entoure —
+   elle ne recouvre que la marge du bloc. */
+.blk__annot-flag::after { content: ""; position: absolute; inset: -4px; }
 .blk__annot-flag:hover { background: var(--brand); }
 
 .chip {
   display: inline-block; padding: 0 4px; border-radius: 3px; cursor: default;
   background: var(--brand-soft); color: var(--brand); font-family: var(--font-mono);
-  font-size: .78em; border: 1px solid rgba(0, 0, 145, .18);
+  /* Un repère d'édition n'est pas le document : il ne descend pas sous le
+     plancher de 13 px de la chrome (NC-III-016). */
+  font-size: 13px; border: 1px solid rgba(0, 0, 145, .18);
   /* une pastille courte reste sur une ligne ; une expression longue (condition
      ternaire, filtre) se replie au lieu de dépasser la largeur de la page */
   white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere;

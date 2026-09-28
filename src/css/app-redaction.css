@@ -55,7 +55,9 @@
 .rw-tok--ref { background: #eef1f8; color: #3a4463; box-shadow: inset 0 -1px 0 rgba(58, 68, 99, .35); }
 .rw-tok--empty { background: #fff4d6; color: #7a5000; box-shadow: inset 0 0 0 1px #e0a800; }
 .rw-tok--empty::before { content: "✎ "; font-family: var(--font-ui); }
-.rw-tok__hint { font-family: var(--font-ui); font-size: .72em; letter-spacing: .01em; }
+/* Le repère d'un champ variable (« Objet », « Bénéficiaire »…) explique le
+   document sans être le document : il ne descend pas sous 13 px (NC-III-016). */
+.rw-tok__hint { font-family: var(--font-ui); font-size: 13px; letter-spacing: .01em; }
 .rw-tok--flash { animation: rwflash 1.4s ease-out; }
 @keyframes rwflash { 0%, 100% { box-shadow: inset 0 -1px 0 rgba(0, 0, 145, .35); } 25% { box-shadow: 0 0 0 4px rgba(224, 168, 0, .55); } }
 .rw-hint-inline { font-family: var(--font-ui); font-size: .78em; color: var(--ink-muted); font-style: italic; }
@@ -105,9 +107,13 @@
    bloc (ajouter après, retirer, options) appartiennent à `.mv__tools`, qui
    n'apparaît qu'au survol — sauf le repère de désignation. */
 .mv--sel { background: rgba(10, 118, 246, .07); box-shadow: inset 2px 0 0 var(--brand); }
+/* Les outils d'un bloc : la cible fait 24 px (WCAG 2.2 AA, 2.5.8) — le
+   rembourrage vertical la porte, la marge négative rend au bloc la place
+   qu'elle prend (les outils se posent, ils ne déplacent pas le texte). */
 .mv__btn {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 22px; padding: 2px 4px; border: 0; border-radius: var(--radius);
+  min-width: 24px; min-height: 24px; padding: 3px 4px; margin: -1px 0;
+  border: 0; border-radius: var(--radius);
   background: none; color: var(--ink-2); cursor: pointer; line-height: 1;
 }
 .mv__btn:hover { color: var(--brand); background: var(--brand-soft); }
@@ -120,9 +126,12 @@
   opacity: 0; transition: opacity .12s; vertical-align: middle;
 }
 li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { opacity: 1; }
+/* La cible fait 24 px de côté (WCAG 2.2 AA, 2.5.8) ; la marge négative rend au
+   texte de la liste les 4 px que le bouton prend en plus — la ligne ne bouge
+   pas. */
 .piece__btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; border: 1px solid transparent; border-radius: var(--radius);
+  width: 24px; height: 24px; margin: -2px 0; border: 1px solid transparent; border-radius: var(--radius);
   background: none; color: var(--ink-muted); cursor: pointer; font-family: var(--font-ui);
 }
 .piece__btn:hover { color: var(--brand); background: var(--brand-soft); border-color: var(--border); }
@@ -131,7 +140,7 @@ li:hover > .piece__tools, p:hover > .piece__tools, .piece__tools:focus-within { 
    qu'on cherche), discret (ce n'est pas du texte de l'acte). */
 .piece--ajout { list-style: none; margin: .1em 0 0; }
 .piece__add {
-  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; min-height: 24px; box-sizing: border-box;
   border: 1px dashed var(--border-strong); border-radius: 999px; background: none;
   color: var(--brand); font: inherit; font-size: var(--t-xs); font-family: var(--font-ui);
   cursor: pointer; opacity: .55; transition: opacity .12s, background .12s;

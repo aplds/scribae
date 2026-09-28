@@ -3,7 +3,7 @@ import {
   mettreALaCorbeille, journaliser, circuitDe, parapheur as fileParapheur, parapheurActif,
   competenceDeSignature, redrawView, currentUser,
 } from "../state.js";
-import { h, button, toast, modal, icon, select, textInput, clear } from "../dom.js";
+import { h, button, toast, modal, icon, select, textInput, clear, field as frField } from "../dom.js";
 import { post, errorMessage, beginFlow } from "../../lib/remote.js";
 import { publicationSettings } from "../../lib/eli.js";
 import { download, formatDate } from "../../lib/util.js";
@@ -91,8 +91,9 @@ export function renderActes(root) {
   // La barre d'outils : la recherche d'abord (c'est ce qu'on fait d'un registre),
   // puis trois filtres qui répondent aux trois questions qu'on se pose — quel
   // statut, quel service, quelle année —, et le compte sous la barre.
-  const champ = (label, control) => h("div", { class: "liste-barre__champ" },
-    h("label", { class: "fr-label", text: label }), control);
+  // Une étiquette qui NOMME son champ : le helper partagé pose l'identifiant et
+  // le `for` (NC-III-009) — la même règle que sur les autres écrans.
+  const champ = (label, control) => h("div", { class: "liste-barre__champ" }, frField(label, control));
   const barre = h("div", { class: "liste-barre no-print" },
     champ("Rechercher", textInput(ui.q, (v) => { ui.q = v; ui.affiches = 25; peindre(); }, { placeholder: "numéro, objet, trame, service…" })),
     statutsPresents.length > 1 ? champ("Statut", select([{ value: "", label: "Tous les statuts" }, ...statutsPresents.map((s) => ({ value: s, label: statutLabel(s) }))], ui.statut, (v) => { ui.statut = v; ui.affiches = 25; peindre(); })) : null,

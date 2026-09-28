@@ -37,6 +37,16 @@ import { etatService, provisionnerService } from "../lib/cles-service.js";
 import * as db from "../lib/db/index.js";
 import { docOfActe } from "./views/modifier.js";
 import { publierActeDuSeed } from "./views/signature.js";
+import { SEED_VERSION } from "../lib/store.js";
+import { suffixeJeu, expressionDeJeu, publicationDuJeu } from "../lib/publication-version.js";
+
+// LA VERSION DU JEU, inscrite dans l'expression de date des publications de
+// démonstration. C'est elle qui permet à un jeu MODIFIÉ (une livraison) de
+// publier une VERSION NOUVELLE au lieu de laisser en ligne le texte périmé : une
+// publication ne s'écrase pas (voir `hPublier`, idempotente par clé), et la clé
+// porte l'expression de date. L'ancienne version reste à l'historique du même
+// ELI — c'est le modèle de versionnement, pas un écrasement.
+const SUFFIXE_JEU = suffixeJeu(SEED_VERSION);
 
 let enCours = false;
 // Instant où l'amorçage courant a commencé. Un amorçage ne se laisse pas
@@ -304,7 +314,15 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
     // Le service est la source : ce qu'il détient déjà n'est ni redéposé ni
     // republié, il est seulement repris au registre local.
     const res = await get("/v1/publications", { label: "Amorçage du recueil", source: "lecture" });
-    const auService = new Map((bodyOf(res).publications || []).map((p) => [String(p.numero || ""), p]));
+    // De la plus récente à la plus ancienne (c'est l'ordre du service) : on garde
+    // donc la PREMIÈRE vue d'un numéro. Important depuis que le service peut
+    // détenir PLUSIEURS versions d'un même ELI : garder la dernière vue ferait
+    // lire la plus ANCIENNE, et l'amorçage croirait chaque acte périmé.
+    const auService = new Map();
+    for (const p of (bodyOf(res).publications || [])) {
+      const numero = String(p.numero || "");
+      if (!auService.has(numero)) auService.set(numero, p);
+    }
     const settings = publicationSettings(state.config);
     const flow = beginFlow("Amorçage du recueil (démonstration)");
 
@@ -318,7 +336,15 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
       if (echecs >= 2) { interrompu = true; break; }
       try {
         const deja = auService.get(String(acte.numero || ""));
-        if (deja) {
+        // « LE SERVICE DÉTIENT UNE PUBLICATION » NE DIT PAS QU'ELLE EST À JOUR.
+        // Une publication ne s'écrase pas : le service la range sous une clé qui
+        // porte son expression de date (voir `hPublier`), et celle de
+        // l'amorçage porte la version du JEU (`SUFFIXE_JEU`). Un jeu qui a
+        // changé — une livraison — laisse donc en ligne une version PÉRIMÉE, et
+        // s'en tenir à « une publication existe » montrerait l'ancien texte au
+        // recueil POUR TOUJOURS. On publie alors une version NOUVELLE (même ELI,
+        // expression distincte) ; l'ancienne reste à l'historique.
+        if (publicationDuJeu(deja, SUFFIXE_JEU)) {
           await reprendre(acte, deja);
           publies += 1;
         } else {
@@ -329,6 +355,10 @@ export async function amorcerRecueil({ silencieux = true } = {}) {
             datePublication: datePublication || undefined,
             mode: settings.opposabilite.mode, jours: settings.opposabilite.jours,
             recueil: settings.recueil, publishConsolide: false,
+            // La version du JEU, dans l'expression : c'est ce qui rend la
+            // version publiée reconnaissable (`SUFFIXE_JEU`), et c'est ce qui
+            // donnera une version neuve au prochain jeu modifié.
+            dateExpression: expressionDeJeu(acte.dateSignature, SUFFIXE_JEU),
           });
           if (ok) {
             publies += 1;

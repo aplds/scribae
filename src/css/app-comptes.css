@@ -240,7 +240,7 @@
 
 /* ---- rapport de conformité du réviseur */
 .rev-rapport__groupe { margin-top: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
-.rev-rapport__groupe summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.rev-rapport__groupe summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; min-height: 24px; }
 .rev-rapport__groupe summary::-webkit-details-marker { display: none; }
 .rev-rapport__titre { flex: 1 1 auto; font-weight: 600; font-size: var(--t-sm); }
 .rev-check { display: flex; gap: 8px; padding: 6px 0 4px 6px; border-top: 1px solid var(--border); }
@@ -272,6 +272,9 @@
   .app-vierge { padding: 5px 12px; gap: 6px; font-size: var(--t-xs); }
   .app-vierge__tag { font-size: var(--t-xs); padding: 1px 6px; }
   .app-vierge__text { flex-basis: 100%; }
+  .app-bandeau { padding: 5px 12px; gap: 6px; font-size: var(--t-xs); }
+  .app-bandeau__tag { font-size: var(--t-xs); padding: 1px 6px; }
+  .app-bandeau__text { flex-basis: 100%; }
   .connexion__card { padding: 18px 16px; }
   .connexion__id { display: none; }
 }
@@ -318,7 +321,8 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 .docs-toc { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); padding: 10px 14px; margin-bottom: 18px; font-size: var(--t-sm); }
 .docs-toc strong { display: block; margin-bottom: 6px; font-size: var(--t-xs); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
-.docs-toc__link { display: block; color: var(--brand); text-decoration: none; padding: 1px 0; }
+/* Une entrée du sommaire est une cible : 24 px de haut au moins (WCAG 2.2 AA). */
+.docs-toc__link { display: block; color: var(--brand); text-decoration: none; padding: 3px 0; }
 .docs-toc__link:hover { text-decoration: underline; }
 .docs-toc__link.is-sub { padding-left: 14px; color: var(--ink-2); }
 /* Le sommaire du document ouvert (P5) : avec le document, à sa gauche. */

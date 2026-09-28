@@ -12,6 +12,7 @@ import { natureOfActe } from "../lib/annexes.js";
 import { styleRuntimeCss, generalPageCss } from "../lib/styles.js";
 import { isDark, brandColors, lighten } from "../lib/theme.js";
 import { debounce } from "../lib/util.js";
+import { veille } from "../lib/relecture.js";
 import * as collab from "../lib/collab.js";
 import * as flux from "./flux.js";
 import { circuitFor, etapePour, validationAJour, validationPourSignature, parapheurActif as parapheurActifConfig } from "../lib/validation.js";
@@ -54,6 +55,15 @@ export const state = {
   firstRun: false,
   storageOk: true,
   draft: {},
+  // L'ÉTAT PROPRE À L'INTERFACE (onglet ouvert, filtre de liste, panneau déplié,
+  // cran de zoom…). Il vit le temps de la page, comme `draft` : il n'est ni
+  // persisté, ni une donnée de l'application. Le seau EXISTE dès le départ, et
+  // ce n'est pas un détail : des écrans le renseignent en le déréférençant
+  // directement (`state.ui.registre = …`, voir `views/actes.js` ;
+  // `state.ui.refTab`, voir `views/referentiel.js`), et un lien direct vers l'un
+  // d'eux — ou tout écran rendu avant qu'un autre ne l'ait créé — tombait sur un
+  // « Cannot read properties of undefined » qui VIDait l'écran.
+  ui: {},
   // CE QU'UN AUTRE POSTE A ENREGISTRÉ, et que ce poste n'a pas encore repris :
   // `{ trames: { "tpl-x": { at, supprime } }, actes: {…}, config: { at } }`.
   // Écrit par le flux (voir plus bas), lu par les écrans qui doivent le dire —
@@ -1235,6 +1245,10 @@ export function oublierBulletinsRecueil() {
   st.chargementBulletins = false;
   st.bulletinsActes = {};
   st.flux = undefined;
+  // L'invalidation est un ORDRE de relire : elle efface aussi le souvenir d'un
+  // échec récent, sans quoi la relecture attendrait la fin du délai (voir
+  // src/lib/relecture.js).
+  st.bulletinsVeille = veille();
 }
 
 // Les INFORMATIONS du recueil : le dépôt de démonstration les a écrites au
@@ -1249,6 +1263,9 @@ export function oublierInformationsRecueil() {
   if (!st) return;
   st.infos = null;
   st.chargementInfos = false;
+  // Voir `oublierBulletinsRecueil` : invalider, c'est demander une relecture
+  // tout de suite.
+  st.infosVeille = veille();
 }
 
 export const trameById = (id) => state.trames.find((t) => t.id === id);

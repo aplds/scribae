@@ -30,6 +30,12 @@ successifs.
 | `rapports/AUDIT-SCRIBAE-2026-09-27.md` | 4e | 1.6.3 |
 | `rapports/AUDIT-SCRIBAE-2026-09-29.md` | 4e (autre lignée) | 1.6.1w |
 | `rapports/AUDIT-SCRIBAE-2026-09-30.md` | 5e (autre lignée) | 1.6.1w |
+| `rapports/AUDIT-VISUEL-SCRIBAE-2026-09-28.md` | **visuelle** — le chapitre III seul (le qualiticien) | 1.6.3f |
+
+Le rapport **visuel** du 2026-09-28 est le premier qui **n'instruit qu'un regard** : les
+interfaces, l'accessibilité et la cohérence, écran par écran, mesures instrumentées à l'appui. Il
+est la **référence courante** pour tout ce qui touche à l'écran (ses dix fiches sont **NC-III-009**
+à **NC-III-017**) ; il ne remplace pas une campagne à quatre regards.
 
 Deux **lignées** ont travaillé en parallèle sur ce dépôt (voir **NC-I-017** dans le registre) :
 celle de l'atelier, qui a mené les campagnes des 21, 23 et 27 septembre, et une seconde, qui a

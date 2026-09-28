@@ -46,7 +46,11 @@ function listePourEli() {
   if (!demandeListe) {
     demandeListe = get("/v1/publications", { label: "Recueil public", source: "lecture" })
       .then((r) => {
-        listeEli = (r.ok && r.body && r.body.publications) || [];
+        // Une réponse VIDE est une réponse ; un échec n'en est pas une — on ne
+        // garde rien, et la prochaine résolution redemandera la liste (voir
+        // src/lib/relecture.js).
+        if (!r.ok || !r.body) { demandeListe = null; return null; }
+        listeEli = r.body.publications || [];
         return listeEli;
       })
       .catch(() => { demandeListe = null; return null; });

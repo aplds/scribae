@@ -94,7 +94,7 @@ jobs:
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -ne 0 ]; then
-            bash scripts/annoncer-echecs.sh "$RUNNER_TEMP/epreuves.log"
+            bash "$GITHUB_WORKSPACE/scripts/annoncer-echecs.sh" "$RUNNER_TEMP/epreuves.log"
           fi
           exit "$code"
 
@@ -119,8 +119,14 @@ jobs:
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -ne 0 ]; then
-            # Le dossier courant est `src/server/mysql` (voir `defaults` ci-dessus).
-            bash ../../scripts/annoncer-echecs.sh "$RUNNER_TEMP/epreuves-service.log"
+            # LE CHEMIN EST ANCRÉ À LA RACINE (`$GITHUB_WORKSPACE`), jamais
+            # relatif : ce travail s'exécute depuis `src/server/mysql` (voir
+            # `defaults` ci-dessus), et un `../../scripts/…` y désigne
+            # `src/scripts/…` — qui n'existe que dans l'atelier. La CI
+            # répondait donc `127` (script introuvable) au lieu d'annoter
+            # l'épreuve rouge, et le travail « Service auto-hébergé » échouait
+            # sans jamais dire pourquoi (le pendant, côté service, de NC-I-009).
+            bash "$GITHUB_WORKSPACE/scripts/annoncer-echecs.sh" "$RUNNER_TEMP/epreuves-service.log"
           fi
           exit "$code"
 

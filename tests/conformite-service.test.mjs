@@ -50,7 +50,12 @@ function instancierServiceDemo(html) {
   const m = String(html || "").match(/<script[^>]*type="text\/x-server-plugin"[^>]*>([\s\S]*?)<\/script>/);
   if (!m) throw new Error("le script du service de démonstration est introuvable dans index.html");
   const boite = {};
-  const etat = new Uint8Array(8000004 + 2);
+  // Le tampon d'état, à la taille que l'édition statique alloue elle-même
+  // (`src/pages/host.js`, `STATE_UNITS`) : le service écrit son état en double
+  // tampon, et l'hôte doit lui donner de quoi en tenir deux — voir
+  // `tests/persistance-double-tampon.test.mjs`, qui vérifie que les deux
+  // déclarations s'accordent.
+  const etat = new Uint8Array(4 + 2 * (8000000 + 2));
   const rpc = new Function("state", "self", m[1] + "\n;return self.rpc;")(etat, boite);
   if (!rpc || typeof rpc.api !== "function") throw new Error("le service de démonstration ne rend pas son API");
   return rpc;
@@ -87,6 +92,8 @@ test("le service de démonstration respecte le contrat commun", async () => {
   const releve = await verifier(transportDemo(rpcDemo), { nom: "démonstration" });
   assert.equal(releve.echecs.length, 0, "écarts de conformité :\n  - " + releve.echecs.map(detail).join("\n  - "));
   assert.equal(releve.total, APPELS.length);
+  // Le service répond à TOUT : aucune réponse ne doit être comptée injoignable.
+  assert.equal(releve.injoignable, 0, "un service vivant ne doit produire aucune réponse injoignable");
 });
 
 test("le jeu d'appels couvre bien le contrat, frontières comprises", () => {
@@ -97,6 +104,32 @@ test("le jeu d'appels couvre bien le contrat, frontières comprises", () => {
     assert.ok(ids.includes(requis), `l'appel « ${requis} » manque au jeu de conformité`);
   }
   assert.ok(APPELS.length >= 12, `le jeu doit couvrir le contrat (${APPELS.length} appels)`);
+});
+
+// LE SERVICE MUET N'EST PAS UN SERVICE INFRACTEUR (NC-II-012). Un transport qui
+// ne rend RIEN — statut 0 : canal fermé, service suspendu — ne produit aucun
+// écart de conformité, parce que le contrat n'est pas JUGÉ. Il se déclare à part
+// (`injoignable`), pour que l'appelant conclue « sans objet » au lieu d'accuser
+// le dépôt pour un hôte qui s'est tu.
+test("un service muet ne produit aucun écart de conformité, mais se déclare injoignable", async () => {
+  const muet = async () => ({ status: 0, body: { erreur: "service suspendu" } });
+  const releve = await verifier(muet, { nom: "muet" });
+  assert.equal(releve.echecs.length, 0, "un service muet ne peut pas être déclaré non conforme :\n  - " + releve.echecs.map(detail).join("\n  - "));
+  assert.equal(releve.injoignable, APPELS.length, "chaque appel doit être compté injoignable");
+  assert.equal(releve.ok, APPELS.length);
+});
+
+// LES DENTS DE LA RÈGLE. Un service qui RÉPOND mal reste une non-conformité,
+// même si le reste de ses réponses manque : sans quoi la règle ci-dessus
+// couvrirait les vrais écarts au lieu de nommer un hôte muet.
+test("un service qui répond mal reste non conforme, fût-il à moitié injoignable", async () => {
+  const bancal = async (methode, chemin) => (chemin === "/v1/health"
+    ? { status: 500, body: { erreur: "panne simulée" } }
+    : { status: 0, body: {} });
+  const releve = await verifier(bancal, { nom: "bancal" });
+  assert.equal(releve.echecs.length, 1, "le 500 doit être rapporté : " + JSON.stringify(releve.echecs));
+  assert.equal(releve.echecs[0].id, "health");
+  assert.equal(releve.injoignable, APPELS.length - 1, "les autres appels sont injoignables");
 });
 
 const url = (typeof process !== "undefined" && process.env && process.env.SCRIBA_CONFORMITE_URL) || "";

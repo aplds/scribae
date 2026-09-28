@@ -1,5 +1,5 @@
 import { emptyConfig, newNode, newField, newRule, newNote, newTrame } from "./schema.js";
-import { seedStyles, svgDataUrl } from "./styles.js";
+import { seedStyles, svgDataUrl, LOGO_SVG } from "./styles.js";
 import { EXTERNE_DEFAUT } from "./numbering.js";
 import { RENVOIS_RECOMMANDES, mentionsParDefaut } from "./recueil.js";
 
@@ -11,47 +11,6 @@ import { RENVOIS_RECOMMANDES, mentionsParDefaut } from "./recueil.js";
 // Ce jeu est celui du démonstrateur : une collectivité FICTIVE, la ville de
 // Valmont-sur-Loire (mairie). Aucune donnée réelle n'y figure.
 // ============================================================================
-
-// Emblème de la commune fictive (SVG embarqué sous forme de data URL). Il est
-// volontairement embarqué plutôt que lu dans `src/assets/` : les bibliothèques
-// de capture d'écran (guide imprimable, vignettes) ne savent pas résoudre un
-// chemin relatif dans leur copie du document, alors qu'une data URL est
-// auto-suffisante.
-//
-// Le dessin : l'écu français, en trois plans — un ciel clair, un soleil d'or à
-// huit rais, et la Loire qui baigne deux monts. Le champ est découpé par le
-// tracé même de l'écu (`clipPath`) : les monts et l'eau s'arrêtent net sur le
-// galon, sans bavure. Deux détails de mise au point, appris en regardant le
-// rendu : les rais du soleil sont courts et proches du disque (un rai long le
-// fait paraître décentré, et son extrémité vient mordre le chef) ; et les cimes
-// enneigées comme les bandes d'eau portent un liseré de LEUR PROPRE couleur,
-// car deux aplats voisins qui partagent un bord laissent, à l'anticrénelage,
-// un filet clair que le liseré recouvre.
-export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="Ville de Valmont-sur-Loire">
-  <defs>
-    <clipPath id="vsl-ecu"><path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z"/></clipPath>
-    <linearGradient id="vsl-ciel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f7fbff"/><stop offset="1" stop-color="#cbdff6"/>
-    </linearGradient>
-    <linearGradient id="vsl-eau" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4b91d3"/><stop offset="1" stop-color="#1b5c92"/>
-    </linearGradient>
-  </defs>
-  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="url(#vsl-ciel)"/>
-  <g clip-path="url(#vsl-ecu)">
-    <g stroke="#f0bd35" stroke-width="2.4" stroke-linecap="round" fill="none">
-      <path d="M32 8.9L32 6.3M32 23.9L32 26.5M24.6 16.4L22 16.4M39.4 16.4L42 16.4M26.7 11.1L24.9 9.3M37.3 21.7L39.1 23.5M37.3 11.1L39.1 9.3M26.7 21.7L24.9 23.5"/>
-    </g>
-    <circle cx="32" cy="16.4" r="6.5" fill="#f0bd35"/>
-    <path d="M5 51 21.5 23.5 38 51Z" fill="#1e7a45"/>
-    <path d="M21.5 24.2 15.9 33.6 18.6 31.9 21.5 34.4 24.4 31.9 27.1 33.6Z" fill="#f4f9ff" stroke="#f4f9ff" stroke-width="0.8" stroke-linejoin="round"/>
-    <path d="M28.5 51 43.5 27.5 58 51Z" fill="#16613a"/>
-    <path d="M43.5 28.2 38.1 37.3 40.7 35.6 43.5 38 46.3 35.6 48.9 37.3Z" fill="#dbe7f5" stroke="#dbe7f5" stroke-width="0.8" stroke-linejoin="round"/>
-    <path d="M4 48.4C11 44.9 17.5 50.4 25 47.6c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v26H4Z" fill="url(#vsl-eau)" stroke="url(#vsl-eau)" stroke-width="0.7"/>
-    <path d="M4 58.2C11 54.7 17.5 60.2 25 57.4c7.5-2.8 12.5 3.4 20 1.6 4.2-1 8.4-1.4 11-1.8v20H4Z" fill="#1a4f82" stroke="#1a4f82" stroke-width="0.7"/>
-  </g>
-  <path d="M32 2 60 11v27c0 15-11.6 26-28 32C15.6 64 4 53 4 38V11Z" fill="none" stroke="#12335c" stroke-width="3.4" stroke-linejoin="round"/>
-</svg>`;
 
 const LOGO_DATA_URL = svgDataUrl(LOGO_SVG);
 

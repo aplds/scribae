@@ -14,7 +14,7 @@ node --test tests/            # ce dossier seul
 |---|---|
 | `purs.test.mjs` | les modules purs : expressions, assainissement, numérotation, version, comptes, signature… et la **concordance** entre le client et le service (OIDC, champs d'API) |
 | `abrogation-annexes.test.mjs` | les annexes d'abrogation |
-| `amorcage-demo.test.mjs` | l'amorçage du jeu de démonstration |
+| `amorcage-demo.test.mjs` | l'amorçage du jeu de démonstration — et le **second emblème** que reçoit une feuille de démonstration livrée |
 | `competence-signature.test.mjs` | **qui signe** (le titulaire de la chaîne, porteur de la qualité), **qui est dans la file** (à signer, suivis, et l'acte sans signataire explicite), et **qui accède** (les qualités cumulées d'un visiteur) |
 | `qualification-signature.test.mjs` | la qualification affichée d'une signature (NC-IV-001) |
 | `publications-locales.test.mjs` | le repli local du recueil public |
@@ -24,6 +24,11 @@ node --test tests/            # ce dossier seul
 | `conformite-service.test.mjs` | l'exécution de ce jeu contre le service de démonstration, et la comparaison avec une installation réelle (`SCRIBA_CONFORMITE_URL`) |
 | `parcours.mjs` | les **parcours** joués dans le NAVIGATEUR, contre l'application vivante (`lancerParcours()`) — voir `docs/INDUSTRIALISATION.md` § 2 |
 | `industrialisation.test.mjs` | **l'outillage lui-même** : il lance `scripts/verifier-style.mjs` tel qu'il est livré et exige le code de sortie 0 (audit, NC-I-008 et NC-I-009) |
+| `version-publication.test.mjs` | le **versionnement d'une publication** : une expression de date nouvelle crée une version, la même est idempotente, le recueil rend la plus récente en tête — et le piège d'une clé d'idempotence qui ne porte pas l'expression |
+| `etat-interface.test.mjs` | le seau **`state.ui`** : il existe dès le départ, car des écrans le déréférencent directement |
+| `format-date.test.mjs` | **`formatDate`** : l'horodatage complet se lit comme sa date calendaire, le reste ne change pas |
+| `recueil-recherche.test.mjs` | la **recherche de l'entrée du recueil** : aucune largeur bridée dans sa règle |
+| `bandeaux.test.mjs` | les **bandeaux d'information** : la sélection (allumés, non vides, dans l'ordre), le masquage des options démo éteinte, le rendu et ses quatre couleurs |
 
 ## Pourquoi les imports disent `../src/…`
 

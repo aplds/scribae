@@ -94,6 +94,51 @@ test("démonstration active : le jeu livré est installé", async (t) => {
 // réglée sur un service externe (`store.db`), et `fetch` est doublé pour
 // ENREGISTRER les écritures. C'est la seule façon de compter les tentatives.
 // ---------------------------------------------------------------------------
+test("la démonstration livrée porte DEUX emblèmes en tête, et la migration les répare", async (t) => {
+  const store = await charger("../src/lib/store.js");
+  const auth = await charger("../src/lib/auth.js");
+  const styles = await charger("../src/lib/styles.js");
+  if (!store || !auth || !styles || !styles.LOGO_SVG || !styles.LOGO_CCAS_SVG) {
+    return t.skip("module indisponible hors navigateur");
+  }
+
+  // La feuille de démonstration `sty-ccas` équipe son en-tête de DEUX emblèmes :
+  // celui du CCAS à gauche, l'écu de la commune à droite. C'est ce que la
+  // livraison pose (voir src/lib/seed.js), et ce qu'une feuille LIVRÉE d'avant
+  // le second emblème doit recevoir par la migration (`migrateDemoSecondEmblem`,
+  // src/lib/store.js).
+  await store.clearAll();
+  auth.setDeploiementAuth({ mode: "demo", demo: true, demoJeu: true });
+  const { config } = await store.bootstrap();
+  const cc = (config.styles || []).find((s) => s.id === "sty-ccas");
+  assert.ok(cc, "la feuille sty-ccas fait partie du jeu de démonstration");
+  assert.equal(cc.logoUrl, styles.svgDataUrl(styles.LOGO_CCAS_SVG), "l'emblème du CCAS à gauche");
+  assert.equal(cc.logoRightUrl, styles.svgDataUrl(styles.LOGO_SVG), "l'écu de la commune à droite");
+
+  // On simule la feuille d'une livraison ANTÉRIEURE : elle porte l'emblème livré
+  // de gauche, et rien à droite. Le démarrage suivant doit la compléter.
+  const ancienne = await store.loadConfig();
+  const cc0 = (ancienne.styles || []).find((s) => s.id === "sty-ccas");
+  delete cc0.logoRightUrl;
+  await store.saveConfig(ancienne);
+  const apres = await store.bootstrap();
+  const cc1 = (apres.config.styles || []).find((s) => s.id === "sty-ccas");
+  assert.equal(cc1.logoRightUrl, styles.svgDataUrl(styles.LOGO_SVG),
+    "une feuille de démonstration livrée reçoit le second emblème");
+  assert.equal(cc1.logoUrl, styles.svgDataUrl(styles.LOGO_CCAS_SVG), "sans perdre le premier");
+
+  // Et le garde-fou : un emblème choisi par l'administrateur n'en reçoit pas —
+  // la migration ne reconnaît que l'emblème LIVRÉ.
+  const choix = await store.loadConfig();
+  const cc2 = (choix.styles || []).find((s) => s.id === "sty-ccas");
+  cc2.logoUrl = "data:image/svg+xml;base64,UEVSU09OQUw=";
+  delete cc2.logoRightUrl;
+  await store.saveConfig(choix);
+  const apres2 = await store.bootstrap();
+  const cc3 = (apres2.config.styles || []).find((s) => s.id === "sty-ccas");
+  assert.equal(cc3.logoRightUrl, undefined, "un emblème d'administrateur n'est pas touché");
+});
+
 test("O-4 : un compte ordinaire ne tente aucune écriture réservée à l'administrateur", async (t) => {
   const store = await charger("../src/lib/store.js");
   if (!store || !store.db) return t.skip("module indisponible hors navigateur");

@@ -31,6 +31,7 @@ const jetonAdmin = () => (sessionDeService() ? null : (cleService() || null));
 
 export const etat = {
   disponible: false,      // le service a-t-il répondu ?
+  repondu: false,         // a-t-il RÉPONDU à la dernière demande (même par un refus) ?
   publicEtat: null,       // GET /v1/bulletins
   tableau: null,          // GET /v1/bulletins/administration/tableau
   erreur: "",             // le dernier refus, en clair
@@ -47,6 +48,10 @@ const prevenir = () => listeners.forEach((f) => { try { f(); } catch (e) { conso
 export async function chargerPublic({ silencieux = false } = {}) {
   try {
     const r = await get("/v1/bulletins", { label: "Bulletin — état public", source: "lecture" });
+    // Le service a PARLÉ : un refus (« route inconnue », « rôle insuffisant »)
+    // est une réponse — elle vaut « pas de bulletin ici ». Seule une absence de
+    // réponse laisse `repondu` à faux, et l'appelant rejouera sa lecture.
+    etat.repondu = true;
     if (!r.ok) {
       etat.disponible = false;
       etat.erreur = errorMessage(r);
@@ -61,6 +66,7 @@ export async function chargerPublic({ silencieux = false } = {}) {
     return etat.publicEtat;
   } catch (e) {
     if (!silencieux) console.warn("Bulletin : le service n'a pas répondu", e && e.message);
+    etat.repondu = false;
     etat.disponible = false;
     etat.motif = "Le service de données n'a pas répondu.";
     return null;

@@ -124,7 +124,17 @@ export function lireScelle(crypto, scelle) {
   const N = Number(parts[1]), r = Number(parts[2]), p = Number(parts[3]);
   if (!(N > 0 && r > 0 && p > 0)) return null;
   try {
-    return { N, r, p, sel: crypto.deb64(parts[4]), cle: crypto.deb64(parts[5]) };
+    const sel = crypto.deb64(parts[4]);
+    const cle = crypto.deb64(parts[5]);
+    // UN SCELLÉ ILLISIBLE EST UN REFUS, PAS UNE DÉRIVE. Le décodeur base64 de
+    // Node est TOLÉRANT : il ignore les caractères hors alphabet et ne lève
+    // jamais — « n'importe quoi » se décoderait donc en quelques octets, et un
+    // scellé corrompu passerait pour lisible. On exige donc que les deux parts
+    // se RÉ-ENCODENT à l'identique : rien n'est écrit autrement (`scellerMotDePasse`
+    // passe par `crypto.b64`), et un dérivé tronqué ou sali est écarté ici.
+    if (!cle.length) return null;
+    if (crypto.b64(sel) !== parts[4] || crypto.b64(cle) !== parts[5]) return null;
+    return { N, r, p, sel, cle };
   } catch (e) { return null; }
 }
 

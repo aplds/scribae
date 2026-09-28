@@ -41,10 +41,30 @@ const ESBUILD_WASM = "https://esm.sh/esbuild-wasm@0.21.5/esbuild.wasm";
 
 const __enc = new TextEncoder();
 const __dec = new TextDecoder();
+// LE DÉCODEUR BASE64 EST CELUI DE NODE, ET C'EST DÉLIBÉRÉ. `atob` est STRICT :
+// il LÈVE sur un caractère hors alphabet, là où `Buffer.from(x, "base64")`
+// l'IGNORE et rend ce qu'il peut. Un harnais plus sévère que Node rendait donc
+// VERTE une épreuve que la CI voyait ROUGE (le scellé « illisible » de
+// `comptes.test.mjs` : `atob` levait ici, Node décodait là-bas) — le pire des
+// écarts, puisque l'atelier cachait la CI au lieu de l'annoncer. On décode comme
+// Node : on retire les caractères hors alphabet, puis on lit les groupes de six
+// bits.
+const __B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const __depuisBase64 = (x) => {
+  const s = String(x).replace(/[^A-Za-z0-9+/]/g, "");
+  const u = new Uint8Array(Math.floor((s.length * 3) / 4));
+  let bits = 0; let acc = 0; let k = 0;
+  for (const ch of s) {
+    acc = (acc << 6) | __B64.indexOf(ch);
+    bits += 6;
+    if (bits >= 8) { bits -= 8; u[k++] = (acc >> bits) & 0xff; }
+  }
+  return u.slice(0, k);
+};
 const __toU8 = (x, e) => {
   if (typeof x === "string") {
     if (!e || e === "utf8" || e === "utf-8" || e === "ascii" || e === "latin1" || e === "binary") return __enc.encode(x);
-    if (e === "base64") { const b = atob(x); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+    if (e === "base64") return __depuisBase64(x);
     if (e === "base64url") return __toU8(x.replace(/-/g, "+").replace(/_/g, "/"), "base64");
     if (e === "hex") { const u = new Uint8Array(Math.floor(x.length / 2)); for (let i = 0; i < u.length; i++) u[i] = parseInt(x.substr(i * 2, 2), 16); return u; }
     return __enc.encode(x);
@@ -387,7 +407,24 @@ const prelude = (cheminReel, code) =>
 const sansShebang = (texte) => String(texte).replace(/^#!/, "//");
 
 const construire = (fs, esbuild, plugin, cheminReel, contenu) =>
-  esbuild.build({ ...OPTIONS, plugins: [plugin], stdin: { contents: sansShebang(contenu), sourcefile: virtuel(cheminReel), resolveDir: "/" } });
+  esbuild.build({
+    ...OPTIONS,
+    plugins: [plugin],
+    stdin: {
+      // L'ENTRÉE AUSSI PORTE SON ADRESSE. Le greffon ne réécrit `import.meta.url`
+      // que dans les modules IMPORTÉS : sans ce remplacement, l'entrée gardait
+      // l'adresse de son module-bloc (`blob:…`), qui n'est pas hiérarchique —
+      // `new URL("..", import.meta.url)` LEVAIT, et toute épreuve qui ancre un
+      // chemin à SON fichier (la vérification des modèles de `.env`, la
+      // disposition livrée…) se SAUTAIT au lieu de se jouer. Le remplacement
+      // faisait pourtant partie du contrat du harnais (voir en tête de fichier) :
+      // c'était un écran de fumée, et le plus trompeur — un saut annoncé là où la
+      // chaîne, elle, joue l'épreuve.
+      contents: sansShebang(contenu).replace(/import[.]meta[.]url/g, JSON.stringify("file:///" + virtuel(cheminReel))),
+      sourcefile: virtuel(cheminReel),
+      resolveDir: "/",
+    },
+  });
 
 async function importer(fs, esbuild, plugin, cheminReel) {
   if (__modules.has(cheminReel)) return __modules.get(cheminReel);

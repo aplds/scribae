@@ -34,7 +34,7 @@
 .annot__icon { display: inline-flex; color: var(--brand); }
 .annot__title { font-weight: 700; }
 .annot__add {
-  display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center; min-height: 24px; box-sizing: border-box; padding: 0 8px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--brand);
   cursor: pointer; font: inherit; font-size: var(--t-xs);
 }
@@ -50,6 +50,7 @@
 .annot__actions { display: inline-flex; gap: 2px; }
 .annot__btn {
   display: inline-flex; align-items: center; justify-content: center; padding: 1px 3px;
+  min-width: 24px; min-height: 24px; box-sizing: border-box;
   border: 0; border-radius: 3px; background: none; color: var(--ink-muted); cursor: pointer;
 }
 .annot__btn:hover { color: var(--brand); background: var(--brand-soft); }
@@ -105,11 +106,17 @@
 .cmt-filtre { margin-bottom: 8px; }
 .cmt-filtre .fr-choice { font-size: var(--t-xs); }
 
-/* Compteurs cliquables de l'en-tête de l'éditeur de trame. */
+/* Compteurs cliquables de l'en-tête de l'éditeur de trame. La cible fait au
+   moins 24 px de haut (WCAG 2.2 AA, 2.5.8) ; le rembourrage est repris en
+   marge négative pour ne pas déplacer l'en-tête. */
 .editor__counts {
-  border: 0; background: none; padding: 0; font: inherit; font-size: var(--t-xs);
+  border: 0; background: none; padding: 3px 4px; margin: -3px -4px; font: inherit; font-size: var(--t-xs);
   color: var(--ink-muted); cursor: pointer; text-align: left;
 }
+
+/* Le titre de l'écran de l'éditeur de trame : le nom de la trame, porté par
+   son `h1` (NC-III-014) — même apparence que le libellé qu'il remplace. */
+.editor__titre { margin: 0; font-size: inherit; font-weight: 700; }
 .editor__counts:hover { color: var(--brand); text-decoration: underline; }
 .editor__counts.is-on { color: var(--brand); font-weight: 600; }
 
@@ -117,14 +124,17 @@
 [contenteditable="true"]:hover { background: rgba(10, 118, 246, .06); border-radius: 2px; }
 [contenteditable="true"]:focus { background: rgba(10, 118, 246, .08); box-shadow: 0 0 0 2px var(--focus); border-radius: 2px; }
 
+/* La cible du « + » fait 24 px de haut (WCAG 2.2 AA) : la barre grandit
+   d'autant, et ses marges négatives grandissent aussi — la place qu'elle prend
+   entre deux blocs ne change pas. */
 .insert-bar {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  opacity: 0; transition: opacity .12s; height: 16px; margin: -4px 0;
+  opacity: 0; transition: opacity .12s; height: 24px; margin: -8px 0;
 }
 .insert-bar:hover, .insert-bar:focus-within { opacity: 1; }
 .insert-bar .insert-bar__btn {
   border: 1px dashed var(--border-strong); background: var(--bg); color: var(--brand);
-  border-radius: 999px; font-size: var(--t-xs); padding: 0 10px; line-height: 20px; cursor: pointer;
+  border-radius: 999px; font-size: var(--t-xs); padding: 0 10px; min-height: 24px; line-height: 22px; cursor: pointer;
 }
 .insert-bar .insert-bar__btn:hover { background: var(--brand-soft); }
 

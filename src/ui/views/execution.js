@@ -25,8 +25,8 @@ import {
   actePubliable, trameById, alertesDe, journaliser,
   controleLegaliteActif, peutDeclarerTransmission,
 } from "../state.js";
-import { h, button, toast } from "../dom.js";
-import { emptyState, helpLink, pageTitle } from "../components.js";
+import { h, button, icon, toast } from "../dom.js";
+import { emptyState, helpLink, objetDeListe, pageTitle } from "../components.js";
 import { formatDate } from "../../lib/util.js";
 import { targetLabel } from "../../lib/scope.js";
 import {
@@ -131,9 +131,15 @@ export function renderExecution(root, params) {
       onClick: () => { ui.acteId = x.a.id; paint(); },
     },
       h("span", { class: "sig-item__num fr-mono", text: x.a.numero || "sans n°" }),
-      h("span", { class: "sig-item__obj", text: x.a.objet || docOfActe(x.a)?.meta?.objet || "—" }),
+      objetDeListe(x.a.objet || docOfActe(x.a)?.meta?.objet),
       h("span", { class: "fr-badge fr-badge--" + x.st.color, text: x.st.label }),
-      alerte ? h("span", { class: "fr-badge fr-badge--" + (alerte.niveau === "error" ? "error" : alerte.niveau === "warning" ? "warning" : "info"), text: alerte.niveau === "info" ? "i" : "!" }) : null,
+      // Le repère d'alerte est une ICÔNE du jeu, pas une lettre : « i » et « ! »
+      // ne se lisent pas sans légende (NC-III-012). Le dessin porte le sens, et
+      // le motif de l'alerte se lit au survol comme au lecteur d'écran.
+      alerte ? h("span", {
+        class: "fr-badge fr-badge--" + (alerte.niveau === "error" ? "error" : alerte.niveau === "warning" ? "warning" : "info"),
+        title: alerte.message, role: "img", "aria-label": alerte.message,
+      }, icon(alerte.niveau === "info" ? "info" : "warn", 13)) : null,
     ));
   }
 

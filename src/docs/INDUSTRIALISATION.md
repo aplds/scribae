@@ -138,9 +138,9 @@ tels quels, sans qu'aucune règle ne soit recopiée.
 
 **Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
 `import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (huit échecs et onze sauts attendus à la 1.6.3d), tous dus à
-l'absence de Node et de réseau : la liste, la lecture de chaque écart et les
-chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
+écarts **connus** (**473/483**, aucun échec et **dix sauts** attendus à la 1.6.3o),
+tous dus à l'absence de Node et de réseau : la liste, la lecture de chaque écart et
+les chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
 
 > **L'atelier n'est pas la CI, et le harnais n'est pas Node.** La CI exécute
 > `npm run syntaxe` (`node --check`) et `npm test` avec un vrai Node : c'est elle

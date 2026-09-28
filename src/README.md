@@ -277,12 +277,22 @@ page statique).
 
 Le bandeau :
 
-- **Élément** : `src/ui/notice.js` (`demoNotice()`, `viergeNotice()`, `isDemo()`, `DEMO_TEXT`),
-  posé par `app.js` (coquille) et par `views/connexion.js` ; styles `.app-demo` et `.app-vierge`
+- **Élément** : `src/ui/notice.js` (`demoNotice()`, `viergeNotice()`, `bandeauxNotice()`,
+  `rafraichirBandeaux()`, `isDemo()`, `DEMO_TEXT`), posé par `app.js` (coquille), par
+  `views/recueil-public.js` (deux sites), par `views/connexion.js`, `views/hors-reseau.js` et
+  `views/sans-acces.js` ; styles `.app-demo`, `.app-vierge` et `.app-bandeau` (quatre couleurs)
   dans `app.css`. Le bandeau de démonstration l'emporte : les deux ne s'affichent jamais ensemble.
 - **Réglage du texte** : `Administration › Identité › Mention de démonstration` — un **texte
   libre** (`brand.demoText`, vide = phrase d'origine) ; le choix *Afficher / Masquer* ne subsiste,
   comme réglage du référentiel, que quand **aucun déploiement** ne parle (aperçu, page statique).
+  **Démonstration éteinte, ces options sont masquées** : une installation en service n'a ni jeu
+  fictif ni mention fictive à régler — la carte dit seulement où passer les messages du service.
+- **Les bandeaux d'information** : `Administration › Identité › Bandeaux d'information` — des
+  messages enregistrés dans le référentiel (`config.bandeaux`, `src/lib/bandeaux.js`), chacun avec
+  un **titre**, une **couleur** (bleu, orange, rouge, vert) et un **contenu**. On les prépare à
+  l'avance puis on les allume : seul un bandeau allumé, qui dit quelque chose, s'affiche — en
+  tête de l'application (derrière le bandeau de démonstration quand il y est), sur le recueil
+  public et à l'écran de connexion. Toute retouche se voit en direct, sans recharger.
 - **Portée** : le bandeau marque l'**application** — l'écran de connexion, l'en-tête de
   l'atelier **et le recueil public** — mais **pas les documents produits** (un acte exporté ou
   publié ne porte pas la mention).
@@ -363,7 +373,7 @@ principe que `AUTH_MODE` pour le mode de connexion (voir `src/lib/auth.js`).
 | **Chrono de numérotation** (tous les rangs attribués — année, entité, type d'acte, numéro composé, état de l'acte, dates, rédacteur —, **rangs jamais attribués** et **numéros annulés** avec leur motif ; compteurs, filtres, tri par colonne, **six colonnes essentielles et les quatorze autres à la demande**, **pagination**, **export CSV et XLSX** ; portée du chrono — un seul, un par entité ou un par type d'acte —, **passage à l'année suivante** et annulation d'un rang ; un numéro n'est **jamais attribué deux fois**) | ✅ |
 | **Organigramme** (entités → services → bureaux, en arbre ou en liste, même toile que les délégations : fiche de chaque maille, **signataire principal** d'une entité, **entité autonome ou rattachée** à une autre — le cas d'une régie sans personnalité morale propre mais avec son directeur, ses services et ses actes —, entités hors arbre signalées) | ✅ |
 | **API REST documentée, avec panneau de commande** (*Aide › API REST*, et `docs/API.md` engendré) : toutes les routes du service — rôle exigé, paramètres, corps, réponses, champs notables, exemple cURL —, et la possibilité de **jouer la requête pour de vrai** depuis l'application (chemin, corps et jeton modifiables, réponse avec code et durée ; l'appel figure dans « API & journal ») | ✅ |
-| **Feuilles de style** (charte graphique : marges, typographie, couleurs, **deux emblèmes en en-tête — à gauche et à droite du filet**, chacun sa hauteur, en-tête, pied, filets, **encadrés à côtés choisis**, **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; **graisse de la formule d'autorité** — normal, italique, **gras**, gras italique —, les feuilles enregistrées avant ce choix gardant leur rendu ; préréglages ; résolution trame → entité → famille → générale ; **éditeur direct WYSIWYG sur le style**) | ✅ |
+| **Feuilles de style** (charte graphique : marges, typographie, couleurs, **deux emblèmes en en-tête — à gauche et à droite du filet**, chacun sa hauteur et **leur position réglable** (écart, alignement vertical, place du texte entre eux), en-tête, pied, filets, **encadrés à côtés choisis**, **listes à puces et listes numérotées « 1° 2° 3° »**, tableaux, signature, cadre ; **graisse de la formule d'autorité** — normal, italique, **gras**, gras italique —, les feuilles enregistrées avant ce choix gardant leur rendu ; préréglages ; résolution trame → entité → famille → générale ; **éditeur direct WYSIWYG sur le style**) | ✅ |
 | **Apparence claire / sombre** (bouton d'en-tête, choix « Automatique » dans le menu du compte ; préférence de poste, le papier reste blanc) | ✅ |
 | **Assistants « Plume » et « Publia »** (mode d'emploi pour l'atelier, actes publiés pour le recueil ; **nom** et **icône** réglables par l'administrateur, **masquables par chaque agent** dans le menu du compte ; réponses renvoyant par des **liens cliquables** — le chapitre du guide, l'acte du recueil ; Publia connaît l'**acte consulté** et répond d'abord sur lui) | ✅ (démonstration) |
 | **Comptes et rôles** (écran de connexion, 6 rôles — dont le **réviseur** et le **signataire**, cumulables, et le **visiteur**, sans accès —, gestion des comptes, **périmètre par service/bureau**, compétence de réviseur, **champ de compétence de signature et rapprochement du compte de l'outil de signature**, contrôle d'accès) | ✅ (démonstration) |
@@ -1044,15 +1054,31 @@ enregistrées avant l'ajout d'un réglage sont **normalisées à l'ouverture** d
 (`emptyStyle(s)`), et `styleCss` applique de toute façon les défauts : une charte ancienne
 reste imprimable, et rien n'est migré de force.
 
-**L'en-tête peut porter DEUX emblèmes.** Le premier (`logoUrl`, à gauche, hauteur `logoHeight`)
-existait ; le second (`logoRightUrl`, hauteur `logoRightHeight` — vide, celle du premier) est
-nouveau. `documentSheetHeader` (`src/lib/render.js`) pose alors la classe
-`doc-sheet-header--duo` et rend le texte d'en-tête flexible, pour que la marque de gauche et la
-marque de droite se répondent aux deux bouts du filet (`styleCss` écrit
-`.doc-sheet-header--duo .doc-sheet-logo--right { margin-left: auto }`). C'est le cas d'une charte
-qui associe l'emblème de la collectivité à celui de l'État, d'un partenaire ou d'une délégation.
-Emplacement vide : rien n'est rendu, et le document se présente exactement comme avant.
-`logoAlign` (`data-align`) continue de régler l'alignement de l'ensemble.
+**L'en-tête peut porter DEUX emblèmes, et leur place se règle.** Le premier (`logoUrl`, à gauche,
+hauteur `logoHeight`) et le second (`logoRightUrl`, à droite, hauteur `logoRightHeight` — vide, celle
+du premier) sont posés par `documentSheetHeader` (`src/lib/render.js`), qui donne à l'en-tête la
+classe `doc-sheet-header--duo` : la marque de gauche et celle de droite se répondent aux deux bouts du
+filet, et le texte de recueil occupe le milieu. C'est le cas d'une charte qui associe l'emblème de la
+collectivité à celui de l'État, d'un partenaire ou d'une délégation. Emplacement vide : rien n'est
+rendu, et le document se présente exactement comme avant.
+
+Trois réglages les positionnent, et `styleCss` comme `creerPdfA` les honorent :
+
+- `logoGap` — l'**écart** entre un emblème et le texte (pixels, 14 par défaut) ;
+- `logoTextAlign` — la **place du texte ENTRE les deux emblèmes** (à gauche, centré, à droite ;
+  « centré » par défaut, qui est le rendu qu'ont toujours eu les chartes à deux emblèmes). Les
+  emblèmes tenant chacun un bout du filet, c'est le seul alignement horizontal qui leur reste ;
+- `logoVAlign` — l'**alignement vertical des emblèmes** (en haut, centrés, en bas), pour deux marques
+  de hauteurs différentes.
+
+`logoAlign` (`data-align`) place, lui, l'**ensemble** — emblème et texte — quand l'en-tête n'a
+**qu'un** emblème (ou pas du tout) ; il n'a pas d'effet entre deux marques.
+
+Les deux emblèmes suivent la charte **partout** : l'aperçu, le HTML autonome, le fichier Word (où ils
+sont posés en flottants, Word ne connaissant ni `flex` ni `gap`) et le **PDF/A**, qui les embarque et
+les dessine sur chaque page — la première comprise — au bord du filet, chacun à sa hauteur. Un
+parcours du navigateur (`emblemes-entete`, `src/tests/parcours.mjs`) rend un vrai document dans un
+hôte hors écran et mesure cette mise en place.
 
 **La formule d'autorité peut être en gras.** Elle ne se réglait qu'en italique ou en normal
 (`authorityItalic`, une case) ; elle a désormais une **graisse** (`authorityWeight`) : « Hérité »,
@@ -2530,6 +2556,17 @@ tenu à un budget de calcul soutenu, et publier dix-sept actes en chaîne l'épu
 n'existant ni dans l'édition statique ni en auto-hébergement, la pause y est nulle, et le recueil
 se remplit en quelques secondes.
 
+**Le rattrapage des versions.** L'amorçage ne s'en tient pas à « une publication existe » : une
+publication ne s'écrase pas, le service la range sous une clé qui porte son **expression de date**,
+si bien qu'un jeu **modifié** (une livraison) laisserait en ligne le texte périmé — et pour
+toujours. Les publications de démonstration portent donc, dans leur expression, la **version du
+jeu** (`-s<SEED_VERSION>`, voir `src/lib/publication-version.js`) : quand la plus récente que le
+service détient pour un acte ne porte pas ce suffixe, l'amorçage en publie une **version NOUVELLE**
+(même identifiant ELI, expression distincte — l'ancienne reste à l'historique), et la **clé
+d'idempotence** porte l'expression elle aussi (sans quoi l'appel rejoué rendrait l'ancienne). La
+**publication informative d'un règlement** suit la même règle. Un jeu inchangé, lui, n'est ni
+redéposé ni republié.
+
 **Le recueil public relit le registre du poste quand le service se tait**
 (`src/lib/publications-locales.js`). Les publications gardées sur les actes sont relues pour
 reconstituer la notice (`publicationsLocales`, avec le rangement des versions par identifiant ELI)
@@ -2644,7 +2681,7 @@ parapheur (`src/ui/views/parapheur.js`) et la révision (`src/ui/views/revision.
 écrans disent ainsi la même chose du même acte. Une **annexe** a son propre fil — rédaction →
 adoption → publication informative pour un règlement —, qui rappelle qu'elle ne se signe pas, et
 la liste des actes de l'écran de signature lui donne l'étiquette « Annexe — ne se signe pas » au
-lieu de « Prêt à signer ».
+lieu de « Prêt ».
 
 `src/lib/revision.js` est **pur** (ni DOM ni état) :
 
@@ -3337,7 +3374,7 @@ src/ui/
   dnd.js                  GLISSER-DÉPOSER : primitives partagées sur les POINTER EVENTS (glissable, deposable, conversion d'un point de dépôt en position de curseur) — souris, doigt et stylet d'un seul chemin
   brand.js                devise et marque du logiciel (SVG en ligne, currentColor) — le nom vient de lib/logiciel.js, dont il est réexporté
   chats-erreur.js         LES CHATS DES PAGES D'ERREUR, VUS DE L'ATELIER : `chatErreurEl(code)` rend la figure (image de http.cat + légende + source) si l'administration a allumé l'option (`config.publication.chatsErreur`), `null` sinon — les vues n'ont donc qu'à dire QUEL code illustre leur panne (module de rendu, voir lib/chats-erreur.js)
-  notice.js               bandeaux de tête : « Démonstration » (si le déploiement l'allume) et « Référentiel vierge » (démonstration éteinte et référentiel vide), dans l'atelier comme sur le recueil public
+  notice.js               bandeaux de tête : « Démonstration » (si le déploiement l'allume), « Référentiel vierge » (démonstration éteinte et référentiel vide) et les messages de l'administration (`bandeauxNotice()`, voir `lib/bandeaux.js`), dans l'atelier, sur le recueil public comme à la connexion
   state.js                état global, routeur (sans toucher au hash), persistance différée, corbeille et mise à disposition d'une trame (gestes journalisés)
   markdown.js             rendu markdown → DOM (documentation technique)
   import-trame.js         OUVRIR LA TRAME PROPOSÉE PAR UN IMPORT DE DOCUMENT : l'adresse réservée `trame/__import__`, la lecture du fichier, la fenêtre des points à vérifier, et l'enregistrement ou l'abandon (rien n'est écrit avant)
@@ -3619,30 +3656,34 @@ estimées à l'œil. Recette pour refaire une capture :
 
 ```js
 // dans la console de l'aperçu, après avoir mis l'application dans l'état voulu
-const { default: h2c } = await import("https://esm.sh/html2canvas@1.4.1?bundle");
-const root = document.querySelector(".app-main");           // cadre capturé
+const { capture } = await import("https://ai-agent.perchance.org/files/snapshot.js");
+const root = document.querySelector("#app");                 // cadre capturé
 const rect = (sel) => {                                     // repère en %
   const r = root.getBoundingClientRect(), e = document.querySelector(sel).getBoundingClientRect();
   return { x: (e.left + e.width / 2 - r.left) / r.width * 100, y: (e.top + e.height / 2 - r.top) / r.height * 100,
            w: e.width / r.width * 100, h: e.height / r.height * 100 };
 };
-(await h2c(root, { scale: 1, backgroundColor: "#fff" })).toDataURL("image/png"); // → téléverser, puis reporter l'URL et rect(...) dans SHOTS
+await capture(root, { scale: 1 }); // → téléverser, puis reporter l'URL et rect(...) dans SHOTS
 ```
 
-Deux pièges, déjà rencontrés :
+Quatre pièges, déjà rencontrés :
 
 - **Le cadre capturé est `#app`** (et `document.body` pour une fenêtre modale, qui vit
   hors de `#app` dans `.fr-modal-overlay`). Les repères se calculent alors relativement à
   ce même élément.
-- **Un `<iframe srcdoc>` n'est pas rendu** par html2canvas (il apparaît blanc). Pour la
-  capture de la consultation publique, le document est d'abord rendu à part
-  (`h2c(iframe.contentDocument.documentElement, …)`), puis l'iframe est **remplacée
-  temporairement** par une `<img>` de même boîte avant la capture du cadre.
-- **html2canvas, pas snapdom.** L'aide `snapshot.js` (qui s'appuie sur snapdom) rend mal les
-  conteneurs *flex* : dans une capture d'en-tête, elle replie `.app-header__tools` sur une
-  deuxième ligne et laisse la droite vide. Pour toute image contenant l'en-tête, utiliser
-  `html2canvas` — c'est ce qui a produit les images du guide (`scale: 2` sur `#app`, à
-  **1440×900**, soit 2880 px de large).
+- **snapshot.js, pas html2canvas.** `html2canvas` **déplie** les zones défilantes (un registre
+  de 25 lignes donne une page de 4 931 px) et rend mal l'éditeur de rédaction ; l'aide
+  `snapshot.js` (qui s'appuie sur snapdom) capture le cadre tel qu'il est à l'écran — c'est ce
+  qui a produit les images du guide (fenêtre **1440×900**, 2 880 px de large). Revers : quelques
+  boutons de barre d'outils (« Compléter », « Enregistrer », le choix de l'entité) ne s'y
+  **peignent** pas — on choisit les repères sur les éléments peints, jamais sur du vide.
+- **Un `<iframe srcdoc>` n'est pas rendu** (il apparaît blanc). Le texte publié s'affiche
+  désormais **dans la page** (plus d'iframe) : si une iframe réapparaît, le document est d'abord
+  rendu à part, puis l'iframe est **remplacée temporairement** par une `<img>` de même boîte
+  avant la capture du cadre.
+- **Masquer ce qui n'existe que dans l'atelier.** La bannière « Édition statique », l'avis de
+  l'hébergeur sur le stockage temporaire et les fenêtres natives (`confirm`, `alert`) se
+  masquent (ou se valident d'avance) pour la pose : l'utilisateur ne les voit jamais.
 - **Le recadrage de l'en-tête bat la reprise d'état.** Quand seule l'identité change
   (nom, marque, ou la pastille de compte affichée à droite), il est inutile de refaire les
   huit mises en situation : la hauteur de l'en-tête (58 px) et tout ce qui est en dessous sont
@@ -3799,9 +3840,8 @@ Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
 (pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
 **virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
 import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
-1.6.3d, **huit échecs et onze sauts attendus** sur 440 épreuves — tous connus,
-tous dus à l'absence de Node et de réseau. Les recettes, les chiffres et la
-lecture des écarts sont dans `docs/ATELIER.md` § 3 : c'est le document à lire
+1.6.3o, **473/483** épreuves, **aucun échec** et **dix sauts** attendus — tous
+dus à l'absence de Node et de réseau. Les recettes, les chiffres et la lecture
 avant de travailler dans l'atelier.
 
 ## Pièges connus
@@ -3915,17 +3955,24 @@ avant de travailler dans l'atelier.
   SHA-256 et l'encodage UTF-8 sont écrits à la main dans le script serveur. Toute
   modification de `sha256Hex` doit être recoupée avec `crypto.subtle.digest` côté client
   (déposer un document puis comparer les empreintes).
-- **La longueur de l'état tient sur 32 bits** (`STATE_VERSION` 2, en-tête de 4 unités
-  UTF-16 : version, longueur en deux unités, réservé). Ne pas revenir à une seule unité : à
-  l'origine la longueur était rangée dans `U16[1]`, donc elle **débordait au-delà de 65 535
-  caractères** — `saveDb` écrivait une longueur fausse, `loadDb` relisait un JSON tronqué et
-  repartait de zéro, en silence. C'est un piège qui ne se voit qu'avec de gros états (un
-  référentiel un peu fourni dépasse vite 64 Kio) : il a été trouvé par une écriture de
-  120 000 caractères, qui revenait tronquée après rechargement. `src/pages/host.js`
-  (`etatUtilise`) lit la même longueur — les deux doivent rester d'accord.
+- **La longueur de l'état tient sur 32 bits** (`STATE_VERSION` 3 ; en-tête de 4 unités
+  UTF-16 : version, région utilisée en deux unités, index de la copie ACTIVE). Le document
+  durable s'écrit en **double tampon** : deux copies à places fixes, la longueur de chacune
+  écrite **avec elle**, et l'index basculé d'**un seul mot** une fois l'écriture achevée — un
+  instantané de `state` prélevé par l'hôte au milieu d'une écriture ne trouve donc que la copie
+  **précédente**, complète (c'était l'« état qui ne survit pas toujours » de l'aperçu). Ne pas
+  revenir à une seule unité de longueur : à l'origine la longueur était rangée dans `U16[1]`,
+  donc elle **débordait au-delà de 65 535 caractères** — `saveDb` écrivait une longueur fausse,
+  `loadDb` relisait un JSON tronqué et repartait de zéro, en silence. C'est un piège qui ne se
+  voit qu'avec de gros états (un référentiel un peu fourni dépasse vite 64 Kio) : il a été
+  trouvé par une écriture de 120 000 caractères, qui revenait tronquée après rechargement.
+  `src/pages/host.js` (`etatUtilise`, `VERSION_ETAT`, `STATE_UNITS`) décrit le même en-tête —
+  les deux doivent rester d'accord, et `tests/persistance-double-tampon.test.mjs` le vérifie.
 - **L'aperçu non enregistré utilise un serveur émulé** : son état (50 Mio) disparaît à
-  chaque rechargement de la page. Après un `page_refresh`, il faut donc refaire le parcours
-  pour observer une publication. La version publiée en ligne, elle, utilise le
+  chaque rechargement de la page, et l'émulateur **met le service en quarantaine** sous une
+  salve d'appels trop dense (NC-II-012) — les parcours qui en dépendent se déclarent alors
+  « sans objet », et le relevé porte `service.joignable`. Espacez les appels, et refaites le
+  scénario proprement. La version publiée en ligne, elle, utilise le
   vrai service et garde son état. Dans l'édition statique, l'état est conservé dans
   IndexedDB : il survit aux rechargements (voir `src/pages/host.js`).
 - **Taille des messages** : un message WebSocket est limité à 1 Mio. `remote.js` refuse

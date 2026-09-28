@@ -35,7 +35,7 @@ import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown, exportStanda
 import { boutonsPdfA } from "../pdfa.js";
 import { download, uid, debounce, formatDate, todayIso, normalizeSpace } from "../../lib/util.js";
 import { dateHeureFr, heureFr } from "../../lib/legalite.js";
-import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge, mentions, menuButton, notePlier, pageTitle } from "../components.js";
+import { helpLink, emptyState, sectionHeader, acteStatutLabel, acteStatutColor, isDraftable, confirmDialog, selectField, textField, choiceField, abrogationBadge, etiquetteCourte, mentions, menuButton, notePlier, pageTitle } from "../components.js";
 import { targetLabel } from "../../lib/scope.js";
 import { tramePublishable, natureDe, NODE_MAP, newNode, ladderOf, paramsBloc, choixDe, PARA_ALIGNS, PARA_INDENTS, LIST_MARKERS, LIST_NUMBERINGS, TABLE_LAYOUTS, TABLE_ALIGNS, TABLE_CAPTION_POS, RECITAL_FINS } from "../../lib/schema.js";
 import { estExterne, reserverNumero, fixerSequence } from "../../lib/numbering.js";
@@ -581,7 +581,10 @@ export function renderRediger(root, params) {
   // « ⋯ » : ce sont des gestes de sortie, pas le travail en cours.
   root.appendChild(h("div", { class: "page-head" },
     h("div", { class: "page-head__text" },
-      h("h1", { class: "page-head__title", text: existing ? "Reprise d'un acte" : "Rédiger un acte" }),
+      // L'aide à la demande, comme sur les autres écrans de l'atelier (P4) :
+      // ce que fait l'écran se lit d'un clic, il ne s'affiche plus d'emblée.
+      pageTitle(existing ? "Reprise d'un acte" : "Rédiger un acte",
+        "L'acte s'écrit ici, dans sa feuille : le texte du modèle est déjà là, et les champs marqués se remplissent. « Enregistrer » conserve le brouillon — l'acte ne part en signature que lorsque vous le décidez, après la révision et la conformité."),
       h("p", { class: "page-head__sub", text: `${trame.name} · v${trame.version}${draft.values.numero ? " · n° " + draft.values.numero : ""}` }),
       // L'ÉTAT DE L'ACTE EN UNE LIGNE (P6) : enregistré ou non, où en est
       // l'acte dans son parcours, ce qui reste à compléter, ce qui bloque — au
@@ -736,7 +739,7 @@ export function renderRediger(root, params) {
       const feuille = h("div", { class: "paper paper--lecture" });
       const style = applyPaper(feuille, joint.doc, config, { style: styleForDoc(config, doc) });
       feuille.appendChild(renderDocument(joint.doc, config, {
-        showNotes: false, showTrail: false, annexes: false, sansSignature: true, style,
+        showNotes: false, showTrail: false, annexes: false, sansSignature: true, style, apercu: true,
       }));
       box.appendChild(feuille);
       annexesBox.appendChild(box);
@@ -1235,7 +1238,7 @@ export function renderRediger(root, params) {
         paintPalette();
         if (ui.arme) toast(`${label} : cliquez dans le texte à l'endroit voulu`, "info");
       },
-    }, h("span", { class: "fr-icon" }, icon(icone || "doc", 13)), h("span", { class: "puce__label", text: label }));
+    }, h("span", { class: "fr-icon" }, icon(icone || "doc", 13)), etiquetteCourte("puce__label", label));
     return glissable(btn, { kind, token, label });
   }
 
@@ -1853,7 +1856,7 @@ export function renderRediger(root, params) {
     box.appendChild(h("div", { class: "rx-un-champ" },
       h("p", { class: "rx-un-champ__rang", text: `Champ ${i + 1} sur ${liste.length}`
         + (req.length ? ` · ${req.length} obligatoire(s) restant(s)` : "") }),
-      fieldRow(f),
+      fieldRow(f, "courant"),
       h("div", { class: "fr-row rx-un-champ__gestes" },
         button("Plus tard", { variant: "secondary", onClick: () => suivant(false) }),
         button("Valider et suivant", { variant: "primary", icon: "check", onClick: () => suivant(true) }),
@@ -1896,7 +1899,7 @@ export function renderRediger(root, params) {
   function relecture(all) {
     return h("details", { class: "rx-hidden", open: ui.showAll ? "" : null },
       h("summary", { text: `Tous les champs (${all.length})` }),
-      ...all.map((f) => fieldRow(f)));
+      ...all.map((f) => fieldRow(f, "relecture")));
   }
 
   // Ramène le curseur dans le champ courant du tiroir : c'est LÀ qu'on complète
@@ -1973,13 +1976,18 @@ export function renderRediger(root, params) {
     }
   }
 
-  function fieldRow(f) {
+  function fieldRow(f, espace = "") {
     const empty = isEmpty(f, draft.values[f.id]);
-    const row = h("div", { class: "rx-field" + (empty ? " rx-field--empty" : "") });
+    // L'étiquette porte un identifiant d'ancre pour que le groupe (la fiche)
+    // puisse s'y référer (`aria-labelledby`). Le MÊME champ se rend à deux
+    // endroits — la fiche du champ courant, et la relecture repliée —, d'où
+    // l'espace de nom : sans lui, deux éléments porteraient le même identifiant.
+    const ancre = "rx-f-" + (espace ? espace + "-" : "") + f.id;
+    const row = h("div", { class: "rx-field" + (empty ? " rx-field--empty" : ""), role: "group", "aria-labelledby": ancre });
     row.dataset.champ = f.id;
     const inText = fieldsInText.has(f.id);
     const head = h("div", { class: "rx-field__head" },
-      h("span", { class: "rx-field__label", text: f.label }),
+      h("span", { class: "rx-field__label", id: ancre, text: f.label }),
       f.required ? h("span", { class: "fr-required", text: "*" }) : h("span", { class: "rx-opt", text: "facultatif" }),
       h("span", { class: "fr-spacer" }),
       inText

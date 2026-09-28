@@ -27,7 +27,7 @@ import { h, icon } from "../dom.js";
 import { APP_NAME, APP_TAGLINE, markEl } from "../brand.js";
 import { mentionAffichee, contenuMention } from "../mention.js";
 import { themeButton } from "../theme.js";
-import { demoNotice } from "../notice.js";
+import { demoNotice, bandeauxNotice } from "../notice.js";
 import { isOidc, isPassword, demoAccountsDisabled, accesLocal, annuairePropose, annuaireSecondePorte } from "../../lib/auth.js";
 import { loginPanel } from "../oidc.js";
 import { comptesGroupes } from "../comptes-liste.js";
@@ -80,6 +80,7 @@ export function renderConnexion(root) {
 
   const box = h("div", { class: "connexion" },
     demoNotice(),
+    ...bandeauxNotice(),
     // L'état du déploiement (base joignable ? compte d'administration amorcé ?)
     // est dit ICI, avant le formulaire : « Identifiant ou mot de passe
     // incorrect » ne doit pas être la seule explication d'un service qui n'a

@@ -26,8 +26,15 @@
 [data-theme="dark"] .gstep::before,
 [data-theme="dark"] .gmail__send,
 [data-theme="dark"] .sig-step.is-done .sig-step__dot,
+[data-theme="dark"] .sig-step.is-open .sig-step__dot,
 [data-theme="dark"] .gshot__mark,
-[data-theme="dark"] .gshot__num { color: #101219; }
+[data-theme="dark"] .gshot__num,
+/* Les puces du fil de parcours : leur fond est la couleur de marque (la porte
+   en cours) ou la couleur de succès (la porte franchie) — en clair, l'encre
+   blanche y passe ; en sombre, ces deux fonds sont des teintes CLAIRES
+   (#8f8fcf, #7fd8a3) et le blanc y tombe à 3,0:1 et 1,7:1. */
+[data-theme="dark"] .pc-parcours__phase--encours .pc-parcours__puce,
+[data-theme="dark"] .pc-parcours__phase--fait .pc-parcours__puce { color: #101219; }
 [data-theme="dark"] .fr-badge--success { color: var(--success); }
 [data-theme="dark"] .fr-alert--success { background: var(--success-bg); }
 [data-theme="dark"] .gnote--ok { background: var(--success-bg); }

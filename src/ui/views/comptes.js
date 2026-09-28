@@ -267,8 +267,8 @@ function scopeEditor(u) {
   const services = servicesOf(c);
   if (!Array.isArray(u.memberships)) u.memberships = [];
 
-  const wrap = h("div", { class: "fr-field compte-scope" },
-    h("label", { class: "fr-label", text: "Périmètre d'accès (services et bureaux)" }),
+  const wrap = h("div", { class: "fr-field compte-scope", role: "group", "aria-labelledby": "compte-scope-label" },
+    h("label", { class: "fr-label", id: "compte-scope-label", text: "Périmètre d'accès (services et bureaux)" }),
     h("p", { class: "fr-hint", text: "Un compte ne voit que les trames et les actes de son périmètre. Cocher un service donne accès à tous ses bureaux ; décochez les bureaux à restreindre." }),
   );
   const summary = h("p", { class: "fr-small", style: { margin: "4px 0" } });
@@ -360,8 +360,8 @@ function scopeEditor(u) {
 // qui remet le principal en tête ; `user.role` n'en est que le reflet.
 function roleEditor(u, onChange) {
   if (!Array.isArray(u.roles)) u.roles = rolesOf(u);
-  const wrap = h("div", { class: "fr-field compte-roles" },
-    h("label", { class: "fr-label", text: "Profil d'accès" }),
+  const wrap = h("div", { class: "fr-field compte-roles", role: "group", "aria-labelledby": "compte-roles-label" },
+    h("label", { class: "fr-label", id: "compte-roles-label", text: "Profil d'accès" }),
     h("p", { class: "fr-hint", text: "Le profil principal dit ce que le compte fait ; les qualités qui se cumulent s'y ajoutent. Le profil « Visiteur » n'ouvre aucun écran : le compte peut s'authentifier, mais n'accède qu'à l'espace public." }),
   );
   const principals = h("div", { class: "fr-choices" });
@@ -396,8 +396,8 @@ function roleEditor(u, onChange) {
 function revisionEditor(u) {
   if (!u.revision) u.revision = newCompetence();
   const c = state.config;
-  const box = h("div", { class: "fr-field compte-revision" },
-    h("label", { class: "fr-label", text: "Compétence du réviseur" }),
+  const box = h("div", { class: "fr-field compte-revision", role: "group", "aria-labelledby": "compte-revision-label" },
+    h("label", { class: "fr-label", id: "compte-revision-label", text: "Compétence du réviseur" }),
     h("p", { class: "fr-hint", text: "Ce que ce compte contrôle avant signature. Ne rien cocher vaut « tout » : tous les services et tous les actes. Pour que la qualité soit portée par un service entier (ou par certains de ses bureaux), réglez-la sur le service, dans « Administration › Services »." }),
     h("p", { class: "fr-small" }, h("span", { text: "Compétence actuelle : " }), h("strong", { text: competenceLabel(c, u.revision) })),
   );
@@ -436,8 +436,8 @@ function revisionSummary(u) {
 function signatureEditor(u) {
   const c = state.config;
   const corps = h("div", {});
-  const box = h("div", { class: "fr-field compte-signature" },
-    h("label", { class: "fr-label", text: "Signature électronique" }),
+  const box = h("div", { class: "fr-field compte-signature", role: "group", "aria-labelledby": "compte-signature-label" },
+    h("label", { class: "fr-label", id: "compte-signature-label", text: "Signature électronique" }),
     h("p", { class: "fr-hint", text: "Un signataire signe avec son compte. Rattaché à une personne du référentiel, il tient d'elle sa qualité ; l'annuaire de la collectivité (OIDC) provisionne le même agent sur l'outil de signature, et le rapprochement relie les deux comptes." }),
     corps);
   const peindre = () => {

@@ -435,7 +435,8 @@ FeuilleDeStyle = {
   signatureFunctionItalic, signatureNameWeight,
 
   // en-tête et pied de page
-  showHeader, logoUrl, logoHeight, logoAlign, headerText, headerRule,
+  showHeader, logoUrl, logoHeight, logoRightUrl, logoRightHeight,
+  logoAlign, logoTextAlign, logoGap, logoVAlign, headerText, headerRule,
   headerSize, headerItalic, headerCase,
   showFooter, footerText, footerAlign, footerSize, footerItalic,
 }
@@ -526,11 +527,22 @@ L'acte publié au recueil se présente selon une **feuille de style web** unique
 (`CSS_DOCUMENT_WEB`, `src/lib/recueil.js`), si bien que deux entités aux chartes différentes
 présentent leurs actes **à l'identique** sur le site public (voir 2.5 et § 3).
 
-L'en-tête (logo + ligne de recueil) et le pied de page font partie du rendu : `renderDocument`
+L'en-tête (logos + ligne de recueil) et le pied de page font partie du rendu : `renderDocument`
 les ajoute au document à partir de la feuille, et leur texte accepte des jetons
 (`{{entity.name}}`, `{{numero}}`, `{{dateSignature}}`, `{{objet}}`, `{{actType}}`,
 `{{style.label}}`). Un acte type (`sampleDocument`) sert d'aperçu dans l'écran de réglage.
 Une feuille s'exporte/s'importe en JSON (`{ "feuille": { … } }`).
+
+**L'en-tête porte jusqu'à deux emblèmes** — `logoUrl` à gauche, `logoRightUrl` à droite, chacun sa
+hauteur (`logoHeight`, `logoRightHeight`, vide = celle de gauche). `documentSheetHeader`
+(`src/lib/render.js`) pose alors `doc-sheet-header--duo` : les deux marques tiennent les deux bouts
+du filet, et le texte occupe le milieu. Les réglages qui les **positionnent** sont `logoGap` (écart
+avec le texte), `logoTextAlign` (place du texte entre les deux emblèmes — le seul alignement
+horizontal qui reste, les marques étant aux bords) et `logoVAlign` (haut, centre, bas, pour deux
+marques de hauteurs différentes) ; `logoAlign` place l'ensemble quand il n'y a **qu'un** emblème.
+Les deux marques suivent la charte **partout** : `styleCss` les habille dans l'aperçu et le HTML
+autonome, `wordLayout` (`src/lib/export.js`) les pose en flottants dans le fichier Word, et
+`creerPdfA` les **embarque et les dessine** — sur chaque page, la première comprise.
 
 #### 2.2.3 Divisions : livre, titre, chapitre, section…
 
@@ -2044,6 +2056,18 @@ Il porte ensuite la **mise à la une** des actes que la fiction déclare épingl
 (`POST /v1/publications/{cle}/epingle`, reposé à chaque amorçage : le service a pu être remis à
 zéro) — la délibération qui adopte le règlement intérieur, dans le jeu livré.
 
+**Le rattrapage des versions.** « Le service détient une publication » ne dit pas qu'elle est *à
+jour* : une publication ne s'écrase pas — le service la range sous une clé qui porte son
+**expression de date** (§ 2.6 quinquies) —, si bien qu'un jeu **modifié** (une livraison) laisserait
+en ligne le texte périmé, et pour toujours, si l'amorçage s'en tenait à « une publication existe ».
+Les publications de démonstration portent donc, dans leur expression de date, la **version du jeu**
+(suffixe `-s<SEED_VERSION>`, voir `src/lib/publication-version.js`) : quand la version la plus
+récente que le service détient pour un acte ne porte pas ce suffixe, l'amorçage en publie une
+**version NOUVELLE** (même identifiant ELI, expression distincte — l'ancienne reste à l'historique),
+et la clé d'idempotence porte l'expression elle aussi (sans quoi l'appel rejoué rendrait
+l'ancienne). La **publication informative d'un règlement** suit la même règle. Un jeu inchangé,
+lui, n'est **ni redéposé ni republié** : l'amorçage reste idempotent.
+
 #### 2.6 sexies L'identifiant ELI comme adresse, dans l'instance
 
 Un acte publié **cite** d'autres actes par leur **identifiant ELI** : c'est le **visa d'adoption**
@@ -2806,7 +2830,17 @@ démonstration ; `DEMO=false` l'**éteint**.
 personnes, rôles, références, familles, trames, actes, comptes) et affiche le **bandeau orange**
 « Démonstration » — en tête de l'application, sur l'écran de connexion, **et sur le recueil
 public**. Il marque **l'application, pas les documents** : un acte exporté, publié ou imprimé ne
-porte pas la mention. Le **texte** du bandeau reste réglable (`brand.demoText`).
+porte pas la mention. Le **texte** du bandeau reste réglable (`brand.demoText`) — mais
+seulement quand la démonstration est **allumée** : éteinte, la carte d'identité masque ces
+options (une installation en service n'a rien de fictif à régler).
+
+**Les bandeaux d'information** (`config.bandeaux`, `src/lib/bandeaux.js`) sont les messages de
+l'administration : maintenance programmée, alerte, annonce — chacun un **titre**, une **couleur**
+(bleu, orange, rouge, vert) et un **contenu**, réglés dans `Administration › Identité › Bandeaux
+d'information`. On les prépare à l'avance puis on les allume : seul un bandeau allumé, qui dit
+quelque chose, s'affiche — en tête de l'application, sur l'écran de connexion, **et sur le
+recueil public**. Comme le bandeau de démonstration, ils marquent **l'application, pas les
+documents**.
 
 **Éteinte**, l'application part d'un **référentiel VIERGE** (`seedConfigVierge()`,
 `src/lib/seed.js`) : identité neutre, aucun blason, vocabulaire, numérotation, délais et mentions

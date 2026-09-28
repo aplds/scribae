@@ -1,5 +1,6 @@
 // ============================================================================
-// Bandeaux de tête : démonstration, et référentiel vierge.
+// Bandeaux de tête : démonstration, référentiel vierge — et messages de
+// l'administration (voir src/lib/bandeaux.js).
 //
 // DÉMONSTRATION. Elle est décidée par le DÉPLOIEMENT (`.env`, `DEMO`), jamais par
 // ce fichier : `demoActif()` est la seule source de vérité (src/lib/demo.js). Le
@@ -27,6 +28,7 @@
 import { h, icon, button } from "./dom.js";
 import { state, navigate } from "./state.js";
 import { demoActif, referentielVierge } from "../lib/demo.js";
+import { bandeauxActifs, couleurBandeau } from "../lib/bandeaux.js";
 
 export const DEMO_TEXT = "Installation de démonstration : les données sont fictives, la signature électronique est simulée. Ne pas produire d'actes réels avec cette installation.";
 
@@ -78,6 +80,50 @@ export function staticNotice(extra) {
     h("span", { class: "app-demo__text", text: statiquePartagee() ? STATIC_SHARED_TEXT : STATIC_TEXT }),
     extra || null,
   );
+}
+
+// Les bandeaux d'information de l'administration (voir src/lib/bandeaux.js) :
+// les messages allumés, dans l'ordre du référentiel — maintenance programmée,
+// alerte, annonce. Ils s'affichent PARTOUT où le bandeau de démonstration
+// s'affiche (atelier, recueil public, écran de connexion), et PAR-DESSUS lui :
+// une maintenance annoncée pendant une démonstration se lit quand même. Rend un
+// TABLEAU (vide le plus souvent) : `h()` aplati les tableaux, on l'étale donc
+// (`...bandeauxNotice()`).
+export function bandeauxNotice() {
+  return bandeauxActifs(state.config).map((b) => {
+    const couleur = couleurBandeau(b.couleur);
+    const titre = String(b.titre || "").trim() || "Information";
+    return h("div", { class: "app-bandeau app-bandeau--" + couleur, role: "status", "data-bandeau": b.id },
+      h("span", { class: "app-bandeau__tag" }, icon("info", 13), h("span", { text: titre })),
+      h("span", { class: "app-bandeau__text", text: String(b.texte || "").trim() }),
+    );
+  });
+}
+
+// Le rafraîchissement en direct : la coquille (dont les bandeaux) n'est bâtie
+// qu'au chargement — un redessin de vue ne la touche pas (voir src/ui/app.js,
+// `renderApp` / `drawView`). Quand l'administration allume, éteint ou retouche
+// un bandeau, on remplace donc les bandeaux affichés par des neufs, à la même
+// place : après le bandeau de tête (démonstration, édition statique) s'il y en
+// a un, sinon en tête du conteneur. Même geste, en plus simple, que le texte du
+// bandeau de démonstration que l'écran d'identité retouche en direct.
+export function rafraichirBandeaux() {
+  const anciens = [...document.querySelectorAll(".app-bandeau")];
+  const neufs = bandeauxNotice();
+  if (anciens.length) {
+    const parent = anciens[0].parentNode;
+    const suivant = anciens[anciens.length - 1].nextSibling;
+    for (const a of anciens) a.remove();
+    for (const n of neufs) parent.insertBefore(n, suivant);
+    return;
+  }
+  const tete = document.querySelector(".app-demo, .app-vierge");
+  if (tete && tete.parentNode) {
+    for (const n of neufs) tete.parentNode.insertBefore(n, tete.nextSibling);
+    return;
+  }
+  const conteneur = document.querySelector(".app, .recueil, .connexion");
+  if (conteneur) for (const n of neufs.reverse()) conteneur.prepend(n);
 }
 
 // L'invitation du premier écran : « votre référentiel est vierge, commencez

@@ -106,7 +106,7 @@ même outillage que celui de la CI, avec d'autres fondations.
 ### 3.1 Comment on s'en sert
 
 Depuis l'outil **`execute_js`** de l'agent (une passe, un délai généreux : le contrôle lit tout
-l'arbre et construit trente-sept fichiers d'épreuves) :
+l'arbre et construit quarante et un fichiers d'épreuves) :
 
 ```js
 const src = await fs.readTextFile("src/scripts/harnais-atelier.mjs");
@@ -140,15 +140,15 @@ Le **style** est en mode **strict** (comme la CI) : un `var`, un `console.log` d
 
 Le harnais **n'est pas Node** : certaines épreuves ne peuvent pas y être jouées. Elles ne mentent
 pas pour autant — elles appellent `t.skip` —, et il vaut mieux les connaître que les redécouvrir.
-À la version **1.6.3d**, la suite complète donne **40 fichiers, 448/459**, et les **11 sauts**
+À la version **1.6.3p**, la suite complète donne **47 fichiers, 476/486**, et les **10 sauts**
 tiennent tous à l'environnement :
 
 | Fichier | Résultat ici | Ce qui manque |
 |---|---|---|
 | `server/mysql/jws.test.mjs` | 0/5 (**5 sautés**) | un vrai `node:crypto` (`generateKeyPairSync`, `createSign`) |
-| `tests/industrialisation.test.mjs` | 0/4 (**4 sautés**) | un **processus** (`spawnSync`) — il n'y en a pas ici |
-| `tests/conformite-service.test.mjs` | 2/3 (**1 sauté**) | une installation réelle à comparer (`SCRIBA_CONFORMITE_URL`) |
-| `tests/purs.test.mjs` | 27/28 (**1 sauté**) | le **réseau** (l'échange OIDC d'un vrai fournisseur) |
+| `tests/industrialisation.test.mjs` | 3/6 (**3 sautés**) | un **processus** (`spawnSync`) — il n'y en a pas ici |
+| `tests/conformite-service.test.mjs` | 4/5 (**1 sauté**) | une installation réelle à comparer (`SCRIBA_CONFORMITE_URL`) |
+| `tests/purs.test.mjs` | 28/29 (**1 sauté**) | le **réseau** (l'échange OIDC d'un vrai fournisseur) |
 
 **Aucun échec n'est connu, et c'est le fait à retenir.** Jusqu'à la 1.6.3d, cinq fichiers étaient
 rouges *dans l'atelier seulement*, et pour une raison qui n'existait que là : le harnais
@@ -161,6 +161,16 @@ d'un fichier d'épreuves au suivant, là où `node --test` donne **un processus 
 modules que sa source cite en clair (esbuild les inline, donc ils sont partagés), et elle vide le
 registre entre deux fichiers. **Un fichier = un bundle = un processus.** Conséquence à garder en
 tête : un fichier rouge ici n'est plus un artefact du harnais, c'est une **régression**.
+
+**Regarder ses sauts de près.** Un saut n'est pas toujours un fait d'environnement. Jusqu'à la
+1.6.3k, `tests/industrialisation.test.mjs` **sautait quatre fois** dans l'atelier : ses épreuves de
+lecture se croyaient hors d'un processus alors qu'elles n'avaient besoin que du système de fichiers.
+La cause était une faute du HARNAIS — il ne réécrivait `import.meta.url` que dans les modules
+IMPORTÉS, jamais dans le fichier d'épreuve lui-même, dont l'URL restait un `blob:` : un
+`new URL("..", import.meta.url)` y levait, et l'épreuve se sautait pour un motif qui n'existait
+qu'ici (un **écran de fumée** : « tout est vert », alors que trois contrôles ne s'exécutaient pas).
+Corollaire à garder : quand un saut apparaît là où l'environnement n'a rien à voir, ou qu'il
+subsiste après un changement de harnais, c'est le harnais qu'il faut soupçonner — pas le test.
 
 **Deux chiffres à surveiller** quand on touche au service : `src/server/mysql/actes.test.mjs`
 (**32/32**) et `src/server/mysql/controle-legalite.test.mjs` (**9/9**). Ce sont eux qui tiennent la
@@ -200,6 +210,16 @@ dans IndexedDB), ouvre une session d'administration, puis rejoue la même suite.
 |---|---|---|
 | Ici, dans l'atelier | `import("src/tests/parcours.mjs")` puis `lancerParcours(await contexteDeLApercu())` | quelques secondes |
 | En CI | le travail `parcours` (`.github/workflows/ci.yml`) | ~4 min, **avisant** (`continue-on-error`) |
+
+**Un service muet n'est pas jugé.** La suite interroge le **service** ; quand celui-ci ne répond
+**rien** (statut 0 : canal fermé, service suspendu — l'aperçu met le sien en quarantaine sous une
+salve trop dense, NC-II-012), les parcours qui en dépendent — le contrat du service, le dépôt d'une
+pièce, la relecture des informations du recueil — se déclarent **sans objet** au lieu d'échouer : le
+contrat n'est pas enfreint, il n'est pas éprouvable. Le relevé le **dit** (`service.joignable`), et
+l'épreuve de la CI **échoue** si le service ne répond pas — l'édition statique l'héberge dans la
+page, il doit donc répondre, et un « tout vert » servi par un service muet serait un théâtre. Un
+service qui répond **mal** (5xx, mauvais statut) reste, lui, un échec : c'est tout l'objet de la
+suite.
 
 Deux points à savoir si l'on touche à ce travail :
 
@@ -259,7 +279,7 @@ const s = await import("./src/ui/state.js");
 await s.login("u-dubois");                                   // ⚠ SESSION ADMINISTRATEUR (voir ci-dessous)
 const p = await import("./src/tests/parcours.mjs");
 const ctx = await p.contexteDeLApercu();
-const r = await p.lancerParcours(ctx);                       // 29 parcours attendus
+const r = await p.lancerParcours(ctx);                       // 32 parcours attendus
 return r.ok + "/" + r.total;
 ```
 
@@ -366,12 +386,12 @@ preuve est un **résultat**, pas une intention.
 - [ ] La règle touchée n'existe **qu'une fois** ; si le service est concerné, **les deux**
       implémentations suivent (et le jeu de conformité couvre la route).
 - [ ] `h.verifier({ fs, epreuvesAussi: false })` → **syntaxe 0 faute**, **style code 0**.
-- [ ] `h.epreuves({ fs })` → **aucun fichier autrefois vert n'est rouge** ; les 19 non-verts
-      connus (§ 3.3) sont les seuls.
+- [ ] `h.epreuves({ fs })` → **aucun fichier autrefois vert n'est rouge** ; les quatre fichiers
+      non verts connus (§ 3.3) sont les seuls, et leurs **10 sauts** sont les seuls sauts.
 - [ ] Si un écran a changé : il a été **regardé**, en **390 px** et en **grand**.
 - [ ] Si le service a changé : il a été **éprouvé vivant** dans l'aperçu (§ 4), et le journal
       `remote.log` ne porte rien d'inattendu.
-- [ ] Si les parcours sont touchés : `lancerParcours` rend **29/29** en session d'administration.
+- [ ] Si les parcours sont touchés : `lancerParcours` rend **32/32** en session d'administration.
 - [ ] Les **documents engendrés** sont régénérés si leur source a bougé.
 - [ ] Toute **variable** nouvelle a sa ligne dans les **deux** `env.example`.
 - [ ] La **trace** est posée : changelog daté + `APP_VERSION` accordé + documents corrigés.

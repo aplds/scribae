@@ -363,7 +363,12 @@ async function publicationsPubliques() {
       let liste = Array.isArray(state.recueil?.liste) ? state.recueil.liste : null;
       if (!liste) {
         const r = await get("/v1/publications", { label: "Assistant du recueil", source: "lecture" }).catch(() => null);
-        liste = r && r.ok ? (bodyOf(r).publications || []) : [];
+        // Un ÉCHEC n'est pas une liste vide : on ne garde rien, et la question
+        // suivante refera la lecture (voir src/lib/relecture.js). Sans cela,
+        // l'assistant répondrait « le recueil ne contient aucun acte » sur un
+        // service momentanément muet.
+        if (!r || !r.ok) return null;
+        liste = bodyOf(r).publications || [];
       }
       const recents = liste.filter((p) => p && p.latest !== false).slice(0, ACTES_DETAILLES);
       await Promise.all(recents.map(async (p) => {

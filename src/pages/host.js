@@ -230,8 +230,10 @@
   // ------------------------------------- 2. root.createServerSocket (le service)
   // L'état du service est un tableau d'octets : c'est la mémoire durable qu'il
   // attend (`state`), et son format est le sien (en-tête de 4 unités UTF-16,
-  // puis le JSON). On lui donne la capacité qu'il annonce : 8 000 000 caractères.
-  var STATE_UNITS = 8000004 + 2;
+  // puis DEUX copies du JSON, voir `saveDb` dans index.html). On lui donne la
+  // capacité qu'il annonce : 8 000 000 caractères PAR COPIE, plus l'en-tête de
+  // longueur de chacune.
+  var STATE_UNITS = 4 + 2 * (8000000 + 2);
   var stateBytes = null;
   var demarrage = null;
   var rpc = null;
@@ -253,9 +255,9 @@
   }
 
   // On n'écrit que la partie utilisée de l'état (les écritures suivantes sont
-  // bien plus légères que les 16 Mio de la capacité nominale).
-  var ENTETE = 4;              // unités : version, longueur (2 unités), réservé
-  var VERSION_ETAT = 2;        // doit suivre STATE_VERSION du script serveur
+  // bien plus légères que les 32 Mio de la capacité nominale).
+  var ENTETE = 4;              // unités : version, longueur (2 unités), index actif
+  var VERSION_ETAT = 3;        // doit suivre STATE_VERSION du script serveur
 
   function etatUtilise() {
     try {

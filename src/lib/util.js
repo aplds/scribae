@@ -39,10 +39,11 @@ export function isDate(v) {
 export function formatDate(value, style = "date-long") {
   if (!value) return "";
   const s = String(value).trim();
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return s;
   const [, y, mm, dd] = m;
   const d = Number(dd), mo = Number(mm);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return s;
   if (style === "date-short") return `${dd}/${mm}/${y}`;
   if (style === "date-iso") return s;
   if (style === "date-month") return `${MONTHS[mo - 1]} ${y}`;

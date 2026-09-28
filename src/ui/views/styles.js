@@ -43,6 +43,7 @@ const SELECTS = {
   signAlign: [{ value: "right", label: "À droite" }, { value: "left", label: "À gauche" }],
   signStyle: [{ value: "plain", label: "Texte seul" }, { value: "line", label: "Ligne de signature" }, { value: "box", label: "Encadré" }],
   logoAlign: [{ value: "left", label: "À gauche" }, { value: "center", label: "Centré" }, { value: "right", label: "À droite" }],
+  logoVAlign: [{ value: "top", label: "En haut" }, { value: "center", label: "Centrés" }, { value: "bottom", label: "En bas" }],
   frame: [{ value: "none", label: "Aucun" }, { value: "line", label: "Filet simple" }, { value: "double", label: "Filet double" }, { value: "heavy", label: "Filet épais" }],
   numPosition: [{ value: "inline", label: "À la suite du titre" }, { value: "block", label: "Au-dessus du titre" }, { value: "margin", label: "Dans la marge de gauche" }],
   headingRule: [{ value: "none", label: "Aucune" }, { value: "line", label: "Filet simple" }, { value: "dotted", label: "Souligné pointillé" }, { value: "box", label: "Encadré" }],
@@ -222,14 +223,17 @@ const GROUPS = [
   },
   {
     id: "header", title: "En-tête",
-    sub: "Le logo et la ligne de recueil qui coiffent chaque page du document. " + TOKENS,
+    sub: "Les logos et la ligne de recueil qui coiffent le document. Deux emblèmes possibles : un à gauche, un à droite du filet. " + TOKENS,
     fields: [
       f("showHeader", "Afficher un en-tête", "bool"),
       f("logoUrl", "URL ou image du logo (gauche)", "text", { wide: true, help: "Une URL, ou une image encodée (data URL). Vide = pas de logo à gauche." }),
       f("logoHeight", "Hauteur du logo de gauche (px)", "num"),
       f("logoRightUrl", "URL ou image du logo (droite)", "text", { wide: true, help: "Second emblème, à droite du filet : la marque de l'État, d'un partenaire ou d'une délégation. Vide = un seul logo." }),
       f("logoRightHeight", "Hauteur du logo de droite (px)", "num", { help: "Vide : la hauteur du logo de gauche." }),
-      f("logoAlign", "Alignement de l'en-tête", "select", { options: SELECTS.logoAlign }),
+      f("logoAlign", "Alignement de l'en-tête", "select", { options: SELECTS.logoAlign, help: "La place de l'ensemble — logo et texte — quand l'en-tête n'a QU'UN emblème (ou pas du tout). Deux emblèmes : ils tiennent chacun un bout du filet, et c'est le réglage ci-dessous qui place le texte." }),
+      f("logoTextAlign", "Texte entre les deux emblèmes", "select", { options: SELECTS.logoAlign, help: "Sans effet quand il n'y a qu'un emblème : c'est l'alignement de l'en-tête, ci-dessus, qui parle alors." }),
+      f("logoGap", "Écart entre un emblème et le texte (px)", "num"),
+      f("logoVAlign", "Alignement vertical des emblèmes", "select", { options: SELECTS.logoVAlign, help: "Comment les emblèmes se calent l'un par rapport à l'autre quand ils n'ont pas la même hauteur." }),
       f("headerText", "Texte de l'en-tête", "text", { wide: true, placeholder: "{{entity.name}} — recueil des actes administratifs" }),
       f("headerRule", "Filet sous l'en-tête", "bool"),
       f("headerSize", "Taille du texte (em)", "num"),
@@ -553,7 +557,7 @@ export function renderStyles(root) {
     // à la bonne mesure, pas une page générique.
     applyPaper(paper, sampleDocument(config, sheet), config, { style: sheet });
     paper.style.fontFamily = "";
-    paper.appendChild(renderDocument(sampleDocument(config, sheet), config, { style: sheet }));
+    paper.appendChild(renderDocument(sampleDocument(config, sheet), config, { style: sheet, apercu: true }));
     if (direct) markPick();
     requestAnimationFrame(() => fitPaper(canvas, paper));
   }
@@ -617,7 +621,11 @@ export function renderStyles(root) {
   }
 
   function resetSheet(s) {
-    const fresh = emptyStyle({ id: s.id, label: s.label, description: s.description, general: s.general, entityIds: s.entityIds, familyIds: s.familyIds, logoUrl: s.logoUrl });
+    // Les réglages repartent aux valeurs par défaut, mais l'IDENTITÉ de la
+    // feuille reste : son nom, son rattachement, et ses DEUX emblèmes — ce ne
+    // sont pas des réglages de présentation comme les autres, et perdre une
+    // marque par un « remettre à zéro » serait une surprise.
+    const fresh = emptyStyle({ id: s.id, label: s.label, description: s.description, general: s.general, entityIds: s.entityIds, familyIds: s.familyIds, logoUrl: s.logoUrl, logoRightUrl: s.logoRightUrl });
     for (const k of Object.keys(s)) if (!(k in fresh)) delete s[k];
     Object.assign(s, fresh);
     save({ structure: true });

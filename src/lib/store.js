@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { seedConfig, seedConfigVierge, seedTrames } from "./seed.js";
-import { LOGO_CCAS_SVG, svgDataUrl } from "./styles.js";
+import { LOGO_CCAS_SVG, LOGO_SVG, svgDataUrl } from "./styles.js";
 import { emptyConfig } from "./schema.js";
 import { mentionsParDefaut } from "./recueil.js";
 import { seedActes } from "./demo-actes.js";
@@ -134,7 +134,7 @@ import * as db from "./db/index.js";
 // document de chacune des autres familles — et la démonstration s'ouvre bien
 // plus vite.
 //
-// La 47 redessine l'**emblème de la commune** (`LOGO_SVG`, src/lib/seed.js) :
+// La 47 redessine l'**emblème de la commune** (`LOGO_SVG`, src/lib/styles.js) :
 // même écu, mais un dessin mis au point (rais du soleil courts et proches du
 // disque, cimes enneigées et bandes d'eau liserées de leur propre couleur pour
 // effacer les filets d'anticrénelage, galon unique). Le logo étant embarqué dans
@@ -279,6 +279,21 @@ function migrateDemoCcasLogo(config) {
   const ancien = "data:image/svg+xml;base64," + btoa(LOGO_CCAS_SVG.trim());
   if (style.logoUrl !== ancien) return false;
   style.logoUrl = svgDataUrl(LOGO_CCAS_SVG);
+  return true;
+}
+
+// Le SECOND emblème d'en-tête (`logoRightUrl`, voir src/lib/styles.js) est un
+// réglage livré après coup. Une feuille de démonstration qui porte encore
+// l'emblème du CCAS **livré** n'a pas de marque de droite : on lui pose celle de
+// la commune (l'écu du jeu), pour que la fonction se voie sans avoir à la régler.
+// Un emblème choisi par l'administrateur — ou un référentiel réel — n'est jamais
+// touché : c'est le même garde-fou que la migration ci-dessus.
+function migrateDemoSecondEmblem(config) {
+  if (!config || !demoActif(config) || !Array.isArray(config.styles)) return false;
+  const style = config.styles.find((s) => s.id === "sty-ccas");
+  if (!style || style.logoRightUrl) return false;
+  if (style.logoUrl !== svgDataUrl(LOGO_CCAS_SVG)) return false;
+  style.logoRightUrl = svgDataUrl(LOGO_SVG);
   return true;
 }
 
@@ -801,6 +816,7 @@ export async function bootstrap({ administrateur = true } = {}) {
   const migrated = migrateAmendmentVocab(config) | migrateDemoNonPublishable(config) | migrateDemoStyles(config)
     | migrateDemoLogoDark(config)
     | migrateDemoCcasLogo(config)
+    | migrateDemoSecondEmblem(config)
     | migrateDemoStyleOptions(config) | migrateCircuits(config) | migrateExperiments(config)
     | migrateControleLegaliteMode(config)
     | migrateCircuitsNatures(config)
