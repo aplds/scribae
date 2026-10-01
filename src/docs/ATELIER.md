@@ -140,7 +140,7 @@ Le **style** est en mode **strict** (comme la CI) : un `var`, un `console.log` d
 
 Le harnais **n'est pas Node** : certaines épreuves ne peuvent pas y être jouées. Elles ne mentent
 pas pour autant — elles appellent `t.skip` —, et il vaut mieux les connaître que les redécouvrir.
-À la version **1.6.3p**, la suite complète donne **47 fichiers, 476/486**, et les **10 sauts**
+À la version **1.6.3r**, la suite complète donne **48 fichiers, 488/498**, et les **10 sauts**
 tiennent tous à l'environnement :
 
 | Fichier | Résultat ici | Ce qui manque |

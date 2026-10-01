@@ -231,6 +231,12 @@ service au démarrage — il n'y a jamais de repli silencieux sur une valeur app
 | `HTTP_PORT` | service | **Port publié sur l'hôte** — Port publié par le conteneur web (à placer derrière un reverse-proxy TLS). | entier (min 1, max 65535) | 8080 | 8080 |
 | `APP_DIR` | service | **Dossier de l'application** — Dossier qui contient « src/ » et index.html. Sans objet par défaut : la pile Compose et l'image autonome EMBARQUENT le code (le monter sert à travailler sur le code sans reconstruire, voir src/server/README.md § 9 bis). | texte | ../../ |  |
 
+## Relais HTTP
+
+| Variable | Portée | Rôle | Type | Défaut | Exemple |
+|---|---|---|---|---|---|
+| `SCRIBA_RELAIS_HOTES` | service | **Hôtes tiers joignables par le relais** — Liste blanche des hôtes que POST /v1/relais peut appeler pour le compte du navigateur (numérotation externe), séparés par des virgules, avec un port facultatif (« grist.exemple.fr », « numeros.interne.example:8443 »). Vide = relais éteint, toute demande est refusée. Même allowlisté, un hôte qui résout vers une adresse privée (intranet, bouclage, métadonnées du nuage) est refusé. | liste |  | grist.exemple.fr |
+
 ## Service
 
 | Variable | Portée | Rôle | Type | Défaut | Exemple |

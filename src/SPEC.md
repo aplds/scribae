@@ -178,7 +178,8 @@ une ligne.
 **Deux précautions à l'installation.** L'API de Grist **n'accepte pas** l'en-tête
 `Authorization` depuis un navigateur tiers : soit l'origine de l'application est déclarée
 **origine de confiance** chez Grist et l'on utilise `direct`, soit l'on passe par le `relais`
-(qui contourne CORS, mais voit la clé passer). Et la **clé d'API est conservée dans le
+(qui contourne CORS, mais voit la clé passer — en auto-hébergement, c'est le service qui
+relaie, sur liste blanche `SCRIBA_RELAIS_HOTES`). Et la **clé d'API est conservée dans le
 référentiel** : elle part dans les sauvegardes JSON et, en base partagée, dans la base commune.
 Il faut donc une clé restreinte au strict nécessaire (création sur la seule table de
 numérotation).

@@ -153,7 +153,7 @@ async function envoyer({ url, method, headers, body, transport, timeoutMs }) {
   const relais = hostSuperFetch();
   const parRelais = transport !== "direct";
   if (parRelais && typeof relais !== "function") {
-    throw new Error("Le relais HTTP n'est pas disponible ici : passez la numérotation externe en « appel direct », ou servez l'application depuis votre propre domaine.");
+    throw new Error("Le relais HTTP n'est pas disponible ici : en auto-hébergement, renseignez SCRIBA_RELAIS_HOTES côté service — ou passez la numérotation externe en « appel direct ».");
   }
   const f = parRelais ? relais : fetch;
   const ctrl = typeof AbortController === "function" ? new AbortController() : null;

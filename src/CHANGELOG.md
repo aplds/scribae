@@ -28,6 +28,78 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
 
 
+## [1.6.3r] — 2026-09-30 — La documentation rattrape le code
+
+Demande : « assure toi que toute la doc soit à jour ».
+
+**Corrigé**
+
+- **La référence de l'API ignorait le relais.** `POST /v1/relais` (livré en 1.6.3q)
+  n'existait que dans le contrat OpenAPI servi par le service : ni la référence
+  lisible (`docs/API.md`), ni l'écran « API REST », ni le tableau des codes
+  d'erreur ne le connaissaient. L'opération vit désormais dans la description
+  unique (`src/lib/api-reference.js`), avec ses codes (`hote_non_autorise`,
+  `hote_irresoluble`, `relais_indisponible`, `relais_echec`,
+  `corps_trop_volumineux`) ; `API.md` est régénéré (70 opérations).
+- **Le chapeau du dépôt datait de la 1.6.3g.** `docs/GITHUB.md` annonçait la
+  1.6.3g et 44 non-conformités : il dit la 1.6.3r et reprend la synthèse du
+  registre (53 fiches, aucune ouverte, 2 en cours, 1 régression, 47 levées,
+  2 acceptées, 1 obsolète).
+- **Les chiffres de vérification dataient.** `docs/ATELIER.md` (§ 3.3),
+  `docs/INDUSTRIALISATION.md` et `src/README.md` annonçaient encore la suite à
+  la 1.6.3o/1.6.3p : ils disent les chiffres mesurés de ce lot.
+- **Le contrat commun compte dix-neuf appels**, pas treize
+  (`docs/INDUSTRIALISATION.md`) ; **huit épreuves manquaient au tableau** de
+  `src/tests/README.md` ; `src/server/README.md` (§ 11) ignorait `relais.mjs`
+  et la route `/v1/relais`.
+- `docs/DOCKER.md` : versions d'exemple à jour (1.6.3r).
+
+**Épreuves** : 253 fichiers sans faute de syntaxe ni de style, **488/498**
+(0 échec, **10 sauts** d'environnement — les quatre connus : `jws`, `conformite`,
+`industrialisation`, `purs`). `VARIABLES.md` régénéré sans changement
+(`variables.mjs` n'a pas bougé) ; `logiciel-engendre.mjs` ne porte que la version.
+
+
+## [1.6.3q] — 2026-09-30 — Le service relaie, et ne tourne plus en root
+
+Demande : « que reste-t-il à peaufiner / sécuriser pour une mise en prod propre et fonctionnelle
+sous docker ? » — dans le code.
+
+**Ajouté**
+
+- **Le relais HTTP côté service** (`POST /v1/relais`) : la numérotation externe « par le
+  relais » marche désormais en auto-hébergement — le service appelle le tiers (Grist…)
+  pour le compte du navigateur, sans CORS à négocier. Il exige une **identité** (session,
+  ou clé de service) et une **liste blanche** (`SCRIBA_RELAIS_HOTES` dans le `.env`, vide =
+  relais éteint) ; même allowlisté, un hôte qui résout vers une adresse privée (intranet,
+  bouclage, métadonnées du nuage) est **refusé**. Méthodes blanches (GET/POST/PUT/PATCH),
+  corps et réponse plafonnés à 1 Mo, débit borné, et la clé d'API du tiers ne figure dans
+  aucun journal. Le démarrage dit si le relais est allumé, et sur quels hôtes.
+
+**Sécurité**
+
+- Le **service Node tourne en `node` (uid 1000), plus en root** — dans la pile Compose
+  comme dans l'image autonome (dont l'entrée y fait passer le service, nginx restant
+  maître en root comme partout). Le dossier du rangement par fichiers doit donc appartenir
+  à l'uid 1000 (`chown -R 1000:1000 ./data`).
+- Chaque image porte sa **sonde** (`HEALTHCHECK`) : le service sur `GET /v1/health` (base
+  comprise), la façade sur la coquille — et la pile Compose n'envoie le trafic à `web`
+  que derrière un `api` sain (`depends_on: service_healthy`).
+- Un vrai init (`init: true` dans les Compose livrés, `--init` dans les commandes de
+  `DOCKER.md`) : signaux relayés, arrêt propre au lieu du kill au timeout.
+
+**Modifié**
+
+- `DOCKER.md` : versions d'exemple à jour, nouveau § 5.5 (non-root, sondes, init),
+  `ADMINISTRATION.md` et `SPEC.md` : le relais côté service remplace l'« appel direct
+  obligatoire » ; `VARIABLES.md` et `API.md` régénérés (`SCRIBA_RELAIS_HOTES`,
+  `POST /v1/relais`).
+
+Reste ouvert : la CI rouge (NC-I-008, à rejouer côté dépôt), la signature qualifiée
+(NC-IV-001, un contrat prestataire, pas du code), et les vérifications en conditions
+réelles (SMTP, OIDC, @ctes — voir `TODO.md`).
+
+
 ## [1.6.3p] — 2026-09-30 — Les bandeaux d'information de l'administration
 
 Demande : « la fonctionnalité de Bandeau peut être réutilisée par les administrateurs pour

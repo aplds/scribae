@@ -544,7 +544,8 @@ src/server/
     favicon.svg
   mysql/               le service (Node) et le schéma
     server.mjs           HTTP : /v1/db/… (données), /v1/… (signature/publication),
-                         /v1/auth/… (comptes), /v1/config (réglages déclaratifs)
+                         /v1/auth/… (comptes), /v1/config (réglages déclaratifs),
+                         /v1/relais (relais HTTP vers les tiers autorisés)
     variables.mjs        REGISTRE DES VARIABLES DU .env (source de vérité du wiki)
     variables.test.mjs   tests du registre (`npm test`)
     annuaire.mjs         ce que le service PUBLIE de l'annuaire (liste blanche, aucun
@@ -564,6 +565,11 @@ src/server/
                          abonnements, confirmations), par le client SMTP
     smtp.mjs             client SMTP : EHLO, STARTTLS, AUTH LOGIN/PLAIN, envoi —
                          transport injecté, donc éprouvable sans réseau
+    relais.mjs           RELAIS HTTP vers les tiers (numérotation externe) :
+                         liste blanche `SCRIBA_RELAIS_HOTES`, refus des adresses
+                         privées même allowlistées — résolution et appel
+                         injectés, donc éprouvable sans réseau
+    relais.test.mjs      épreuves du relais (liste blanche, verrous, réponses)
     comptes.mjs          domaine des comptes locaux : mots de passe, sessions (sans
                          dépendance à Node — le port de crypto lui est injecté)
     comptes.test.mjs     tests du domaine des comptes (`npm test`)

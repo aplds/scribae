@@ -10,8 +10,8 @@
 //     dépôt des actes, circuits de signature, publication au recueil et
 //     identifiants ELI.
 //
-// S'y ajoutent les routes de SERVICE (`/v1/config`, `/v1/auth/…`, `/v1/courriel`)
-// et les adresses PUBLIQUES du site (`/recueil`, `/robots.txt`, `/llms.txt`,
+// S'y ajoutent les routes de SERVICE (`/v1/config`, `/v1/auth/…`, `/v1/courriel`,
+// `/v1/relais`) et les adresses PUBLIQUES du site (`/recueil`, `/robots.txt`, `/llms.txt`,
 // `/sitemap.xml`).
 //
 // Ce module est la description UNIQUE de cette surface : la référence lisible
@@ -80,6 +80,26 @@ export const API_REFERENCE = [
       { cle: "variables", type: "object", description: "{ \"brand.name\": \"…\", \"numbering.pad\": 3 }" },
       { cle: "erreurs", type: "array", description: "Variables refusées : variable, valeur, motif" },
       { cle: "prestataire", type: "object", description: "État du prestataire : actif, url, niveau, cle (booléen), motif" },
+    ],
+  },
+  {
+    id: "relais", groupe: "service", methode: "POST", chemin: "/v1/relais", auth: "lecteur",
+    resume: "Relais HTTP vers un tiers autorisé",
+    service: "auto-heberge",
+    description: "Appelle un service tiers (numérotation externe) pour le compte du navigateur, qui ne peut pas toujours l'appeler lui-même (CORS, en-tête refusé). L'hôte doit figurer dans la liste blanche `SCRIBA_RELAIS_HOTES` (vide = relais éteint), et toute adresse privée est refusée même allowlistée. Identité exigée, sans rôle particulier : toute session ouverte en mode mot de passe (avec l'anti-CSRF des écritures), tout jeton en mode demo. Méthodes GET, POST, PUT et PATCH ; corps confié et réponse plafonnés à 1 Mo ; la clé d'API du tiers ne figure dans aucun journal.",
+    corps: { method: "GET", url: "https://grist.exemple.fr/api/docs/TABLE/records", headers: { Authorization: "Bearer VOTRE_CLE_TIERS" } },
+    reponses: [
+      { code: 200, description: "Réponse du tiers : `statut`, `corps` (texte, 1 Mo au plus) et `tronque`" },
+      { code: 401, description: "Identité absente (session_absente)" },
+      { code: 403, description: "Hôte non autorisé, ou adresse privée (hote_non_autorise)" },
+      { code: 413, description: "Corps confié trop volumineux (corps_trop_volumineux)" },
+      { code: 429, description: "Trop de requêtes (trop_de_requetes)" },
+      { code: 502, description: "Le tiers est injoignable (relais_echec)" },
+    ],
+    champs: [
+      { cle: "statut", type: "entier", description: "Le statut HTTP rendu par le tiers" },
+      { cle: "corps", type: "string", description: "Le corps rendu par le tiers, en texte (1 Mo au plus)" },
+      { cle: "tronque", type: "booléen", description: "Vrai si la réponse du tiers dépassait le plafond et a été coupée" },
     ],
   },
 
@@ -716,6 +736,11 @@ export const CODES_ERREUR = [
   { code: "piece_referencee", sens: "La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort." },
   { code: "piece_absente", sens: "Le corps de la requête ne porte pas le contenu de la pièce (`base64`)." },
   { code: "piece_trop_volumineuse", sens: "La pièce dépasse le plafond du service (MAX_BODY)." },
+  { code: "hote_non_autorise", sens: "L'hôte visé par le relais ne figure pas dans SCRIBA_RELAIS_HOTES, ou le relais est éteint." },
+  { code: "hote_irresoluble", sens: "L'hôte visé par le relais ne se résout pas : le relais n'appelle jamais « au jugé »." },
+  { code: "relais_indisponible", sens: "Le relais ne peut pas résoudre ici (pas de DNS injecté) : appel impossible." },
+  { code: "relais_echec", sens: "Le tiers n'a pas répondu au relais, ou a coupé la liaison : rien n'est enregistré, l'appel se rejoue." },
+  { code: "corps_trop_volumineux", sens: "Le corps confié au relais dépasse 1 Mo." },
   { code: "publication_inconnue", sens: "Aucune publication ne porte cette clé." },
   { code: "bulletin_inconnu", sens: "Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique)." },
   { code: "bulletin_provisoire", sens: "Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés." },
@@ -819,7 +844,7 @@ export function markdownApi({ base = "https://api.exemple.fr" } = {}) {
     + "C'est ce qu'un script ou un prestataire appelle.");
   out.push("");
   p("S'y ajoutent les routes de **service** (`/v1/config`, `/v1/auth/…`, "
-    + "`/v1/courriel`) et les **adresses publiques du site** (`/recueil`, "
+    + "`/v1/courriel`, `/v1/relais`) et les **adresses publiques du site** (`/recueil`, "
     + "`/robots.txt`, `/llms.txt`, `/sitemap.xml`), qui ne passent pas par "
     + "`/v1/`.");
   p("Un déploiement autonome (Docker) sert les deux familles depuis son propre "

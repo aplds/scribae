@@ -1483,13 +1483,20 @@ service déclare tenir son coffre (`GET /v1/config`, champ `signatureInterne`).
 signature de la collectivité »), ou se pose par `SCRIBA_SIGNATURE_MODE=interne` ; une trame peut
 aussi l'imposer ou l'autoriser (`trame.signature` : `interne_impose`, `interne_autorise`). Le
 **coffre**, lui, ne se règle que dans le `.env` : `SCRIBA_SIGNATURE_KV_KEY` (32 octets en
-hexadécimal ou en base64, marquée *secret*) scelle chaque clé privée (AES-256-GCM) ; sans elle, le
-circuit est **éteint**. `SCRIBA_SIGNATURE_INTERNE_NIVEAU` et `SCRIBA_SIGNATURE_INTERNE_AUTORITE`
+hexadécimal ou en base64, marquée *secret* — elle s'engendre ainsi : `openssl rand -hex 32`)
+scelle chaque clé privée (AES-256-GCM) ; sans elle, le circuit est **éteint**. `SCRIBA_SIGNATURE_INTERNE_NIVEAU` et `SCRIBA_SIGNATURE_INTERNE_AUTORITE`
 règlent ce que le service annonce et le nom de l'émetteur des certificats (voir § 5.2).
 
 **Le coffre.** Une fiche **par signataire** — la clé suit la **personne** (son identifiant de
 personne, à défaut son compte, son adresse, son nom), comme un certificat de signature suit son
-titulaire ; une fiche d'**horodatage** unique date les actes au nom du service. Le coffre ne
+titulaire ; une fiche d'**horodatage** unique date les actes au nom du service.
+
+**Prérequis par signataire.** Aucun rapprochement avec un outil externe — il n'y en a pas.
+Il faut seulement : une personne au référentiel, un compte applicatif rattaché à cette
+personne (*Administration › Comptes et rôles*), une désignation comme signataire
+(*Délégations*, qui attribue la qualité), et la signature par le titulaire **depuis sa propre
+session**. Sinon le service refuse (`403 signature_non_habilitée`, `signataire_non_identifie`,
+`operateur_non_identifie`) : personne ne signe à la place du signataire. Le coffre ne
 contient que des clés **scellées** et des certificats **publics** : une sauvegarde de la base ne
 livre aucune clé privée. Le perdre n'est pas une catastrophe : chaque acte déjà signé porte son
 certificat, donc reste vérifiable ; une clé de scellement changée oblige en revanche à engendrer de
@@ -1616,10 +1623,13 @@ est conservée sur l'acte (`acte.numeroSource`) et l'attribution entre au **jour
 **Deux points d'exploitation.** La **clé d'API est conservée dans le référentiel** — donc dans
 les sauvegardes JSON (§ 8) et, en base partagée, dans la base commune : prenez une clé
 **restreinte à la seule table de numérotation**, et traitez les exports de référentiel comme des
-documents sensibles. Et le **relais HTTP vient de l'hébergement** : il existe dans l'édition en
-ligne, **pas dans le déploiement `src/server/`** — une installation auto-hébergée doit donc soit
-déclarer l'origine de l'application **origine de confiance** chez le service et utiliser l'appel
-direct, soit attendre un relais côté service (voir `src/TODO.md`).
+documents sensibles. Et le **relais HTTP vient du service** : `POST /v1/relais` appelle le tiers
+pour le compte du navigateur — c'est ce qui fait marcher le transport `relais` en
+auto-hébergement, sans CORS à négocier. Il exige une **liste blanche** (`SCRIBA_RELAIS_HOTES`
+dans le `.env`, vide = relais éteint) et une **identité** (session, ou clé de service) ; même
+allowlisté, un hôte qui résout vers une adresse privée est refusé. Sans liste blanche,
+reste l'appel direct — avec l'origine de l'application déclarée origine de confiance chez le
+service.
 
 
 #### La séquence interne, et le chrono

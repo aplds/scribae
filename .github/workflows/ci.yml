@@ -162,7 +162,7 @@ jobs:
       # démarrage du service, le second aligne le compte au passage.
       - name: Mettre l'image en service
         run: |
-          docker run -d --name scribae --network host \
+          docker run -d --name scribae --network host --init \
             -e DB_HOST=127.0.0.1 -e DB_PORT=3306 \
             -e DB_USER=scriba -e DB_PASSWORD=service-ci -e DB_NAME=scriba \
             -e DB_ROOT_PASSWORD=racine-ci -e AUTO_MIGRATE=true \

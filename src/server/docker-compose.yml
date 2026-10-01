@@ -73,6 +73,10 @@ services:
   api:
     build: ./mysql
     restart: unless-stopped
+    # Un vrai init (tini) en PID 1 : il relaie les signaux au processus et
+    # moissonne les orphelins — `docker stop` arrête alors le service
+    # proprement (voir server.mjs, SIGTERM), au lieu de le tuer au timeout.
+    init: true
     # TOUT le `.env` est transmis au service. Les variables listées ci-dessous
     # sont celles dont le défaut ou le rôle mérite une explication ; les autres —
     # notamment les réglages DÉCLARATIFS `SCRIBA_*` (identité, vocabulaire,
@@ -260,8 +264,15 @@ services:
       - webroot:/srv/www
     ports:
       - "${HTTP_PORT:-8080}:80"
-    depends_on: [api]
+    depends_on:
+      # La façade ne sert qu'un service VIVANT : `HEALTHCHECK` (voir
+      # web/Dockerfile) fait de cette condition une vraie porte, et non un
+      # simple ordre de démarrage — sans quoi les premières requêtes tombent
+      # sur une API pas encore à l'écoute.
+      api:
+        condition: service_healthy
     networks: [interne]
+    init: true
 
 volumes:
   donnees:

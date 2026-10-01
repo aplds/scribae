@@ -27,6 +27,8 @@ services:
     #   docker buildx imagetools inspect mariadb:11
     image: mariadb:11@sha256:79d59758afc91b89b120b0a8904d637f5a3b3e1c4900f29b740d6d46c72fef68
     restart: unless-stopped
+    # Un vrai init (tini) en PID 1 : signaux relayés, arrêt propre.
+    init: true
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?renseignez DB_ROOT_PASSWORD dans .env}
       MARIADB_DATABASE: ${DB_NAME:-scriba}
@@ -50,6 +52,9 @@ services:
     # (`docker.io/aplds/scribae:1.6.2`) ou par une empreinte.
     image: docker.io/aplds/scribae:latest
     restart: unless-stopped
+    # Un vrai init (tini) en PID 1 : l'image tient deux processus (Node +
+    # nginx), et c'est lui qui leur relaie les signaux d'arrêt.
+    init: true
     # TOUT le `.env` entre dans le conteneur. C'est là que s'ajoutent, le moment
     # venu, les variables DÉCLARATIVES du référentiel (`SCRIBA_IDENTITE_*`,
     # `SCRIBA_VOCAB_*`, `SCRIBA_NUMERO_*`…) : elles se lisent dans

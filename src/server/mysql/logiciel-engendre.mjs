@@ -7,8 +7,8 @@
 // seul dossier `src/server/mysql/`, qui ne contient ni `src/lib/`, ni cette documentation.
 
 export const APP_NAME = "Scribae";
-export const APP_VERSION = "1.6.3p";
-export const VERSION_LABEL = "v1.6.3p";
+export const APP_VERSION = "1.6.3r";
+export const VERSION_LABEL = "v1.6.3r";
 export const APP_RELEASED = "2026-09-30";
 export const LICENCE = "GPLv3";
 export const DOCUMENTATION = "https://doc.scribae.eu";

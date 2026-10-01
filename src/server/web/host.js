@@ -61,6 +61,55 @@
     };
   }
 
+  // Le relais HTTP sans CORS, pour les services tiers que le navigateur ne peut
+  // pas appeler lui-même (numérotation externe — voir src/lib/numbering.js).
+  // En auto-hébergement, c'est le SERVICE qui relaie (`POST /v1/relais`, même
+  // origine : le cookie de session suit, et l'anti-CSRF des écritures aussi) —
+  // jamais le navigateur en direct. La route exige une identité et une liste
+  // blanche d'hôtes (`SCRIBA_RELAIS_HOTES`, voir src/server/mysql/relais.mjs) :
+  // sans elle (relais éteint), la demande est refusée et la numérotation le
+  // dit, avec le remède. La forme rendue est celle qu'attend `numbering.js`
+  // (`status`, `ok`, `text()`), pas celle de la route.
+  //
+  // Posé AVANT la sortie « plateforme » ci-dessous : la plateforme, quand elle
+  // existe, a son propre relais et reste prioritaire (voir src/lib/hosts.js).
+  window.__SCRIBA_HOST__ = window.__SCRIBA_HOST__ || {};
+  if (typeof window.__SCRIBA_HOST__.superFetch !== "function") {
+    window.__SCRIBA_HOST__.superFetch = function (url, options) {
+      var opt = options || {};
+      var csrf = null;
+      try {
+        var m = /(?:^|;\s*)scribae_csrf=([^;]*)/.exec(document.cookie || "");
+        csrf = m ? decodeURIComponent(m[1]) : null;
+      } catch (e) { csrf = null; }
+      // En mode « demo », le navigateur s'autorise par le jeton (comme
+      // `remote.js`) ; en mode session, par le cookie et l'anti-CSRF.
+      var entetes = { "Content-Type": "application/json" };
+      if (window.__SCRIBA_API_TOKEN__ && !modeSession) entetes.Authorization = "Bearer " + window.__SCRIBA_API_TOKEN__;
+      if (csrf) entetes["x-csrf-token"] = csrf;
+      return fetch((window.__SCRIBA_API_BASE__ || "") + "/v1/relais", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: entetes,
+        body: JSON.stringify({
+          url: String(url),
+          method: opt.method || "GET",
+          headers: opt.headers || {},
+          body: typeof opt.body === "string" ? opt.body : undefined,
+        }),
+      }).then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw new Error((data && data.erreur) || ("relais refusé (" + r.status + ")"));
+          return {
+            status: data.statut,
+            ok: data.statut >= 200 && data.statut < 300,
+            text: function () { return Promise.resolve(String(data.corps != null ? data.corps : "")); },
+          };
+        });
+      });
+    };
+  }
+
   // Les services de la plateforme ont la priorité s'ils existent déjà.
   if (window.root && window.root.kv) return;
 

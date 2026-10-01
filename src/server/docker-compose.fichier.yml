@@ -39,6 +39,9 @@ services:
   api:
     build: ./mysql
     restart: unless-stopped
+    # Un vrai init (tini) en PID 1 : signaux relayés, orphelins moissonnés —
+    # `docker stop` arrête le service proprement (voir server.mjs, SIGTERM).
+    init: true
     env_file:
       - .env
     environment:
@@ -70,8 +73,13 @@ services:
       - webroot:/srv/www
     ports:
       - "${HTTP_PORT:-8080}:80"
-    depends_on: [api]
+    # La façade ne sert qu'un service VIVANT (voir `HEALTHCHECK` dans
+    # web/Dockerfile et le commentaire de `docker-compose.yml`).
+    depends_on:
+      api:
+        condition: service_healthy
     networks: [interne]
+    init: true
 
 volumes:
   webroot:

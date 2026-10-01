@@ -47,16 +47,21 @@ chmod 644 "$WWW/config.js" 2>/dev/null || true
 # ailleurs, et c'est `docker exec … --reconcilier` qui s'en charge à la main.
 # Le geste ne bloque jamais le démarrage : au pire, il le dit et le service prend
 # la suite en journalisant l'état réel de la base.
+#
+# Le service tourne en `node`, pas en root (voir mysql/Dockerfile) : `su` l'y
+# fait passer — avec `exec`, pour que le processus garde son pid et que les
+# signaux relayés plus bas (`arret`) l'atteignent directement. L'entrée elle-même
+# reste root : elle prépare /srv/www et pilote nginx, qui écoute le port 80.
 if [ -n "${DB_ROOT_PASSWORD:-}" ]; then
   echo "Scribae — Compte applicatif et schéma : alignement sur l'environnement (DB_ROOT_PASSWORD fourni)."
-  node "$SERVICE_DIR/server.mjs" --reconcilier \
+  su node -s /bin/sh -c "exec node \"$SERVICE_DIR/server.mjs\" --reconcilier" \
     || echo "Scribae — Alignement impossible : le service démarre quand même et dira l'état de la base."
 fi
 
 # --- les deux processus ------------------------------------------------------
 echo "Scribae — Image autonome : service Node + nginx (API ${API_BASE:-même origine}, mode ${AUTH_MODE:-référentiel})."
 
-node "$SERVICE_DIR/server.mjs" &
+su node -s /bin/sh -c "exec node \"$SERVICE_DIR/server.mjs\"" &
 NODE_PID=$!
 
 nginx -g 'daemon off;' &

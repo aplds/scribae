@@ -892,6 +892,12 @@ export const VARIABLES = [
     description: "Dossier qui contient « src/ » et index.html. Sans objet par défaut : la pile Compose et l'image autonome EMBARQUENT le code (le monter sert à travailler sur le code sans reconstruire, voir src/server/README.md § 9 bis).",
   },
   {
+    env: "SCRIBA_RELAIS_HOTES", portee: "service", type: "liste", groupe: "Relais HTTP",
+    libelle: "Hôtes tiers joignables par le relais",
+    description: "Liste blanche des hôtes que POST /v1/relais peut appeler pour le compte du navigateur (numérotation externe), séparés par des virgules, avec un port facultatif (« grist.exemple.fr », « numeros.interne.example:8443 »). Vide = relais éteint, toute demande est refusée. Même allowlisté, un hôte qui résout vers une adresse privée (intranet, bouclage, métadonnées du nuage) est refusé.",
+    exemple: "grist.exemple.fr",
+  },
+  {
     env: "PORT", portee: "service", type: "entier", min: 1, max: 65535, groupe: "Service",
     libelle: "Port d'écoute du service", defaut: "8080",
     description: "Port sur lequel le service Node écoute (interne).", exemple: "8080",

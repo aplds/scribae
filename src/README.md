@@ -3840,7 +3840,7 @@ Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
 (pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
 **virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
 import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
-1.6.3o, **473/483** épreuves, **aucun échec** et **dix sauts** attendus — tous
+1.6.3r, **488/498** épreuves, **aucun échec** et **dix sauts** attendus — tous
 dus à l'absence de Node et de réseau. Les recettes, les chiffres et la lecture
 avant de travailler dans l'atelier.
 

@@ -64,4 +64,14 @@ RUN chmod 755 /docker-entrypoint.d/40-scriba-web.sh \
  && chmod 644 /etc/nginx/conf.d/default.conf \
  && chmod -R a+rX /srv/templates /srv/app
 
+# nginx reste maître en root : il écoute le port 80 et l'entrée prépare
+# `/srv/www` (un volume) avant de le servir — les processus de TRAVAIL, eux,
+# sont déjà `nginx`, sans privilèges. Le service qui analyse l'entrée du réseau
+# (Node, `api`) tourne, lui, en non-root (voir `mysql/Dockerfile`).
 EXPOSE 80
+
+# La façade sert-elle la coquille ? `HEALTHCHECK` fait de
+# `depends_on: service_healthy` une vraie porte, et d'une façade bloquée un
+# conteneur à recréer.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/ > /dev/null || exit 1

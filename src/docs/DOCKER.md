@@ -40,7 +40,7 @@ conserve à part. L'image se connecte à une base MariaDB / MySQL joignable
 Depuis la **racine du dépôt** (le dossier qui contient `src/`) :
 
 ```bash
-docker build -f src/server/Dockerfile -t scribae:1.5.3 .
+docker build -f src/server/Dockerfile -t scribae:1.6.3r .
 ```
 
 Le contexte est la racine du dépôt ; le Dockerfile ne copie que `src/`, donc la taille du
@@ -50,8 +50,8 @@ contexte n'entre pas dans l'image. Un fichier d'exclusion (`src/server/Dockerfil
 Vérifier ensuite :
 
 ```bash
-docker image ls scribae:1.5.3
-docker run --rm scribae:1.5.3 nginx -v
+docker image ls scribae:1.6.3r
+docker run --rm scribae:1.6.3r nginx -v
 ```
 
 ## 4. Publier sur un registre
@@ -60,7 +60,7 @@ docker run --rm scribae:1.5.3 nginx -v
 
 ```bash
 REGISTRE=moncompte          # compte Docker Hub, ou ghcr.io/moncompte, ou un registre privé
-VERSION=1.5.3
+VERSION=1.6.3r
 
 docker build -f src/server/Dockerfile -t "$REGISTRE/scribae:$VERSION" .
 docker tag "$REGISTRE/scribae:$VERSION" "$REGISTRE/scribae:latest"
@@ -71,7 +71,7 @@ docker push "$REGISTRE/scribae:latest"
 > **Tout cela en une commande** : `src/server/build-and-push.sh` enchaîne ces étapes (build,
 > étiquette `latest` facultative, `docker login` par `DOCKER_USER`/`DOCKER_PASSWORD`). Le registre
 > se donne par `DOCKER_REGISTRY` :
-> `DOCKER_REGISTRY=ghcr.io/ ./src/server/build-and-push.sh moncompte 1.5.3 true`.
+> `DOCKER_REGISTRY=ghcr.io/ ./src/server/build-and-push.sh moncompte 1.6.3r true`.
 
 ### 4.2. Publier plusieurs architectures (amd64 + arm64)
 
@@ -88,7 +88,7 @@ docker buildx build \
 ```
 
 > Une étiquette `latest` mobile est commode, mais une installation de service gagne à
-> ÉPINGLER une version (`scribae:1.5.3`) : `docker pull` reproductible, et mise à jour
+> ÉPINGLER une version (`scribae:1.6.3r`) : `docker pull` reproductible, et mise à jour
 > délibérée.
 
 ## 5. Lancer
@@ -114,7 +114,7 @@ docker run -d --name scribae-db --network scribae --restart unless-stopped \
   mariadb:11
 
 # 2) Scribae
-docker run -d --name scribae --network scribae --restart unless-stopped \
+docker run -d --name scribae --network scribae --restart unless-stopped --init \
   -p 8080:80 \
   -e DB_HOST=scribae-db \
   -e DB_USER=scriba \
@@ -150,7 +150,7 @@ L'application répond alors sur `http://<serveur>:8080`.
 Retirez le conteneur `db` et pointez l'image sur votre base existante :
 
 ```bash
-docker run -d --name scribae --restart unless-stopped -p 8080:80 \
+docker run -d --name scribae --restart unless-stopped --init -p 8080:80 \
   -e DB_HOST=192.168.1.20 -e DB_PORT=3306 \
   -e DB_USER=scriba -e DB_PASSWORD='…' -e DB_NAME=scriba \
   -e AUTH_MODE=password -e ADMIN_PASSWORD='…' \
@@ -181,7 +181,7 @@ services:
     volumes: [donnees:/var/lib/mysql]
 
   scribae:
-    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.5.3}
+    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.6.3r}
     restart: unless-stopped
     environment:
       DB_HOST: db
@@ -214,7 +214,10 @@ Avec l'**image autonome** (§ 1), il suffit de monter un volume sur le dossier d
 
 ```bash
 mkdir -p ./data
-docker run -d --name scribae --restart unless-stopped -p 8080:80 \
+# Le service tourne en `node` (uid 1000), pas en root : le dossier doit lui
+# appartenir — sinon le service refuse de démarrer et le dit dans ses journaux.
+chown -R 1000:1000 ./data
+docker run -d --name scribae --restart unless-stopped --init -p 8080:80 \
   -v "$PWD/data:/data" \
   -e STOCKAGE=fichier -e DATA_DIR=/data \
   -e AUTH_MODE=password -e ADMIN_PASSWORD='…' \
@@ -247,6 +250,24 @@ environ **5,5 Mo** (~600 Ko là où le poste parle au service sans façade HTTP)
 plafond, agrandissez `MAX_BODY` **et** `client_max_body_size` (16 Mo par défaut dans les nginx
 livrés) : les deux, sinon la façade refuse l'envoi avant que le service ne le voie.
 
+### 5.5. Non-root, sondes de santé, init
+
+- Le **service Node tourne en `node` (uid 1000), pas en root** — dans la pile
+  Compose comme dans l'image autonome. nginx, lui, reste maître en root
+  (il écoute le port 80 et prépare `/srv/www`, un volume) : ses processus de
+  travail sont déjà sans privilèges. Conséquence pratique : tout dossier monté
+  que le service doit **écrire** (le `./data` du rangement par fichiers)
+  doit appartenir à l'uid 1000 (`chown -R 1000:1000 ./data`, § 5.4).
+- Chaque image porte sa **sonde** (`HEALTHCHECK`) : le service sur
+  `GET /v1/health` (base comprise), la façade sur la coquille. La pile Compose
+  en tient compte — `web` n'accepte le trafic que derrière un `api` sain
+  (`depends_on: service_healthy`) — et `docker ps` dit `healthy` au lieu de
+  `up`.
+- `--init` (ou `init: true` en Compose, déjà posé dans les fichiers livrés) :
+  un vrai init en PID 1 relaie les signaux et moissonne les orphelins. Sans
+  lui, `docker stop` tue au timeout au lieu d'arrêter proprement — et c'est
+  d'autant plus vrai pour l'image autonome, qui tient deux processus.
+
 ## 6. Configurer
 
 Toute la configuration passe par l'**environnement** du conteneur. La référence complète
@@ -267,6 +288,7 @@ de déploiement*). Les plus utiles au démarrage :
 | `DEMO=false` | référentiel **vierge** : aucune donnée fictive |
 | `COOKIE_SECURE` | `true` en production (HTTPS) |
 | `SCRIBA_IDENTITE_NOM`, `SCRIBA_IDENTITE_ADRESSE`, `SCRIBA_IDENTITE_COULEUR` | l'identité de la collectivité, **déclarée** |
+| `SCRIBA_RELAIS_HOTES` | la liste blanche du **relais HTTP** (`POST /v1/relais`) : les hôtes tiers que le service peut appeler pour le navigateur (numérotation externe). Vide = relais éteint |
 | `SCRIBA_*` (vocabulaire, numérotation, délais, recueil, fonctions) | les réglages de référentiel, **déclaratifs** |
 
 Les variables `SCRIBA_*` sont **appliquées par-dessus le référentiel** à chaque démarrage :

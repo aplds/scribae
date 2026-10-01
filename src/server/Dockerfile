@@ -59,11 +59,22 @@ COPY src /srv/app/src
 # ne peut pas lire ce que seul root peut lire. On rétablit donc franchement la
 # lecture — il n'y a là ni secret, ni donnée d'exécution (le seul fichier qui
 # porte un jeton, `config.js`, est engendré au démarrage dans /srv/www).
+#
+# Le service, lui, tourne en `node` (voir l'entrée) : il doit LIRE son dossier,
+# et ÉCRIRE le rangement par fichiers quand `DATA_DIR` y vit (`./data` par
+# défaut — un volume en déploiement, dont les droits viennent alors de l'hôte :
+# voir DOCKER.md § 5.4).
 RUN chmod 644 /etc/nginx/http.d/default.conf \
- && chmod -R a+rX /srv/templates /srv/app
+ && chmod -R a+rX /srv/templates /srv/app /srv/service \
+ && mkdir -p /srv/service/data && chown node:node /srv/service/data
 
 ENV SCRIBA_SERVICE_DIR=/srv/service
 EXPOSE 80
+
+# La façade répond-elle, service compris ? Un seul contrôle, sur la façade
+# (port 80) : il traverse nginx jusqu'au service, donc les deux processus.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/v1/health > /dev/null || exit 1
 
 # Le conteneur tient deux processus (Node et nginx) : l'entrée les surveille et
 # les arrête ensemble. Voir standalone-entrypoint.sh.

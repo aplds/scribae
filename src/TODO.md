@@ -3,6 +3,49 @@
 État au moment où ce fichier a été écrit. Ce qui est **fait** est décrit dans
 `README.md` et `SPEC.md` ; ce fichier ne liste que ce qui reste.
 
+## Version 1.6.3r — la documentation rattrape le code (livré)
+
+Demande : « assure toi que toute la doc soit à jour ». Le détail est au `CHANGELOG.md`.
+
+- [x] **`POST /v1/relais` entre dans la référence de l'API** (`src/lib/api-reference.js` +
+      `docs/API.md` régénéré, écran « API REST » suivi) avec ses codes d'erreur.
+- [x] **Chapeau du dépôt** (`docs/GITHUB.md`), **chiffres du banc** (`docs/ATELIER.md`,
+      `docs/INDUSTRIALISATION.md`, `src/README.md`), **tableau des épreuves**
+      (`src/tests/README.md`), **arborescence du service** (`src/server/README.md`),
+      **exemples Docker** (`docs/DOCKER.md`) : réalignés.
+
+**Ce qui reste ouvert** : inchangé — voir la section 1.6.3q ci-dessous (CI à voir
+verte, NC-I-003, NC-IV-001, vérifications tierces).
+
+## Version 1.6.3q — le service relaie, et ne tourne plus en root (livré)
+
+Demande : « que reste-t-il à peaufiner / sécuriser pour une mise en prod propre et
+fonctionnelle sous docker ? » — dans le code. Le détail est au `CHANGELOG.md`.
+
+- [x] **Numérotation externe : le relais côté service (livré).** `POST /v1/relais`
+      (`src/server/mysql/relais.mjs`, pur + épreuves `relais.test.mjs`) reprend une adresse,
+      des en-têtes et un corps, avec la liste blanche `SCRIBA_RELAIS_HOTES` — posée par
+      `src/server/web/host.js` dans `__SCRIBA_HOST__`, la clé ne sort donc pas du serveur
+      de la collectivité. La route avait été esquissée ici sous le nom `/v1/proxy` : elle
+      s'appelle `/v1/relais`, comme tout le reste du vocabulaire du projet.
+- [x] **Non-root, sondes, init** : `USER node` (pile Compose et image autonome),
+      `HEALTHCHECK` sur les trois images, `depends_on: service_healthy`, `init: true`,
+      `DOCKER.md` à jour (versions, § 5.5, `chown ./data`).
+
+**Ce qui reste ouvert** (inchangé) :
+
+- [ ] **Voir la CI VERTE** sur un envoi — les annotations ne rejouent pas une correction avant
+      qu'elle soit déposée. NC-I-008 reste ouverte jusque-là.
+- [ ] **NC-I-003** — découper les gros modules de vue : `src/ui/views/signature.js` est encore à
+      ~3 571 lignes.
+- [ ] **NC-IV-001** — la signature **qualifiée** : au mieux, un banc (un faux prestataire éprouvant
+      `createPrestataire`, `src/server/mysql/signature.mjs`) ; la valeur probante demanderait un
+      tiers certificateur.
+- [ ] **Les vérifications d'un tiers** : `veraPDF` (PDF/A), l'ouverture du fichier **Word**, un
+      **annuaire OIDC** réel, un **SMTP** réel, la télétransmission `@ctes`, le **flux temps réel
+      entre deux machines**, les **navigateurs croisés**. Chacune demande un environnement absent
+      ici : à documenter comme telle, faute de pouvoir l'éprouver.
+
 ## Version 1.6.3p — les bandeaux d'information de l'administration (livré)
 
 Demande : bandeaux réutilisables par les administrateurs (titre, couleur, contenu customisé et
@@ -1138,14 +1181,10 @@ Reste à faire, par ordre d'intérêt :
       rattachées à une organisation : un établissement autonome (l'office public
       de l'habitat de la démonstration) a SA propre autorité de tête et sa propre
       chaîne, indépendante de celle de la commune.
-- [ ] **Numérotation externe : le relais hors de l'environnement d'édition.** Le relais HTTP
-      sans CORS (`hostSuperFetch()`) vient de l'hébergement : il existe dans l'édition en
-      ligne, pas dans le déploiement `src/server/`. Une installation auto-hébergée ne peut
-      donc appeler un service de numérotation qu'en **appel direct**, avec l'origine de
-      l'application déclarée origine de confiance chez le service. La suite serait un
-      **relais côté service** (un `/v1/proxy` qui reprend une adresse, des en-têtes et un
-      corps, avec une liste d'hôtes autorisés) posé par `src/server/web/host.js` dans
-      `__SCRIBA_HOST__` — la clé ne sortirait alors pas du serveur de la collectivité.
+- [x] **Numérotation externe : le relais hors de l'environnement d'édition (livré en
+      1.6.3q).** Voir la section « Version 1.6.3q » en tête de ce fichier : `POST /v1/relais`
+      (`src/server/mysql/relais.mjs`), liste blanche `SCRIBA_RELAIS_HOTES`, posé par
+      `src/server/web/host.js` dans `__SCRIBA_HOST__`.
 - [ ] **Numérotation externe : une source par entité.** Le référentiel ne porte qu'UNE source
       (`config.numbering.source`, avec `config.numbering.externe`) pour toutes les entités : la
       table de numérotation distingue les entités par le jeton `{entityCode}`. Une collectivité

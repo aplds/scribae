@@ -11,7 +11,7 @@ Les routes se rangent en deux familles, servies par la même façade et le même
 - la **persistance partagée** — `/v1/db/…` : le référentiel, les trames, les actes et les comptes, enregistrement par enregistrement, avec révisions et détection de conflits. C'est ce que le navigateur synchronise en continu ;
 - le **domaine** — `/v1/actes/…`, `/v1/signatures/…`, `/v1/publications/…`, `/v1/pieces/…` : le dépôt d'un acte finalisé, l'ouverture d'un circuit de signature, la publication au recueil, les identifiants persistants (ELI) et les fichiers conservés avec les actes. C'est ce qu'un script ou un prestataire appelle.
 
-S'y ajoutent les routes de **service** (`/v1/config`, `/v1/auth/…`, `/v1/courriel`) et les **adresses publiques du site** (`/recueil`, `/robots.txt`, `/llms.txt`, `/sitemap.xml`), qui ne passent pas par `/v1/`.
+S'y ajoutent les routes de **service** (`/v1/config`, `/v1/auth/…`, `/v1/courriel`, `/v1/relais`) et les **adresses publiques du site** (`/recueil`, `/robots.txt`, `/llms.txt`, `/sitemap.xml`), qui ne passent pas par `/v1/`.
 
 Un déploiement autonome (Docker) sert les deux familles depuis son propre domaine. Dans la version hébergée, seules les routes marquées « auto-hébergé » ci-dessous sont servies par votre installation : la persistance partagée et la plateforme sont prises en charge par le service.
 
@@ -97,6 +97,50 @@ curl -X GET 'https://api.exemple.fr/v1/config' \
 | variables | object | { "brand.name": "…", "numbering.pad": 3 } |
 | erreurs | array | Variables refusées : variable, valeur, motif |
 | prestataire | object | État du prestataire : actif, url, niveau, cle (booléen), motif |
+
+### `POST /v1/relais` — Relais HTTP vers un tiers autorisé
+
+Appelle un service tiers (numérotation externe) pour le compte du navigateur, qui ne peut pas toujours l'appeler lui-même (CORS, en-tête refusé). L'hôte doit figurer dans la liste blanche `SCRIBA_RELAIS_HOTES` (vide = relais éteint), et toute adresse privée est refusée même allowlistée. Identité exigée, sans rôle particulier : toute session ouverte en mode mot de passe (avec l'anti-CSRF des écritures), tout jeton en mode demo. Méthodes GET, POST, PUT et PATCH ; corps confié et réponse plafonnés à 1 Mo ; la clé d'API du tiers ne figure dans aucun journal.
+
+- **Authentification** : lecteur
+- **Service** : auto-hébergé
+
+**Corps de la requête**
+
+```json
+{
+  "method": "GET",
+  "url": "https://grist.exemple.fr/api/docs/TABLE/records",
+  "headers": {
+    "Authorization": "Bearer VOTRE_CLE_TIERS"
+  }
+}
+```
+
+**Exemple**
+
+```bash
+curl -X POST 'https://api.exemple.fr/v1/relais' \
+  -H 'accept: application/json' \
+  -H 'authorization: Bearer VOTRE_JETON' \
+  -H 'content-type: application/json' \
+  -d '{"method":"GET","url":"https://grist.exemple.fr/api/docs/TABLE/records","headers":{"Authorization":"Bearer VOTRE_CLE_TIERS"}}'
+```
+
+| Code | Signification |
+|---|---|
+| 200 | Réponse du tiers : `statut`, `corps` (texte, 1 Mo au plus) et `tronque` |
+| 401 | Identité absente (session_absente) |
+| 403 | Hôte non autorisé, ou adresse privée (hote_non_autorise) |
+| 413 | Corps confié trop volumineux (corps_trop_volumineux) |
+| 429 | Trop de requêtes (trop_de_requetes) |
+| 502 | Le tiers est injoignable (relais_echec) |
+
+| Champ | Type | Description |
+|---|---|---|
+| statut | entier | Le statut HTTP rendu par le tiers |
+| corps | string | Le corps rendu par le tiers, en texte (1 Mo au plus) |
+| tronque | booléen | Vrai si la réponse du tiers dépassait le plafond et a été coupée |
 
 ## Autorisation
 
@@ -2035,6 +2079,11 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | piece_referencee | La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort. |
 | piece_absente | Le corps de la requête ne porte pas le contenu de la pièce (`base64`). |
 | piece_trop_volumineuse | La pièce dépasse le plafond du service (MAX_BODY). |
+| hote_non_autorise | L'hôte visé par le relais ne figure pas dans SCRIBA_RELAIS_HOTES, ou le relais est éteint. |
+| hote_irresoluble | L'hôte visé par le relais ne se résout pas : le relais n'appelle jamais « au jugé ». |
+| relais_indisponible | Le relais ne peut pas résoudre ici (pas de DNS injecté) : appel impossible. |
+| relais_echec | Le tiers n'a pas répondu au relais, ou a coupé la liaison : rien n'est enregistré, l'appel se rejoue. |
+| corps_trop_volumineux | Le corps confié au relais dépasse 1 Mo. |
 | publication_inconnue | Aucune publication ne porte cette clé. |
 | bulletin_inconnu | Aucun bulletin ne porte cet identifiant (ou il est provisoire, donc sans adresse publique). |
 | bulletin_provisoire | Le bulletin couvre une période encore ouverte : il ne s'adresse pas encore aux abonnés. |
@@ -2054,6 +2103,7 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | GET | `/v1/health` | public | État du service |
 | GET | `/v1/` | public | Description OpenAPI 3.1 |
 | GET | `/v1/config` | public | Réglages de référentiel et état du prestataire |
+| POST | `/v1/relais` | lecteur | Relais HTTP vers un tiers autorisé |
 | GET | `/v1/auth/etat` | public | État de l'autorisation du service |
 | POST | `/v1/auth/bootstrap` | public | Provisionner le service (première clé) |
 | GET | `/v1/auth/cles` | administrateur | Lister les clés d'API |

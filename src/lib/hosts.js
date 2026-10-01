@@ -34,7 +34,9 @@ export function hostSocketFactory() {
 // Relais HTTP : un `fetch` qui n'est pas soumis au CORS, pour les services
 // tiers que le navigateur ne peut pas appeler lui-même (numérotation externe —
 // voir src/lib/numbering.js). Fourni par la plateforme (`root.superFetch`) ;
-// l'auto-hébergement peut le poser dans `__SCRIBA_HOST__`.
+// en auto-hébergement, c'est le SERVICE qui le pose dans `__SCRIBA_HOST__`
+// (voir src/server/web/host.js — `POST /v1/relais`, liste blanche
+// `SCRIBA_RELAIS_HOTES`).
 export function hostSuperFetch() {
   const host = globalThis.__SCRIBA_HOST__;
   if (host && typeof host.superFetch === "function") return host.superFetch;

@@ -138,7 +138,7 @@ tels quels, sans qu'aucune règle ne soit recopiée.
 
 **Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
 `import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (**473/483**, aucun échec et **dix sauts** attendus à la 1.6.3o),
+écarts **connus** (**488/498**, aucun échec et **dix sauts** attendus à la 1.6.3r),
 tous dus à l'absence de Node et de réseau : la liste, la lecture de chaque écart et
 les chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
 
@@ -155,9 +155,11 @@ Deux manques de l'audit sont comblés ici (NC-I-001, NC-I-010) — mais **hors d
 chargée, et son service.
 
 - **Le contrat du service**, décrit **une fois** dans
-  `tests/conformite-service.mjs` : treize appels (santé, OpenAPI, état de
-  l'autorisation, registre public, ressource inconnue, résolution ELI, route
-  inconnue, dépublication, trois frontières d'autorisation) avec, pour chacun, ce
+  `tests/conformite-service.mjs` : dix-neuf appels (santé, OpenAPI, état de
+  l'autorisation, réglages de référentiel, publications, résolution ELI, route
+  inconnue, dépublication et republication, signatures interne et externe,
+  conformité, pièces jointes, informations du recueil, et trois frontières
+  d'autorisation) avec, pour chacun, ce
   que le contrat exige. Le jeu s'exécute :
   - en Node, contre le **service de démonstration** chargé en mémoire
     (`tests/conformite-service.test.mjs`) ;
@@ -170,8 +172,9 @@ chargée, et son service.
 
 - **Les parcours** (`tests/parcours.mjs`) traversent l'application : dépôt →
   signature → publication → recueil, repli local (service muet), signature
-  qualifiée, session, contrat du service, **saisie qui garde le curseur** et
-  **écran de connexion soumis par Entrée**. Chaque parcours rend son verdict, et
+  qualifiée, session, contrat du service, **saisie qui garde le curseur**,
+  **écran de connexion soumis par Entrée**, en-tête à deux emblèmes — trente-deux
+  parcours au total, listés dans le module. Chaque parcours rend son verdict, et
   `lancerParcours(ctx)` les exécute tous (ou un seul, par `seulement`).
 
 **Comment les lancer.** Ils s'exécutent dans la console du navigateur, sur la page

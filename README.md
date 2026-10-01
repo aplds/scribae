@@ -26,14 +26,14 @@ A4), Word, Markdown.
 
 | | |
 |---|---|
-| **Version courante** | **1.6.3g**, 28 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
+| **Version courante** | **1.6.3r**, 30 septembre 2026 — le détail, note après note, vit dans `src/CHANGELOG.md` |
 | **Chaîne d'intégration** | ![Intégration continue](https://github.com/aplds/scribae/actions/workflows/ci.yml/badge.svg) — contrôle de syntaxe et de style, épreuves des modules purs et du parc (`npm run verifier`, depuis la racine), épreuves du domaine du service, et **construction de l'image Docker, mise en service contre une vraie base** puis éprouvée (santé, schéma, façade, code servi) |
 | **Démonstration publiée** | <https://demo.scribae.eu> — GitHub Pages, édition **statique** : référentiel et actes vivent dans le navigateur du visiteur, rien n'est partagé entre collègues |
 | **Démonstration partagée** | aucune instance publique : la pile auto-hébergée (`src/server/`, nginx + Node + MariaDB) se monte en quelques minutes |
-| **Audit** | **44 non-conformités recensées : aucune ouverte**, 3 en cours (ce qui demande un tiers ou une machine : parcours rejoués en intégration continue, signature *qualifiée*), 38 levées, 2 acceptées, 1 obsolète — synthèse dans `src/audit/REGISTRE-NON-CONFORMITES.md` |
+| **Audit** | **53 non-conformités recensées : aucune ouverte**, 2 en cours et 1 régression (le découpage des gros modules, la chaîne d'intégration à voir verte, la signature *qualifiée*), 47 levées, 2 acceptées, 1 obsolète — synthèse dans `src/audit/REGISTRE-NON-CONFORMITES.md` |
 
 > **Ce dépôt est un travail en cours, tenu par ses propres audits.** Les nombres du tableau datent
-> la dernière campagne (27 septembre 2026) ; ils se lisent avec le registre, qui est un document de
+> la synthèse du registre (28 septembre 2026) ; ils se lisent avec le registre, qui est un document de
 > travail — voir la section *Audit* plus bas. Un voyant rouge sur la chaîne d'intégration veut dire
 > « ne pas livrer », et non « détail ».
 

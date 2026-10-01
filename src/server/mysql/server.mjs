@@ -39,6 +39,7 @@
 // ============================================================================
 
 import http from "node:http";
+import { lookup as resoudreHote } from "node:dns/promises";
 import { readFileSync } from "node:fs";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { createActesApi, emptyState } from "./actes.mjs";
@@ -55,6 +56,7 @@ import { annuaireAccepte, annuaireEffectif } from "./annuaire-service.mjs";
 import { verifierJws } from "./jws.mjs";
 import { createPrestataire } from "./signature.mjs";
 import { createControleLegalite } from "./controle-legalite.mjs";
+import { relayer, relaisPaths } from "./relais.mjs";
 import { createSignatureInterne, portWebcrypto } from "./signature-interne.mjs";
 import { creerMagasinMysql } from "./magasin-mysql.mjs";
 import { creerMagasinFichier } from "./magasin-fichier.mjs";
@@ -420,6 +422,13 @@ const controleLegalite = createControleLegalite({
   cle: env("SCRIBA_CONTROLE_LEGALITE_API_CLE"),
   journal: (e) => console.log("[controle-legalite]", JSON.stringify(e)),
 });
+
+// ------------------------------------------------- le relais HTTP (les tiers)
+// Les hôtes que POST /v1/relais peut appeler pour le compte du navigateur
+// (numérotation externe) : la liste blanche du `.env`, validée au démarrage
+// (voir variables.mjs). Vide = relais éteint — la route refuse tout, et
+// l'application retombe sur l'appel direct (voir src/lib/numbering.js).
+const RELAIS_HOTES = opt("SCRIBA_RELAIS_HOTES") || [];
 
 // -------------------------------------------- la signature interne (le coffre de
 // Les clés privées des signataires, scellées au repos (AES-256-GCM) sous une clé
@@ -1001,10 +1010,32 @@ async function gardeCourriel(req) {
   return a.ok ? null : { status: a.status, headers: {}, body: err(a.message, { code: a.code }) };
 }
 
+// L'hôte visé par une demande de relais, pour le journal — l'adresse seule,
+// jamais les en-têtes ni les corps (la clé d'API du tiers y transite).
+function hoteDemande(corps) {
+  try { return new URL(String((corps && corps.url) || "")).hostname; }
+  catch (e) { return ""; }
+}
+
 async function acteurDe(req) {
   if (MOT_DE_PASSE) { const s = await sessionHTTP(req); return (s && s.compte && (s.compte.login || s.compte.id)) || "session"; }
   const a = authenticate(req);
   return a.ok ? a.label : "";
+}
+
+// La garde du relais HTTP : session en mode « mot de passe » (avec l'anti-CSRF
+// des écritures — le navigateur poste en session), jeton en mode « demo ».
+// Sans identité, pas de relais : un relais anonyme serait un mandataire ouvert,
+// et la liste blanche seule ne suffirait pas (voir relais.mjs).
+async function gardeRelais(req) {
+  if (MOT_DE_PASSE) {
+    const s = await sessionHTTP(req);
+    if (!s) return refusSession();
+    if (comptes.csrfObligatoire(req) && !comptes.csrfValide(req)) return refusCsrf();
+    return null;
+  }
+  const a = authenticate(req);
+  return a.ok ? null : { status: a.status, headers: {}, body: err(a.message, { code: a.code }) };
 }
 
 // Une trace d'envoi au journal des courriels. Le corps du message n'est PAS
@@ -1156,7 +1187,7 @@ async function handle(req, res) {
 
   if (pathname === "/" || pathname === "/v1" || pathname === "/v1/") {
     const doc = api.openapi();
-    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...deploiementPaths(), ...piecesPaths(), ...courrielPaths() };
+    doc.paths = { ...doc.paths, ...dbPaths(), ...authPaths(), ...deploiementPaths(), ...piecesPaths(), ...courrielPaths(), ...relaisPaths() };
     doc.paths = Object.fromEntries(Object.entries(doc.paths).sort((a, b) => a[0].localeCompare(b[0])));
     send(req, res, 200, doc);
     return;
@@ -1728,6 +1759,47 @@ async function handle(req, res) {
     return;
   }
 
+  // --- relais HTTP vers les tiers : POST /v1/relais ---------------------------
+  // La numérotation externe appelle parfois un service que le navigateur ne
+  // peut pas appeler lui-même (CORS, en-tête refusé) : c'est le SERVICE qui
+  // appelle alors, pour le compte du navigateur (voir relais.mjs — la liste
+  // blanche, le refus des adresses privées, les méthodes et les plafonds).
+  // La garde exige une identité ; le débit est borné comme une écriture ; et
+  // le journal ne porte que l'hôte et l'issue — jamais les en-têtes (la clé
+  // d'API du tiers y transite) ni les corps.
+  if (pathname === "/v1/relais" && req.method === "POST") {
+    const refus = await gardeRelais(req);
+    if (refus) { send(req, res, refus.status, refus.body, refus.headers || {}); return; }
+    if (tooMany("r:" + ip, RATE_MAX_WRITES, RATE_WINDOW_MS)) {
+      send(req, res, 429, err("Trop de requêtes : ralentissez.", { code: "trop_de_requetes" }), { "retry-after": String(Math.ceil(RATE_WINDOW_MS / 1000)) });
+      return;
+    }
+    let body;
+    try {
+      const raw = await readBody(req);
+      body = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      const status = e.status || 400;
+      send(req, res, status, err(status === 413 ? "Requête trop volumineuse." : "Requête illisible (JSON attendu).", { code: status === 413 ? "corps_trop_volumineux" : "json_invalide" }));
+      return;
+    }
+    const acteur = await acteurDe(req);
+    // La résolution DNS vient de Node (voir relais.mjs : le module reste
+    // importable hors de Node, et c'est l'appelant du service qui la fournit).
+    const out = await relayer(body, {
+      hotes: RELAIS_HOTES,
+      resolution: (hote) => resoudreHote(hote, { all: true }),
+    });
+    if (out.refus) {
+      console.warn(`[relais] refusé à ${acteur || ip} (${out.refus.code}${out.refus.hote ? " : " + out.refus.hote : ""})`);
+      send(req, res, out.refus.statut, err(out.refus.erreur, { code: out.refus.code }));
+      return;
+    }
+    console.log(`[relais] ${acteur || ip} → ${hoteDemande(body) || "?"} (${out.statut})`);
+    send(req, res, 200, { statut: out.statut, corps: out.corps, tronque: out.tronque });
+    return;
+  }
+
   // --- signature et publication : le domaine de actes.mjs -------------------
   if (/^\/v1\//.test(pathname)) {
     let body = null;
@@ -2278,6 +2350,13 @@ async function main() {
   console.log(etatLegalite.actif
     ? `Contrôle de légalité : télétransmission BRANCHÉE — ${etatLegalite.url}${etatLegalite.chemin} (destinataire ${etatLegalite.destinataire}, délai ${etatLegalite.timeoutMs} ms).`
     : `Contrôle de légalité : télétransmission SIMULÉE — ${etatLegalite.motif}.`);
+  // Le relais HTTP vers les tiers (numérotation externe) : allumé sur une liste
+  // blanche, éteint sinon — et POURQUOI. Un exploitant qui règle une
+  // numérotation « par le relais » sans renseigner SCRIBA_RELAIS_HOTES doit le
+  // lire ici, plutôt que de découvrir le refus au premier numéro demandé.
+  console.log(RELAIS_HOTES.length
+    ? `Relais HTTP : ALLUMÉ — ${RELAIS_HOTES.length} hôte(s) autorisé(s) (${RELAIS_HOTES.join(", ")}).`
+    : "Relais HTTP : éteint — aucune demande vers un tiers ne passera (SCRIBA_RELAIS_HOTES vide).");
   if (MOT_DE_PASSE) {
     console.log(AUTH_MODE === "oidc"      ? "Authentification : annuaire de la collectivité (OIDC), ET comptes locaux (mot de passe) — le compte d'administration du .env reste accessible. Les jetons d'API ne sont PAS acceptés dans ce mode."
       : "Authentification : comptes locaux (mot de passe). Les jetons d'API ne sont PAS acceptés dans ce mode.");

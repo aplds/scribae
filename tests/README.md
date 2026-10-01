@@ -29,6 +29,14 @@ node --test tests/            # ce dossier seul
 | `format-date.test.mjs` | **`formatDate`** : l'horodatage complet se lit comme sa date calendaire, le reste ne change pas |
 | `recueil-recherche.test.mjs` | la **recherche de l'entrée du recueil** : aucune largeur bridée dans sa règle |
 | `bandeaux.test.mjs` | les **bandeaux d'information** : la sélection (allumés, non vides, dans l'ordre), le masquage des options démo éteinte, le rendu et ses quatre couleurs |
+| `file-attente.test.mjs` | la **file des écritures en attente** : une écriture refusée pour une raison qui ne vient pas du réseau n'est pas représentée en boucle |
+| `fusion.test.mjs` | la **fusion à trois voies** : deux postes qui écrivent le même enregistrement ne s'écrasent plus — rien n'est perdu en silence |
+| `parcours.test.mjs` | l'**ordre des portes** du parcours d'un acte (parapheur, révision, signature) et la file du signataire (une annexe ne s'y signe pas) |
+| `persistance-double-tampon.test.mjs` | l'**état durable du service de démonstration**, écrit en double tampon : un instantané pris au milieu d'une écriture ne perd jamais l'état |
+| `relecture.test.mjs` | la **veille de lecture** : une lecture qui échoue n'est pas une lecture qui rend vide — elle reste à rejouer |
+| `reprise.test.mjs` | la **reprise d'un acte ancien** : date antérieure au jour, original signé exigé, texte relu en articles sans être réécrit |
+| `sante-base.test.mjs` | la **route de santé de la base** : un `401` y vaut « session requise », jamais « panne » |
+| `sites.test.mjs` | **sites et cookies** : l'avertissement inter-site de l'écran « Base de données » (`SameSite=Lax`) |
 
 ## Pourquoi les imports disent `../src/…`
 
