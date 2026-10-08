@@ -29,6 +29,10 @@ import { A4_WIDTH, A4_HEIGHT, A4_MARGIN } from "./paper.js";
 // l'en-tête de ce fichier, et l'audit NC-I-004).
 import { partiePublique } from "../server/mysql/original-signe.mjs";
 export { partiePublique };
+// L'identifiant du circuit où c'est le SERVICE qui signe : son certificat est
+// émis par la collectivité elle-même, pas par une autorité de démonstration —
+// la page de l'original le dit (voir `pageOriginalSigne`).
+import { ID_SERVICE } from "../server/mysql/signature-interne.mjs";
 
 const b64 = (bytes) => {
   let s = "";
@@ -247,6 +251,14 @@ export function pageOriginalSigne(pack, bodyHtml, brand, pageCss) {
   const s = (pack.signatures || [])[0] || {};
   const c = s.certificat || {};
   const h = pack.horodatage || {};
+  // Le certificat n'est « de démonstration » que quand il a été engendré dans
+  // le navigateur (signature simple, prestataire simulé). Quand c'est le SERVICE
+  // qui a signé (circuit interne, clé scellée au coffre), l'émetteur est la
+  // collectivité elle-même : la page le dit, au lieu de parler de démonstration.
+  const interne = String((pack.prestataire && pack.prestataire.id) || "") === ID_SERVICE;
+  const noteCertificat = interne
+    ? "Certificat émis par le service de la collectivité (autorité de certification interne). La signature est cryptographiquement vérifiable, mais ce certificat n'est pas qualifié au sens du règlement eIDAS."
+    : "Certificat de démonstration. La signature est cryptographiquement vérifiable, mais ce certificat n'est pas qualifié au sens du règlement eIDAS.";
   const esc = (x) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const dt = (x) => (x ? new Date(x).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" }) : "—");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Original signé — ${esc(pack.reference)}</title>
@@ -281,7 +293,7 @@ ${pageCss || ""}
   <div class="stamp"><strong>Horodatage</strong> — ${esc(h.emisPar || "")}, ${esc(dt(h.emisLe))}<br>
   <span class="hash">jeton ${esc(String(h.valeur || "").slice(0, 64))}…</span><br>
   <span class="hash">empreinte horodatée ${esc(String(h.empreinte || "").slice(0, 32))}…</span></div>
-  <p style="margin:8px 0 0;font-size:.76rem;color:#555">Certificat de démonstration. La signature est cryptographiquement vérifiable, mais ce certificat n'est pas qualifié au sens du règlement eIDAS.</p>
+  <p style="margin:8px 0 0;font-size:.76rem;color:#555">${esc(noteCertificat)}</p>
 </div>
 </div></div></body></html>`;
 }

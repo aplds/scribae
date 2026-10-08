@@ -39,6 +39,7 @@
 // Ce module est pur : il ne connaît ni le DOM ni l'état de l'application.
 // ============================================================================
 import { prestataireDeploye, signatureInterneDeploye, controleLegaliteDeploye } from "./deploiement-config.js";
+import { demoActif } from "./demo.js";
 
 // --------------------------------------------------------------- les réglages
 // Le circuit général de la collectivité. « electronique » est le comportement
@@ -196,6 +197,25 @@ export function motifSignatureInterne() {
 export const PRESTATAIRE_INTERNE = { id: "scribae-interne", nom: "Signature interne du service" };
 
 // ----------------------------------------------------------------------------
+// LA SIGNATURE DE DÉMONSTRATION EST-ELLE PERMISE ?
+//
+// La signature « simple » (clé engendrée dans le navigateur, certificat de
+// démonstration) et le prestataire SIMULÉ (l'application qui joue le
+// prestataire) sont des fonctionnalités de DÉMONSTRATION : sur une
+// installation auto-hébergée dont le `.env` éteint la démonstration
+// (`DEMO=false`), elles n'existent pas — la signature y est désactivée par
+// défaut, jusqu'à ce qu'un vrai circuit soit branché (prestataire,
+// signature interne, circuit externe). `DEMO=true` les rallume.
+//
+// C'est le COMMUTATEUR de démonstration qui tranche (voir src/lib/demo.js) :
+// allumé par le déploiement, ou — sans déploiement qui parle (aperçu en ligne,
+// page statique) — par le miroir du référentiel. La page de démonstration
+// publiée garde donc ses circuits ; une installation réelle éteinte ne les
+// montre plus.
+// ----------------------------------------------------------------------------
+export const signatureDemoPermise = (config) => demoActif(config) === true;
+
+// ----------------------------------------------------------------------------
 // LA TÉLÉTRANSMISSION AU CONTRÔLE DE LÉGALITÉ EST-ELLE RÉELLE ?
 //
 // L'application peut ACTIVER l'étape (Administration › Expérimentale), mais elle
@@ -294,13 +314,22 @@ export function circuitPour(config, trame) {
 // éteint — c'est un réglage à corriger, et l'écran le dit.
 export function circuitsDisponibles(config, trame) {
   const c = circuitPour(config, trame);
-  if (!c.choix) return [c.mode];
   const liste = [c.mode];
-  if (c.externePermis && !liste.includes("externe")) liste.push("externe");
-  if (c.simplePermis && !liste.includes("simple")) liste.push("simple");
-  if (c.internePermis && !liste.includes("interne")) liste.push("interne");
-  const offerts = liste.filter((m) => m !== "interne" || signatureInterneDisponible());
-  return offerts.length ? offerts : liste;
+  if (c.choix) {
+    if (c.externePermis && !liste.includes("externe")) liste.push("externe");
+    if (c.simplePermis && !liste.includes("simple")) liste.push("simple");
+    if (c.internePermis && !liste.includes("interne")) liste.push("interne");
+  }
+  // Démonstration éteinte : la signature simple et le prestataire simulé
+  // n'existent pas — ils sont retirés de l'inventaire, qu'ils soient le
+  // circuit retenu ou un choix ouvert. Un circuit électronique RÉELLEMENT
+  // branché reste, lui, offert.
+  const demoOk = signatureDemoPermise(config);
+  const sansDemo = demoOk ? liste : liste.filter((m) =>
+    m !== "simple" && (m !== "electronique" || !circuitElectroniqueSimule()));
+  if (!sansDemo.length) return [];
+  const offerts = sansDemo.filter((m) => m !== "interne" || signatureInterneDisponible());
+  return offerts.length ? offerts : sansDemo;
 }
 
 // Le circuit effectivement retenu pour un ACTE : le choix du rédacteur, quand
@@ -419,7 +448,11 @@ export const phraseCircuit = (config, trame) => {
   if (c.impose && c.mode === "simple") return "Signature simple imposée par la trame : l'acte est signé dans l'application, par le signataire, avec son compte.";
   if (c.impose && c.mode === "interne") return "Signature interne imposée par la trame : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre.";
   if (c.choix) {
-    const n = circuitsDisponibles(config, trame).map((m) => modeLabel(m).replace(/^Circuit /, "").replace(/^Signature /, "")).join(", ou ");
+    const offerts = circuitsDisponibles(config, trame);
+    // Démonstration éteinte : il peut ne rester aucun circuit à offrir — le
+    // panneau de l'écran de signature le dit, acte par acte.
+    if (!offerts.length) return "Aucun circuit n'est disponible sur cette installation : la démonstration est éteinte (DEMO=false) et aucun circuit réel n'est ouvert pour cette trame.";
+    const n = offerts.map((m) => modeLabel(m).replace(/^Circuit /, "").replace(/^Signature /, "")).join(", ou ");
     return `Cette trame ouvre plusieurs circuits : le rédacteur choisit, acte par acte, entre ${n}.`;
   }
   if (c.mode === "externe") return "Le circuit externe est le circuit général de la collectivité : les actes sont signés hors de l'application, puis la version signée est déposée.";

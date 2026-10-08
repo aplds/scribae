@@ -941,7 +941,7 @@ Circuits de signature, notification du prestataire, circuits externes.
 
 ### `POST /v1/actes/{id}/signature` — Envoyer un acte en signature
 
-Ouvre un circuit de signature auprès du prestataire. Le corps porte les signataires, le niveau demandé, l'adresse de notification et les réglages du prestataire (`api` : transport, adresse, identifiant, niveau, délai, points de terminaison). Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte le lien de signature réel. Sinon le circuit est simulé (`simulation: true`). La clé n'est jamais transmise par le client.
+Ouvre un circuit de signature auprès du prestataire. Le corps porte les signataires, le niveau demandé, l'adresse de notification et les réglages du prestataire (`api` : transport, adresse, identifiant, niveau, délai, points de terminaison). Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte le lien de signature réel. Sinon le circuit est simulé (`simulation: true`). La signature simple (niveau « simple », signée dans le navigateur) est un circuit d'essai : démonstration éteinte (DEMO=false), son ouverture est refusée (403 `demo_indisponible`), et la signature y est désactivée par défaut — DEMO=true la réactive. La clé n'est jamais transmise par le client.
 
 - **Authentification** : redacteur
 - **Service** : les deux
@@ -991,6 +991,7 @@ curl -X POST 'https://api.exemple.fr/v1/actes/ACT-12/signature' \
 | Code | Signification |
 |---|---|
 | 202 | Circuit ouvert |
+| 403 | Démonstration éteinte : le niveau « simple » est un circuit d'essai (demo_indisponible) |
 | 409 | Acte déjà signé, ou validation / révision non achevée |
 | 502 | Le prestataire a refusé le circuit (prestataire_indisponible) |
 
@@ -2074,6 +2075,7 @@ En cas d'échec, le service répond avec un code HTTP (400, 401, 403, 404, 405, 
 | deja_signe | L'acte est déjà signé (ou publié). |
 | signature_rejetee | L'empreinte du document signé ne correspond pas à celle du document déposé. |
 | prestataire_indisponible | Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse). |
+| demo_indisponible | La démonstration est éteinte sur ce service (DEMO=false) : le circuit d'essai demandé — signature simple, paquet au certificat de démonstration — n'existe pas ici, et la signature y est désactivée par défaut (DEMO=true la réactive). |
 | circuit_non_externe | L'acte ne suit pas le circuit externe. |
 | piece_inconnue | Aucune pièce (fichier joint) ne porte cet identifiant. |
 | piece_referencee | La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort. |

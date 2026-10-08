@@ -37,6 +37,7 @@ node --test tests/            # ce dossier seul
 | `reprise.test.mjs` | la **reprise d'un acte ancien** : date antérieure au jour, original signé exigé, texte relu en articles sans être réécrit |
 | `sante-base.test.mjs` | la **route de santé de la base** : un `401` y vaut « session requise », jamais « panne » |
 | `sites.test.mjs` | **sites et cookies** : l'avertissement inter-site de l'écran « Base de données » (`SameSite=Lax`) |
+| `acte-modificatif.test.mjs` | la **clôture de l'acte modificatif** : les mentions de l'acte modifié, ni plus ni moins — jamais la mention « version consolidée » |
 
 ## Pourquoi les imports disent `../src/…`
 

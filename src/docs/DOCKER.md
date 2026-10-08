@@ -40,7 +40,7 @@ conserve à part. L'image se connecte à une base MariaDB / MySQL joignable
 Depuis la **racine du dépôt** (le dossier qui contient `src/`) :
 
 ```bash
-docker build -f src/server/Dockerfile -t scribae:1.6.3r .
+docker build -f src/server/Dockerfile -t scribae:1.6.3s .
 ```
 
 Le contexte est la racine du dépôt ; le Dockerfile ne copie que `src/`, donc la taille du
@@ -50,8 +50,8 @@ contexte n'entre pas dans l'image. Un fichier d'exclusion (`src/server/Dockerfil
 Vérifier ensuite :
 
 ```bash
-docker image ls scribae:1.6.3r
-docker run --rm scribae:1.6.3r nginx -v
+docker image ls scribae:1.6.3s
+docker run --rm scribae:1.6.3s nginx -v
 ```
 
 ## 4. Publier sur un registre
@@ -60,7 +60,7 @@ docker run --rm scribae:1.6.3r nginx -v
 
 ```bash
 REGISTRE=moncompte          # compte Docker Hub, ou ghcr.io/moncompte, ou un registre privé
-VERSION=1.6.3r
+VERSION=1.6.3s
 
 docker build -f src/server/Dockerfile -t "$REGISTRE/scribae:$VERSION" .
 docker tag "$REGISTRE/scribae:$VERSION" "$REGISTRE/scribae:latest"
@@ -71,7 +71,7 @@ docker push "$REGISTRE/scribae:latest"
 > **Tout cela en une commande** : `src/server/build-and-push.sh` enchaîne ces étapes (build,
 > étiquette `latest` facultative, `docker login` par `DOCKER_USER`/`DOCKER_PASSWORD`). Le registre
 > se donne par `DOCKER_REGISTRY` :
-> `DOCKER_REGISTRY=ghcr.io/ ./src/server/build-and-push.sh moncompte 1.6.3r true`.
+> `DOCKER_REGISTRY=ghcr.io/ ./src/server/build-and-push.sh moncompte 1.6.3s true`.
 
 ### 4.2. Publier plusieurs architectures (amd64 + arm64)
 
@@ -88,7 +88,7 @@ docker buildx build \
 ```
 
 > Une étiquette `latest` mobile est commode, mais une installation de service gagne à
-> ÉPINGLER une version (`scribae:1.6.3r`) : `docker pull` reproductible, et mise à jour
+> ÉPINGLER une version (`scribae:1.6.3s`) : `docker pull` reproductible, et mise à jour
 > délibérée.
 
 ## 5. Lancer
@@ -181,7 +181,7 @@ services:
     volumes: [donnees:/var/lib/mysql]
 
   scribae:
-    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.6.3r}
+    image: ${SCRIBA_IMAGE:-moncompte/scribae:1.6.3s}
     restart: unless-stopped
     environment:
       DB_HOST: db

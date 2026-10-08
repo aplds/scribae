@@ -138,7 +138,7 @@ tels quels, sans qu'aucune règle ne soit recopiée.
 
 **Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
 `import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (**488/498**, aucun échec et **dix sauts** attendus à la 1.6.3r),
+écarts **connus** (**495/505**, aucun échec et **dix sauts** attendus à la 1.6.3s),
 tous dus à l'absence de Node et de réseau : la liste, la lecture de chaque écart et
 les chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
 

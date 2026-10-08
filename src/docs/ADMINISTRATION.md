@@ -596,8 +596,17 @@ trames, actes et comptes de démonstration.
 
 - `DEMO=false` : l'application part d'un **référentiel vierge** — aucune donnée fictive, aucune
   mention de collectivité fictive nulle part. C'est le réglage d'une installation réelle.
+  La signature y est **désactivée par défaut** : les circuits d'essai n'existent pas — ni la
+  signature simple (clé engendrée dans le navigateur, certificat de démonstration), ni le
+  prestataire simulé. L'application ne les propose plus (l'inventaire des circuits est vide
+  tant qu'aucun vrai circuit n'est branché), et le service refuse leur ouverture comme le
+  retour de leurs paquets (`403 demo_indisponible`), sans altérer les circuits. Brancher un
+  vrai circuit (prestataire, signature interne, circuit externe) rallume la signature ; la
+  page de l'original signé ne parle de « démonstration » que pour les paquets qui en portent
+  un — quand c'est le service qui a signé (signature interne), l'émetteur est la collectivité.
 - `DEMO=true` (ou `AUTH_MODE=demo`, ou `DEMO_ACCOUNTS=true`) : le jeu fictif est installé, et le
-  bandeau « Démonstration » s'affiche dans l'application et sur le recueil public.
+  bandeau « Démonstration » s'affiche dans l'application et sur le recueil public. Les circuits
+  d'essai sont rallumés avec lui.
 
 `DEMO_ACCOUNTS` ne règle plus que le **raccourci de connexion** : à `true`, l'écran de connexion
 garde « choisir un compte » (pratique pour une recette, **à ne pas laisser en service**) ; à
@@ -1817,9 +1826,12 @@ déposé, donc on ne peut pas publier autre chose que ce qui a été signé. Pou
 `simple` (le signataire signe **dans l'application**, avec son compte), `interne` (c'est le
 **SERVICE** qui signe, avec la clé du signataire gardée scellée dans son coffre — § 5.5 sexies
 bis, auto-hébergement seulement), `externe` (le document est téléchargé, signé hors de
-l'application, et le PDF signé est déposé après certification du réviseur). Les quatre circuits
-sont menés par les **deux** services (démonstration et auto-hébergé), à cette réserve près que
-la signature interne exige le coffre du service Node. Un acte **engagé** dans un circuit y reste :
+l'application, et le PDF signé est déposé après certification du réviseur). Les circuits
+`simple` et `electronique simulé` sont des **circuits d'essai** : démonstration éteinte
+(`DEMO=false`), ils n'existent pas — l'application ne les propose plus, et le service refuse
+leur ouverture comme le retour de leurs paquets (`403 demo_indisponible`) ; la signature y est
+désactivée par défaut, jusqu'à ce qu'un vrai circuit soit branché. `DEMO=true` les rallume.
+Un acte **engagé** dans un circuit y reste :
 changer un réglage ne déplace pas un acte en cours.
 
 **La signature simple est la plus nominative** — c'est dans la nature du procédé —, et c'est

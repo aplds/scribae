@@ -54,6 +54,7 @@ import { lireVariables } from "./variables.mjs";
 import { annuairePublic } from "./annuaire.mjs";
 import { annuaireAccepte, annuaireEffectif } from "./annuaire-service.mjs";
 import { verifierJws } from "./jws.mjs";
+import { ROLES_CONNUES, roleDeCompte, roleAutorise } from "./roles.mjs";
 import { createPrestataire } from "./signature.mjs";
 import { createControleLegalite } from "./controle-legalite.mjs";
 import { relayer, relaisPaths } from "./relais.mjs";
@@ -240,10 +241,10 @@ const flux = creerFlux({
   journal: (message) => console.warn("[flux] " + message),
 });
 
-// Rôles d'une clé d'API. Les quatre premiers forment une hiérarchie ; le
-// `prestataire` est hors hiérarchie (notification de signature seulement).
-const ROLES_CONNUES = ["administrateur", "editeur", "redacteur", "lecteur", "prestataire"];
-const RANG_ROLE = { administrateur: 4, editeur: 3, redacteur: 2, lecteur: 1 };
+// Rôles d'une clé d'API : voir roles.mjs — les qualités cumulables de
+// l'application (réviseur, signataire) et le visiteur y ont leur rang, pour
+// que le rôle d'une SESSION ne retombe jamais sur un repli qui la trahit.
+// Le `prestataire` est hors hiérarchie (notification de signature seulement).
 
 // Jetons d'écriture : « libellé|rôle:empreinte_sha256 », « libellé:empreinte »
 // ou « empreinte_sha256 ». Le rôle vaut « administrateur » à défaut : une clé de
@@ -263,20 +264,9 @@ const TOKENS = env("API_TOKENS", "")
   })
   .filter((t) => /^[0-9a-f]{64}$/i.test(t.hash));
 
-// Le rôle d'un compte : le plus fort de ses rôles.
-const roleDeCompte = (compte) => {
-  const roles = Array.isArray(compte && compte.roles) && compte.roles.length
-    ? compte.roles
-    : [compte && compte.role].filter(Boolean);
-  return ROLES_CONNUES.find((r) => r !== "prestataire" && roles.includes(r)) || "lecteur";
-};
-
-const roleAutorise = (role, regle) => {
-  if (!regle) return true;
-  if (regle.exact) return regle.exact.includes(role);
-  if (regle.min) return (RANG_ROLE[role] || 0) >= RANG_ROLE[regle.min];
-  return true;
-};
+// Le rôle d'un compte : voir roles.mjs — le plus fort de ses rôles, jamais
+// un repli qui trahit une qualité cumulable (signataire seul, visiteur +
+// signataire).
 
 const sha256 = (s) => createHash("sha256").update(String(s), "utf8").digest("hex");
 
@@ -2172,6 +2162,10 @@ function instancierApi(state) {
     // retrouve — et que les certificats déjà émis continuent de signer.
     signatureInterne: coffre,
     authMode: AUTH_MODE,
+    // LA DÉMONSTRATION (`DEMO` du .env) : éteinte, les circuits d'essai
+    // (signature simple, prestataire simulé) sont refusés par le domaine
+    // (`demo_indisponible`) — la signature y est désactivée par défaut.
+    demo: DEMO_JEU,
     // LE RÉFÉRENTIEL, tel que le SERVICE le lit (collection `config`) : c'est
     // lui qui donne le NOM du signataire quand une signature est attribuée —
     // jamais le nom déclaré par l'appelant, qu'un compte habilité pourrait

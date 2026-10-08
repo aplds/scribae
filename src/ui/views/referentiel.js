@@ -29,7 +29,7 @@ import * as bs from "../../lib/bulletins-service.js";
 import {
   signatureSettings, SIGNATURE_MODES, SIGNATURE_API_DEFAUT, trameModeLabel,
   circuitPour, circuitsDisponibles, modeLabel,
-  circuitElectroniqueSimule, motifCircuitSimule, prestataireDuService,
+  circuitElectroniqueSimule, motifCircuitSimule, prestataireDuService, signatureDemoPermise,
   controleLegaliteDuService, controleLegaliteReelle, motifControleLegaliteSimule,
   signatureInterneDuService, signatureInterneDisponible, motifSignatureInterne,
 } from "../../lib/externe.js";
@@ -2062,11 +2062,22 @@ function signaturePanel(save, redraw) {
   const wrap = h("div", { class: "fr-card", style: { maxWidth: "900px" } });
   wrap.appendChild(h("h2", { class: "fr-card__title", text: "Circuit de signature" }));
   wrap.appendChild(h("p", { class: "fr-card__sub", text: "Comment les actes sont signés. Le circuit vaut pour toute la collectivité ; une trame peut l'écarter, en imposant ou en autorisant la signature hors application." }));
+  // Démonstration éteinte : la signature simple est un circuit d'essai — elle
+  // ne se propose pas ici, et un réglage antérieur qui la retenait est sans
+  // effet (l'écran de signature le dit, acte par acte).
+  const demoSignatureOk = signatureDemoPermise(c);
+  const modesOfferts = SIGNATURE_MODES.filter((m) => demoSignatureOk || m.id !== "simple");
+  if (!demoSignatureOk) {
+    wrap.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginBottom: "12px" } },
+      h("p", { class: "fr-alert__title", text: "Circuits d'essai indisponibles" }),
+      h("p", { class: "fr-small", text: "La démonstration est éteinte (DEMO=false) : la signature simple et le prestataire simulé n'existent pas sur cette installation. Le circuit électronique suppose donc un prestataire branché ci-dessous ; à défaut, la signature est désactivée — il reste le circuit interne (coffre) et le circuit externe. Rallumez la démonstration (DEMO=true) pour retrouver les circuits d'essai." }),
+      d.mode === "simple" ? h("p", { class: "fr-small", text: "Le réglage retient encore « simple » : il est sans effet tant que la démonstration est éteinte." }) : null));
+  }
 
   wrap.appendChild(choiceField({
     label: "Circuit de signature de la collectivité",
     value: d.mode,
-    options: SIGNATURE_MODES.map((m) => ({ value: m.id, label: m.label })),
+    options: modesOfferts.map((m) => ({ value: m.id, label: m.label })),
     help: "Électronique : l'acte est déposé auprès du service puis signé dans l'outil du prestataire, et la signature est vérifiée par empreinte. Simple : le signataire signe dans l'application, avec son compte — aucun prestataire n'est requis, et les mentions nominatives restent dans l'original interne. Interne : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — la clé ne quitte jamais le serveur (auto-hébergement seulement). Externe : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée est déposée en PDF — et sa conformité certifiée par le réviseur avant publication.",
     onChange: (v) => { s.mode = v; save(); redraw(); },
   }));
@@ -2119,10 +2130,12 @@ function signaturePanel(save, redraw) {
   wrap.appendChild(h("div", { class: "fr-grid fr-grid--2" },
     choiceField({
       label: "Transport", value: api.transport,
-      options: [
-        { value: "service", label: "Par le service de la collectivité (la clé reste au serveur)" },
-        { value: "demonstration", label: "Simulation locale (aucun appel sortant)" },
-      ],
+      options: (demoSignatureOk
+        ? [
+          { value: "service", label: "Par le service de la collectivité (la clé reste au serveur)" },
+          { value: "demonstration", label: "Simulation locale (aucun appel sortant)" },
+        ]
+        : [{ value: "service", label: "Par le service de la collectivité (la clé reste au serveur)" }]),
       help: "« Par le service » est le seul transport qui garde la clé d'API côté serveur : c'est le réglage d'une installation réelle. « Simulation locale » sert aux essais et aux démonstrations."
         + (deploie("transport") ? " Posé par le .env : une saisie ici ne tient pas." : ""),
       onChange: (v) => { api.transport = v; save(); redraw(); },

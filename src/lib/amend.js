@@ -414,9 +414,21 @@ export function buildModificatif(base, plan, m, config) {
     signataire: enrichPerson(config, m.signataireId, entity.id),
     showFunction: true,
   }));
-  for (const mn of config.mentions || []) {
-    if (mn.kind !== "recours" && mn.kind !== "publication") continue;
-    nodes.push(id("mention", { mentionId: mn.id, textOverride: "", text: interpolate(mn.text || "", ctx), kind: mn.kind }));
+  // Mentions de clôture : celles de l'acte modifié, ni plus ni moins. Un acte
+  // modificatif est un acte comme les autres : il se referme comme l'acte
+  // qu'il modifie (voies de recours, publication). Prendre toutes les mentions
+  // du référentiel y ajoutait des doublons contradictoires — voire la mention
+  // « version consolidée », qui n'a rien à y faire — là où l'acte d'origine
+  // n'en porte que deux.
+  const mentionsBase = (base.nodes || []).filter((n) => n && n.type === "mention");
+  if (mentionsBase.length) {
+    for (const mn of mentionsBase) nodes.push({ ...clone(mn), id: uid("n"), when: "", notes: [] });
+  } else {
+    for (const mid of ["men-recours", "men-publication"]) {
+      const mn = (config.mentions || []).find((x) => x.id === mid);
+      if (!mn) continue;
+      nodes.push(id("mention", { mentionId: mn.id, textOverride: "", text: interpolate(mn.text || "", ctx), kind: mn.kind }));
+    }
   }
 
   const eli = buildEli(config, { numero: m.numero, entityCode: entity.code, actTypeId: base.meta?.actTypeId });

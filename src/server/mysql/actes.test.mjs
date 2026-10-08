@@ -16,9 +16,9 @@ const sha256 = (s) => createHash("sha256").update(String(s), "utf8").digest("hex
 const AKN = "<akomaNtoso><body>Arrêté n°2026-401</body></akomaNtoso>";
 const JETON = "Bearer bon";
 
-function banc({ save = () => true, controleLegalite = null } = {}) {
+function banc({ save = () => true, controleLegalite = null, demo = true } = {}) {
   const state = emptyState();
-  const api = createActesApi({ state, sha256, save, controleLegalite, now: () => "2026-03-10T12:00:00.000Z" });
+  const api = createActesApi({ state, sha256, save, controleLegalite, demo, now: () => "2026-03-10T12:00:00.000Z" });
   const authorize = (headers) => (String(headers.authorization || "").includes(JETON)
     ? null
     : { status: 401, headers: {}, body: { erreur: "absent", code: "jeton_absent" } });
@@ -1022,4 +1022,54 @@ test("le titulaire apporte sa propre signature : attribuée vérifiée, avec son
   assert.equal(bon.status, 200);
   assert.equal(b.state.signatures[circ.signatureId].attribution, "verifiee");
   assert.equal(b.state.signatures[circ.signatureId].operateur.personId, "per-004");
+});
+
+test("démonstration éteinte : l'ouverture d'un circuit simple est refusée", async () => {
+  const { state, call } = banc({ demo: false });
+  const a = (await call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON })).body;
+  const res = (await call("POST", `/v1/actes/${a.id}/signature`, { niveau: "simple" }, { authorization: JETON }));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "demo_indisponible");
+  assert.deepEqual(Object.keys(state.signatures), [], "aucun circuit ne doit être ouvert");
+});
+
+test("démonstration allumée : l'ouverture d'un circuit simple reste permise", async () => {
+  const { call } = banc({ demo: true });
+  const a = (await call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON })).body;
+  const res = (await call("POST", `/v1/actes/${a.id}/signature`, { niveau: "simple" }, { authorization: JETON }));
+  assert.equal(res.status, 202);
+  assert.ok(res.body.signatureId);
+});
+
+test("démonstration éteinte : le retour d'un paquet de démonstration est refusé, circuit intact", async () => {
+  const { state, call } = banc({ demo: false });
+  const a = (await call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON })).body;
+  const s = (await call("POST", `/v1/actes/${a.id}/signature`, { niveau: "avancee" }, { authorization: JETON })).body;
+  assert.equal(state.signatures[s.signatureId].statut, "en_attente");
+  const res = (await call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: {
+      document: { akn: AKN },
+      signatures: [{ signeLe: "2026-03-10T12:20:00.000Z", certificat: { emetteur: "AC Scribae — démonstration" } }],
+    },
+  }, { authorization: JETON }));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "demo_indisponible");
+  assert.equal(state.signatures[s.signatureId].statut, "en_attente", "le circuit n'est pas altéré");
+});
+
+test("démonstration éteinte : le retour d'un paquet du service passe la porte", async () => {
+  const { state, call } = banc({ demo: false });
+  const a = (await call("POST", "/v1/actes", { akn: AKN }, { authorization: JETON })).body;
+  const s = (await call("POST", `/v1/actes/${a.id}/signature`, { niveau: "avancee" }, { authorization: JETON })).body;
+  const res = (await call("POST", "/v1/webhooks/signature", {
+    signatureId: s.signatureId,
+    documentSigne: {
+      document: { akn: AKN },
+      signatures: [{ signeLe: "2026-03-10T12:20:00.000Z", certificat: { emetteur: "Ville de Valmont-sur-Loire — autorité interne" } }],
+      horodatage: { emisPar: "Horodateur du service" },
+    },
+  }, { authorization: JETON }));
+  assert.equal(res.status, 200);
+  assert.equal(state.signatures[s.signatureId].statut, "signee");
 });

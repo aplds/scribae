@@ -19,7 +19,7 @@ import {
 } from "../annotations.js";
 import { exportAkn, exportSchematron, exportJsonLd, exportMarkdown } from "../../lib/export.js";
 import { circuitFor } from "../../lib/validation.js";
-import { MODES_TRAME, trameModeLabel, circuitPour, modeLabel } from "../../lib/externe.js";
+import { MODES_TRAME, trameModeLabel, circuitPour, modeLabel, signatureDemoPermise } from "../../lib/externe.js";
 import { DISPENSES } from "../../lib/execution.js";
 import { ecartsOfActe } from "./modifier.js";
 import { IMPORT_ID, trameImportee, enregistrerImport, abandonnerImport } from "../import-trame.js";
@@ -2269,7 +2269,9 @@ function renderTrameInspector(root, trame, redraw, softSave) {
     h("span", { class: "inspector__label", style: { marginTop: "10px" }, text: "Signature" }),
     selectField({
       label: "Circuit de signature", value: trame.signature || "",
-      options: MODES_TRAME.map((m) => ({ value: m.id, label: m.label })),
+      options: MODES_TRAME
+        .filter((m) => signatureDemoPermise(state.config) || (m.id !== "simple_impose" && m.id !== "simple_autorise"))
+        .map((m) => ({ value: m.id, label: m.label })),
       help: "Quatre circuits (voir Administration › Signature). ÉLECTRONIQUE : signé dans l'outil du prestataire. SIMPLE : signé dans l'application, par le signataire, avec son compte — les mentions nominatives restent dans l'original interne, jamais diffusées. INTERNE : c'est le SERVICE qui signe, avec la clé du signataire gardée scellée dans son coffre — la clé ne quitte jamais le serveur (auto-hébergement seulement). EXTERNE : le document est téléchargé prêt à signer, signé hors de l'application (papier ou outil tiers), puis la version signée (PDF) est déposée, et le réviseur certifie sa conformité avec la version numérique avant publication. « Imposé » l'exige pour cette trame ; « autorisé » le laisse au choix du rédacteur, acte par acte.",
       onChange: (v) => { trame.signature = v; redraw(); softSave(); },
     }),

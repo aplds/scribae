@@ -23,9 +23,101 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
-## [Non publié]
+## [1.6.3u] — 2026-10-01 — L'acte modificatif se referme comme l'acte modifié
 
-Rien pour l'instant : le travail achevé reçoit une note intermédiaire (voir ci-dessous).
+Demande : « quand un acte a été modifié, la vue en version consolidée est complètement cassée
+et ne correspond pas du tout à la même vue que pour un acte initial ».
+
+**Corrigé**
+
+- **L'acte modificatif se refermait avec toutes les mentions du référentiel.** Sa clôture
+  portait cinq mentions au lieu de deux : les voies de recours en double (publication ET
+  notification, contradictoires), la publication en double (recueil ET affichage avec
+  signalisation), et même la mention « version consolidée diffusée à titre informationnel » —
+  qui n'a rien à y faire sur un modificatif. Il reprend désormais la clôture de l'acte
+  qu'il modifie, ni plus ni moins (à défaut — acte importé sans mentions — la paire
+  standard voies de recours + publication).
+- **Vérifié sans effet de bord** : les aperçus de l'écran de modification (acte modificatif,
+  version consolidée avec et sans suivi), les fiches des trois actes et l'historique des
+  versions ont été rejoués dans l'aperçu ; le service rend bien les versions groupées par
+  identifiant ELI. Trois épreuves nouvelles (`acte-modificatif.test.mjs`).
+
+**Éprouvé** : 257 fichiers sans faute de syntaxe ni de style, **506/516** (0 échec,
+10 sauts d'environnement — les quatre connus).
+
+
+## [1.6.3t] — 2026-10-01 — Démonstration éteinte, la signature d'essai n'existe plus
+
+Demande : « en prod auto-hébergé, la signature par service interne parle encore de certificat
+de Démonstration, alors que c'est faux ; il ne doit pas y avoir de possibilité de passer par le
+service de signature démo (navigateur) — par défaut, la signature est désactivée ; elle est
+réactivée si DEMO est true dans le .env ; d'une façon générale, aucune fonctionnalité démo ne
+doit être accessible si Scribae tourne sous docker et que demo est false dans le .env ».
+
+**Corrigé**
+
+- **La page de l'original signé parlait de « certificat de Démonstration » même quand c'est le
+  service qui avait signé.** Le circuit interne (clé du signataire scellée au coffre,
+  `scribae-interne`) ne porte aucun certificat d'essai : la page dit désormais que le
+  certificat est émis par le service de la collectivité (autorité de certification interne),
+  vérifiable mais non qualifié eIDAS. Seuls les paquets d'essai (signature simple, prestataire
+  simulé) gardent la mention de démonstration.
+- **Les circuits d'essai restaient offerts en production éteinte.** La signature simple et le
+  prestataire simulé sont des fonctionnalités de démonstration : `DEMO=false`, l'application ne
+  les propose plus (ni dans l'écran Signature, ni dans les réglages de trame ou le transport —
+  l'inventaire des circuits est vide tant qu'aucun vrai circuit n'est branché), et le service
+  refuse leur ouverture comme le retour de leurs paquets (`403 demo_indisponible`), sans
+  altérer les circuits. La signature y est donc désactivée par défaut ; `DEMO=true` rallume les
+  circuits d'essai avec le reste du jeu fictif.
+
+**Éprouvé**
+
+- Huit épreuves nouvelles (`actes.test.mjs` : ouverture simple refusée puis permise selon
+  `demo`, paquet de démonstration refusé au retour sans marquer le circuit, paquet du service
+  accepté ; `verrou-demo.test.mjs` : commutateur, inventaire vide puis offert, trame simple
+  écartée, page de l'original selon l'émetteur).
+
+
+## [1.6.3s] — 2026-10-01 — Le signataire sans autre rôle signe enfin
+
+Demande : « un lecteur qui est également signataire ne peut pas signer : rôle insuffisant
+lors du clic du bouton de signature ».
+
+**Corrigé**
+
+- **Le service auto-hébergé refusait le dépôt et l'ouverture du circuit au signataire
+  qui ne porte aucun autre rôle.** L'application lui offre le bouton « Vérifier et
+  signer » (`peutSignerEffectivement`, `src/lib/signataires.js` : titulaire de la chaîne
+  et qualité de signataire), mais le service ne connaissait que quatre rôles
+  (`administrateur`, `editeur`, `redacteur`, `lecteur`) : un compte signataire seul —
+  ou visiteur + signataire — retombait sur le repli « lecteur », et les gardes
+  (`POST /v1/actes`, `POST /v1/actes/{id}/signature`, minimum « redacteur ») répondaient
+  `403 role_insuffisant`. C'est ce « lecteur » que disait le message : le repli, pas
+  le compte. Le service connaît désormais tous les rôles de l'application
+  (`src/server/mysql/roles.mjs` : réviseur et signataire au rang du rédacteur, visiteur
+  sans accès, prestataire hors hiérarchie), et le rôle d'un compte est le plus fort
+  des siens — plus jamais un repli qui trahit une qualité cumulable. La signature
+  elle-même ne s'en contente pas : elle reste opposée à la personne
+  (`porteSignature`), et une clé de service ne signe jamais au nom de quelqu'un.
+- **Le visiteur authentifié ne lit plus par l'API.** L'ancien repli « lecteur » ouvrait
+  les lectures aux sessions sans rôle connu ; le repli est désormais « visiteur »
+  (refus par défaut), comme l'écran qui lui ferme l'atelier.
+
+**Ajouté**
+
+- `src/server/mysql/roles.mjs` — les rôles du service en un seul endroit, pur et
+  éprouvable ; `src/server/mysql/roles.test.mjs` — **sept épreuves**, dont les dents
+  ont été éprouvées (l'ancien calcul rend « lecteur » et refuse le dépôt : trois cas
+  sur trois).
+
+**Épreuves** : 255 fichiers sans faute de syntaxe ni de style, **495/505**
+(0 échec, **10 sauts** d'environnement — les quatre connus). `VARIABLES.md` et `API.md`
+sans changement (ni variable ni route touchée) ; `logiciel-engendre.mjs` régénéré
+(il porte la version).
+
+Non vérifié : le parcours complet en session sur une installation réelle (ici, le
+service de démonstration travaille par clé d'administration et ne connaît pas les
+sessions) — tenu par les sept épreuves neuves et les 32/32 du domaine.
 
 
 ## [1.6.3r] — 2026-09-30 — La documentation rattrape le code

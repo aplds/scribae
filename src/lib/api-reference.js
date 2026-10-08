@@ -378,7 +378,7 @@ export const API_REFERENCE = [
   {
     id: "signature-envoyer", groupe: "signature", methode: "POST", chemin: "/v1/actes/{id}/signature", auth: "redacteur",
     resume: "Envoyer un acte en signature",
-    description: "Ouvre un circuit de signature auprès du prestataire. Le corps porte les signataires, le niveau demandé, l'adresse de notification et les réglages du prestataire (`api` : transport, adresse, identifiant, niveau, délai, points de terminaison). Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte le lien de signature réel. Sinon le circuit est simulé (`simulation: true`). La clé n'est jamais transmise par le client.",
+    description: "Ouvre un circuit de signature auprès du prestataire. Le corps porte les signataires, le niveau demandé, l'adresse de notification et les réglages du prestataire (`api` : transport, adresse, identifiant, niveau, délai, points de terminaison). Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte le lien de signature réel. Sinon le circuit est simulé (`simulation: true`). La signature simple (niveau « simple », signée dans le navigateur) est un circuit d'essai : démonstration éteinte (DEMO=false), son ouverture est refusée (403 `demo_indisponible`), et la signature y est désactivée par défaut — DEMO=true la réactive. La clé n'est jamais transmise par le client.",
     params: [{ nom: "id", type: "string", description: "Identifiant de l'acte déposé" }],
     corps: {
       signataires: [{ nom: "Jeanne Mercier", courriel: "j.mercier@exemple.fr", fonction: "Le maire", ordre: 1 }],
@@ -388,6 +388,7 @@ export const API_REFERENCE = [
     },
     reponses: [
       { code: 202, description: "Circuit ouvert" },
+      { code: 403, description: "Démonstration éteinte : le niveau « simple » est un circuit d'essai (demo_indisponible)" },
       { code: 409, description: "Acte déjà signé, ou validation / révision non achevée" },
       { code: 502, description: "Le prestataire a refusé le circuit (prestataire_indisponible)" },
     ],
@@ -731,6 +732,7 @@ export const CODES_ERREUR = [
   { code: "deja_signe", sens: "L'acte est déjà signé (ou publié)." },
   { code: "signature_rejetee", sens: "L'empreinte du document signé ne correspond pas à celle du document déposé." },
   { code: "prestataire_indisponible", sens: "Le service n'a pas pu ouvrir le circuit auprès du prestataire (adresse, clé, réponse)." },
+  { code: "demo_indisponible", sens: "La démonstration est éteinte sur ce service (DEMO=false) : le circuit d'essai demandé — signature simple, paquet au certificat de démonstration — n'existe pas ici, et la signature y est désactivée par défaut (DEMO=true la réactive)." },
   { code: "circuit_non_externe", sens: "L'acte ne suit pas le circuit externe." },
   { code: "piece_inconnue", sens: "Aucune pièce (fichier joint) ne porte cet identifiant." },
   { code: "piece_referencee", sens: "La pièce est citée par un acte ou une publication : la retirer laisserait un lien mort." },

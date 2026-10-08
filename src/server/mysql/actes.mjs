@@ -189,6 +189,12 @@ export function createActesApi({
   // l'accusé de réception le dit (`demonstration: true`) plutôt que de se
   // présenter comme un certificat opposable. Voir NC-IV-004.
   controleLegalite = null,
+  // LA DÉMONSTRATION (`DEMO` du .env). Éteinte, les circuits d'essai
+  // n'existent pas : la signature simple et le prestataire simulé sont refusés
+  // (voir `demo_indisponible`), et la signature est désactivée par défaut —
+  // jusqu'à ce qu'un vrai circuit soit branché. Allumée (ou absente, le
+  // comportement historique), rien ne change.
+  demo = true,
 }) {
   const db = state;
   let dirty = null;           // dernier état sérialisé, en attente d'écriture
@@ -488,7 +494,7 @@ export function createActesApi({
         "/v1/actes/{id}/signature": {
           post: {
             operationId: "envoyerEnSignature", summary: "Envoyer un acte en signature", tags: ["Signature"],
-            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte alors le lien de signature réel (`lienSignature`, `dossier`) ; sinon le circuit est simulé (`simulation: true`), et rien ne sort de la collectivité. La clé du prestataire n'est jamais transmise par le client, ni écrite au registre. AVEC `mode: \"interne\"`, la route change de nature : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre (SCRIBA_SIGNATURE_KV_KEY), et rend l'original signé dans la réponse — aucune clé ne quitte le serveur. Ce circuit n'existe qu'en auto-hébergement : sans clé de scellement (et sur le service de démonstration), la route refuse (409 `signature_interne_indisponible`). QUAND LE SERVICE IDENTIFIE LES PERSONNES (déploiement à session : AUTH_MODE=password ou oidc), la signature est opposée à l'opérateur : le signataire déclaré doit porter un `personId`, et ce `personId` doit être celui du compte connecté — sinon la route refuse (403 `signature_non_habilitée`, `signataire_non_identifie` ou `signature_sans_identite`). Le nom inscrit vient alors du RÉFÉRENTIEL du service, jamais du corps : personne ne signe à la place du signataire.",
+            description: "Ouvre un circuit de signature auprès du prestataire (ESUP-Signature ou équivalent). Le service renvoie immédiatement un identifiant de circuit ; ce sont le prestataire (par notification) puis le suivi qui feront évoluer l'état. Le corps porte les réglages du prestataire (`api`) : transport, adresse, identifiant, niveau, adresse de notification, délai et points de terminaison. Quand le transport vaut « service » et qu'une adresse ET une clé sont configurées (SCRIBA_SIGNATURE_API_CLE), c'est le SERVICE qui appelle le prestataire : la réponse porte alors le lien de signature réel (`lienSignature`, `dossier`) ; sinon le circuit est simulé (`simulation: true`), et rien ne sort de la collectivité. La clé du prestataire n'est jamais transmise par le client, ni écrite au registre. AVEC `mode: \"interne\"`, la route change de nature : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre (SCRIBA_SIGNATURE_KV_KEY), et rend l'original signé dans la réponse — aucune clé ne quitte le serveur. Ce circuit n'existe qu'en auto-hébergement : sans clé de scellement (et sur le service de démonstration), la route refuse (409 `signature_interne_indisponible`). QUAND LE SERVICE IDENTIFIE LES PERSONNES (déploiement à session : AUTH_MODE=password ou oidc), la signature est opposée à l'opérateur : le signataire déclaré doit porter un `personId`, et ce `personId` doit être celui du compte connecté — sinon la route refuse (403 `signature_non_habilitée`, `signataire_non_identifie` ou `signature_sans_identite`). Le nom inscrit vient alors du RÉFÉRENTIEL du service, jamais du corps : personne ne signe à la place du signataire. Démonstration éteinte (DEMO=false) : le niveau « simple » — circuit d'essai signé dans le navigateur — est refusé avant toute ouverture (403 `demo_indisponible`), et la signature y est désactivée par défaut ; DEMO=true la réactive.",
             security: [{ bearerAuth: [] }],
             requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { mode: { type: "string", enum: ["interne"], description: "interne : le SERVICE signe lui-même, avec la clé du signataire gardée scellée dans son coffre — aucune clé ne quitte le serveur ; l'original signé est rendu dans la réponse. Auto-hébergement seulement." }, signataires: { type: "array", items: { type: "object", properties: { nom: { type: "string" }, courriel: { type: "string" }, fonction: { type: "string" }, ordre: { type: "integer" } } } }, niveau: { type: "string", enum: ["simple", "avancee", "qualifiee"] }, urlNotification: { type: "string", description: "URL appelée par le prestataire à l'issue de la signature" }, api: { type: "object", description: "Réglages du prestataire de signature (voir Administration › Signature). Aucun secret : la clé reste au service.", properties: { transport: { type: "string", enum: ["service", "demonstration"] }, url: { type: "string" }, prestataire: { type: "string" }, niveau: { type: "string" }, urlNotification: { type: "string" }, timeoutMs: { type: "integer" }, cheminDocument: { type: "string" }, cheminSignataires: { type: "string" }, cheminDemarrer: { type: "string" }, cheminStatut: { type: "string" } } } } } } } },
             responses: { 202: { description: "Circuit ouvert" }, 404: { description: "Acte inconnu" }, 409: { description: "Acte déjà signé" }, 401: { description: "Jeton absent" } },
@@ -515,7 +521,7 @@ export function createActesApi({
         "/v1/webhooks/signature": {
           post: {
             operationId: "notifierSignature", summary: "Notification du prestataire (retour de l'acte signé)", tags: ["Signature"],
-            description: "Appelée par le prestataire lorsque la signature est apposée. Le service recalcule l'empreinte SHA-256 du document signé et la compare à celle de l'acte déposé : une différence est refusée (409), la signature n'est jamais acceptée sur un document qui n'est pas celui qui a été déposé. QUAND L'APPELANT EST UNE SESSION — c'est le cas de l'agent qui rapporte sa propre signature (circuit simple) —, le service exige que la personne du signataire portée par le paquet soit celle de l'opérateur : sinon il refuse (403 `signature_non_habilitée`) et marque le circuit « rejetée ». Une CLÉ de service (le prestataire) AFFIRME la signature, et celle-ci porte alors `attribution: \"declaree\"` ; une signature opposée à une personne identifiée porte `attribution: \"verifiee\"`.",
+            description: "Appelée par le prestataire lorsque la signature est apposée. Le service recalcule l'empreinte SHA-256 du document signé et la compare à celle de l'acte déposé : une différence est refusée (409), la signature n'est jamais acceptée sur un document qui n'est pas celui qui a été déposé. QUAND L'APPELANT EST UNE SESSION — c'est le cas de l'agent qui rapporte sa propre signature (circuit simple) —, le service exige que la personne du signataire portée par le paquet soit celle de l'opérateur : sinon il refuse (403 `signature_non_habilitée`) et marque le circuit « rejetée ». Une CLÉ de service (le prestataire) AFFIRME la signature, et celle-ci porte alors `attribution: \"declaree\"` ; une signature opposée à une personne identifiée porte `attribution: \"verifiee\"`. Démonstration éteinte (DEMO=false) : un paquet au certificat de démonstration (signature simple, prestataire simulé) est refusé (403 `demo_indisponible`), sans marquer le circuit — ce geste n'existe pas ici ; DEMO=true le réactive.",
             requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["signatureId", "documentSigne"], properties: { signatureId: { type: "string" }, statut: { type: "string", enum: ["signee", "refusee"] }, documentSigne: { type: "object", description: "L'original signé (document + signatures + horodatage)" } } } } } },
             responses: { 200: { description: "Notification acceptée" }, 404: { description: "Circuit inconnu" }, 409: { description: "Empreinte du document signé différente de celle déposée" } },
           },
@@ -735,6 +741,19 @@ export function createActesApi({
     };
   }
 
+  // Un paquet porte-t-il un CERTIFICAT DE DÉMONSTRATION — clé engendrée dans le
+  // navigateur, autorité « AC Scribae — démonstration » ? C'est la marque des
+  // circuits d'essai (signature simple, prestataire simulé) : le certificat du
+  // service (signature interne, autorité de la collectivité) ne la porte
+  // jamais. Démonstration éteinte, ces paquets sont refusés.
+  function paquetDemo(pack) {
+    const sig = pack && pack.signatures && pack.signatures[0];
+    const cert = (sig && sig.certificat) || {};
+    const h = (pack && pack.horodatage) || {};
+    return [cert.emetteur, cert.version, cert.usage, h.emisPar]
+      .some((m) => /d[eé]monstration/i.test(String(m || "")));
+  }
+
   // L'attribution d'une signature, telle qu'elle s'inscrit au circuit : ce que le
   // service a pu VÉRIFIER de l'identité du signataire. `verifiee` quand une
   // session a été opposée au signataire ; `declaree` quand le service n'a aucune
@@ -856,6 +875,11 @@ export function createActesApi({
     const signataires = Array.isArray(b.signataires) && b.signataires.length ? b.signataires : [{ nom: "Signataire non précisé" }];
     const reglages = { ...(b.api || {}) };
     const niveau = b.niveau || reglages.niveau || "avancee";
+    // Démonstration éteinte : le circuit « simple » n'existe pas — il est
+    // refusé avant toute ouverture, plutôt qu'au retour signé.
+    if (!demo && niveau === "simple") {
+      return err(403, "La signature simple est un circuit d'essai : la démonstration est éteinte sur ce service (DEMO=false), et la signature y est désactivée par défaut.", { code: "demo_indisponible" });
+    }
     const urlNotification = b.urlNotification || reglages.urlNotification || "/v1/webhooks/signature";
 
     // Le prestataire est-il réellement branché côté service ? Le circuit
@@ -952,6 +976,12 @@ export function createActesApi({
     if (!pack || !pack.document || typeof pack.document.akn !== "string") return err(400, "Notification invalide : `documentSigne.document.akn` est attendu.", { code: "document_absent" });
     const acte = lireActe(sig.acteId);
     if (!acte) return err(404, "Acte d'origine introuvable pour ce circuit.");
+    // Démonstration éteinte : un paquet au certificat de démonstration
+    // (signature simple, prestataire simulé) est refusé — sans marquer le
+    // circuit, qui n'est pas altéré : ce geste n'existe pas ici.
+    if (!demo && paquetDemo(pack)) {
+      return err(403, "Ce paquet porte un certificat de démonstration : la démonstration est éteinte sur ce service (DEMO=false), et la signature y est désactivée par défaut.", { code: "demo_indisponible" });
+    }
     // QUI A SIGNÉ ? Quand l'appelant est une PERSONNE (une session), la signature
     // qu'elle apporte doit être LA SIENNE. Le paquet porte la personne du
     // signataire (`interne.signataire.personId`, posé par le dossier de

@@ -37,7 +37,7 @@ import { validationPourSignature, avancement, empreinteTexte } from "../../lib/v
 import {
   circuitPour, circuitsDisponibles, modeLabel, trameModeLabel,
   versionSignee, certificationDe, publicationExternePossible,
-  reglagesPrestataire, circuitElectroniqueSimule,
+  reglagesPrestataire, circuitElectroniqueSimule, signatureDemoPermise,
   signatureSettings, signatureInterneDisponible, motifSignatureInterne,
 } from "../../lib/externe.js";
 import { niveauDepuisCircuit } from "../../lib/qualification-signature.js";
@@ -300,14 +300,15 @@ function elementSignature(a, docs, paint, config) {
   // trace nominative reste dans l'original interne, jamais dans la publication.
   if (modeSignatureDe(a) === "simple") {
     const engage = !!(a.api?.acteId && a.api?.signatureId && a.api?.niveau !== "avancee");
+    const demoEteinte = !signatureDemoPermise(config);
     return h("div", { class: "sig-file__item sig-file__item--action" },
       h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
       h("span", { class: "sig-file__obj", text: a.objet || doc?.meta?.objet || "—" }),
-      h("span", { class: "fr-small fr-muted", text: engage ? "circuit ouvert — prêt à signer" : "signature dans l'application" }),
+      h("span", { class: "fr-small fr-muted", text: demoEteinte ? "signature simple indisponible (démonstration éteinte)" : engage ? "circuit ouvert — prêt à signer" : "signature dans l'application" }),
       button("Vérifier et signer", {
         variant: "primary", size: "sm", icon: "lock",
-        disabled: apiStatus().status !== "online" || !!raison,
-        title: raison || "Vérifier le document, puis le signer avec votre compte",
+        disabled: apiStatus().status !== "online" || !!raison || demoEteinte,
+        title: demoEteinte ? MOTIF_DEMO_ETEINTE : (raison || "Vérifier le document, puis le signer avec votre compte"),
         onClick: () => engagerSignatureSimple(a, doc, { docs, paint }),
       }));
   }
@@ -316,14 +317,17 @@ function elementSignature(a, docs, paint, config) {
   // puis déclenche le geste : il n'y a aucun outil à ouvrir, aucune clé sur le
   // poste, et rien à déposer depuis lui.
   if (modeSignatureDe(a) === "interne") return elementSignatureInterne(a, doc, paint, raison);
+  // Démonstration éteinte et prestataire simulé : le geste n'existe pas ici —
+  // le bouton est désactivé plutôt que de mener à un outil qui refusera.
+  const outilDemoEteint = circuitElectroniqueSimule() && !signatureDemoPermise(config);
   return h("div", { class: "sig-file__item sig-file__item--action" },
     h("span", { class: "sig-file__num fr-mono", text: a.numero || "sans n°" }),
     h("span", { class: "sig-file__obj", text: a.objet || doc?.meta?.objet || "—" }),
-    h("span", { class: "fr-small fr-muted", text: dejaDepose ? "circuit ouvert — " + (a.api?.statut || "") : "à déposer" }),
+    h("span", { class: "fr-small fr-muted", text: outilDemoEteint ? "signature désactivée (démonstration éteinte)" : dejaDepose ? "circuit ouvert — " + (a.api?.statut || "") : "à déposer" }),
     button(dejaDepose ? "Signer" : "Déposer et signer", {
       variant: "primary", size: "sm", icon: "lock",
-      disabled: apiStatus().status !== "online" || !!raison,
-      title: raison || "Ouvrir l'outil de signature pour cet acte",
+      disabled: apiStatus().status !== "online" || !!raison || outilDemoEteint,
+      title: outilDemoEteint ? MOTIF_DEMO_ETEINTE : (raison || "Ouvrir l'outil de signature pour cet acte"),
       onClick: async () => {
         const ctx = { docs, paint };
         if (dejaDepose) await ouvrirOutil(a, doc, ctx, true);
@@ -573,7 +577,11 @@ function renderCircuit(root, ctx) {
     actionsInterne(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur });
   } else if (!signed) {
     const libelle = enRevision ? "Transmis au réviseur" : (rev.requise && !rev.ok ? "Soumettre au réviseur" : (acte.api?.acteId ? "Reprendre le circuit" : "Envoyer en signature"));
-    row.appendChild(button(libelle, {
+    // Démonstration éteinte et prestataire simulé : aucun envoi n'est possible —
+    // le panneau le dit, et seul le suivi d'un circuit déjà ouvert subsiste.
+    const envoiDemoEteint = !acte.api?.acteId && circuitElectroniqueSimule() && !signatureDemoPermise(state.config);
+    if (envoiDemoEteint) panneauSignatureDemoEteinte(actions);
+    else row.appendChild(button(libelle, {
       variant: "primary", icon: enRevision ? "check" : "upload",
       disabled: apiStatus().status !== "online" || blocking.length > 0 || !para.ok || enRevision,
       title: blocking.length ? "L'acte comporte un contrôle bloquant"
@@ -599,7 +607,10 @@ function renderCircuit(root, ctx) {
       // L'outil du prestataire ne s'ouvre que pour le TITULAIRE de la signature :
       // les autres suivent le circuit (relève du statut), ils ne signent pas à
       // sa place (voir `peutSignerEffectivement`, src/lib/signataires.js).
-      if (peutSignerEffectivement(state.config, state.user, acte, trameById(acte.trameId)).ok) {
+      // Démonstration éteinte : l'outil simulé n'existe plus — seule la relève
+      // subsiste.
+      const outilSimuleEteint = circuitElectroniqueSimule() && !signatureDemoPermise(state.config);
+      if (peutSignerEffectivement(state.config, state.user, acte, trameById(acte.trameId)).ok && !outilSimuleEteint) {
         row.appendChild(button("Ouvrir l'outil de signature", {
           variant: "secondary", icon: "lock", onClick: () => ouvrirOutil(acte, doc, { docs, paint }),
         }));
@@ -878,12 +889,27 @@ function choixCircuit(row, { acte, doc, ctx, pret, signataire }) {
   }
 }
 
+// La signature de DÉMONSTRATION est éteinte sur cette installation
+// (auto-hébergement, DEMO=false) : ni la signature simple, ni le prestataire
+// simulé n'existent ici. Un seul panneau, un seul motif, pour les files comme
+// pour l'écran de signature — la signature y est désactivée par défaut,
+// jusqu'à ce qu'un vrai circuit soit branché.
+const MOTIF_DEMO_ETEINTE = "Signature désactivée sur cette installation : la démonstration est éteinte (DEMO=false), et ce circuit d'essai n'existe pas ici.";
+function panneauSignatureDemoEteinte(actions) {
+  actions.appendChild(h("div", { class: "fr-alert fr-alert--warning", style: { marginTop: "10px" } },
+    h("p", { class: "fr-alert__title", text: "Signature désactivée sur cette installation" }),
+    h("p", { class: "fr-small", text: "La démonstration est éteinte (DEMO=false) : la signature simple et le prestataire simulé — des circuits d'essai — n'existent pas ici. Branchez un prestataire (Administration › Signature), ouvrez la signature interne (clé SCRIBA_SIGNATURE_KV_KEY dans le .env), ou menez cet acte par le circuit externe — ou rallumez la démonstration (DEMO=true) pour retrouver les circuits d'essai." })));
+}
+
 // Les actions du circuit simple : le geste de signature, et le choix du circuit
 // quand la trame en ouvre plusieurs. Le libellé dit le geste RÉEL de
 // l'opérateur : « Vérifier et signer » pour le titulaire, « Envoyer en
 // signature » pour qui n'est pas lui — la fenêtre de signature ne s'ouvrira pas
 // (voir `peutSignerEffectivement`, src/lib/signataires.js).
 function actionsSimple(actions, row, { acte, doc, trame, circuitSig, paint, blocking, para, parapheur }) {
+  // Démonstration éteinte : la signature simple n'existe pas ici — le panneau
+  // le dit, et aucun geste n'est offert.
+  if (!signatureDemoPermise(state.config)) { panneauSignatureDemoEteinte(actions); return; }
   const pret = !blocking.length && para.ok;
   const ctx = { docs: new Map([[acte.id, doc]]), paint };
   const auteur = auteurDe(acte, doc);
@@ -1022,6 +1048,9 @@ function corpsDepot(acte, doc, { signatureMode }) {
 // compétence de signer, et l'acte restait « prêt » pour toujours.
 async function engagerSignatureSimple(acte, doc, ctx) {
   const config = state.config;
+  // Démonstration éteinte : la signature simple n'existe pas ici — le service
+  // refuserait le paquet (voir `demo_indisponible`, src/server/mysql/actes.mjs).
+  if (!signatureDemoPermise(config)) { toast(MOTIF_DEMO_ETEINTE, "error"); return; }
   const parapheur = parapheurActif();
   const para = parapheur ? validationPourSignature(acte) : { ok: true, raison: "" };
   if (!para.ok) { toast(para.raison, "warning"); return; }
@@ -2114,6 +2143,10 @@ export async function envoyerEnSignature(acte, ctx, { ouvrirOutil: ouvrir = true
 
 async function envoyerEnSignatureElectronique(acte, doc, ctx, { ouvrir = true } = {}) {
   const config = state.config;
+  // Prestataire simulé sur une installation dont la démonstration est éteinte :
+  // aucun envoi n'est possible — un vrai prestataire se branche dans
+  // Administration › Signature.
+  if (circuitElectroniqueSimule() && !signatureDemoPermise(config)) { toast(MOTIF_DEMO_ETEINTE, "error"); return; }
   const trame = trameById(acte.trameId);
   const settings = publicationSettings(config);
   const token = settings.jetonDemonstration;
@@ -2311,6 +2344,10 @@ async function ouvrirOutil(acte, doc, ctx, autoOpen) {
   if (!acte.api?.docId) { toast("Aucun circuit ouvert pour cet acte.", "error"); return; }
   // Prestataire réellement branché : la signature n'est pas donnée ici.
   if (!circuitElectroniqueSimule() && acte.api?.lienSignature) { ouvrirLienPrestataire(acte, ctx, autoOpen); return; }
+  // Outil simulé sur une installation dont la démonstration est éteinte : le
+  // geste n'existe pas ici — le service refuserait le paquet (voir
+  // `demo_indisponible`, src/server/mysql/actes.mjs).
+  if (circuitElectroniqueSimule() && !signatureDemoPermise(state.config)) { toast(MOTIF_DEMO_ETEINTE, "error"); return; }
   const config = state.config;
   const auteur = auteurDe(acte, doc);
   let dossier = prestataire.dossier(acte.api.docId);
