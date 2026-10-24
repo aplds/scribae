@@ -19,9 +19,9 @@
 //
 // CE FICHIER N'IMPORTE QU'UN SEUL MODULE (`src/lib/db/index.js`) : le service de
 // données est doublé par `fetch`. C'est délibéré — une épreuve qui importe aussi
-// `src/lib/auth.js` éprouve DEUX copies du module dans l'atelier (voir
-// docs/ATELIER.md § 3.3), alors qu'ici le pilote se règle par son propre
-// réglage (`setSettings`), sans dépendre de la découverte du mode.
+// un second module du code épreuve DEUX copies de chaque module, alors qu'ici le
+// pilote se règle par son propre réglage (`setSettings`), sans dépendre de la
+// découverte du mode.
 // ============================================================================
 import test from "node:test";
 import assert from "node:assert/strict";

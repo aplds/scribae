@@ -9,8 +9,7 @@
 // opération, puis on régénère.
 //
 // La racine du code est CONSTATÉE, jamais supposée (`racine-code.mjs`) : le
-// script s'exécute aussi bien depuis la racine du dépôt, où le code vit sous
-// `src/`, que depuis l'atelier, où tout voisine sous `src/`.
+// script s'exécute depuis la racine du dépôt, où le code vit sous `src/`.
 //
 // Il n'y a rien à installer : la description est un module pur, sans dépendance.
 // ============================================================================

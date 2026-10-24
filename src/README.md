@@ -66,7 +66,7 @@ double :
 | `.gitignore` | dépendances, secrets de déploiement (`.env*`), dossier de données `data/` |
 | `README.md` | la page d'accueil du dépôt |
 | `AGENTS.md`, `CLAUDE.md` | les consignes d'un agent qui reprend le dépôt |
-| `index.html`, `main.pjs` | la page et son code, servis par GitHub Pages |
+| `index.html` | la page et son code, servies par GitHub Pages |
 | `CNAME`, `.nojekyll` | l'adresse publiée, et de quoi empêcher Jekyll |
 | `src/**` | l'application, servie telle quelle par le navigateur |
 
@@ -149,8 +149,8 @@ Le nom est **réexporté** par `src/ui/brand.js`, la licence et la documentation
 `src/ui/mention.js` : l'interface n'a donc qu'un module d'identité à connaître, et les trois pieds
 de page ne peuvent pas diverger de la bannière du service.
 
-À quoi d'autre toucher si le nom change : `$meta.title` / `description` (`main.pjs`, le
-manifeste de la page publiée), le `<link rel="icon">` de `index.html`, le nom des autorités
+À quoi d'autre toucher si le nom change : le `<title>` de `index.html`, le
+`<link rel="icon">` de `index.html`, le nom des autorités
 de certification de la démonstration (`src/lib/signature.js`), et les captures du guide
 (leur en-tête montre le nom — voir plus bas). Et **régénérer le miroir du service** (`node scripts/generer-logiciel.mjs`,
 voir `src/server/README.md`) : sans quoi le journal du conteneur continuerait d'annoncer l'ancien
@@ -981,7 +981,7 @@ Trois réglages les positionnent, et `styleCss` comme `creerPdfA` les honorent :
 Les deux emblèmes suivent la charte **partout** : l'aperçu, le HTML autonome, le fichier Word (où ils
 sont posés en flottants, Word ne connaissant ni `flex` ni `gap`) et le **PDF/A**, qui les embarque et
 les dessine sur chaque page — la première comprise — au bord du filet, chacun à sa hauteur. Un
-parcours du navigateur (`emblemes-entete`, `src/tests/parcours.mjs`) rend un vrai document dans un
+parcours du navigateur (`emblemes-entete`, `tests/parcours.mjs`) rend un vrai document dans un
 hôte hors écran et mesure cette mise en place.
 
 **La formule d'autorité peut être en gras.** Elle ne se réglait qu'en italique ou en normal
@@ -3082,7 +3082,7 @@ base, partagée.
 | `root.createServerSocket` (API du service) | appels `fetch` directs vers `/v1/…` (nginx → service Node) |
 
 `server/web/index.html` est la coquille de cette édition (l'`index.html` du dépôt sert la
-démonstration statique, et `main.pjs` n'est que son manifeste). `remote.js` choisit son
+démonstration statique). `remote.js` choisit son
 transport : le canal de l'environnement s'il existe, sinon HTTP si
 `window.__SCRIBA_SELF_HOSTED__` est posé par le déploiement. Le mode de persistance par défaut y devient « serveur externe » sur la **même
 origine**, et le jeton d'écriture est injecté au démarrage du conteneur (voir
@@ -3094,7 +3094,6 @@ migration depuis la démonstration : `docs/ADMINISTRATION.md`.
 ## Architecture
 
 ```
-main.pjs                  manifeste de la page publiée (métadonnées + greffons de la plateforme)
 index.html                coquille : script serveur (LE SERVICE) + <link> + <div id="app"> + module
 src/SPEC.md               spécification
 src/docs/ADMINISTRATION.md  DOCUMENTATION D'ADMINISTRATION ET D'EXPLOITATION (auto-hébergement, sécurité, sauvegardes)

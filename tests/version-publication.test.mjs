@@ -74,9 +74,9 @@ test("cleIdempotencePublication : la clé porte l'expression, et deux expression
 
 const SKIP = "index.html illisible ici";
 
-// L'adresse d'`index.html` : au-dessus de `tests/`, dans les deux dispositions
-// (dépôt livré et atelier). Un module sans adresse hiérarchique ne doit pas
-// faire échouer l'épreuve, seulement la faire changer de chemin.
+// L'adresse d'`index.html` : au-dessus de `tests/`, ancrée à ce fichier. Un
+// module sans adresse hiérarchique ne doit pas faire échouer l'épreuve,
+// seulement la faire changer de chemin.
 async function lireIndex() {
   const noms = [];
   try {

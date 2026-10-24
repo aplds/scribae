@@ -7,10 +7,9 @@
 // blanc. Ce contrôle attrape donc la faute de frappe, la parenthèse fermante
 // manquante, la virgule de trop, la chaîne non terminée.
 //
-// CE QU'IL PARCOURT. Le dossier QUI PORTE l'outillage (`scripts/` et `tests/`,
-// à la racine du dépôt livré ; tout l'arbre de l'atelier, où tout voisine sous
-// `src/`) : le code de l'application est donc vu dans les deux dispositions,
-// sans chemin à tenir à jour. Sont écartés `node_modules`, les dossiers
+// CE QU'IL PARCOURT. La racine du dépôt — l'outillage (`scripts/`, `tests/`)
+// comme le code de l'application (`src/`) — sans chemin à tenir à jour. Sont
+// écartés `node_modules`, les dossiers
 // commençants par un point (`.git`, `.github`) et `data/` — le rangement par
 // fichiers d'un service auto-hébergé (voir docs/ADMINISTRATION.md), qui ne
 // contient pas de JavaScript.

@@ -9,9 +9,9 @@ Demande : « assure toi que toute la doc soit à jour ». Le détail est au `CHA
 
 - [x] **`POST /v1/relais` entre dans la référence de l'API** (`src/lib/api-reference.js` +
       `docs/API.md` régénéré, écran « API REST » suivi) avec ses codes d'erreur.
-- [x] **Chapeau du dépôt** (`docs/GITHUB.md`), **chiffres du banc** (`docs/ATELIER.md`,
-      `docs/INDUSTRIALISATION.md`, `src/README.md`), **tableau des épreuves**
-      (`src/tests/README.md`), **arborescence du service** (`src/server/README.md`),
+- [x] **Chapeau du dépôt** (la page d'accueil du dépôt), **chiffres du banc**
+      (`docs/INDUSTRIALISATION.md`, `src/README.md`), **tableau des épreuves**
+      (`tests/README.md`), **arborescence du service** (`src/server/README.md`),
       **exemples Docker** (`docs/DOCKER.md`) : réalignés.
 
 **Ce qui reste ouvert** : inchangé — voir la section 1.6.3q ci-dessous (CI à voir
@@ -285,7 +285,7 @@ contre registre, thèmes, etc.). Il a trouvé le défaut que la demande soupçon
       les décisions publiées des délégations, la résolution des liens ELI.
 - [x] **La cohérence en plus** : le recueil relit ses informations quand un billet **publié au
       poste** manque à la liste affichée — la rubrique se répare au redessin suivant.
-- [x] **La régression est tenue** : `src/tests/relecture.test.mjs` (3 épreuves) et le parcours
+- [x] **La régression est tenue** : `tests/relecture.test.mjs` (3 épreuves) et le parcours
       « Les informations du recueil ne s'effacent pas, et se réparent » (le trentième).
 - [x] **Le jeu d'épreuves** : **243 fichiers** sans faute de syntaxe, **451/462** épreuves
       (0 échec, **11 sauts** d'environnement), **30/30 parcours** verts, et les **18 adresses du
@@ -407,10 +407,10 @@ Reste ouvert, et dit comme tel :
       parcours) et leurs réparations sont au `CHANGELOG.md` (1.6.3k). Reste à **voir la CI verte**
       sur un envoi : NC-I-008 reste ouverte jusque-là.
 - [x] **Rejouer les parcours du navigateur en intégration continue** (Playwright) — FAIT en 1.6.3d.
-      `src/tests/parcours-navigateur.mjs` rejoue les 29 parcours dans un vrai Chromium : serveur de
+      `tests/parcours-navigateur.mjs` rejoue les 29 parcours dans un vrai Chromium : serveur de
       fichiers local, applications montées en édition statique, session d'administration ouverte,
       verdict + annotations `::error::` + capture d'écran en artefact. Travail `parcours` ajouté à
-      `src/github/ci.yml` (avisant : `continue-on-error`). Vérifié dans l'aperçu : **29/29** sur un
+      `.github/workflows/ci.yml` (avisant : `continue-on-error`). Vérifié dans l'aperçu : **29/29** sur un
       profil vierge. NC-I-002 peut être levée.
 - [x] **`piece-depot` est instable sous l'émulateur de l'éditeur — traité (1.6.3l).** La cause
       était le **statut**, comme la fiche le pressentait : `supprimerPiece` rend `false` pour un
@@ -510,12 +510,8 @@ limité. »
 
 Reste ouvert :
 
-- [ ] **Rejouer les parcours en intégration continue** (Playwright ou équivalent) : ils demandent
-      aujourd'hui un navigateur, donc une main — voir `docs/INDUSTRIALISATION.md` § 4. Le harnais de
-      l'atelier ne les remplace pas.
-- [ ] **Le harnais jette-t-il un écran de fumée ?** Il rejoue la CI, il ne la remplace pas : garder
-      la règle « une épreuve qui échoue ici et passe en Node est un écart à documenter », et tenir
-      la liste des écarts connus (`docs/ATELIER.md` § 3.3) à jour à chaque note.
+- [x] **Rejouer les parcours en intégration continue** (Playwright ou équivalent) — FAIT en
+      1.6.3d (`tests/parcours-navigateur.mjs`, travail « Parcours critiques » de la chaîne).
 
 ## Version 1.6.3a — la transmission au contrôle de légalité se règle en trois régimes (livré)
 
@@ -1254,8 +1250,8 @@ publication → ELI) fonctionne sans serveur, y compris après rechargement.
       statique sur un **service distant** (`src/server/`, ou toute installation au même contrat) :
       le stockage local reste (réglages, session, file d'attente), les collections passent par
       l'API, et tous les postes voient le même référentiel. Le service doit autoriser l'origine
-      de la page (`CORS_ORIGINS`). Documenté dans `docs/GITHUB.md` (« Travailler à plusieurs tout
-      en restant sur GitHub Pages ») ; `__SCRIBA_STATIC_SHARED__` dit au bandeau qu'il ne doit
+      de la page (`CORS_ORIGINS`). Documenté dans `src/README.md` (« Démonstration statique ») ;
+      `__SCRIBA_STATIC_SHARED__` dit au bandeau qu'il ne doit
       pas annoncer « rien n'est partagé ».
 - [x] **Bandeau « démonstration statique ».** Le bandeau de tête (atelier **et** recueil public)
       dit maintenant, en édition statique, que la page héberge son propre service et que rien

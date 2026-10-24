@@ -6,7 +6,7 @@ mettre en place. Il complète `src/README.md` (architecture) — voir aussi
 `src/server/README.md` pour l'exploitation.
 
 > **Où vivent ces fichiers.** Le dépôt est servi **tel quel** : sa racine porte
-> `index.html`, `main.pjs`, l'**outillage** (`scripts/`, `tests/`, `package.json`,
+> `index.html`, l'**outillage** (`scripts/`, `tests/`, `package.json`,
 > `.github/workflows/ci.yml`) et le **code** sous `src/`. Rien n'est compilé, et
 > un fichier ne vit qu'à UN endroit (la disposition est dans `src/README.md`,
 > § « Disposition des fichiers »).
@@ -160,8 +160,8 @@ s'installer (module absent) est **sauté**, jamais vert par accident.
 
 ## 3. L'intégration continue
 
-`src/github/ci.yml` (recopié par l'export en `.github/workflows/ci.yml`) exécute
-**trois** travaux à chaque `push`, chaque demande de fusion, et **sur demande**
+`.github/workflows/ci.yml` exécute **trois** travaux à chaque `push`, chaque
+demande de fusion, et **sur demande**
 (`workflow_dispatch` — de quoi rejouer la chaîne sans rien livrer, ce qui est la
 façon de relire un échec qu'on vient de corriger) :
 

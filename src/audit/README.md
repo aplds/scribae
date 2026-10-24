@@ -64,7 +64,7 @@ L'agent doit, dans cet ordre :
 4. écrire le rapport dans `rapports/AUDIT-SCRIBAE-AAAA-MM-JJ.md` ;
 5. mettre à jour le registre (statuts, nouvelles entrées, historique des audits) ;
 6. **joindre le rapport** à sa réponse finale (en markdown) ;
-7. **ne rien corriger** : un audit constate et propose ; il ne modifie ni `main.pjs`, ni
+7. **ne rien corriger** : un audit constate et propose ; il ne modifie ni
    `index.html`, ni le reste de `src/`.
 
 ## Règles

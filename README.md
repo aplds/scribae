@@ -355,7 +355,7 @@ Le dépôt range **l'outillage à la racine** et **le code dans `src/`** :
 
 | | |
 |---|---|
-| `index.html`, `main.pjs` | la page publiée : le gabarit et le code du service de démonstration statique |
+| `index.html` | la page publiée : le gabarit et le code du service de démonstration statique |
 | `src/lib/` | le cœur métier — modules **purs** : compilation, expressions, numérotation, signature, exports, PDF/A |
 | `src/ui/`, `src/css/` | les vues et les feuilles de style |
 | `src/server/` | le service compagnon auto-hébergé (nginx + Node + MariaDB) et le pilote de persistance |

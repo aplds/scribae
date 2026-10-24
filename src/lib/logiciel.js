@@ -14,7 +14,7 @@
 // au service de le lire, sans embarquer l'application.
 //
 // Pour changer de nom, de licence ou d'adresse de documentation, tout passe par
-// ce fichier (et par `$meta` dans main.pjs pour le titre de la page).
+// ce fichier (et par le `<title>` de `index.html` pour le titre de la page).
 // ============================================================================
 
 // Le nom du logiciel, tel qu'il s'affiche : interface, pieds de page, bannière

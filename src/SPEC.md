@@ -2744,7 +2744,7 @@ référentiel, applique par-dessus les variables du `.env`, et ne rend qu'une **
 du navigateur : le service découvre le fournisseur, échange le code (avec le vérificateur PKCE que
 le navigateur a gardé le temps de l'aller-retour), vérifie le jeton d'identité, en tire le compte
 (règles de `src/lib/oidc.js` **reprises à l'identique** — la concordance des deux implémentations
-est éprouvée, `src/tests/purs.test.mjs`) et ouvre **sa** session (`POST /v1/auth/annuaire`). Deux
+est éprouvée, `tests/purs.test.mjs`) et ouvre **sa** session (`POST /v1/auth/annuaire`). Deux
 raisons, et deux conséquences :
 
 * **un fournisseur qui n'ouvre pas le CORS se branche** : aucun appel ne part d'une autre origine,
@@ -3484,8 +3484,8 @@ le lui apporte — une épreuve (`logiciel-engendre.test.mjs`) refuse un miroir 
 paraît que sur le **démarrage du service** : les commandes d'administration (`--reconcilier`,
 `--migrate`, `--mot-de-passe`) gardent un journal qui n'est que la trace du geste qu'on y a fait.
 
-La coquille de cette édition est `server/web/index.html` : l'`index.html` et le `main.pjs`
-d'origine ne servent qu'à l'édition en ligne. En auto-hébergement, le mode de persistance par
+La coquille de cette édition est `server/web/index.html` : l'`index.html` du dépôt sert
+la démonstration statique. En auto-hébergement, le mode de persistance par
 défaut est « serveur externe » sur la même origine, et le jeton d'écriture est injecté au
 démarrage du conteneur.
 
