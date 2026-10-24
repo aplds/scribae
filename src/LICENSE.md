@@ -1,17 +1,15 @@
 # Licence — Scribae
 
 Ce document **tranche par écrit** ce que la documentation laissait divergent : la
-page publique du dépôt annonçait « tous droits réservés » (`src/docs/GITHUB.md`,
-section « Licence ») alors que le dépôt porte un fichier **`LICENSE` en
-GPL-3.0**, exclu de l'archive d'export (voir `src/README.md`, « Exporter le dépôt
-GitHub »). Il distingue trois objets, qui n'ont ni le même auteur ni le même
-régime.
+page d'accueil du dépôt annonçait « tous droits réservés » alors que le dépôt
+porte un fichier **`LICENSE` en GPL-3.0**. Il distingue trois objets, qui n'ont
+ni le même auteur ni le même régime.
 
 > **Confirmation.** L'arbitrage ci-dessous s'appuie sur ce que le dépôt porte
 > déjà. Si le propriétaire entend un autre régime (EUPL 1.2, MIT, Apache 2.0,
 > ou « tous droits réservés »), il **remplace le fichier `LICENSE` à la racine du
-> dépôt**, puis ajuste ce document et la section « Licence » de
-> `src/docs/GITHUB.md` : les trois doivent dire exactement la même chose.
+> dépôt**, puis ajuste ce document et la section « Licence » de `README.md` :
+> les deux doivent dire exactement la même chose.
 
 ---
 
@@ -60,9 +58,11 @@ direction du propriétaire du dépôt. Position retenue :
 - **aucune licence tierce n'est héritée** de ce fait : le code produit n'intègre
   pas de composant sous licence incompatible. Les dépendances externes, elles,
   gardent leurs licences respectives (voir ci-dessous) ;
-- les **dépendances de plateforme** (`ai-text-plugin` pour les assistants,
-  stockage clé/valeur, canal du service, relais HTTP) sont **importées par nom**
-  depuis Perchance (`main.pjs`) et **ne résident pas** dans ce dépôt.
+- les **ports d'hôte** (moteur de langage des assistants, stockage
+  clé/valeur, canal du service, relais HTTP) sont des **capacités facultatives de
+  l'hébergement** : l'application les détecte à l'exécution et s'en passe quand
+  l'hébergement ne les fournit pas — aucun n'est requis, et **aucun ne réside**
+  dans ce dépôt.
 
 Table des dépendances du service auto-hébergé (`src/server/mysql/package.json`) :
 

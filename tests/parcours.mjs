@@ -12,13 +12,13 @@
 // quelques PARCOURS CRITIQUES, joués sur l'application réelle, dans l'ordre où un
 // agent les rencontre.
 //
-// COMMENT ON S'EN SERT. Le module s'importe DANS la page de l'application (aperçu
-// de l'éditeur, ou application déployée), ce qui lui donne accès aux mêmes
-// modules que l'application — les mêmes instances, donc le même état :
+// COMMENT ON S'EN SERT. Le module s'importe DANS la page de l'application
+// (la démonstration statique, ou une application déployée), ce qui lui donne
+// accès aux mêmes modules que l'application — les mêmes instances, donc le
+// même état :
 //
 //     import("tests/parcours.mjs").then((p) => p.lancerParcours())
-//     (dans l'atelier : import("https://perchance.org/src/tests/parcours.mjs") — voir
-//     docs/INDUSTRIALISATION.md § 2)
+//     (voir docs/INDUSTRIALISATION.md § 2)
 //
 // Chaque parcours rend "" quand il passe, ou la RAISON de son échec. Aucun
 // parcours ne modifie durablement l'application : ce qui est changé (la route,
@@ -30,17 +30,13 @@
 // `tests/conformite-service.mjs`.
 // ============================================================================
 
-// OÙ VIT LE CODE. Ce module sert DEUX dispositions : dans le dépôt livré il est
-// `tests/parcours.mjs` et le code est `../src/…` ; dans l'atelier il est
-// `src/tests/parcours.mjs` et le code est `../…`. On essaie les deux, une seule
-// fois, et l'on garde celui qui porte `lib/version.js` : un chemin d'import figé
-// serait faux dans l'autre disposition — c'est le piège de NC-I-009.
+// OÙ VIT LE CODE. Ce module est `tests/parcours.mjs` et le code est `../src/…`.
+// Le chemin d'import est constaté, une seule fois : on garde celui qui porte
+// `lib/version.js` — un chemin figé serait faux si l'arborescence changeait
+// (c'est le piège de NC-I-009).
 const RACINE_CODE = await (async () => {
-  for (const essai of ["../", "../src/"]) {
-    try { await import(essai + "lib/version.js"); return essai; }
-    catch (e) { /* disposition suivante */ }
-  }
-  return "../";
+  try { await import("../src/lib/version.js"); return "../src/"; }
+  catch (e) { return "../"; }
 })();
 
 // Ce dont un parcours a besoin : de quoi lire et manœuvrer l'application. On

@@ -23,6 +23,44 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
+## [1.6.3w] — 2026-10-24 — Le legs Perchance est supprimé
+
+**Retiré**
+
+- **L'atelier en ligne (Perchance) n'a plus aucune trace dans le dépôt.** Le
+  manifeste `main.pjs`, le harnais de vérification sans terminal
+  (`scripts/harnais-atelier.mjs`) et la méthode de l'atelier
+  (`src/docs/ATELIER.md`) sont supprimés ; l'écran « Documentation technique »
+  n'en propose plus l'entrée, et les commentaires de l'outillage, de la chaîne
+  et des épreuves ne parlent plus de la double disposition. Le prompt d'audit
+  (document vivant) est mis à jour : sa cible est la démonstration statique.
+- **Les chemins morts disparaissent des documents** : plus de référence à
+  `main.pjs`, à `docs/GITHUB.md` ou à l'ancienne arborescence `src/tests/` /
+  `src/scripts/` — les chemins cités sont ceux du dépôt.
+
+**Éprouvé** : 256 fichiers sans faute de syntaxe ni de style, **152 épreuves**
+(0 échec, 2 sauts d'environnement), **333/333** pour le service, le miroir
+engendré conforme (4/4).
+
+
+## [1.6.3v] — 2026-10-24 — La doc agent dit le nouveau monde : le dépôt est la source unique
+
+**Modifié**
+
+- **Les consignes aux agents disent le dépôt, et seulement le dépôt.** Le flux de
+  travail « Perchance ↔ GitHub », les recettes d'export et la double disposition
+  des fichiers disparaissent : on développe dans le dépôt sur `dev`, une branche
+  par sujet, une PR par sujet vers `dev` avec la chaîne verte avant relecture, et
+  chaque livraison laisse une trace — une entrée datée au changelog et
+  `APP_VERSION` à jour.
+
+**Retiré**
+
+- **L'atelier en ligne (Perchance) et son harnais de vérification sans Node ne
+  figurent plus dans la doc agent.** Le mot « atelier » reste pour l'écran interne
+  de l'application, inchangé.
+
+
 ## [1.6.3u] — 2026-10-01 — L'acte modificatif se referme comme l'acte modifié
 
 Demande : « quand un acte a été modifié, la vue en version consolidée est complètement cassée

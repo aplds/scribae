@@ -27,30 +27,18 @@ exploitants) et `server/README.md` (installation Docker). La démonstration publ
 production, le dossier `server/` fournit la pile complète (nginx + service Node + MySQL/MariaDB)
 et l'édition web de l'application.
 
-## Flux de travail : Perchance ↔ GitHub
+## Flux de travail — le dépôt est la source de vérité
 
 **Consigne de travail permanente. À lire avant toute modification du code.**
 
-1. **Le développement se fait ici, sur Perchance.** `main.pjs`, `index.html` et `src/` sont la
-   copie de travail : c'est là qu'on écrit, qu'on essaie et qu'on vérifie dans l'aperçu.
-   Rien d'autre ne compte tant que la version n'est pas figée.
-2. **Les versions finalisées sont déposées sur GitHub.** Le dépôt est la référence *publiée* :
-   une version n'existe qu'une fois poussée là-bas. C'est l'utilisateur qui dépose (ou qui
-   demande de préparer le dépôt) — on ne considère jamais une version comme livrée sans cela.
-3. **L'utilisateur peut fournir un lien GitHub** (dépôt, dossier, fichier, archive). Dans ce
-   cas, **avant d'écrire la moindre ligne** :
-   - **comparer** les deux états : lire dans le dépôt `src/lib/version.js` (`APP_VERSION` et
-     `APP_RELEASED`) et la **première entrée datée** de `src/CHANGELOG.md`, puis les comparer à
-     ceux d'ici ;
-   - **GitHub au même niveau, ou en retard** → on travaille ici normalement, sur la copie
-     Perchance ;
-   - **GitHub plus récent** → **on met d'abord Perchance à jour depuis GitHub** : récupérer les
-     fichiers du dépôt, les réécrire **à l'identique** dans `src/`, `main.pjs` et `index.html`,
-     vérifier que l'application tourne encore (aperçu live, console sans erreur, un écran de
-     chaque famille), **puis seulement** traiter la demande en cours. On ne fusionne pas à
-     moitié : c'est le dépôt qui fait foi, on le reporte tel quel.
-   - En cas de doute sur la fraîcheur, **demander** plutôt que d'écraser : une version Perchance
-     plus avancée qui écrase le dépôt fait perdre du travail.
+1. **Le développement se fait ici, dans le dépôt.** `index.html` et `src/` sont la source :
+   c'est là qu'on écrit, qu'on vérifie (`npm run verifier`) et que la CI juge. Rien d'autre
+   ne compte tant que la version n'est pas figée.
+2. **On travaille sur la branche `dev`, une branche par sujet** (`vibe/<sujet>` ou le nom du
+   chantier), jamais directement sur `main` : `main` ne reçoit que des fusions relues, et la
+   branche de sujet part toujours du dernier `dev`.
+3. **Une pull request par sujet vers `dev`**, la CI verte avant toute demande de relecture.
+   Un changement, un sujet : pas de renommage ni de réorganisation « au passage ».
 4. **Chaque livraison laisse une trace** : ouvrir une entrée datée dans
    **`src/CHANGELOG.md`** (rubriques `Ajouté` / `Modifié` / `Corrigé` / `Retiré`) et vérifier
    que `APP_VERSION` (`src/lib/version.js`) correspond **au titre de la première entrée datée**,
@@ -63,107 +51,40 @@ et l'édition web de l'application.
 5. **Ne jamais livrer deux fois le même numéro.** Si le dépôt a déjà le numéro d'ici, c'est
    qu'une livraison a eu lieu : incrémenter avant de figer, jamais réutiliser.
 
-### Récupérer un dépôt GitHub (recette)
+### Disposition des fichiers
 
-- **Un fichier** : `https://raw.githubusercontent.com/<compte>/<dépôt>/<branche>/<chemin>`
-  (par exemple `.../main/src/lib/version.js`) — à enregistrer dans `scratch/` puis à comparer
-  avec le fichier de `src/`.
-- **Le dépôt entier** :
-  `https://github.com/<compte>/<dépôt>/archive/refs/heads/<branche>.zip` → décompresser dans
-  `scratch/` (outil `execute_js` + `@zip.js/zip.js`) et comparer fichier par fichier avec
-  `src/`.
-- **Comparer avant de copier** : le dépôt peut contenir ce qui n'appartient pas à l'édition
-  Perchance (outillage, `node_modules`, artefacts de build, `.git`). `src/` ne doit recevoir
-  que ce que le générateur sert réellement (voir « Workspace » dans les notes de l'agent).
-- Le dépôt contient aussi `.nojekyll` (obligatoire pour GitHub Pages, voir plus bas) : sa
-  présence dans le dépôt ne veut pas dire qu'il doit exister dans `src/`.
+**Un fichier, un seul endroit** — l'outillage à la racine, le code sous `src/`, et rien en
+double :
 
-### Exporter le dépôt GitHub (recette)
+| À la racine du dépôt | Pourquoi |
+|---|---|
+| `scripts/**` | l'outillage se lance depuis la racine (`npm run lint`, `npm test`) |
+| `tests/**` | les épreuves transverses (voir `tests/README.md`) |
+| `compose-exemple/**` | l'exemple de premier déploiement, que l'administrateur cherche à la racine |
+| `package.json`, `package-lock.json` | le manifeste et le verrou, lus par npm, `npm ci` et la CI |
+| `.github/workflows/ci.yml` | la chaîne d'intégration |
+| `.gitignore` | dépendances, secrets de déploiement (`.env*`), dossier de données `data/` |
+| `README.md` | la page d'accueil du dépôt |
+| `AGENTS.md`, `CLAUDE.md` | les consignes d'un agent qui reprend le dépôt |
+| `index.html` | la page et son code, servies par GitHub Pages |
+| `CNAME`, `.nojekyll` | l'adresse publiée, et de quoi empêcher Jekyll |
+| `src/**` | l'application, servie telle quelle par le navigateur |
 
-L'export est un **zip dont la racine EST le dépôt**. C'est la racine qui est lue par un
-intégrateur, par une forge et par un agent : l'outillage y est donc rangé **à sa place
-attendue**, et le code de l'application sous `src/`.
+Les commandes du manifeste désignent l'outillage **là où il vit** (`scripts/…`, `tests/`,
+`src/server/mysql/`) : rien n'est dupliqué, et `npm run verifier` fonctionne **depuis la
+racine**. `scripts/verifier-syntaxe.mjs` et `scripts/verifier-style.mjs` retrouvent leur
+arborescence tout seuls (voir `scripts/racine-code.mjs`).
 
-**AVANT DE CONSTRUIRE L'ARCHIVE : comparer avec le dépôt.** Un export **écrase** ce qu'il
-contient, et un dépôt peut avoir avancé d'un seul fichier — un registre d'audit plus récent, un
-rapport qu'on n'a pas ici. On lit donc, au minimum, `src/lib/version.js` (`APP_VERSION`,
-`APP_RELEASED`) et le **premier titre daté** de `src/CHANGELOG.md` du dépôt, et l'on liste ses
-fichiers (`GET /repos/<compte>/<dépôt>/git/trees/<branche>?recursive=1` — un seul appel, et l'on
-voit tout de suite ce qui manque d'un côté ou de l'autre) :
-
-- **dépôt au même niveau, ou en retard** → on construit l'archive ;
-- **dépôt plus récent, ou porteur d'un fichier qu'on n'a pas** → **on récupère d'abord** ce qui
-  manque (rapports, fiches de registre, correctifs), on le vérifie, **puis** on construit.
-
-La leçon vient de loin : un export a déjà recouvert un registre d'audit plus récent que le nôtre
-(voir `audit/REGISTRE-NON-CONFORMITES.md`, NC-I-017, et `audit/README.md` § « les deux lignées »).
-Ce qui est perdu par un écrasement ne se retrouve pas dans l'archive suivante.
-
-| Dans l'atelier | À la racine du dépôt | Pourquoi |
-|---|---|---|
-| `src/scripts/**` | `scripts/**` | l'outillage se lance depuis la racine (`npm run lint`, `npm test`) |
-| `src/tests/**` | `tests/**` | les épreuves transverses (voir `tests/README.md`) |
-| `src/compose-exemple/**` | `compose-exemple/**` | l'exemple de premier déploiement, que l'administrateur cherche à la racine |
-| `src/package.json` | `package.json` | le manifeste, lu par npm et par la forge |
-| `src/package-lock.json` | `package-lock.json` | le verrou de dépendances, lu par `npm ci` et la CI |
-| `src/github/ci.yml` | `.github/workflows/ci.yml` | la chaîne d'intégration |
-| `src/github/gitignore` | `.gitignore` | |
-| `src/docs/GITHUB.md` | `README.md` | la page d'accueil du dépôt |
-| `src/AGENTS.md` | `AGENTS.md` | les consignes d'un agent qui reprend le dépôt |
-| `src/CLAUDE.md` | `CLAUDE.md` | le pointeur de Claude Code vers `AGENTS.md` |
-| `index.html`, `main.pjs` | `index.html`, `main.pjs` | la page et son code, servis par GitHub Pages |
-| *(écrit par l'export)* | `CNAME`, `.nojekyll` | l'adresse publiée, et de quoi empêcher Jekyll |
-| tout le reste de `src/` | `src/**` | l'application, servie telle quelle par le navigateur |
-
-**Un fichier, un seul exemplaire.** Une source recopiée à la racine **ne reste pas** dans
-`src/` : le dépôt ne porte ni deux `package.json` ni deux outils — un doublon ferait corriger
-le mauvais fichier en silence. L'export **exclut** donc de l'arbre `src/` tout ce qu'il déplace
-(`scripts/`, `tests/`, `compose-exemple/`, `package.json`, `package-lock.json`, `github/`, `AGENTS.md`, `CLAUDE.md`,
-`docs/GITHUB.md`). Conséquence pour une mise à jour : ce qui a changé de place doit être
-**supprimé** du dépôt
-(`git rm -r src/scripts src/tests src/compose-exemple src/github src/package.json src/package-lock.json src/docs/GITHUB.md`)
-avant de décompresser le zip par-dessus — sinon les anciens chemins demeurent, et l'on corrige un
-fichier que personne ne lit.
-
-**Dans l'atelier, l'outillage vit sous `src/`** (`src/scripts/`, `src/tests/`) : c'est le seul
-arbre que la plateforme conserve d'une séance à l'autre. Il est pourtant **écrit pour la
-disposition livrée** — le code y est `../src/…`, l'outillage `../scripts/…`. Trois choses le
-rendent tenable : `tests/README.md` le dit à qui ouvre un fichier d'épreuve, `scripts/racine-code.mjs`
-**constate** la racine du code au lieu de la supposer, et le harnais de l'atelier
-(`scripts/harnais-atelier.mjs`) **simule la disposition livrée** (voir `docs/ATELIER.md` § 3).
-
-Recette : écrire les fichiers dans un zip (outil `execute_js` + `@zip.js/zip.js`, niveau 9,
-dates fixes pour un export reproductible), en excluant `node_modules`, `scratch/`, `.git` et
-les fichiers système, en appliquant la table ci-dessus (et en écartant de `src/` ce qu'elle
-déplace). Le nom du fichier porte la version courante — `scribae-v<APP_VERSION>-github.zip` — et
-l'archive se décompresse **à la racine** du dépôt.
-
-Les fichiers sont écrits en **0644**, sauf les scripts (`*.sh`), qui doivent l'être en
-**0755** : c'est ce que `git` enregistre (le bit exécutable), et ce qu'une décompression
-ordinaire restitue. `@zip.js/zip.js` n'écrit que 0644 — le mode se corrige après coup dans
-les **attributs externes** des entrées de l'annuaire central du zip (champ `external file
-attributes`, 16 bits de poids fort), en laissant le reste de l'archive intact.
-
-Le zip porte en outre **`package.json`** et **`package-lock.json`** (recopies de `src/`) et
-**`.github/workflows/ci.yml`** (recopie de `src/github/ci.yml`) : la racine est lue par
-l'intégrateur et par la forge, `src/` par le navigateur. Les commandes du manifeste désignent
-l'outillage **là où il vit dans le dépôt** (`scripts/…`, `tests/`, `src/server/mysql/`) : rien
-n'est dupliqué, et `npm run verifier` fonctionne **depuis la racine**. `scripts/verifier-syntaxe.mjs`
-et `scripts/verifier-style.mjs` retrouvent leur arborescence tout seuls, qu'ils soient lancés
-depuis la racine du dépôt livré ou depuis l'atelier, où tout voisine sous `src/`.
-
-Le `.gitignore` ajouté à la racine vaut ceci — il est recopié de
-`src/github/gitignore`, qui en est la source (comme `ci.yml`), et il ignore
-`data/` : le dossier du rangement par FICHIERS (`STOCKAGE=fichier`) contient les
-actes, les comptes et les sessions, et n'a rien à faire dans un dépôt public. Le
-`.env` n'est **jamais** commité : il porte les secrets de déploiement (voir
-`docs/VARIABLES.md`, qui ne montre aucune valeur).
+Le `.gitignore` de la racine vaut ceci — et il ignore `data/` : le dossier du rangement par
+FICHIERS (`STOCKAGE=fichier`) contient les actes, les comptes et les sessions, et n'a rien à
+faire dans un dépôt public. Le `.env` n'est **jamais** committé : il porte les secrets de
+déploiement (voir `docs/VARIABLES.md`, qui ne montre aucune valeur).
 
 ```gitignore
 # Dépendances
 node_modules/
 
-# Secrets de déploiement — jamais commités (voir src/server/env.example)
+# Secrets de déploiement — jamais committés (voir src/server/env.example)
 .env
 .env.local
 
@@ -185,7 +106,7 @@ Thumbs.db
 .vibe/
 ```
 
-Le `CNAME` ajouté à la racine vaut ceci — **une ligne**, sans schéma ni barre oblique. C'est
+Le `CNAME` à la racine vaut ceci — **une ligne**, sans schéma ni barre oblique. C'est
 l'adresse à laquelle GitHub Pages sert la démonstration (voir « Démonstration statique »
 ci-dessus), et par conséquent **l'origine** à laquelle le stockage des visiteurs est attaché.
 La changer — ou publier la même page sous une seconde adresse — revient à ouvrir une
@@ -196,9 +117,8 @@ produites. Un fork remplace ce fichier, ou le supprime.
 demo.scribae.eu
 ```
 
-Le dépôt porte aussi des fichiers que l'export **ne contient pas** : `LICENSE` (GPL-3.0), le
-dossier `.git/`, et d'éventuels fichiers tiers. On décompresse donc l'archive **par-dessus un
-clone existant**, jamais dans un dossier vidé au préalable — sinon on supprime la licence.
+Le dépôt porte aussi des fichiers qui ne servent pas au site : `LICENSE` (GPL-3.0), le
+dossier `.git/`, et d'éventuels fichiers tiers.
 
 ```sh
 git add -A
@@ -206,24 +126,8 @@ git commit -m "<titre de l'entrée de changelog de la version>"
 git push
 ```
 
-`src/docs/GITHUB.md` et le `README.md` du dépôt doivent rester **cohérents** : le premier est
-la source, le second la copie publiée (c'est ce que l'export recopie).
-
 **Vérifier et tester avant de livrer** — `npm run verifier` (syntaxe, style, épreuves), la CI, et
-ce qui reste à mettre en place : `docs/INDUSTRIALISATION.md`. Des fichiers de `src/` sont
-destinés à la **racine du dépôt** et y sont recopiés par l'export (`package.json`,
-`package-lock.json`, `scripts/`, `tests/`, `github/ci.yml` → `.github/workflows/ci.yml`, `AGENTS.md`,
-`CLAUDE.md`) — même convention que `docs/GITHUB.md` (→ `README.md`).
-
-**Destinataire de `docs/GITHUB.md` : un tiers qui veut *se servir* du logiciel** — un agent, un
-responsable de service, un élu curieux —, **jamais un développeur**, et surtout jamais la
-personne qui édite ce générateur. Conséquence : on n'y parle **ni de Perchance, ni de `src/`,
-ni du flux de travail, ni des recettes d'export, ni de `APP_VERSION`** — tout cela vit ici ou
-dans `SPEC.md`. On y parle de ce que le logiciel fait, de la façon de l'essayer, de ce qu'il
-advient des données, et de la façon de l'installer (Pages ou serveur). Les seuls renvois
-techniques admis sont `src/server/README.md` et `src/docs/ADMINISTRATION.md`, qui s'adressent
-au service informatique du lecteur — et l'on dit à qui ils s'adressent. **Toute consigne
-destinée à l'éditeur du générateur reste dans ce fichier-ci.**
+ce qui reste à mettre en place : `docs/INDUSTRIALISATION.md`.
 
 ## Identité du logiciel (nom + marque)
 
@@ -245,10 +149,10 @@ Le nom est **réexporté** par `src/ui/brand.js`, la licence et la documentation
 `src/ui/mention.js` : l'interface n'a donc qu'un module d'identité à connaître, et les trois pieds
 de page ne peuvent pas diverger de la bannière du service.
 
-À quoi d'autre toucher si le nom change : `$meta.title` / `description` (`main.pjs`), le
-`<link rel="icon">` de `index.html`, le nom des autorités de certification de la
-démonstration (`src/lib/signature.js`), et les captures du guide (leur en-tête montre le
-nom — voir plus bas). Et **régénérer le miroir du service** (`node scripts/generer-logiciel.mjs`,
+À quoi d'autre toucher si le nom change : le `<title>` de `index.html`, le
+`<link rel="icon">` de `index.html`, le nom des autorités
+de certification de la démonstration (`src/lib/signature.js`), et les captures du guide
+(leur en-tête montre le nom — voir plus bas). Et **régénérer le miroir du service** (`node scripts/generer-logiciel.mjs`,
 voir `src/server/README.md`) : sans quoi le journal du conteneur continuerait d'annoncer l'ancien
 nom.
 
@@ -262,10 +166,10 @@ nom.
 La démonstration est décidée par le **DÉPLOIEMENT** : un seul commutateur, **`DEMO`** dans le
 `.env` du service (voir `src/server/env.example`). La question se tranche à **un seul endroit**,
 `demoActif()` (`src/lib/demo.js`) ; `config.brand.demo` n'en est qu'un **miroir** — il voyage avec
-les données exportées et importées, et fait foi quand aucun déploiement ne parle (aperçu en ligne,
-page statique).
+les données exportées et importées, et fait foi quand aucun déploiement ne parle (page statique,
+service embarqué).
 
-- **Allumée** (le défaut de l'aperçu en ligne ; `DEMO=true`, ou `AUTH_MODE=demo`, ou
+- **Allumée** (le défaut de la démonstration en ligne ; `DEMO=true`, ou `AUTH_MODE=demo`, ou
   `DEMO_ACCOUNTS=true`) : l'application sème le **jeu fictif livré** — identité, entités,
   assemblées, services, personnes, rôles, références, familles, trames, actes et comptes — et
   affiche le **bandeau orange** « Démonstration ».
@@ -284,7 +188,8 @@ Le bandeau :
   dans `app.css`. Le bandeau de démonstration l'emporte : les deux ne s'affichent jamais ensemble.
 - **Réglage du texte** : `Administration › Identité › Mention de démonstration` — un **texte
   libre** (`brand.demoText`, vide = phrase d'origine) ; le choix *Afficher / Masquer* ne subsiste,
-  comme réglage du référentiel, que quand **aucun déploiement** ne parle (aperçu, page statique).
+  comme réglage du référentiel, que quand **aucun déploiement** ne parle (page statique, service
+  embarqué).
   **Démonstration éteinte, ces options sont masquées** : une installation en service n'a ni jeu
   fictif ni mention fictive à régler — la carte dit seulement où passer les messages du service.
 - **Les bandeaux d'information** : `Administration › Identité › Bandeaux d'information` — des
@@ -850,8 +755,7 @@ réseau, SSO placé devant l'application). Voir `docs/ADMINISTRATION.md` § 4.
 
 **Où l'éprouver.** Le flux suppose que l'**adresse de retour** soit réellement chargée par le
 navigateur, paramètres compris (`?code=…&state=…`) : testez le fournisseur **sur la page
-déployée**, dans un vrai onglet (l'aperçu d'un environnement d'édition peut ne pas suivre la
-redirection). L'annuaire d'essai, lui, fonctionne partout.
+déployée**, dans un vrai onglet (un aperçu local peut ne pas suivre la redirection). L'annuaire d'essai, lui, fonctionne partout.
 
 **Écrans** : `src/ui/views/connexion.js` (écran de connexion, trois modes : jetons de
 démonstration, comptes locaux à mot de passe, annuaire — le mode mot de passe se réglant au
@@ -1077,7 +981,7 @@ Trois réglages les positionnent, et `styleCss` comme `creerPdfA` les honorent :
 Les deux emblèmes suivent la charte **partout** : l'aperçu, le HTML autonome, le fichier Word (où ils
 sont posés en flottants, Word ne connaissant ni `flex` ni `gap`) et le **PDF/A**, qui les embarque et
 les dessine sur chaque page — la première comprise — au bord du filet, chacun à sa hauteur. Un
-parcours du navigateur (`emblemes-entete`, `src/tests/parcours.mjs`) rend un vrai document dans un
+parcours du navigateur (`emblemes-entete`, `tests/parcours.mjs`) rend un vrai document dans un
 hôte hors écran et mesure cette mise en place.
 
 **La formule d'autorité peut être en gras.** Elle ne se réglait qu'en italique ou en normal
@@ -2252,7 +2156,7 @@ acte se cherche comme ses autres champs). Deux adresses à ne pas
 confondre : `hrefRecueil`/`hrefActe` (relatives, la racine du site et ses clés — `?acte=<clé>`) pour
 **naviguer** dans la page (un lien absolu rechargerait la page publique dans
 son propre cadre), et `adresseRecueil`/`adresseActe` (absolues,
-`perchance.org/<générateur>?acte=<clé>`) pour **citer et partager** l'acte. En **bas de page** —
+l'adresse du site, `?acte=<clé>`) pour **citer et partager** l'acte. En **bas de page** —
 et au bout des résultats de recherche —, le recueil renvoie vers les recueils qu'il ne gère pas et
 vers les sites de référence : voir « Le recueil renvoie vers les recueils qu'il ne gère pas ».
 
@@ -2330,10 +2234,10 @@ liste, toutes les routes de l'atelier répondent `403 atelier_hors_reseau`, et j
 L'application ne fait que **refléter** cet état (`src/lib/atelier-acces.js` : `chargerAcces`,
 `acces`, `atelierRestreint`, `horsReseau`, `agentsAvecActesReserves` ; l'écran `hors-reseau` pour
 l'agent qui arrive d'ailleurs) et le **simuler** (`?ip=` sur `GET /v1/atelier/acces`) : un
-navigateur ne décide jamais de son propre droit d'entrer. Le service de démonstration de la
-plateforme, lui, ne voit pas l'adresse de l'appelant : sa réponse le dit
-(`restriction_appliquee: false` et une **note**), et le simulateur reste juste — c'est aussi ce qui
-explique, dans l'aperçu, qu'un réglage écrit ici ne se voie pas appliqué.
+navigateur ne décide jamais de son propre droit d'entrer. Le service embarqué (édition
+statique), lui, ne voit pas l'adresse de l'appelant : sa réponse le dit
+(`restriction_appliquee: false` et une **note**), et le simulateur reste juste — c'est aussi ce
+qui explique, en édition statique, qu'un réglage écrit ici ne se voie pas appliqué.
 
 **L'identifiant ELI est une adresse, et les liens ELI mènent à l'acte.** Un acte publié cite ses
 fondements par leur identifiant (`eli:/fr/arr/2026/0464/vsl`) : c'est le **visa d'adoption** d'une
@@ -2551,10 +2455,10 @@ gestes qui manquaient à une démonstration :
 est de plus **repris** quelques fois, à intervalles croissants, tant qu'il reste des actes à
 publier : lancé au démarrage, il peut trouver la page occupée (jeu de démonstration à reconstruire,
 registre volumineux à écrire) et la première lecture du service échoue avant même d'avoir
-commencé. Entre deux actes, il **respire** (`PAUSE_AMORCAGE`) — le service de la plateforme est
-tenu à un budget de calcul soutenu, et publier dix-sept actes en chaîne l'épuise ; ce budget
-n'existant ni dans l'édition statique ni en auto-hébergement, la pause y est nulle, et le recueil
-se remplit en quelques secondes.
+commencé. Entre deux actes, il **respire** (`PAUSE_AMORCAGE`) — l'hébergement de l'édition en
+ligne tenait le service à un budget de calcul soutenu, et publier dix-sept actes en chaîne
+l'épuisait ; ce budget n'existant ni dans l'édition statique ni en auto-hébergement, la pause y
+est nulle, et le recueil se remplit en quelques secondes.
 
 **Le rattrapage des versions.** L'amorçage ne s'en tient pas à « une publication existe » : une
 publication ne s'écrase pas, le service la range sous une clé qui porte son **expression de date**,
@@ -2903,15 +2807,15 @@ public les donne — c'est exactement ce que le recueil affiche à tout venant.
 `repondre()` compose l'invite — instruction, connaissances, conversation, tâche — puis la
 confie au moteur. Le moteur est **interchangeable** (Administration › Assistants) :
 
-- **automatique** (défaut) : le moteur intégré quand il existe (le plugin `ai-text` de
-  Perchance), l'adresse de la collectivité sinon, le **repli documentaire** à défaut — c'est
-  le réglage qui fonctionne partout ;
-- **intégré** : uniquement Perchance ;
+- **automatique** (défaut) : le moteur intégré quand l'hébergement en fournit un (le port
+  `generateText`, `src/lib/hosts.js`), l'adresse de la collectivité sinon, le **repli
+  documentaire** à défaut — c'est le réglage qui fonctionne partout ;
+- **intégré** : uniquement quand l'hébergement fournit le moteur ;
 - **personnalisé** : l'API de la collectivité (adresse, clé, modèle), en **complétions de
   conversation** façon OpenAI (flux SSE — OpenAI, Mistral, Groq, OpenRouter, Ollama, vLLM,
   LM Studio…) ou en **appel simple** `{ prompt } → { texte }`. C'est le seul moyen d'obtenir
-  des réponses **rédigées** hors de Perchance ; une adresse vide est signalée comme une
-  configuration à corriger.
+  des réponses **rédigées** ; une adresse vide est signalée comme une configuration à
+  corriger.
 
 **Le repli documentaire : répondre sans moteur.** Faute de moteur de langage — page servie en
 statique (GitHub Pages), déploiement sans API —, `moteurDe` rend `{ type: "repli" }` et
@@ -2974,7 +2878,7 @@ L'application ne sait pas *où* sont rangées ses données : elle passe par une
 | Mode | Pilote | Ce que ça donne |
 |---|---|---|
 | **Locale — ce navigateur** (défaut) | `db/local.js` (IndexedDB) | mode de démonstration : rien à installer, données propres au poste |
-| **Service de démonstration — partagé** | `db/service.js`, transport `socket` | l'état durable du service de démonstration tient lieu de base, sans rien installer ; **partagé** entre postes quand la page est servie par la plateforme, **propre au navigateur** dans l'édition statique (le libellé du mode le dit) |
+| **Service de démonstration — partagé** | `db/service.js`, transport `socket` | l'état durable du service de démonstration tient lieu de base, sans rien installer ; **partagé** entre postes quand l'hébergement fournit le canal, **propre au navigateur** dans l'édition statique (le libellé du mode le dit) |
 | **Serveur externe — MySQL / MariaDB** | `db/service.js`, transport `http` | la base de la collectivité, via le service de données de `src/server/mysql/` |
 
 Le réglage vit dans `kv.actesDb` — il est **propre au poste** et n'est jamais
@@ -3114,18 +3018,18 @@ change, et qu'il faut savoir :
   HTTPS obligatoire), contrôle d'empreinte, publication, ELI, opposabilité ;
 - la résolution des services de l'hôte passe par **`src/lib/hosts.js`**, seul endroit qui sait
   où les chercher — le stockage, le canal du service, et le relais HTTP sans CORS dont la
-  numérotation externe a besoin (indisponible hors de l'édition en ligne : voir « La
-  numérotation » ci-dessus). `src/pages/host.js` est sans effet dans l'environnement d'édition
-  et dans le déploiement auto-hébergé (il ne s'installe que si les services manquent). Poser
-  `window.__SCRIBA_FORCE_STATIC__ = true` avant son exécution force l'inverse : c'est ainsi
-  qu'on relit l'édition statique depuis l'éditeur ;
-- **la plateforme ne pose pas ses règles de style.** Tout le code masque en posant l'attribut
-  `hidden` (`el.hidden = true`), jamais `style.display` : c'est la plateforme Perchance qui
-  fournit la règle `[hidden] { display: none }`. Une page statique ne l'a pas, et une classe
-  qui pose `display: flex` l'emporte alors sur le `display: none` du navigateur (sélecteur
-  d'attribut 0,1,0 contre sélecteur de type 0,0,1) — un panneau « fermé » restait ouvert.
-  `app.css` reprend donc la règle (`[hidden] { display: none !important; }`) : c'est ce qui
-  rend la fermeture du panneau de l'assistant effective hors de Perchance ;
+  numérotation externe a besoin (un port que l'hébergement d'édition en ligne fournissait, et
+  qu'aucune installation livrée ne fournit : voir « La numérotation » ci-dessus).
+  `src/pages/host.js` est sans effet dans le déploiement auto-hébergé (il ne s'installe que si
+  les services manquent). Poser `window.__SCRIBA_FORCE_STATIC__ = true` avant son exécution
+  force l'inverse : c'est ainsi qu'on relit l'édition statique depuis un poste de travail ;
+- **l'hébergement ne pose pas ses règles de style.** Tout le code masque en posant l'attribut
+  `hidden` (`el.hidden = true`), jamais `style.display` : c'est l'hébergement d'édition en
+  ligne qui fournissait la règle `[hidden] { display: none }`. Une page statique ne l'a pas,
+  et une classe qui pose `display: flex` l'emporte alors sur le `display: none` du navigateur
+  (sélecteur d'attribut 0,1,0 contre sélecteur de type 0,0,1) — un panneau « fermé » restait
+  ouvert. `app.css` reprend donc la règle (`[hidden] { display: none !important; }`) : c'est
+  ce qui rend la fermeture du panneau de l'assistant effective en édition statique ;
 - **l'assistant n'a pas de moteur de langage** : `moteurDe` rend `{ type: "repli" }`, et
   Plume comme Publia répondent par **recherche documentaire** dans le guide (ou dans les actes
   publiés) — sans réseau, sans clé, rien à installer. Voir « Les assistants » plus haut.
@@ -3177,10 +3081,10 @@ base, partagée.
 | `root.kv` (stockage clé/valeur local) | `server/web/host.js` — une base **IndexedDB** du navigateur |
 | `root.createServerSocket` (API du service) | appels `fetch` directs vers `/v1/…` (nginx → service Node) |
 
-`server/web/index.html` est la coquille de cette édition (l'`index.html` d'origine ne sert
-qu'à l'édition en ligne, comme `main.pjs`). `remote.js` choisit son transport : le canal de
-l'environnement s'il existe, sinon HTTP si `window.__SCRIBA_SELF_HOSTED__` est posé par le
-déploiement. Le mode de persistance par défaut y devient « serveur externe » sur la **même
+`server/web/index.html` est la coquille de cette édition (l'`index.html` du dépôt sert la
+démonstration statique). `remote.js` choisit son
+transport : le canal de l'environnement s'il existe, sinon HTTP si
+`window.__SCRIBA_SELF_HOSTED__` est posé par le déploiement. Le mode de persistance par défaut y devient « serveur externe » sur la **même
 origine**, et le jeton d'écriture est injecté au démarrage du conteneur (voir
 `server/web/config.js.template`).
 
@@ -3190,10 +3094,8 @@ migration depuis la démonstration : `docs/ADMINISTRATION.md`.
 ## Architecture
 
 ```
-main.pjs                  $meta + les imports de la plateforme (stockage, canal du service, relais HTTP)
 index.html                coquille : script serveur (LE SERVICE) + <link> + <div id="app"> + module
 src/SPEC.md               spécification
-src/docs/ATELIER.md       TRAVAILLER DANS L'ATELIER : la méthode, les dix garde-fous, vérifier sans terminal (le harnais), ce qui compte comme « terminé »
 src/docs/ADMINISTRATION.md  DOCUMENTATION D'ADMINISTRATION ET D'EXPLOITATION (auto-hébergement, sécurité, sauvegardes)
 src/docs/API.md           RÉFÉRENCE DE L'API REST (engendrée par scripts/generer-api.mjs, lue par « Documentation technique »)
 src/docs/VARIABLES.md     VARIABLES DE DÉPLOIEMENT (engendré par scripts/generer-variables.mjs)
@@ -3202,7 +3104,6 @@ src/docs/REPRISE.md       KIT DE REPRISE : points d'entrée, « un seul point de
 src/docs/UI-UX.md         REVUE D'INTERFACE : constats chiffrés (hauteur des écrans, contrôles, pastilles, tailles de texte), huit propositions d'UI/UX et leur ordre de mise en œuvre
 src/docs/AUDIT-BUGS-2026-09-22.md  AUDIT CIBLÉ : session, anti-CSRF, file d'attente, état de la base (constats corrigés et points ouverts)
 src/docs/PERFORMANCE.md   PERFORMANCE MESURÉE : le gel des connexions simultanées, ce qui l'a corrigé, les scénarios et les chiffres avant/après
-src/docs/GITHUB.md        PAGE D'ACCUEIL DU DÉPÔT (recopiée en README.md à la racine par l'export GitHub)
 src/CHANGELOG.md          JOURNAL DES VERSIONS (la première entrée datée = la version en service)
 src/TODO.md               chantiers ouverts
 src/css/app.css           feuille de style : l'ENTRÉE — elle importe dix parties (app-base.css, app-atelier.css, …), dans l'ordre d'origine
@@ -3300,7 +3201,7 @@ src/server/               AUTO-HÉBERGEMENT : pile Docker complète
   nginx.conf              façade : application servie, /v1/ en proxy vers api (cuit dans l'image de web)
   Dockerfile              IMAGE AUTONOME : le service, la façade et le code en un conteneur
   env.example             modèle du .env du déploiement
-  web/                    édition web de l'application (chargée hors édition en ligne)
+  web/                    édition web de l'application (coquille servie par nginx)
     Dockerfile            la façade : nginx + nos réglages + la coquille + le code de l'application
     index.html            coquille (remplace l'index.html d'origine)
     host.js               hôtes d'exécution simulés : root.kv (IndexedDB) et transport HTTP
@@ -3417,32 +3318,31 @@ src/audit/                CADRE ET LIVRABLES D'AUDIT (voir src/audit/README.md) 
   REGISTRE-NON-CONFORMITES.md  registre cumulatif (identifiants stables, statuts : Ouverte / En cours / Levée / Régression / Acceptée / Obsolète)
   rapports/               les rapports datés, un par campagne
   README.md               mode d'emploi du cadre
-src/tests/                TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR — dans le dépôt livré : `tests/` (voir src/tests/README.md)
-  README.md               pourquoi ces fichiers sont écrits pour la disposition LIVRÉE (le code y est `../src/…`), et ce que tient chacun
+tests/                    TESTS QUI S'EXÉCUTENT SANS NAVIGATEUR (voir tests/README.md)
+  README.md               pourquoi les imports y disent `../src/…` (la disposition du dépôt), et ce que tient chaque fichier
   purs.test.mjs           tests des modules purs : expressions, assainissement, numérotation, version — et, depuis la 1.6.1p, le contrat des champs que le client lit du service, ainsi que la règle des imports jamais employés (les modules exigeant un navigateur font SAUTER leurs tests au lieu de faire tomber la suite)
   industrialisation.test.mjs  L'OUTILLAGE éprouvé lui-même : lance le contrôle de style tel qu'il est livré, sur l'arborescence livrée, exige le code de sortie 0 (ordinaire et strict) et vérifie que le parcours a bien vu tout le code — une faute de chemin ne se voit pas dans le code, elle se voit à l'exécution (il se saute là où aucun processus enfant n'est possible)
   publications-locales.test.mjs  tests du repli local du recueil public : seuls les actes publiés entrent au recueil, les versions d'un même ELI sont rangées (la plus récente porte `latest`), un acte réservé reste caché, et les pièces se lisent aussi bien dans `formats` qu'à plat
   conformite-service.mjs  LE JEU D'APPELS COMMUN aux deux services (démonstration et auto-hébergé) — le contrat, pas une épreuve ; conformite-service.test.mjs l'exécute contre la démonstration et le compare à une installation réelle (`SCRIBA_CONFORMITE_URL`)
   parcours.mjs            LES PARCOURS joués dans le NAVIGATEUR, contre l'application vivante (`lancerParcours()`) — voir docs/INDUSTRIALISATION.md § 2
   parcours.test.mjs  abrogation-annexes.test.mjs  amorcage-demo.test.mjs  qualification-signature.test.mjs  original-signe.test.mjs  pilote-persistance.test.mjs  reprise.test.mjs
-src/scripts/              L'OUTILLAGE — dans le dépôt livré : `scripts/`
-  verifier-syntaxe.mjs    `npm run syntaxe` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance ; parcourt le dossier qui porte l'outillage (la racine du dépôt, ou tout l'arbre dans l'atelier)
-  verifier-style.mjs      `npm run lint` (avertissements tolérés) et `npm run style` (`--strict` : ils font échouer) : analyse sans dépendance — REFUSE `debugger` hors outillage, SIGNALE `var` et `console.log` dans le code client, ET les imports jamais employés (partout, via `analyse-imports.mjs`) ; les exemptions sont écrites relativement à la RACINE DU CODE, ce qui les rend justes dans les deux dispositions
+scripts/                  L'OUTILLAGE
+  verifier-syntaxe.mjs    `npm run syntaxe` : `node --check` sur tout le JavaScript du dépôt, sans aucune dépendance ; parcourt le dossier qui porte l'outillage (la racine du dépôt)
+  verifier-style.mjs      `npm run lint` (avertissements tolérés) et `npm run style` (`--strict` : ils font échouer) : analyse sans dépendance — REFUSE `debugger` hors outillage, SIGNALE `var` et `console.log` dans le code client, ET les imports jamais employés (partout, via `analyse-imports.mjs`) ; les exemptions sont écrites relativement à la RACINE DU CODE
   analyse-imports.mjs     MODULE PUR de la règle précédente : rend les noms importés que le reste du fichier n'emploie jamais, avec le numéro de ligne — éprouvé dans `tests/purs.test.mjs`
-  racine-code.mjs         OÙ VIT LE CODE (`RACINE_CODE`, `RACINE_OUTILLAGE`) : le dossier qui porte `lib/version.js` — CONSTATÉ, jamais supposé (il est `src/` dans le dépôt, et la racine de l'outillage dans l'atelier)
+  racine-code.mjs         OÙ VIT LE CODE (`RACINE_CODE`, `RACINE_OUTILLAGE`) : le dossier qui porte `lib/version.js` — CONSTATÉ, jamais supposé
   generer-variables.mjs   engendre `src/docs/VARIABLES.md` depuis le registre des variables (`src/server/mysql/variables.mjs`)
   generer-api.mjs         engendre `src/docs/API.md` depuis la description de l'API (`src/lib/api-reference.js`) — le document et l'écran « API REST » ne peuvent donc pas diverger
   generer-logiciel.mjs    engendre `src/server/mysql/logiciel-engendre.mjs` depuis `src/lib/version.js` et `src/lib/logiciel.js` : l'image du service, qui ne contient que son dossier, peut ainsi annoncer la version RÉELLE dans sa bannière de démarrage
-  harnais-atelier.mjs     LE BANC D'ÉPREUVES DE L'ATELIER : rejoue, sans terminal, la syntaxe, le style, les épreuves et les générateurs en chargeant LES SCRIPTS LIVRÉS eux-mêmes (doublures de `node:fs`/`node:path`/`node:url`/`node:crypto`, esbuild) — voir `docs/ATELIER.md` § 3
-  annoncer-echecs.sh      L'ÉPREUVE ROUGE DEVIENT LISIBLE : appelé par la chaîne d'intégration après un échec, il attache chaque épreuve rouge en ANNOTATION (« ::error:: », avec son message d'assertion) et résume le journal dans le récapitulatif du travail — le journal brut n'étant lisible que par un administrateur du dépôt, c'est ce qui permet de savoir CE QUI a lâché (voir `docs/INDUSTRIALISATION.md` § 3)
-src/compose-exemple/      EXEMPLE DE PREMIER DÉPLOIEMENT — dans le dépôt livré : `compose-exemple/` : MariaDB et l'image publiée `aplds/scribae`, deux services, rien à construire (docker-compose.yml, env.example, README.md)
-src/github/               SOURCES DES FICHIERS DE RACINE DU DÉPÔT (l'export les recopie, ils ne restent pas sous src/) :
-  ci.yml                  → `<racine>/.github/workflows/ci.yml` : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
-  gitignore               → `<racine>/.gitignore` : dépendances, secrets de déploiement (`.env*`) et dossier de données `data/` — voir la section « Exporter le dépôt GitHub »
-src/AGENTS.md             → `<racine>/AGENTS.md` : ce qu'un agent (Claude Code, Mistral Vibe…) doit savoir AVANT de toucher au dépôt
-src/CLAUDE.md             → `<racine>/CLAUDE.md` : le pointeur de Claude Code vers `AGENTS.md`
-src/package.json          MANIFESTE DU DÉPÔT (l'export le recopie à la racine) : `npm run lint`, `npm run style`, `npm test`, `npm run verifier`
-src/package-lock.json     VERROU DE DÉPENDANCES (l'export le recopie à la racine) : aucun paquet — Scribae n'a aucune dépendance — mais sa présence rend `npm ci` possible et fait taire les avertissements de la forge
+  annoncer-echecs.sh      L'ÉPREUVE ROUGE DEVIENT LISIBLE : appelé par la chaîne d'intégration après un échec, il attache chaque épreuve rouge en ANNOTATION (`::error::`, avec son message d'assertion) et résume le journal dans le récapitulatif du travail — le journal brut n'étant lisible que par un administrateur du dépôt, c'est ce qui permet de savoir CE QUI a lâché (voir `docs/INDUSTRIALISATION.md` § 3)
+compose-exemple/          EXEMPLE DE PREMIER DÉPLOIEMENT : MariaDB et l'image publiée `aplds/scribae`, deux services, rien à construire (docker-compose.yml, env.example, README.md)
+package.json              MANIFESTE DU DÉPÔT : `npm run lint`, `npm run style`, `npm test`, `npm run verifier`
+package-lock.json         VERROU DE DÉPENDANCES : aucun paquet — Scribae n'a aucune dépendance — mais sa présence rend `npm ci` possible et fait taire les avertissements de la forge
+.github/workflows/ci.yml  LA CHAÎNE D'INTÉGRATION : syntaxe, style (strict) et épreuves, puis le service auto-hébergé
+.gitignore                dépendances, secrets de déploiement (`.env*`), dossier de données `data/`
+README.md                 PAGE D'ACCUEIL DU DÉPÔT
+AGENTS.md                 ce qu'un agent (Claude Code, Mistral Vibe…) doit savoir AVANT de toucher au dépôt
+CLAUDE.md                 le pointeur de Claude Code vers `AGENTS.md`
 src/LICENSE.md            LICENCE, ARBITRÉE : logiciel sous GPL-3.0 (le fichier `LICENSE` vit à la racine du dépôt), réutilisation des actes sous Licence Ouverte 2.0, position sur le code produit par l'IA et table des dépendances
 ```
 
@@ -3656,7 +3556,7 @@ estimées à l'œil. Recette pour refaire une capture :
 
 ```js
 // dans la console de l'aperçu, après avoir mis l'application dans l'état voulu
-const { capture } = await import("https://ai-agent.perchance.org/files/snapshot.js");
+const { capture } = await import("<adresse de snapshot.js>/files/snapshot.js"); // l'outil de capture de l'hébergement
 const root = document.querySelector("#app");                 // cadre capturé
 const rect = (sel) => {                                     // repère en %
   const r = root.getBoundingClientRect(), e = document.querySelector(sel).getBoundingClientRect();
@@ -3822,28 +3722,6 @@ Repères de vérification visuelle : pour l'aperçu, chaque `.paper` doit porter
 l'écran des feuilles de style se vérifie dans les deux vues (« Réglages » et « Édition
 directe »), en 390 × 844 et en 1600 × 950.
 
-Vérifier l'outillage depuis l'atelier : l'aperçu du navigateur n'a ni système de
-fichiers ni processus, il ne peut donc pas lancer `scripts/verifier-style.mjs` tel
-qu'il est livré. C'est le rôle du **harnais de l'atelier** —
-**`scripts/harnais-atelier.mjs`**, dans l'arborescence du dépôt depuis la 1.6.3b
-(il n'est pas une épreuve : `npm test` ne le voit pas, `npm run syntaxe` le parse
-comme un module). Il monte la disposition livrée dans un système de fichiers
-virtuel (la table ci-dessus, la racine virtuelle étant `src/`), remplace les
-modules Node (`node:fs`, `node:path`, `node:url`, `node:crypto`) par des
-doublures, fait passer le tout par esbuild, et laisse les écritures revenir dans
-`src/`. Il **charge les scripts du dépôt eux-mêmes** : le contrôle de style et
-les trois générateurs s'exécutent tels quels, sans qu'aucune règle soit recopiée.
-Les épreuves, elles, se construisent **un fichier à la fois** — comme `node --test`
-les isole, une doublure qui fuit d'un fichier à l'autre fausserait le suivant.
-
-Ce que l'atelier ne peut pas faire, il le **dit** : `node:child_process` lève
-(pas de processus) et un `import.meta.url` est servi sous une adresse `file://`
-**virtuelle**, ancrée à la racine virtuelle, pour que `new URL("..",
-import.meta.url)` calcule juste (`scripts/racine-code.mjs`). Il en résulte, à la
-1.6.3s, **495/505** épreuves, **aucun échec** et **dix sauts** attendus — tous
-dus à l'absence de Node et de réseau. Les recettes, les chiffres et la lecture
-avant de travailler dans l'atelier.
-
 ## Pièges connus
 
 - **Une épreuve qui lit un fichier ne doit pas dépendre du DOSSIER COURANT.** `node --test` peut
@@ -3852,8 +3730,8 @@ avant de travailler dans l'atelier.
   `"src/server/env.example"` ne veut pas dire la même chose dans les deux cas, et ne trouve **rien**
   dans le second. Une épreuve qui échoue à cause de cela ne dit rien du code — elle ne dit que son
   propre dossier de départ. Ancrez le repère au fichier : `fileURLToPath(new URL("../env.example",
-  import.meta.url))` — et protégez ce calcul (`try`), car dans un harnais de navigateur l'adresse
-  d'un module n'est pas hiérarchique. Les chemins relatifs peuvent rester, **essayés ensuite** ;
+  import.meta.url))` — et protégez ce calcul (`try`), car sous le harnais de parcours
+  (`tests/parcours-navigateur.mjs`) l'adresse d'un module n'est pas hiérarchique. Les chemins relatifs peuvent rester, **essayés ensuite** ;
   c'est ainsi que la chaîne est restée rouge quatre livraisons durant (NC-I-008).
 - **Une feuille de style écrite dans un littéral gabarit ne peut pas contenir de backtick** —
   et `\00a0` (échappement octal) y est refusé aussi. `CSS_DOCUMENT_WEB`
@@ -3920,8 +3798,7 @@ avant de travailler dans l'atelier.
   compter sur les marges du bloc, c'est `@page` qui fait la page.
   En test automatisé, `window.print()` **bloque** la page : ne pas appeler sans
   interaction utilisateur.
-- **Captures d'écran** : utiliser l'aide de capture du harnais d'édition (`snapshot.js` de
-  `ai-agent` : `await capture()` pour la page entière, `await capture(el, {scale})` pour un sous-arbre).
+- **Captures d'écran** : utiliser l'outil de capture (`snapshot.js` : `await capture()` pour la page entière, `await capture(el, {scale})` pour un sous-arbre).
   **Sauf si l'en-tête est dans le cadre** : snapdom y replie la barre d'outils (voir la
   section du guide) — prendre `html2canvas` à la place.
   Attention : un **logo distant** fait **traîner la capture** (le helper tente de le convertir en
@@ -3968,12 +3845,12 @@ avant de travailler dans l'atelier.
   trouvé par une écriture de 120 000 caractères, qui revenait tronquée après rechargement.
   `src/pages/host.js` (`etatUtilise`, `VERSION_ETAT`, `STATE_UNITS`) décrit le même en-tête —
   les deux doivent rester d'accord, et `tests/persistance-double-tampon.test.mjs` le vérifie.
-- **L'aperçu non enregistré utilise un serveur émulé** : son état (50 Mio) disparaît à
-  chaque rechargement de la page, et l'émulateur **met le service en quarantaine** sous une
-  salve d'appels trop dense (NC-II-012) — les parcours qui en dépendent se déclarent alors
-  « sans objet », et le relevé porte `service.joignable`. Espacez les appels, et refaites le
-  scénario proprement. La version publiée en ligne, elle, utilise le
-  vrai service et garde son état. Dans l'édition statique, l'état est conservé dans
+- **L'édition en ligne non enregistrée utilisait un serveur émulé** : son état (50 Mio)
+  disparaissait à chaque rechargement de la page, et l'émulateur **mettait le service en
+  quarantaine** sous une salve d'appels trop dense (NC-II-012) — les parcours qui en
+  dépendaient se déclaraient alors « sans objet », et le relevé portait `service.joignable`.
+  Espacez les appels, et refaites le scénario proprement. La version publiée en ligne, elle,
+  utilise le vrai service et garde son état. Dans l'édition statique, l'état est conservé dans
   IndexedDB : il survit aux rechargements (voir `src/pages/host.js`).
 - **Taille des messages** : un message WebSocket est limité à 1 Mio. `remote.js` refuse
   au-delà de 900 000 caractères et le service au-delà de 400 000 caractères de document ;

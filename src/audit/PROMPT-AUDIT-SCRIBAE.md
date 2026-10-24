@@ -2,7 +2,7 @@
 titre: Prompt d'audit complet — Scribae
 version: 1.0
 date: 2026-09-21
-cible: https://perchance.org/scribae
+cible: https://demo.scribae.eu
 objet: Cadre d'audit et contrat de sortie pour produire le rapport d'audit de Scribae
 reutilisable: oui (voir §0)
 stockage: src/audit/PROMPT-AUDIT-SCRIBAE.md
@@ -14,7 +14,7 @@ stockage: src/audit/PROMPT-AUDIT-SCRIBAE.md
 il le cadre, le rôle par rôle, section par section, et fixe le contrat de sortie du
 rapport. L'audit lui-même est produit par l'agent à qui ce prompt est donné.
 
-**Cible auditée.** `https://perchance.org/scribae` — éditeur de trames d'actes
+**Cible auditée.** `https://demo.scribae.eu` — éditeur de trames d'actes
 administratifs : préparation des modèles par les administrateurs, remplissage par les
 services, validation interne, signature, transmission au contrôle de légalité,
 publication au recueil public sous identifiant ELI, export Akoma Ntoso / Schematron /
@@ -39,8 +39,8 @@ pour une collectivité fictive (mairie de Valmont-sur-Loire).
   4. écrire le rapport dans `src/audit/rapports/AUDIT-SCRIBAE-AAAA-MM-JJ.md` (§8) ;
   5. mettre à jour `src/audit/REGISTRE-NON-CONFORMITES.md` (§6.4) ;
   6. **joindre le rapport à sa réponse finale** en markdown (`attach_file`) ;
-  7. **ne rien corriger** : un audit constate et propose ; il ne modifie ni `main.pjs`,
-     ni `index.html`, ni le reste de `src/`.
+  7. **ne rien corriger** : un audit constate et propose ; il ne modifie ni
+     `index.html`, ni le reste de `src/`.
 
 - **Ce que ce prompt n'est pas.** Ce n'est ni un référentiel de conformité exhaustif,
   ni un jugement pré-écrit. Les constats sont produits par l'agent, à partir des
@@ -76,7 +76,7 @@ matière (l'outil), quatre regards irréductibles l'un à l'autre.
 
 ### §2.1 Dans le périmètre
 
-- `main.pjs`, `index.html` (y compris le script `type="text/x-server-plugin"`), et
+- `index.html` (y compris le script `type="text/x-server-plugin"`), et
   **l'intégralité** du dossier `src/` (code, documentation, données de démonstration) ;
 - l'application **à l'exécution** : parcours réels, écrans, workflows, exports,
   API, persistance, assistants ;
@@ -86,8 +86,8 @@ matière (l'outil), quatre regards irréductibles l'un à l'autre.
 
 ### §2.2 Hors périmètre (à mentionner, sans en faire des non-conformités)
 
-- les composants de la plateforme Perchance elle-même (moteur, hébergement,
-  plugins tiers) — mais **leur usage par Scribae** est dans le périmètre ;
+- les composants de la plateforme d'hébergement d'origine (moteur de langage,
+  stockage, plugins tiers) — mais **leur usage par Scribae** est dans le périmètre ;
 - le prestataire de signature externe et les services tiers appelés — mais la
   **manière dont Scribae s'y branche** est dans le périmètre ;
 - l'infrastructure de la collectivité cliente.
@@ -95,7 +95,7 @@ matière (l'outil), quatre regards irréductibles l'un à l'autre.
 ### §2.3 Distinction à tenir
 
 Le rapport distingue systématiquement :
-**l'outil de démonstration** (ce qui tourne sur `perchance.org/scribae`, avec ses
+**l'outil de démonstration** (ce qui tourne sur `demo.scribae.eu`, avec ses
 limites assumées : IndexedDB comme pilote local, pas de SMTP, etc.) et
 **le déploiement cible** (service auto-hébergé, base MySQL/MariaDB, SMTP, jeton d'API).
 La confusion entre les deux est elle-même un objet d'audit (§4.2).
@@ -155,7 +155,7 @@ Chaque chapitre se termine par : les **points conformes**, les **non-conformité
   - **I.3 Environnements, tests, industrialisation** — séparation démo / recette /
     production ; tests automatisés ; intégration et déploiement continus ;
     reproductibilité des versions.
-  - **I.4 Dépendances et chaîne d'approvisionnement** — plugins Perchance, imports
+  - **I.4 Dépendances et chaîne d'approvisionnement** — imports
     CDN, dépendances implicites, épinglage de versions, vulnérabilités des composants.
   - **I.5 Gouvernance du code** — versionnage (`APP_VERSION`), changelog, revue,
     traçabilité des modifications, propriété intellectuelle du code produit par l'IA.

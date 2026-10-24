@@ -30,7 +30,7 @@
 // Le service de DÉMONSTRATION (`index.html`, `<script type="text/x-server-plugin">`)
 // garde sa copie : son contexte d'exécution n'importe pas de modules. Un test la
 // tient, elle, pour équivalente au comportement de ce module (voir
-// src/tests/original-signe.test.mjs) : la duplication ne peut plus dériver en
+// tests/original-signe.test.mjs) : la duplication ne peut plus dériver en
 // silence.
 // ============================================================================
 

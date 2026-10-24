@@ -12,8 +12,8 @@
 // deux vérités pour un nom. On le réexporte pour que l'interface n'ait qu'un
 // module d'identité à connaître.
 //
-// Pour changer de devise ou de marque, tout passe par ce fichier (et par
-// `$meta` dans main.pjs pour le titre de la page).
+// Pour changer de devise ou de marque, tout passe par ce fichier (et par le
+// `<title>` de `index.html` pour le titre de la page).
 // ============================================================================
 export { APP_NAME } from "../lib/logiciel.js";
 export const APP_TAGLINE = "Trames, rédaction et publication des actes administratifs";

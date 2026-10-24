@@ -21,7 +21,6 @@ perdre plus de temps qu'il n'en fait gagner.
 
 | Où | Ce que c'est | Par où commencer la lecture |
 |---|---|---|
-| `main.pjs` | Le **manifeste** : métadonnées de la page et imports de la plateforme (« Perchance »). Presque vide — c'est voulu. | en entier (court) |
 | `index.html` | La **coquille** : le script du service de démonstration (`<script type="text/x-server-plugin">`), le `<div id="app">`, et le module qui démarre l'application. | le bas du fichier (la ligne `import`) |
 | `src/ui/app.js` | Le **routeur** de l'application : lit l'adresse, choisit l'écran, gère la session. | `render()` |
 | `src/ui/views/` | Un fichier par **écran** (trames, rédaction, signature, recueil public…). | l'écran qui vous intéresse |
@@ -29,7 +28,7 @@ perdre plus de temps qu'il n'en fait gagner.
 | `src/lib/db/index.js` | La **façade de persistance** : trois pilotes (navigateur, service partagé, MySQL), différences, miroir hors ligne, file d'écritures différées. | l'en-tête, puis `sync` |
 | `src/server/mysql/server.mjs` | Le **service auto-hébergé** (Node + son rangement — MariaDB, ou un dossier de fichiers) : routage HTTP, autorisation, magasin. | `handle()` |
 | `src/server/mysql/actes.mjs` | Le **domaine** signature/publication, **pur** (sans Node, sans réseau, sans base) — c'est le cœur métier du service. | en-tête, puis `hPublier` |
-| `src/pages/host.js` · `src/server/web/host.js` | Les **hôtes d'exécution** : ils fournissent le stockage et le canal du service hors de l'environnement d'édition. | en-tête |
+| `src/pages/host.js` · `src/server/web/host.js` | Les **hôtes d'exécution** : ils fournissent le stockage et le canal du service à la page servie en statique et au déploiement. | en-tête |
 
 **Deux modes de déploiement, un seul code d'application :**
 
@@ -88,8 +87,8 @@ npm test            # épreuves des modules purs + domaines du service
 npm run verifier    # les deux, dans l'ordre  ← c'est ce que la CI exécute
 ```
 
-À quoi s'ajoutent deux vérifications qui demandent un **navigateur** (l'aperçu de
-l'éditeur, ou un poste) :
+À quoi s'ajoutent deux vérifications qui demandent un **navigateur** (un poste de
+travail, sur la page déployée) :
 
 - **les épreuves de parcours** — le trajet réel dépôt → signature → publication →
   recueil, et le contrat du service, exécutés **contre le service vivant** :
@@ -98,11 +97,11 @@ l'éditeur, ou un poste) :
 - **l'apparence** — les écrans sensibles (recueil public, atelier) se relisent à
   l'écran, en mobile comme en grand.
 
-> **Le piège à connaître.** L'édition en ligne recharge la page **à chaque
-> modification** : une durée de vie d'état qui semblait stable peut se perdre. Les
-> épreuves de parcours attendent explicitement ce qu'elles observent au lieu de
-> supposer qu'un rendu est terminé. Voir `src/docs/INDUSTRIALISATION.md` (§ les
-> parcours) pour la marche à suivre.
+> **Le piège à connaître.** Un rechargement de la page remet l'état à zéro quand
+> le service ne le garde pas : une durée de vie d'état qui semblait stable peut se
+> perdre. Les épreuves de parcours attendent explicitement ce qu'elles observent au
+> lieu de supposer qu'un rendu est terminé. Voir `src/docs/INDUSTRIALISATION.md`
+> (§ les parcours) pour la marche à suivre.
 
 ---
 
@@ -110,21 +109,11 @@ l'éditeur, ou un poste) :
 
 ### 4.1. Le dépôt GitHub (édition statique)
 
-Le dépôt est servi **tel quel** : rien n'est compilé. L'outillage est rangé **à sa place attendue** — à la racine — et le code de
-l'application sous `src/`. L'export range chaque source à sa place et ne la
-recopie pas dans `src/` (une table complète, et la recette, sont dans
-`src/README.md` § « Exporter le dépôt GitHub ») :
+Le dépôt est servi **tel quel** : rien n'est compilé. L'outillage est rangé **à sa
+place attendue** — à la racine — et le code de l'application sous `src/` (la
+disposition complète est dans `src/README.md`, § « Disposition des fichiers »).
 
-| Élément | À la racine du dépôt |
-|---|---|
-| `src/docs/GITHUB.md` | `README.md` |
-| `src/package.json` | `package.json` |
-| `src/github/ci.yml` | `.github/workflows/ci.yml` |
-| `src/github/gitignore` | `.gitignore` |
-| `src/scripts/**`, `src/tests/**` | `scripts/**`, `tests/**` |
-| `src/AGENTS.md`, `src/CLAUDE.md` | `AGENTS.md`, `CLAUDE.md` |
-
-Le site publié a besoin, à la racine, de `index.html`, `main.pjs`, `src/**`, et
+Le site publié a besoin, à la racine, de `index.html`, `src/**`, et
 d'un `.nojekyll` (pour que GitHub Pages serve `src/` sans transformation). Le
 domaine se règle par un fichier `CNAME`.
 

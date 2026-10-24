@@ -2,23 +2,14 @@
 
 Ce document s'adresse au service informatique qui **reprend le dépôt** : il décrit
 comment vérifier le code sans navigateur, ce qui est vérifié, et ce qui reste à
-mettre en place. Il complète `src/README.md` (architecture) et `GITHUB.md` (mise en
-ligne) — voir aussi `src/server/README.md` pour l'exploitation.
+mettre en place. Il complète `src/README.md` (architecture) — voir aussi
+`src/server/README.md` pour l'exploitation.
 
 > **Où vivent ces fichiers.** Le dépôt est servi **tel quel** : sa racine porte
-> `index.html`, `main.pjs`, l'**outillage** (`scripts/`, `tests/`, `package.json`,
+> `index.html`, l'**outillage** (`scripts/`, `tests/`, `package.json`,
 > `.github/workflows/ci.yml`) et le **code** sous `src/`. Rien n'est compilé, et
-> un fichier ne vit qu'à UN endroit : l'export range chaque source à sa place et
-> ne la recopie pas dans `src/` (la table complète est dans `src/README.md`,
-> § « Exporter le dépôt GitHub »).
->
-> **Dans l'atelier, l'outillage est sous `src/`** (`src/scripts/`, `src/tests/`) :
-> c'est le seul arbre que la plateforme conserve d'une séance à l'autre. Il est
-> pourtant écrit pour la **disposition livrée** — le code y est `../src/…`,
-> l'outillage `../scripts/…` —, et `scripts/racine-code.mjs` constate la racine du
-> code au lieu de la supposer. Le harnais de l'atelier (`scripts/harnais-atelier.mjs`,
-> § 2 « Vérifier depuis l'atelier ») simule cette disposition avant de conclure
-> quoi que ce soit.
+> un fichier ne vit qu'à UN endroit (la disposition est dans `src/README.md`,
+> § « Disposition des fichiers »).
 
 ---
 
@@ -112,42 +103,6 @@ peut être lancé, l'épreuve se **saute** au lieu d'échouer.
 > **sautés**. Un test qu'on ne peut pas exécuter ici ne doit pas cacher ceux
 > qu'on peut exécuter.
 
-### Vérifier depuis l'atelier : le harnais
-
-Dans l'atelier (Perchance), il n'y a **ni système de fichiers ni processus** : rien
-de ce qui précède n'y est lançable tel quel. C'est le rôle de
-**`scripts/harnais-atelier.mjs`** — l'outillage est ainsi rangé **dans le dépôt**,
-à sa place attendue (il n'est pas une épreuve : `npm test` ne le voit pas, et
-`npm run syntaxe` le parse comme un module).
-
-Il monte la disposition livrée dans un système de fichiers **virtuel** (la racine
-virtuelle étant `src/`), remplace les modules Node (`node:fs`, `node:path`,
-`node:url`, `node:crypto`) par des doublures, fait passer le tout par **esbuild**,
-et laisse les écritures retomber dans `src/`. Surtout, il charge les scripts du
-dépôt **eux-mêmes** : `verifier-style.mjs` et les trois générateurs s'exécutent
-tels quels, sans qu'aucune règle ne soit recopiée.
-
-| Service | Ce qu'il fait |
-|---|---|
-| `h.verifier({ fs })` | la syntaxe, le style puis les épreuves — l'ordre de `npm run verifier` |
-| `h.verifierSyntaxe({ fs })` | parse chaque `.js`/`.mjs` de `src/` (par le parseur d'esbuild : il n'y a pas de processus) |
-| `h.verifierStyle({ fs })` | exécute `scripts/verifier-style.mjs` tel qu'il est livré, en strict |
-| `h.epreuves({ fs, cibles })` | les épreuves, **un fichier à la fois** (comme `node --test` les isole) |
-| `h.regenerer({ fs })` | les trois générateurs — les documents engendrés |
-| `h.texte(rapport)` | le verdict en quelques lignes, à rendre tel quel |
-
-**Ce qu'il ne peut pas faire, il le dit** : `node:child_process` lève, et un
-`import.meta.url` est servi sous une adresse `file://` virtuelle. Il en résulte des
-écarts **connus** (**495/505**, aucun échec et **dix sauts** attendus à la 1.6.3s),
-tous dus à l'absence de Node et de réseau : la liste, la lecture de chaque écart et
-les chiffres à surveiller sont dans **`docs/ATELIER.md` § 3**.
-
-> **L'atelier n'est pas la CI, et le harnais n'est pas Node.** La CI exécute
-> `npm run syntaxe` (`node --check`) et `npm test` avec un vrai Node : c'est elle
-> qui fait foi. Le harnais est l'ombre portée de la CI dans l'atelier — il dit
-> quand quelque chose a **régressé**, et il ne remplace jamais le regard sur
-> l'écran (voir `docs/ATELIER.md` § 5 et § 6).
-
 ### Les épreuves de parcours, et le contrat commun aux deux services
 
 Deux manques de l'audit sont comblés ici (NC-I-001, NC-I-010) — mais **hors de
@@ -178,15 +133,11 @@ chargée, et son service.
   `lancerParcours(ctx)` les exécute tous (ou un seul, par `seulement`).
 
 **Comment les lancer.** Ils s'exécutent dans la console du navigateur, sur la page
-de l'application (c'est là que les modules réels et le service vivant sont). Le
-chemin à importer dépend de l'endroit d'où l'on parle :
+de l'application (c'est là que les modules réels et le service vivant sont) :
 
 ```js
-// dépôt livré (démonstration statique, auto-hébergement) :
+// démonstration statique, ou auto-hébergement :
 const p = await import("tests/parcours.mjs");
-// atelier — la page est servie depuis le sous-domaine du générateur alors que ses
-// modules viennent de l'origine de l'éditeur : il FAUT viser cette origine-là.
-const p = await import("https://perchance.org/src/tests/parcours.mjs");
 
 const ctx = await p.contexteDeLApercu();            // les modules de l'application, et son transport
 await p.lancerParcours(ctx);                        // tous les parcours
@@ -209,8 +160,8 @@ s'installer (module absent) est **sauté**, jamais vert par accident.
 
 ## 3. L'intégration continue
 
-`src/github/ci.yml` (recopié par l'export en `.github/workflows/ci.yml`) exécute
-**trois** travaux à chaque `push`, chaque demande de fusion, et **sur demande**
+`.github/workflows/ci.yml` exécute **trois** travaux à chaque `push`, chaque
+demande de fusion, et **sur demande**
 (`workflow_dispatch` — de quoi rejouer la chaîne sans rien livrer, ce qui est la
 façon de relire un échec qu'on vient de corriger) :
 
@@ -231,9 +182,8 @@ façon de relire un échec qu'on vient de corriger) :
    `GET /v1/health`, `GET /v1/db/health` (**schéma et migrations appliqués**, là où
    la santé ne prouve que le processus), la coquille servie, le code de
    l'application servi, `config.js` engendré depuis l'environnement. Aucune image
-   n'est poussée : aucun secret n'entre dans la chaîne. C'est la seule chose que
-   l'atelier ne peut pas faire, et c'est celle qui décide si une livraison
-   s'installe.
+   n'est poussée : aucun secret n'entre dans la chaîne. C'est elle qui décide si
+   une livraison s'installe.
 
 **QUAND ELLE ÉCHOUE, ELLE DIT MAINTENANT POURQUOI.** Le journal d'un travail n'est
 lisible que par un administrateur du dépôt : qui voit la chaîne rouge n'apprend pas
@@ -272,7 +222,7 @@ qu'ils ne peuvent pas être produits hors de l'environnement d'installation :
 
 | Point | Pourquoi il n'est pas livré | Comment le faire |
 |---|---|---|
-| **`package-lock.json`** | **livré** : le verrou du service (`src/server/mysql/package-lock.json`) est écrit à la main dans l'atelier, à partir du registre npm — chaque empreinte SHA-512 a été **vérifiée contre l'archive réellement retirée**, et la chaîne l'éprouve désormais à chaque envoi par `npm ci` (§3, 2e travail) | `cd src/server/mysql && npm ci` |
+| **`package-lock.json`** | **livré** : le verrou du service (`src/server/mysql/package-lock.json`) est écrit à la main, à partir du registre npm — chaque empreinte SHA-512 a été **vérifiée contre l'archive réellement retirée**, et la chaîne l'éprouve désormais à chaque envoi par `npm ci` (§3, 2e travail) | `cd src/server/mysql && npm ci` |
 | **`package-lock.json` de la RACINE** | **livré** (1.6.3c, NC-I-015) : la racine du dépôt porte un verrou (lockfileVersion 3), si bien que `npm ci` y fonctionne même si le manifeste ne déclare aucune dépendance — la seule du dépôt (`mysql2`) reste verrouillée où elle vit | `npm ci` (racine), `cd src/server/mysql && npm ci` (service) |
 | **Images Docker épinglées** | livré : `node:20-alpine`, `mariadb:11`, `nginx:alpine` sont épinglées **par empreinte** dans `Dockerfile` et `docker-compose.yml` — et la chaîne **construit et met en service** l'image autonome à chaque envoi (§3, 3e travail), ce qui est la vraie preuve de l'épinglage | pour reprendre l'étiquette du jour : `docker buildx imagetools inspect node:20-alpine`, et reportez l'empreinte |
 | **Analyse statique** (linter) | **livrée** : `scripts/verifier-style.mjs` (sans dépendance) refuse `debugger`, les `var`, les traces de client, et — depuis la 1.6.1p — les **imports jamais employés** (`scripts/analyse-imports.mjs`, éprouvé). Aucun outil tiers n'est requis ; c'est un choix : un linter ajouterait une chaîne d'approvisionnement à auditer pour des règles que l'on écrit en quelques lignes. Reste à voir : la couverture des règles, à élargir au besoin | `npm run style` (les avertissements font échouer) ; en CI, `npm run verifier` |
@@ -290,9 +240,9 @@ qu'ils ne peuvent pas être produits hors de l'environnement d'installation :
 - L'historique se tient dans **`src/CHANGELOG.md`** : une section **Non publié**
   décrit le travail en cours ; au moment de figer une version, on l'incrémente et
   on ouvre l'entrée datée.
-- **Où chaque fichier vit** : l'export range l'outillage et les fichiers de racine
-  à leur place dans le dépôt (`scripts/`, `tests/`, `package.json`,
-  `.github/workflows/ci.yml`, `AGENTS.md`, `README.md`) et ne les recopie **pas**
-  dans `src/` — un fichier, un seul endroit. La table complète et la recette sont
-  dans `src/README.md` (§ « Exporter le dépôt GitHub »).
+- **Où chaque fichier vit** : l'outillage et les fichiers de racine vivent à la
+  racine du dépôt (`scripts/`, `tests/`, `package.json`, `.github/workflows/ci.yml`,
+  `AGENTS.md`, `README.md`) et ne sont **pas** recopiés dans `src/` — un fichier,
+  un seul endroit. La disposition complète est dans `src/README.md`
+  (§ « Disposition des fichiers »).
 - Aucun artefact n'est construit : livrer, c'est **déposer le dépôt**.

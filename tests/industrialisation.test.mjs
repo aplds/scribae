@@ -89,9 +89,8 @@ const RACINE_TEST = (() => {
   catch (e) { return null; }
 })();
 
-// Le code vit sous `src/` à la racine du dépôt livré, et à la racine de
-// l'outillage dans l'atelier (voir tests/README.md) : on essaie les deux
-// préfixes plutôt que d'en figer un, et les appels n'ont pas à s'en soucier.
+// Le code vit sous `src/` à la racine du dépôt : le préfixe est essayé d'abord
+// ancré, puis tel quel, et les appels n'ont pas à s'en soucier.
 async function lire(chemin) {
   if (!RACINE_TEST) return null;
   for (const prefixe of ["src/", ""]) {
@@ -147,12 +146,11 @@ test("la façade sert en JavaScript les extensions que le client importe", async
 //
 // Ces deux épreuves naissent de la même leçon que celle du contrôle de style
 // ci-dessus, et de deux pannes réelles de la chaîne d'intégration (2026-09-27) :
-// un chemin JUSTE dans l'atelier et FAUX dans le dépôt. Elles lisent les
-// fichiers, sans lancer de processus — elles tournent donc AUSSI dans l'atelier,
-// là où le défaut se fabrique.
+// un chemin juste dans un dossier, et faux dans un autre. Elles lisent les
+// fichiers, sans lancer de processus.
 
 test("la chaîne cite le guetteur d'échecs par un chemin ancré à sa racine", async (ctx) => {
-  const ci = (await lire(".github/workflows/ci.yml")) ?? (await lire("github/ci.yml"));
+  const ci = await lire(".github/workflows/ci.yml");
   if (!ci) return ctx.skip(SKIP);
   const lignes = ci.split("\n").filter((l) => /\bbash\s+\S*annoncer-echecs[.]sh/.test(l));
   assert.ok(lignes.length, "la chaîne doit appeler le guetteur d'échecs (sinon cette épreuve ne prouve rien)");
@@ -160,19 +158,18 @@ test("la chaîne cite le guetteur d'échecs par un chemin ancré à sa racine", 
     assert.match(
       ligne,
       /[$]GITHUB_WORKSPACE[/]scripts[/]annoncer-echecs[.]sh/,
-      "le guetteur doit être cité par un chemin ANCRÉ à la racine du dépôt : le travail « Service auto-hébergé » s'exécute depuis `src/server/mysql`, où un `../../scripts/…` désigne `src/scripts/…` — qui n'existe que dans l'atelier. La chaîne sortait donc en 127 (script introuvable) au lieu d'annoter l'épreuve rouge (NC-I-008) :\n" + ligne,
+      "le guetteur doit être cité par un chemin ANCRÉ à la racine du dépôt : le travail « Service auto-hébergé » s'exécute depuis `src/server/mysql`, où un `../../scripts/…` désigne un autre dossier. La chaîne sortait donc en 127 (script introuvable) au lieu d'annoter l'épreuve rouge (NC-I-008) :\n" + ligne,
     );
   }
 });
 
-test("l'épreuve de navigateur cherche la suite de parcours dans les deux dispositions", async (ctx) => {
+test("l'épreuve de navigateur cherche la suite de parcours à la racine", async (ctx) => {
   const source = await lire("tests/parcours-navigateur.mjs");
   if (!source) return ctx.skip(SKIP);
-  // Dans l'atelier, la suite est `src/tests/parcours.mjs` ; dans le dépôt, `tests/`
-  // est remonté à la racine et la suite est `/tests/parcours.mjs`. Un import figé
-  // sur `/src/tests/` répond 404 dans la chaîne, et le navigateur lève
+  // La suite est `tests/parcours.mjs`, à la racine du dépôt. Un import figé sur
+  // un autre chemin répond 404 dans la chaîne, et le navigateur lève
   // « Failed to fetch dynamically imported module » : le travail `parcours`
   // échouait donc sans jamais jouer un seul parcours (2026-09-27).
-  assert.match(source, /['"]\/src\/tests\/parcours[.]mjs['"]/, "la disposition de l'atelier doit être citée");
-  assert.match(source, /['"]\/tests\/parcours[.]mjs['"]/, "la disposition du dépôt (où `tests/` est à la racine) doit être citée");
+  assert.match(source, /['"]\/tests\/parcours[.]mjs['"]/, "la suite de parcours doit être citée à la racine du dépôt");
+  assert.doesNotMatch(source, /['"]\/src\/tests\//, "aucun chemin de l'ancienne double disposition ne doit rester");
 });

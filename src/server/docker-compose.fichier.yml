@@ -32,7 +32,7 @@
 # LE DOSSIER DE DONNÉES (`./data`, à côté de ce fichier) est monté sur `/data` :
 # c'est là que TOUT est rangé — référentiel, trames, actes, comptes, sessions,
 # état de signature, journaux. SAUVEGARDER = copier ce dossier. Il est ignoré par
-# git (voir src/github/gitignore), et n'a rien à faire dans un dépôt.
+# git (voir .gitignore), et n'a rien à faire dans un dépôt.
 # ============================================================================
 
 services:

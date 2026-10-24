@@ -9,8 +9,8 @@
 //   • `STATE_VERSION` (index.html)        — le format de l'état durable du service ;
 //   • `SEED_VERSION` (src/lib/store.js)   — la version du jeu de démonstration.
 //
-// Convention de versionnement (voir `src/CHANGELOG.md`, et « Flux de travail :
-// Perchance ↔ GitHub » dans `src/README.md`) :
+// Convention de versionnement (voir `src/CHANGELOG.md`, et « Flux de travail —
+// le dépôt est la source de vérité » dans `src/README.md`) :
 //
 //   • une version n'existe qu'une fois FIGÉE — c'est-à-dire déposée sur GitHub.
 //     On ouvre et on date l'entrée du changelog à ce moment-là, jamais avant ;
@@ -23,10 +23,10 @@
 //     dit la vérité, et il faut corriger `APP_VERSION`.
 // ============================================================================
 
-export const APP_VERSION = "1.6.3u";
+export const APP_VERSION = "1.6.3w";
 
 // Date de la version courante (ISO, AAAA-MM-JJ).
-export const APP_RELEASED = "2026-10-01";
+export const APP_RELEASED = "2026-10-24";
 
 // Le changelog est un fichier du dépôt, pas une donnée recopiée dans le code :
 // l'écran « Documentation technique » le lit tel quel (comme README/SPEC/TODO).

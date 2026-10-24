@@ -1772,7 +1772,7 @@ administrateurs par la permission `docs.voir`, mais ses fichiers (`src/docs/ADMI
 l'entrée de l'écran aux autres rôles — c'est un confort d'interface, pas un secret : n'y écrivez
 jamais un identifiant, une clé ou une adresse à protéger (voir le paragraphe suivant).
 
-Ne placez **jamais** dans `src/`, `main.pjs`, `index.html` ou `config.js` : mot de passe de
+Ne placez **jamais** dans `src/`, `index.html` ou `config.js` : mot de passe de
 base, clé privée, jeton de production durable, URL de suppression. Les secrets vivent dans
 `.env` (non versionné) et dans la configuration du serveur.
 
@@ -2152,7 +2152,7 @@ la migration consiste donc à déplacer les données, pas à les convertir.
    service) — la carte *Administration › Identité › Mention de démonstration* masque alors
    d'elle-même ses options, et aucun bandeau « Démonstration » ne s'affiche ;
    et retirer la dépendance à l'environnement d'édition — l'application auto-hébergée ne
-   charge plus `main.pjs` ni l'`index.html` d'origine (sa coquille est `src/server/web/index.html`).
+   charge plus l'`index.html` d'origine (sa coquille est `src/server/web/index.html`).
 
 > Les **certificats de signature** créés dans un navigateur de démonstration ne se
 > transportent pas : en service, ils sont créés par poste (ou remplacés par le certificat du

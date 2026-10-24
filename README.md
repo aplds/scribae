@@ -355,7 +355,7 @@ Le dépôt range **l'outillage à la racine** et **le code dans `src/`** :
 
 | | |
 |---|---|
-| `index.html`, `main.pjs` | la page publiée : le gabarit et le code du service de démonstration statique |
+| `index.html` | la page publiée : le gabarit et le code du service de démonstration statique |
 | `src/lib/` | le cœur métier — modules **purs** : compilation, expressions, numérotation, signature, exports, PDF/A |
 | `src/ui/`, `src/css/` | les vues et les feuilles de style |
 | `src/server/` | le service compagnon auto-hébergé (nginx + Node + MariaDB) et le pilote de persistance |
@@ -375,19 +375,13 @@ npm test           # node --test tests/ et le domaine du service
 dépôt — commence par **`AGENTS.md`** : il tient l'arborescence, les commandes, les
 règles du projet (aucune dépendance, métier sans DOM ni réseau, documents engendrés
 à ne pas modifier à la main), les pièges et la licence. **`CLAUDE.md`** y renvoie.
-S'il travaille dans **l'atelier** (l'édition en ligne, où il n'y a ni terminal ni
-processus), il lit en plus **`src/docs/ATELIER.md`** : la méthode, les dix
-garde-fous, le harnais `scripts/harnais-atelier.mjs` — qui rejoue la syntaxe, le
-style, les épreuves et les générateurs **sans Node** — et ce qui compte comme
-« terminé ». Le fond vit sous `src/` : `src/README.md` (mode d'emploi du code,
+Le fond vit sous `src/` : `src/README.md` (mode d'emploi du code,
 doctrine, recettes d'exploitation et de livraison), `src/SPEC.md` (spécification),
-`src/docs/` (service, administration, industrialisation, atelier), `src/audit/`
+`src/docs/` (service, administration, industrialisation), `src/audit/`
 (registre).
 
-Un fichier ne vit qu'à **un seul endroit** : la table de l'export
-(`src/README.md` § « Exporter le dépôt GitHub ») dit lequel. Le même outillage, dans
-l'atelier de travail, sert à faire tourner l'aperçu — d'où des chemins qui restent
-relatifs dans les deux dispositions.
+Un fichier ne vit qu'à **un seul endroit** : `src/README.md`, § « Disposition des
+fichiers », dit lequel vit où et pourquoi.
 
 ## Version
 
