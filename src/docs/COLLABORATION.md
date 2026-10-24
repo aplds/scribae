@@ -179,11 +179,11 @@ apparaître chez l'autre avec la mention « untel écrit ».
 
 ## 8. Où c'est éprouvé
 
-- `src/tests/fusion.test.mjs` — la fusion, hors navigateur : identifiants, ordre
+- `tests/fusion.test.mjs` — la fusion, hors navigateur : identifiants, ordre
   des listes, suppressions symétriques, profondeur.
 - `src/server/mysql/flux.test.mjs` — le concentrateur : diffusion, poste lent
   (resync), abonné mort, plafond, battement, fermeture générale.
-- `src/tests/parcours.mjs` — deux épreuves de plus :
+- `tests/parcours.mjs` — deux épreuves de plus :
   `fusion-sans-perte` (deux postes qui écrivent le même document ne s'effacent
   plus) et `flux-temps-reel` (découpage des trames SSE, trame incomplète remise au
   paquet suivant, `resync` reconnu, service sans flux déclaré « absent »).

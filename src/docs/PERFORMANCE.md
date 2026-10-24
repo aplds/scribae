@@ -265,7 +265,7 @@ sur les nœuds rendus, eux, partent avec les nœuds — ceux-là sont sans risqu
   la nouvelle.
 - Vérifié : dix redessins n'ajoutent plus **rien** (0 / 0 / 0), contre +1 / +1 / +3
   avant. L'épreuve de parcours `editeur-sans-fuite`
-  (`src/tests/parcours.mjs`) tient la règle : elle compte les écouteurs posés
+  (`tests/parcours.mjs`) tient la règle : elle compte les écouteurs posés
   MOINS ceux repris, et échoue si dix redessins en laissent derrière eux.
 
 > Le geste vaut pour tout l'atelier : la rédaction, l'organigramme et les

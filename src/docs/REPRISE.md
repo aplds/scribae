@@ -21,7 +21,6 @@ perdre plus de temps qu'il n'en fait gagner.
 
 | Où | Ce que c'est | Par où commencer la lecture |
 |---|---|---|
-| `main.pjs` | Le **manifeste** de la page publiée : métadonnées et greffons de la plateforme d'hébergement. Presque vide — c'est voulu. | en entier (court) |
 | `index.html` | La **coquille** : le script du service de démonstration (`<script type="text/x-server-plugin">`), le `<div id="app">`, et le module qui démarre l'application. | le bas du fichier (la ligne `import`) |
 | `src/ui/app.js` | Le **routeur** de l'application : lit l'adresse, choisit l'écran, gère la session. | `render()` |
 | `src/ui/views/` | Un fichier par **écran** (trames, rédaction, signature, recueil public…). | l'écran qui vous intéresse |
@@ -114,7 +113,7 @@ Le dépôt est servi **tel quel** : rien n'est compilé. L'outillage est rangé 
 place attendue** — à la racine — et le code de l'application sous `src/` (la
 disposition complète est dans `src/README.md`, § « Disposition des fichiers »).
 
-Le site publié a besoin, à la racine, de `index.html`, `main.pjs`, `src/**`, et
+Le site publié a besoin, à la racine, de `index.html`, `src/**`, et
 d'un `.nojekyll` (pour que GitHub Pages serve `src/` sans transformation). Le
 domaine se règle par un fichier `CNAME`.
 

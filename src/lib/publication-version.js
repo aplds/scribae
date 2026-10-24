@@ -16,7 +16,7 @@
 // Ces règles vivent ici, UNE SEULE FOIS : le client qui publie (voir `publier`,
 // src/ui/views/signature.js) et l'amorçage qui décide s'il doit republier (voir
 // `amorcerRecueil`, src/ui/demo-publications.js) les partagent — et l'épreuve
-// les exerce sans navigateur (`src/tests/version-publication.test.mjs`).
+// les exerce sans navigateur (`tests/version-publication.test.mjs`).
 // ============================================================================
 
 // Le suffixe qui marque une publication comme celle d'une version donnée du jeu

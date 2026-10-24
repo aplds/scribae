@@ -16,7 +16,7 @@
 //
 // Les règles « revendications → compte » sont une COPIE de celles du navigateur
 // (src/lib/oidc.js), que le service ne peut pas importer : son image ne contient
-// que ce dossier. C'est `src/tests/purs.test.mjs` qui tient la concordance des
+// que ce dossier. C'est `tests/purs.test.mjs` qui tient la concordance des
 // deux, en confrontant les deux implémentations sur les mêmes revendications.
 // ============================================================================
 

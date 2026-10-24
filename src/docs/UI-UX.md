@@ -361,7 +361,7 @@ est montré est réalisable dans le code actuel sans changer de socle.
 4. **Lot 4 — le confort** (P4 ✅, P7 ✅, P8 ✅).
 
 Toutes les propositions ont été livrées. Chacune a reçu son **épreuve de parcours**
-(`src/tests/parcours.mjs`) : la suite en compte aujourd'hui **vingt-cinq**, dont
+(`tests/parcours.mjs`) : la suite en compte aujourd'hui **vingt-cinq**, dont
 dix nées de cette revue. Elles lisent les vraies classes des écrans et
 **remettent l'état** qu'elles ont touché (registre, chrono, tiroir, préférences
 du menu) pour ne pas perturber la suite.

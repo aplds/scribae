@@ -18,12 +18,11 @@
 //     L'import jamais employé, lui, se signale PARTOUT : il ne dépend ni du
 //     rôle du fichier, ni de son style.
 //
-// CE QU'ELLE PARCOURT. Le dossier qui porte l'outillage — la racine du dépôt
-// livré, où vivent `scripts/`, `tests/` et `src/` ; tout l'arbre de l'atelier,
-// où tout voisine sous `src/`. Les exemptions, elles, sont écrites relativement
-// à la RACINE DU CODE (`racine-code.mjs`) : c'est ce qui les rend justes dans
-// les deux dispositions — un décalage entre l'outil et la disposition qu'il
-// contrôle avait éteint toutes les exemptions (audit, NC-I-009).
+// CE QU'ELLE PARCOURT. La racine du dépôt — l'outillage (`scripts/`, `tests/`)
+// comme le code de l'application (`src/`). Les exemptions, elles, sont écrites
+// relativement à la RACINE DU CODE (`racine-code.mjs`) — un décalage entre
+// l'outil et l'arborescence qu'il contrôle éteindrait toutes les exemptions
+// (audit, NC-I-009).
 //
 // USAGE
 //   npm run lint                               avertissements tolérés (CI douce)
@@ -32,15 +31,15 @@
 // Voir docs/INDUSTRIALISATION.md et l'audit (proposition P-30).
 // ============================================================================
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
-import { RACINE_CODE, RACINE_OUTILLAGE } from "./racine-code.mjs";
+import { join, sep } from "node:path";
+import { RACINE_OUTILLAGE } from "./racine-code.mjs";
 import { importsInutilises } from "./analyse-imports.mjs";
 
 const strict = process.argv.includes("--strict");
 
 // Les fichiers volontairement exemptés, et pourquoi. Les chemins sont écrits
 // RELATIVEMENT AU CODE (voir `cheminDuCode` plus bas) : `scripts/…` et
-// `tests/…` n'y figurent que pour mémoire, l'outillage n'étant jamais dans
+// `tests/…` n'y figurent que pour la lecture, l'outillage n'étant jamais dans
 // l'arbre du code.
 const EXEMPTIONS = [
   { test: (p) => p.startsWith("scripts" + sep) || p.startsWith("tests" + sep), raison: "outillage" },
@@ -52,7 +51,7 @@ const EXEMPTIONS = [
 const exempt = (p) => EXEMPTIONS.find((e) => e.test(p));
 
 // L'outillage, au sens du parcours : son PREMIER segment de chemin, qui est
-// `scripts` ou `tests` dans les deux dispositions (voir ci-dessus).
+// `scripts` ou `tests`.
 const estOutillage = (rel) => {
   const premier = rel.split(sep)[0];
   return premier === "scripts" || premier === "tests";
@@ -62,11 +61,7 @@ const estOutillage = (rel) => {
 // l'outillage (hors du code) garde son chemin tel quel : il ne peut donc
 // correspondre à aucune exemption, ce qui est le sens voulu (« scripts/… » et
 // « tests/… » ne sont là que pour la lecture).
-const prefixeCode = relative(RACINE_OUTILLAGE, RACINE_CODE);
-const cheminDuCode = (rel) => {
-  if (!prefixeCode) return rel;
-  return rel.startsWith(prefixeCode + sep) ? rel.slice(prefixeCode.length + 1) : rel;
-};
+const cheminDuCode = (rel) => rel.startsWith("src" + sep) ? rel.slice(4) : rel;
 
 async function fichiers(dir, out = []) {
   for (const e of await readdir(join(RACINE_OUTILLAGE, dir), { withFileTypes: true })) {

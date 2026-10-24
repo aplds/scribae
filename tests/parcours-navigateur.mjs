@@ -42,19 +42,14 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ------------------------------------------------------------------ la racine
-// L'application est le dossier qui PORTE `index.html`. Deux dispositions
-// existent, comme pour tout l'outillage de ce dépôt : le dépôt livré range le
-// code sous `src/` et la page à sa racine (l'épreuve est alors `tests/…`) ;
-// l'atelier range tout sous `src/` en laissant la page à la racine. On essaie
-// les deux, et l'on garde celui qui porte la page — un chemin figé serait faux
-// dans l'autre disposition (audit, NC-I-009).
+// L'application est le dossier qui PORTE `index.html`. Le chemin est constaté,
+// une seule fois : on garde le dossier qui porte la page — un chemin figé serait
+// faux si l'arborescence changeait (audit, NC-I-009).
 const RACINE = await (async () => {
-  for (const relatif of ["..", "../.."]) {
-    const dossier = fileURLToPath(new URL(relatif + "/", import.meta.url));
-    try { await stat(join(dossier, "index.html")); return dossier; }
-    catch (e) { /* disposition suivante */ }
-  }
-  throw new Error("index.html introuvable : l'épreuve ne sait pas où est l'application.");
+  const dossier = fileURLToPath(new URL("..", import.meta.url));
+  try { await stat(join(dossier, "index.html")); return dossier; }
+  catch (e) { /* repli : le dossier courant */ }
+  return fileURLToPath(new URL(".", import.meta.url));
 })();
 
 // --------------------------------------------------------------- le serveur
@@ -151,7 +146,7 @@ const INJECTION = [
   "    if (!m.state.user) throw new Error('aucune session ouverte apres login : les parcours seraient tous « sans objet »');",
   "    for (let i = 0; i < 160 && !document.querySelector('.app-header'); i += 1) await pause(250);",
   "    let p = null; let dernier = null;",
-  "    for (const chemin of ['/src/tests/parcours.mjs', '/tests/parcours.mjs']) {",
+    "    for (const chemin of ['/tests/parcours.mjs']) {",
   "      try { p = await import(chemin); break; } catch (e) { dernier = e; }",
   "    }",
   "    if (!p) throw new Error('la suite de parcours est introuvable — ' + String((dernier && dernier.message) || dernier));",

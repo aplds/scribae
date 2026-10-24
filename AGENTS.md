@@ -32,7 +32,7 @@ Ne renommez donc pas les fichiers sans raison.
 
 ```
 /                       README.md, AGENTS.md, CLAUDE.md, package.json, LICENSE, CNAME, .nojekyll
-                        index.html, main.pjs             la page publiée (GitHub Pages) et son code
+                        index.html                  la page publiée (GitHub Pages) et son code
 compose-exemple/        L'EXEMPLE DE PREMIER DÉPLOIEMENT : MariaDB + l'image publiée, deux services
 scripts/                L'OUTILLAGE : vérifications, analyse statique, générateurs de documents
 tests/                  LES ÉPREUVES transverses (le service éprouve, lui, à côté de son code)

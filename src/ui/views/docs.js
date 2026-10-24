@@ -73,11 +73,6 @@ const DOCUMENTS = [
     desc: "Architecture du code, rôle de chaque module, partis pris techniques.",
   },
   {
-    id: "atelier", group: "Conception",
-    path: "src/docs/ATELIER.md", title: "Travailler dans l'atelier",
-    desc: "La méthode, les dix garde-fous, la vérification sans terminal (le harnais d'épreuves), et ce qui compte comme « terminé ».",
-  },
-  {
     id: "todo", group: "Conception",
     path: "src/TODO.md", title: "Chantiers ouverts",
     desc: "Ce qui reste à faire, par ordre d'importance, et pourquoi.",

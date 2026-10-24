@@ -683,14 +683,13 @@ test("service : les champs que le client lit de `GET /v1/auth/config` lui sont t
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return t.skip("lecture de fichier indisponible hors dépôt");
   // Le dossier de CE fichier est le repère sûr : `node --test` peut partir de la
-  // racine du dépôt comme de `tests/`. Les deux dispositions sont essayées — le
-  // dépôt livré (`../src/…`) et l'atelier, où le code et l'outillage voisinent
-  // (`../…`) —, puis les chemins du dossier courant, qui couvrent les autres cas.
+  // racine du dépôt comme de `tests/`. Le chemin ancré au fichier couvre les deux
+  // cas ; les chemins du dossier courant servent de repli.
   let ici = () => null;
   try {
     const { fileURLToPath } = await import("node:url");
     const base = import.meta.url;
-    // Le calcul est protégé ICI : dans un harnais de navigateur, l'adresse du
+    // Le calcul est protégé ICI : sous le harnais de parcours (`tests/parcours-navigateur.mjs`), l'adresse du
     // module n'est pas hiérarchique, et résoudre un chemin relatif contre elle
     // lève. L'essai rend alors `null`, et les chemins relatifs prennent la suite.
     ici = (rel) => { try { return fileURLToPath(new URL(rel, base)); } catch (e) { return null; } };
@@ -702,8 +701,8 @@ test("service : les champs que le client lit de `GET /v1/auth/config` lui sont t
     }
     return null;
   };
-  const auth = await lire([ici("../src/lib/auth.js"), ici("../lib/auth.js"), "src/lib/auth.js", "lib/auth.js"]);
-  const etat = await lire([ici("../src/ui/state.js"), ici("../ui/state.js"), "src/ui/state.js", "ui/state.js"]);
+  const auth = await lire([ici("../src/lib/auth.js"), "src/lib/auth.js"]);
+  const etat = await lire([ici("../src/ui/state.js"), "src/ui/state.js"]);
   if (!auth || !etat) return t.skip("sources illisibles hors du dépôt");
 
   const debut = auth.indexOf("export function setDeploiementAuth");

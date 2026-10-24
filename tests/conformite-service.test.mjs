@@ -29,8 +29,8 @@ async function lireIndex() {
   try { ({ readFile } = await import("node:fs/promises")); } catch (e) { readFile = null; }
   if (typeof readFile !== "function") return null;
   // La première adresse est ANCRÉE à ce fichier (`index.html` vit deux crans
-  // au-dessus de `tests/` : le dépôt livré comme l'atelier la trouvent), les
-  // autres couvrent une exécution lancée depuis un autre dossier.
+  // au-dessus de `tests/`), les autres couvrent une exécution lancée depuis un
+  // autre dossier.
   const chemins = [];
   try {
     const { fileURLToPath } = await import("node:url");

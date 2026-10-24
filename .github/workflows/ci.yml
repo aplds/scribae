@@ -3,9 +3,7 @@
 #
 # OÙ VIT CE FICHIER. Le dépôt est servi tel quel (GitHub Pages) : sa racine
 # porte le code de l'application (`src/`) et l'outillage (`scripts/`, `tests/`).
-# Le présent fichier est le modèle de `<racine>/.github/workflows/ci.yml`, où
-# l'export le dépose (comme `src/docs/GITHUB.md` devient `README.md`). Voir
-# `src/docs/INDUSTRIALISATION.md`.
+# Voir `src/docs/INDUSTRIALISATION.md`.
 #
 # CE QU'IL FAIT. Rien à installer pour le premier travail : la vérification de
 # syntaxe, le contrôle de style et les tests des modules purs n'utilisent que
@@ -27,8 +25,9 @@
 # AVISANT pour l'instant (`continue-on-error`), voir son commentaire plus bas.
 #
 # LE TROISIÈME TRAVAIL CONSTRUIT L'IMAGE DOCKER ET LA MET EN SERVICE, sur une
-# vraie MariaDB : c'est la seule chose que l'atelier ne peut pas faire, et c'est
-# pourtant ce qui décide si « ça marche en production ». Il ne pousse aucune
+# vraie MariaDB : c'est la seule chose que la CI peut faire de plus que les
+# épreuves, et c'est pourtant ce qui décide si « ça marche en production ». Il
+# ne pousse aucune
 # image (aucun secret, aucun registre) : il répond à la question « le
 # `Dockerfile` se construit-il encore, et le service répond-il, base comprise ? »
 # — la question que se pose un exploitant au moment de déployer. Il vérifie
@@ -121,11 +120,11 @@ jobs:
           if [ "$code" -ne 0 ]; then
             # LE CHEMIN EST ANCRÉ À LA RACINE (`$GITHUB_WORKSPACE`), jamais
             # relatif : ce travail s'exécute depuis `src/server/mysql` (voir
-            # `defaults` ci-dessus), et un `../../scripts/…` y désigne
-            # `src/scripts/…` — qui n'existe que dans l'atelier. La CI
-            # répondait donc `127` (script introuvable) au lieu d'annoter
-            # l'épreuve rouge, et le travail « Service auto-hébergé » échouait
-            # sans jamais dire pourquoi (le pendant, côté service, de NC-I-009).
+            # `defaults` ci-dessus), et un chemin relatif y désignerait un
+            # autre dossier. La CI répondait donc `127` (script introuvable)
+            # au lieu d'annoter l'épreuve rouge, et le travail « Service
+            # auto-hébergé » échouait sans jamais dire pourquoi (le pendant,
+            # côté service, de NC-I-009).
             bash "$GITHUB_WORKSPACE/scripts/annoncer-echecs.sh" "$RUNNER_TEMP/epreuves-service.log"
           fi
           exit "$code"

@@ -1,23 +1,19 @@
 <!doctype html>
 <!--
-  Ces quatre lignes ne servent qu'à la version publiée en statique (GitHub
-  Pages) : elles donnent à la page un vrai document — mode « standards », jeu de
-  caractères, largeur d'écran pour les téléphones, titre d'onglet. Dans
-  l'environnement d'édition elles sont sans effet (le document existe déjà).
+  Ces quatre lignes donnent à la page un vrai document — mode « standards », jeu
+  de caractères, largeur d'écran pour les téléphones, titre d'onglet.
 -->
 
 <!--
-  AGENT : avant d'écrire quoi que ce soit, lisez src/docs/ATELIER.md — la
-  méthode, les dix garde-fous, la vérification SANS TERMINAL
-  (src/scripts/harnais-atelier.mjs : syntaxe, style, épreuves, générateurs) et
-  ce qui compte comme « terminé ». L'architecture est dans src/README.md, les
-  règles du projet dans src/AGENTS.md.
+  AGENT : avant d'écrire quoi que ce soit, lisez AGENTS.md — la méthode, les
+  garde-fous, la vérification (`npm run verifier`) et ce qui compte comme
+  « terminé ». L'architecture est dans src/README.md.
 
   CE FICHIER PORTE LE SERVICE DE DÉMONSTRATION (le bloc « text/x-server-plugin »
-  ci-dessous), que la plateforme d'édition exécute dans un fil séparé. Toute
+  ci-dessous), monté en édition statique par src/pages/host.js. Toute
   règle métier y a son JUMEAU dans src/server/mysql/ : les deux doivent suivre
-  ensemble, et le jeu de conformité (src/tests/conformite-service.mjs) est ce qui
-  les empêche de diverger (voir docs/REPRISE.md, § 2).
+  ensemble, et le jeu de conformité (tests/conformite-service.mjs) est ce qui
+  les empêche de diverger (voir src/docs/REPRISE.md, § 2).
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -42,7 +38,7 @@ if (!document.documentElement.lang) document.documentElement.lang = "fr";
 // se prendrait pour un acte réel. Ce n'est PAS vrai du logiciel auto-hébergé,
 // dont le recueil public est fait pour être trouvé — la règle ne vaut donc que
 // pour l'adresse de la démonstration, qui est celle du fichier `CNAME` du
-// dépôt. Voir docs/GITHUB.md (« Démonstration statique ») et l'audit, NC-III-008.
+// dépôt. Voir README.md (« Démonstration ») et l'audit, NC-III-008.
 if (location.hostname === "demo.scribae.eu") {
   var robots = document.createElement("meta");
   robots.name = "robots";

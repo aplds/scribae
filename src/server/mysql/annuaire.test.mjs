@@ -87,7 +87,7 @@ test("ce qui n'est pas dans la liste blanche ne sort JAMAIS", () => {
 
 test("la liste blanche est celle des deux côtés", () => {
   // Le navigateur tient la même liste (ANNUAIRE_CLES, src/lib/auth.js) : les
-  // épreuves de src/tests/purs.test.mjs vérifient qu'elles ne divergent pas.
+  // épreuves de tests/purs.test.mjs vérifient qu'elles ne divergent pas.
   assert.equal(CHAMPS_PUBLICS.length, 19);
   assert.ok(CHAMPS_PUBLICS.includes("annuaire"));
   assert.ok(CHAMPS_PUBLICS.includes("roleMap"));

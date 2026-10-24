@@ -172,7 +172,7 @@ test("une correspondance de groupes fautive est refusée ENTIÈREMENT", () => {
 
 test("les rôles de la correspondance sont ceux de l'application", () => {
   // La liste de référence est ROLE_ORDER (src/lib/users.js) ; les épreuves du
-  // navigateur (src/tests/purs.test.mjs) vérifient que les deux listes sont
+  // navigateur (tests/purs.test.mjs) vérifient que les deux listes sont
   // identiques — la copie locale tient ce module PUR, sans dépendance.
   assert.deepEqual(ROLES_CONNUS, ["visiteur", "redacteur", "reviseur", "signataire", "editeur", "administrateur"]);
   const r = lireVariables({ SCRIBA_ANNUAIRE_ROLE_DEFAUT: "prestataire" });
