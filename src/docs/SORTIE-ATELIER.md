@@ -1,7 +1,7 @@
 ---
 titre: Sortie d'atelier (Perchance) — le dépôt devient la seule source de vérité
 date: 2026-10-24
-statut: plan proposé, non démarré
+statut: en cours — étape 1 en relecture (PR #2), étape 2 faite (doc agent)
 auteur: Vibe (Work) — validé par Arno pour exécution par une session Code
 ---
 

@@ -42,22 +42,9 @@ node --test tests/            # ce dossier seul
 ## Pourquoi les imports disent `../src/…`
 
 Le dépôt range l'outillage à sa **racine** (`scripts/`, `tests/`) et le code de
-l'application sous **`src/`** : c'est la disposition **livrée**, et c'est pour
+l'application sous **`src/`** : c'est la disposition du dépôt, et c'est pour
 elle que ces fichiers sont écrits (le code est donc `../src/lib/…`, `../src/ui/…`
-et l'outillage `../scripts/…`).
-
-Dans l'atelier, l'outillage vit sous `src/` — `src/tests/` est le seul arbre que
-la plateforme conserve d'une séance à l'autre —, et le harnais d'essai y simule
-la disposition livrée. `scripts/racine-code.mjs` **constate** la racine du code
-au lieu de la supposer : c'est ce qui évite le piège de NC-I-009, où un décalage
-entre l'outil et l'arborescence qu'il contrôle avait éteint toutes ses
+et l'outillage `../scripts/…`). `scripts/racine-code.mjs` **constate** la racine
+du code au lieu de la supposer : c'est ce qui évite le piège de NC-I-009, où un
+décalage entre l'outil et l'arborescence qu'il contrôle avait éteint toutes ses
 exemptions.
-
-## Les jouer dans l'atelier
-
-Ces épreuves ne se lancent pas au terminal dans l'atelier : c'est
-**`scripts/harnais-atelier.mjs`** qui les rejoue (un fichier à la fois, comme
-`node --test` les isole), en même temps que la syntaxe, le style et les
-générateurs. La recette, les **chiffres attendus** et la liste des écarts connus
-(qui sont un artefact du harnais, jamais une excuse) sont dans
-**`docs/ATELIER.md` § 3** — le document à lire avant de travailler dans l'atelier.

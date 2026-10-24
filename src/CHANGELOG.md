@@ -23,6 +23,24 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
+## [1.6.3v] — 2026-10-24 — La doc agent dit le nouveau monde : le dépôt est la source unique
+
+**Modifié**
+
+- **Les consignes aux agents disent le dépôt, et seulement le dépôt.** Le flux de
+  travail « Perchance ↔ GitHub », les recettes d'export et la double disposition
+  des fichiers disparaissent : on développe dans le dépôt sur `dev`, une branche
+  par sujet, une PR par sujet vers `dev` avec la chaîne verte avant relecture, et
+  chaque livraison laisse une trace — une entrée datée au changelog et
+  `APP_VERSION` à jour.
+
+**Retiré**
+
+- **L'atelier en ligne (Perchance) et son harnais de vérification sans Node ne
+  figurent plus dans la doc agent.** Le mot « atelier » reste pour l'écran interne
+  de l'application, inchangé.
+
+
 ## [1.6.3u] — 2026-10-01 — L'acte modificatif se referme comme l'acte modifié
 
 Demande : « quand un acte a été modifié, la vue en version consolidée est complètement cassée
