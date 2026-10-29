@@ -702,6 +702,13 @@ première connexion, utilisez *Pré-enregistrer un agent* avec son adresse exact
 de démonstration désactivés par l'annuaire (les autres restent désactivés). Les comptes créés
 ou repris par l'annuaire, eux, restent dans la liste : ils portent le badge **Annuaire**.
 
+**Désactivation et reprise par l'annuaire.** Un compte **désactivé dans *Comptes et rôles*** (par
+un administrateur — départ de l'agent, par exemple) **reste inactif** : la connexion par
+l'annuaire ne réactive que les comptes que l'annuaire lui-même avait désactivés, et sa
+connexion est alors **refusée** avec un message qui dit où le blocage a été posé. Seul un
+administrateur peut réactiver ce compte, dans *Comptes et rôles* — la désactivation applicative
+vaut donc contre la connexion par l'annuaire (et non l'inverse).
+
 **Quand il n'y a pas d'annuaire.** Utilisez les **comptes locaux (mot de passe)** (§ 4.3 bis) :
 c'est une vraie authentification, tenue par le service, sans rien à installer de plus. Le mode
 « comptes de l'application » ne reste, lui, qu'un mode de démonstration.
