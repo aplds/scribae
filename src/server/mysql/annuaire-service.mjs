@@ -30,13 +30,15 @@
 // rediriger, garder le `state`/`nonce`/vérificateur le temps de l'aller-retour,
 // et présenter le résultat. Plus aucun appel au fournisseur ne part du
 // navigateur : **le CORS cesse d'être une condition de fonctionnement**.
+// Le `state` est confronté par le NAVIGATEUR (`completeAuthorizationFromUrl`,
+// src/lib/oidc.js) : le service ne le voit jamais.
 //
 // CE QUI RESTE AU NAVIGATEUR, ET POURQUOI. Le flux reste « code d'autorisation
 // + PKCE » : le vérificateur est tiré par le navigateur (il ne quitte l'onglet
 // que pour l'aller-retour avec le service, sur la MÊME origine), `state` et
 // `nonce` sont confrontés, et l'URL est nettoyée. Un attaquant qui obtiendrait
 // un code ne pourrait ni le présenter sans le vérificateur, ni s'en servir deux
-// fois : le service refuse un `state` inconnu, et le fournisseur un code rejoué.
+// fois : c'est le navigateur qui refuse un `state` inconnu, et le fournisseur un code rejoué.
 //
 // LES RÈGLES D'ATTRIBUTION SONT REPRISES D'ICI, À L'IDENTIQUE. Les revendications
 // → compte (groupes → rôle, services et entité, création à la première
@@ -483,8 +485,21 @@ export function rolesCanoniques(roles) {
 
 // Ce que l'annuaire fait du compte : la fiche à écrire, le rôle principal, et
 // les qualités cumulables conservées. `existing` est le compte déjà rattaché, ou
-// `null` (création).
+// `null` (création). La réactivation est CONDITIONNELLE : seul un compte
+// désactivé PAR L'ANNUAIRE (`deactivatedBy: "oidc"`) redevient actif —
+// un compte désactivé par un administrateur le reste, et la connexion est
+// refusée (`refuse` porte le motif) : le geste d'administration applicative
+// est opposable à la connexion par l'annuaire (NC-II-018).
 export function revendicationsVersCompte({ referentiel = null, auth, claims = {}, existing = null, now = () => new Date() } = {}) {
+  if (existing && existing.active === false && existing.deactivatedBy !== "oidc") {
+    return {
+      ok: false, refuse: true,
+      motif: "Ce compte a été désactivé par un administrateur" +
+        (existing.deactivatedBy && existing.deactivatedBy !== "admin" ? " (" + existing.deactivatedBy + ")" : "") +
+        " : la connexion par l'annuaire ne le réactive pas. Seul un administrateur peut le réactiver, dans « Comptes et rôles ».",
+      role: "", matched: "", visiteur: false, reason: "",
+    };
+  }
   const role = roleDepuisRevendications(auth, claims);
   const nom = nomSepare(claims);
   const email = texte(claims.email || claims.preferred_username).trim();
@@ -531,7 +546,10 @@ export function revendicationsVersCompte({ referentiel = null, auth, claims = {}
 // du compte existant sont conservées : elles ne viennent pas des groupes, mais
 // d'une décision de l'administrateur ; sauf quand l'annuaire ne reconnaît AUCUN
 // rôle : le compte devient Visiteur, et une qualité résiduelle ne doit pas lui
-// rouvrir un accès.
+// rouvrir un accès. La réactivation n'efface les marques de désactivation que
+// quand l'annuaire en est l'auteur (`deactivatedBy: "oidc"`) : un compte
+// désactivé par un administrateur les garde, et reste inactif (la connexion est
+// refusée en amont, `revendicationsVersCompte` — NC-II-018).
 export function compteApplique({ existant = null, patch = {}, principal = "" } = {}) {
   const base = existant ? { ...existant } : null;
   const qualites = principal && principal !== ROLE_SANS_ACCES && base
@@ -539,8 +557,10 @@ export function compteApplique({ existant = null, patch = {}, principal = "" } =
     : [];
   const roles = rolesCanoniques(principal ? [principal, ...qualites] : rolesDuCompte(base));
   const compte = { ...(base || {}), ...patch };
-  delete compte.deactivatedBy;
-  delete compte.deactivatedAt;
+  if (compte.deactivatedBy === "oidc") {
+    delete compte.deactivatedBy;
+    delete compte.deactivatedAt;
+  }
   if (roles.length) { compte.roles = roles; compte.role = roles[0]; }
   return compte;
 }

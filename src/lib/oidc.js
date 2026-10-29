@@ -478,8 +478,17 @@ const localPart = (email) => String(email || "").split("@")[0].replace(/[^a-zA-Z
 // Traduit les revendications en fiche de compte. `authoritative` décide si le
 // rôle et le périmètre de l'annuaire écrasent ceux déjà attribués dans
 // l'application ; les champs que l'annuaire ne renseigne pas sont conservés.
+// La réactivation est CONDITIONNELLE : seul un compte désactivé PAR L'ANNUAIRE
+// (`deactivatedBy: "oidc"`) redevient actif — un compte désactivé par un
+// administrateur le reste, et `applyOidcUser` refuse la connexion (NC-II-018).
 export function claimsToAccount(config, claims, existing = null) {
   const auth = authConfig(config);
+  if (existing && existing.active === false && existing.deactivatedBy !== "oidc") {
+    return {
+      denied: true, role: null,
+      reason: "Ce compte a été désactivé par un administrateur : la connexion par l'annuaire ne le réactive pas. Seul un administrateur peut le réactiver, dans « Comptes et rôles ».",
+    };
+  }
   const role = mapRole(auth, claims);
   if (role.denied) return { denied: true, reason: role.reason, role: null };
 
@@ -551,8 +560,13 @@ export function applyOidcUser(config, users, claims) {
 
   if (existing) {
     const patched = { ...existing, ...res.patch };
-    delete patched.deactivatedBy;
-    delete patched.deactivatedAt;
+    // La réactivation n'efface les marques que quand l'annuaire en est l'auteur :
+    // un compte désactivé par un administrateur les garde, et reste inactif (la
+    // connexion est refusée en amont, `claimsToAccount` — NC-II-018).
+    if (patched.deactivatedBy === "oidc") {
+      delete patched.deactivatedBy;
+      delete patched.deactivatedAt;
+    }
     // Le rôle de l'annuaire devient le rôle PRINCIPAL ; les qualités cumulées
     // attribuées dans l'application (le rôle « Réviseur », par exemple) sont
     // conservées : elles ne viennent pas des groupes, mais d'une décision de

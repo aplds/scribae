@@ -658,6 +658,11 @@ export function createComptes({
     }
 
     const res = revendicationsVersCompte({ referentiel, auth, claims: verdict.claims, existing: existant, now });
+    // Un compte désactivé par un administrateur reste inactif : la connexion par
+    // l'annuaire ne réactive que ce que l'annuaire avait désactivé (NC-II-018).
+    if (res.ok === false && res.refuse) {
+      return { ok: false, code: "compte_desactive", message: res.motif };
+    }
     const fiche = compteApplique({ existant, patch: res.patch, principal: res.role });
     if (!existant) {
       fiche.id = "u-" + crypto.randomBytes(6).toString("hex");
@@ -787,7 +792,7 @@ export function createComptes({
         // (jeton refusé, compte inconnu et création automatique éteinte) ; 401 :
         // tout le reste (code invalide, fournisseur injoignable, échange refusé).
         const statut = res.code === "annuaire_non_branche" ? 404
-          : ["jeton_refuse", "compte_inconnu"].includes(res.code) ? 403
+          : ["jeton_refuse", "compte_inconnu", "compte_desactive"].includes(res.code) ? 403
             : res.code === "reseau_indisponible" ? 503 : 401;
         return ko(statut, err(res.code, res.message, res.checks ? { checks: res.checks } : undefined));
       }

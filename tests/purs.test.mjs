@@ -479,6 +479,25 @@ test("annuaire : les règles du service disent la même chose que celles du navi
     assert.equal(duService.visiteur, cote.visiteur, "accès : " + etiquete);
   }
 
+  // NC-II-018, des deux côtés : un compte désactivé par un administrateur n'est
+  // réactivé ni par l'un ni par l'autre — la connexion est refusée, avec un motif.
+  const bloque = { id: "u-9", active: false, deactivatedBy: "admin", deactivatedAt: "2026-02-01T00:00:00.000Z", role: "editeur" };
+  const refuseNav = oidc.claimsToAccount(config, { sub: "a-1", groups: ["scribae-admins"] }, bloque);
+  const refuseSvc = serveur.revendicationsVersCompte({ referentiel: config, auth: reglages, existing: bloque, claims: { sub: "a-1", groups: ["scribae-admins"] } });
+  assert.equal(refuseNav.denied, true, "navigateur : refus");
+  assert.match(refuseNav.reason, /administrateur/);
+  assert.equal(refuseSvc.ok, false, "service : refus");
+  assert.equal(refuseSvc.refuse, true);
+  assert.match(refuseSvc.motif, /administrateur/);
+  // Et désactivé par l'annuaire : les deux réactivent.
+  const parOidc = { id: "u-9", active: false, deactivatedBy: "oidc", deactivatedAt: "2026-01-01T00:00:00.000Z", role: "editeur" };
+  const reactNav = oidc.claimsToAccount(config, { sub: "a-1", groups: ["scribae-admins"] }, parOidc);
+  const reactSvc = serveur.revendicationsVersCompte({ referentiel: config, auth: reglages, existing: parOidc, claims: { sub: "a-1", groups: ["scribae-admins"] } });
+  assert.equal(reactNav.denied, false);
+  assert.equal(reactNav.patch.active, true, "navigateur : réactivation");
+  assert.equal(reactSvc.ok, true);
+  assert.equal(reactSvc.patch.active, true, "service : réactivation");
+
   for (const claims of cas) {
     const etiquete = JSON.stringify(claims);
     const parLeNavigateur = oidc.claimsToAccount(config, { sub: "a-1", ...claims });

@@ -476,6 +476,56 @@ test("les qualités cumulables survivent, sauf quand l'annuaire ne reconnaît pe
   assert.equal(reactive.active, true);
   assert.equal(reactive.deactivatedBy, undefined);
   assert.equal(reactive.deactivatedAt, undefined);
+
+  // NC-II-018 : un compte désactivé par un ADMINISTRATEUR garde ses marques, et
+  // reste inactif — la réactivation par l'annuaire ne s'applique qu'à ce que
+  // l'annuaire a désactivé.
+  const admin = compteApplique({ existant: { id: "u-1", active: false, deactivatedBy: "admin", deactivatedAt: "2026-01-01T00:00:00.000Z", role: "editeur" }, patch: { active: true, role: "editeur" }, principal: "editeur" });
+  assert.equal(admin.active, true, "le patch pose active, mais…");
+  assert.equal(admin.deactivatedBy, "admin", "…les marques de l'administrateur restent");
+  assert.equal(admin.deactivatedAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("NC-II-018 : la reprise ne réactive que les comptes désactivés par l'annuaire", () => {
+  const auth = reglages();
+  // Cas 1 — désactivé par l'annuaire : la reprise réactive, sans refus.
+  const parOidc = revendicationsVersCompte({
+    referentiel: REFERENTIEL, auth, now: MAINTENANT,
+    existing: { id: "u-1", active: false, deactivatedBy: "oidc", deactivatedAt: "2026-01-01T00:00:00.000Z", role: "editeur" },
+    claims: revendicationsValides(),
+  });
+  assert.equal(parOidc.ok, true);
+  assert.equal(parOidc.patch.active, true);
+  const ficheOidc = compteApplique({ existant: { id: "u-1", active: false, deactivatedBy: "oidc", deactivatedAt: "2026-01-01T00:00:00.000Z", role: "editeur" }, patch: parOidc.patch, principal: parOidc.role });
+  assert.equal(ficheOidc.active, true);
+  assert.equal(ficheOidc.deactivatedBy, undefined, "les marques de l'annuaire disparaissent");
+
+  // Cas 2 — désactivé par un administrateur : la connexion est REFUSÉE, avec un
+  // motif qui dit où le blocage a été posé ; le compte n'est pas écrit réactif.
+  const parAdmin = revendicationsVersCompte({
+    referentiel: REFERENTIEL, auth, now: MAINTENANT,
+    existing: { id: "u-1", active: false, deactivatedBy: "admin", deactivatedAt: "2026-02-01T00:00:00.000Z", role: "editeur" },
+    claims: revendicationsValides(),
+  });
+  assert.equal(parOidc.ok, true);
+  assert.equal(parAdmin.ok, false);
+  assert.equal(parAdmin.refuse, true);
+  assert.match(parAdmin.motif, /administrateur/);
+  assert.equal(parAdmin.patch, undefined, "aucun patch n'est produit pour un compte bloqué");
+
+  // Sans marque de désactivation (désactivation simple, active:false seul) :
+  // même refus — la règle ne distingue pas, elle exige que l'annuaire soit l'auteur.
+  const sansMarque = revendicationsVersCompte({
+    referentiel: REFERENTIEL, auth, now: MAINTENANT,
+    existing: { id: "u-1", active: false, role: "editeur" },
+    claims: revendicationsValides(),
+  });
+  assert.equal(sansMarque.ok, false);
+  assert.equal(sansMarque.refuse, true);
+
+  // Un compte actif, ou un compte neuf : pas de refus.
+  assert.equal(revendicationsVersCompte({ referentiel: REFERENTIEL, auth, now: MAINTENANT, existing: { id: "u-1", active: true }, claims: revendicationsValides() }).ok, true);
+  assert.equal(revendicationsVersCompte({ referentiel: REFERENTIEL, auth, now: MAINTENANT, existing: null, claims: revendicationsValides() }).ok, true);
 });
 
 // -------------------------------------------------------- le branchement complet
