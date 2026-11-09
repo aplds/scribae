@@ -23,6 +23,23 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
+## [1.6.3y] — 2026-11-09 — Cocher « Qualité de réviseur » ne plante plus l'affichage
+
+**Corrigé**
+
+- **Le bloc « Qualité de réviseur » d'un service faisait planter tout l'écran
+  quand une liste du référentiel était vide** (aucune famille de trames, aucun
+  type d'acte, aucune entité signataire…). L'auxiliaire qui construit les champs
+  de restriction rendait `null` sans options, et le bloc faisait `appendChild(null)`
+  : dès la coche, l'affichage tombait sur « Erreur d'affichage — TypeError:
+  parameter 1 is not of type 'Node' » (issue #6). Un champ sans options ne
+  s'affiche désormais tout simplement pas.
+
+**Éprouvé** : 256 fichiers sans faute de syntaxe ni de style, **516 épreuves**
+(0 échec, 2 sauts d'environnement). Le parcours navigateur de la coche
+« Service Réviseur » avec un référentiel vide n'a pas été rejoué ici (pas de
+navigateur dans cet environnement) : à rejouer dans l'aperçu.
+
 ## [1.6.3w] — 2026-10-24 — Le legs Perchance est supprimé
 
 **Retiré**
