@@ -36,9 +36,12 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
   s'affiche désormais tout simplement pas.
 
 **Éprouvé** : 256 fichiers sans faute de syntaxe ni de style, **516 épreuves**
-(0 échec, 2 sauts d'environnement). Le parcours navigateur de la coche
-« Service Réviseur » avec un référentiel vide n'a pas été rejoué ici (pas de
-navigateur dans cet environnement) : à rejouer dans l'aperçu.
+(0 échec, 2 sauts d'environnement). Parcours navigateur rejoués dans un Chromium
+sans interface (Playwright installé hors verrou, comme en CI) : **32/32 réussis**,
+dont le dépôt d'une pièce. Le défaut de l'issue #6 a été rejoué avant/après
+correctif en navigateur : avant, « Erreur d'affichage — TypeError: parameter 1 is
+not of type 'Node' » à `reviseurBlock` (`referentiel.js:1350`) ; après, la coche
+s'enregistre sans plantage.
 
 ## [1.6.3w] — 2026-10-24 — Le legs Perchance est supprimé
 
