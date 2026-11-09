@@ -1341,21 +1341,26 @@ function reviseurBlock(rec, save, redraw) {
     options: rec.bureaux.map((b) => ({ value: b.id, label: b.name || b.id })),
     onChange: (v) => ecrire({ bureaux: v }),
   }));
-  const champ = (label, value, options, help, apply) => options.length
-    ? choiceField({ label, value, multi: true, help, options, onChange: apply })
-    : null;
-  box.appendChild(champ("Services dont les actes relèvent de ce réviseur", cur.services,
+  // Un champ dont la liste d'options est vide ne s'affiche pas : on ne l'ajoute
+  // pas au bloc — `appendChild(null)` fait alors planter tout l'affichage
+  // (TypeError « parameter 1 is not of type 'Node' ») dès qu'une liste du
+  // référentiel est vide (familles, types d'actes, entités signataires…).
+  const champ = (label, value, options, help, apply) => {
+    if (!options.length) return;
+    box.appendChild(choiceField({ label, value, multi: true, help, options, onChange: apply }));
+  };
+  champ("Services dont les actes relèvent de ce réviseur", cur.services,
     (c.services || []).map((s) => ({ value: s.id, label: (s.code ? s.code + " — " : "") + s.name })),
-    "Vide : tous les services.", (v) => ecrire({ services: v })));
-  box.appendChild(champ("Familles de trames", cur.familyIds,
+    "Vide : tous les services.", (v) => ecrire({ services: v }));
+  champ("Familles de trames", cur.familyIds,
     (c.families || []).map((f) => ({ value: f.id, label: f.label })),
-    "Vide : toutes.", (v) => ecrire({ familyIds: v })));
-  box.appendChild(champ("Types d'actes", cur.actTypes,
+    "Vide : toutes.", (v) => ecrire({ familyIds: v }));
+  champ("Types d'actes", cur.actTypes,
     (c.actTypes || []).map((t) => ({ value: t.id, label: t.label })),
-    "Vide : tous.", (v) => ecrire({ actTypes: v })));
-  box.appendChild(champ("Entités signataires", cur.entityIds,
+    "Vide : tous.", (v) => ecrire({ actTypes: v }));
+  champ("Entités signataires", cur.entityIds,
     (c.entities || []).map((e) => ({ value: e.id, label: (e.code ? e.code + " — " : "") + e.name })),
-    "Vide : toutes.", (v) => ecrire({ entityIds: v })));
+    "Vide : toutes.", (v) => ecrire({ entityIds: v }));
   return box;
 }
 
