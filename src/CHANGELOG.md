@@ -23,6 +23,12 @@ numéros `MAJEUR.MINEUR.CORRECTIF` ([semver](https://semver.org/lang/fr/)).
 - On décrit le **changement visible** (ce que l'utilisateur constate, ou ce que
   l'exploitant doit savoir), pas la liste des fichiers touchés.
 
+## [1.6.3x] — 2026-10-29 — La connexion par l'annuaire ne réactive plus un compte désactivé par un administrateur
+
+**Corrigé**
+
+- **La reprise par l'annuaire ne réactive que ce que l'annuaire avait désactivé.** Jusque-là, un compte désactivé par un administrateur (départ de l'agent, par exemple) redevenait actif, avec le rôle de son groupe, à la première connexion par l'annuaire : le geste d'administration applicative n'était pas opposable (fiche NC-II-018 de l'audit OIDC du 2026-10-29). Désormais, seul un compte portant `deactivatedBy: "oidc"` est réactivé — des deux côtés (service `annuaire-service.mjs` / `comptes.mjs`, et navigateur `src/lib/oidc.js`, tenus en concordance par `tests/purs.test.mjs`) ; un compte désactivé par un administrateur reste inactif, et sa connexion est refusée avec un message qui dit où le blocage a été posé (`403 compte_desactive` côté service). Épreuves des deux cas dans `annuaire-service.test.mjs`.
+
 ## [1.6.3w] — 2026-10-24 — Le legs Perchance est supprimé
 
 **Retiré**
